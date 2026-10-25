@@ -502,8 +502,11 @@ impl CollisionWorld {
             if !c.enabled || c.groups & mask == 0 {
                 return;
             }
-            // Written so that a NaN bounding box never overlaps.
             if !(c.aabb_max.cmpge(lo).all() && c.aabb_min.cmple(hi).all()) {
+                return;
+            }
+            // Broken colliders are never hit (they are in no cell, but a full scan sees them).
+            if !c.aabb_min.is_finite() || !c.aabb_max.is_finite() {
                 return;
             }
             f(id, c);
@@ -789,6 +792,13 @@ mod tests {
             .expect("box");
         assert_eq!(hit.tag, 10);
         assert!(w.intersects_capsule(Vec3::new(30.0, 1.0, 0.0), 0.5, 0.4, MASK_MOVEMENT));
+        // A query so large it scans every collider still skips the broken ones.
+        let all = quick(1.0, || {
+            w.capsule_contacts(Vec3::new(0.0, 0.85, 3.0), 0.5, 0.4, 1.0e6, MASK_MOVEMENT)
+        });
+        let mut tags: Vec<u32> = all.iter().map(|c| w.collider(c.collider).tag).collect();
+        tags.sort();
+        assert_eq!(tags, [7, 10]);
     }
 
     #[test]
