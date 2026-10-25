@@ -57,6 +57,28 @@ off on dedicated servers; `--dev-commands` turns them on for the lobby host only
 single-player they are always available, and on a listen server only the host can use them.
 `--help` lists every flag.
 
+## Sharing the game with friends
+
+You don't need to send friends the source code. Build ready-to-run packages:
+
+```sh
+scripts/package.sh            # or: scripts/package.sh linux / scripts/package.sh windows
+```
+
+The builds run in containers via podman or docker, so no extra toolchains are needed. The
+output lands in `dist/`:
+
+- `velocide-<version>-windows-x86_64.zip`: `velocide.exe`, `velocide-server.exe`, `assets\`,
+  `PLAY.txt`.
+- `velocide-<version>-linux-x86_64.tar.gz`: the same for Linux. It runs on any distro with
+  glibc ≥ 2.30, so about 2020 or newer.
+
+Friends unzip the package and run `velocide` (or `velocide.exe`). `PLAY.txt` inside explains
+the controls and how to join. `<version>` is the git commit, and everyone, including the
+server, must run the same one. On Windows, the first launch shows a SmartScreen warning
+because the exe isn't signed ("More info" → "Run anyway"). There is no macOS build; it would
+have to be built on a Mac.
+
 ## Controls (rebindable in Settings → Controls)
 
 | Action | Keyboard / mouse | Gamepad |

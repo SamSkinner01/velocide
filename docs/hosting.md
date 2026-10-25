@@ -5,6 +5,13 @@ GPU, no audio and no Rust toolchain on the machine it runs on.
 
 ## 1. Build the server (on your own PC)
 
+**Easiest:** if you already ran `scripts/package.sh linux` to share the game, the
+`velocide-server` binary and the `assets/` folder in that package work on the server as is.
+They need nothing beyond the C library. Copy the unpacked folder's contents to
+`/opt/velocide/` and skip to step 3.
+
+**Or** build just the server as a fully static binary:
+
 ```sh
 rustup target add x86_64-unknown-linux-musl        # one time
 cargo build --release -p server --bin velocide-server --target x86_64-unknown-linux-musl
