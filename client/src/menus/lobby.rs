@@ -37,6 +37,7 @@ use crate::app::Common;
 use crate::cli::StartMode;
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
 use crate::ingame::chat::Chat;
+use crate::ingame::cues;
 use crate::ingame::remote_players::player_color;
 use crate::ingame::scoreboard::crown;
 use crate::net::{
@@ -785,10 +786,13 @@ impl LobbyScreen {
                     );
                 }
                 let color = shared_color(p.color);
-                draw::fill(
+                cues::player_swatch(
                     ui.painter(),
-                    Rect::from_min_size(row.min, vec2(4.0, 7.0)),
+                    row.min,
+                    vec2(4.0, 7.0),
+                    p.color as usize,
                     color,
+                    fade(t.ink, 0.9),
                 );
                 let mut x = row.min.x + 8.0;
                 if p.is_host {

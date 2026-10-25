@@ -3,7 +3,8 @@
 //! Layout (canvas 360 units tall): level timer top centre, status line below the mode /
 //! encounter readouts under it; ping / FPS top right with the event feed below; health +
 //! stamina bottom left; speedometer bottom centre; weapon + fire modes bottom right; crosshair
-//! in the middle; name tags over players.
+//! in the middle; name tags over players. With shape cues on (`palette::shape_cues`), health
+//! changes pop up as `+N` / `-N` over the health number and name tags show marker shapes.
 //!
 //! Adding an element: add a field to [`HudInfo`] (filled in `InGame::draw_hud`) and draw it in
 //! [`Hud::draw`]; for stateful elements (feeds, banners) add the state to [`Hud`].
@@ -14,7 +15,9 @@ use engine::ui::hud::{self, CrosshairStyle, TextFeed};
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 
+use super::cues;
 use crate::controls::WeaponSelect;
+use crate::palette::{MarkerShape, palette, shape_cues};
 use crate::settings::Settings;
 
 /// Everything the HUD shows this frame.
@@ -45,6 +48,8 @@ pub struct NameTag<'a> {
     pub position: Vec3,
     pub name: &'a str,
     pub color: Vec4,
+    /// Shape drawn under the name instead of the plain colour chevron (shape cues on).
+    pub marker: Option<MarkerShape>,
     /// Behind a wall (drawn faded).
     pub occluded: bool,
 }
@@ -55,17 +60,34 @@ struct Banner {
     start: f64,
 }
 
+/// A `+12` / `-8` next to the health number (shape cues: the sign says heal or damage).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HealthPopup {
+    amount: f32,
+    time: f64,
+}
+
+/// Seconds a health popup rises and fades.
+const POPUP_LIFE: f64 = 1.1;
+
 pub struct Hud {
     /// Top-right feed: joins / leaves now, kills later ([`Hud::event`]).
     pub feed: TextFeed,
     banner: Option<Banner>,
+    last_health: Option<f32>,
+    popups: Vec<HealthPopup>,
 }
 
 impl Default for Hud {
     fn default() -> Self {
         let mut feed = TextFeed::new(6, 4.0);
         feed.newest_on_top = true;
-        Self { feed, banner: None }
+        Self {
+            feed,
+            banner: None,
+            last_health: None,
+            popups: Vec::new(),
+        }
     }
 }
 
@@ -91,6 +113,50 @@ impl Hud {
     /// Drops the current banner (the death view takes the middle of the screen).
     pub fn clear_banner(&mut self) {
         self.banner = None;
+    }
+
+    /// Turns health changes into popups (merging a burst of hits into one number). Respawns
+    /// (from 0) and the first frame don't count.
+    fn track_health(&mut self, health: f32, now: f64) {
+        let last = self.last_health.replace(health);
+        self.popups.retain(|p| now - p.time < POPUP_LIFE);
+        let Some(last) = last else {
+            return;
+        };
+        let delta = health - last;
+        if delta.abs() < 0.5 || last <= 0.0 {
+            return;
+        }
+        match self.popups.last_mut() {
+            Some(p) if now - p.time < 0.25 && p.amount.signum() == delta.signum() => {
+                p.amount += delta;
+                p.time = now;
+            }
+            _ => self.popups.push(HealthPopup {
+                amount: delta,
+                time: now,
+            }),
+        }
+        if self.popups.len() > 4 {
+            self.popups.remove(0);
+        }
+    }
+
+    /// `+N` (heal colour) / `-N` (damage colour) floating up from the health number.
+    fn draw_popups(&self, list: &mut UiDrawList, t: &Theme, anchor: Vec2, now: f64) {
+        let p = palette();
+        for (i, popup) in self.popups.iter().rev().enumerate() {
+            let age = ((now - popup.time) / POPUP_LIFE).clamp(0.0, 1.0) as f32;
+            let alpha = (1.0 - age * age).clamp(0.0, 1.0);
+            let (text, color) = if popup.amount > 0.0 {
+                (format!("+{}", popup.amount.round() as i32), p.heal)
+            } else {
+                (format!("-{}", (-popup.amount).round() as i32), p.damage)
+            };
+            let y = (anchor.y - 12.0 * age - i as f32 * 10.0).round();
+            let style = TextStyle::new(fade(color, alpha)).outline(fade(t.ink, 0.9 * alpha));
+            list.text(vec2(anchor.x, y), &text, &style);
+        }
     }
 
     pub fn draw(&mut self, list: &mut UiDrawList, t: &Theme, info: &HudInfo) {
@@ -205,6 +271,10 @@ impl Hud {
             info.hard_damage,
             now,
         );
+        self.track_health(info.health, now);
+        if shape_cues() {
+            self.draw_popups(list, t, vec2(14.0, c.max.y - 60.0), now);
+        }
         let pip = vec2(14.0, 5.0);
         hud::pips(
             list,
@@ -314,9 +384,43 @@ pub fn draw_name_tags(list: &mut UiDrawList, t: &Theme, camera: &Camera, tags: &
             .centered()
             .outline(fade(t.ink, 0.85 * alpha));
         let r = list.text(p - vec2(0.0, 10.0), &tag.name.to_uppercase(), &style);
-        // Marker chevron in the player's colour under the name.
-        let m = Rect::from_center_size(vec2(p.x, r.max.y + 4.0), vec2(5.0, 2.0));
-        list.fill(m.expand(1.0), fade(t.ink, 0.8 * alpha));
-        list.fill(m, fade(tag.color, alpha));
+        let ink = fade(t.ink, 0.8 * alpha);
+        if let Some(shape) = tag.marker {
+            // The player's marker shape in their colour (shape cues).
+            let at = vec2(p.x - 2.0, r.max.y + 2.0);
+            cues::draw_marker(list, at, shape, 1.0, fade(tag.color, alpha), ink);
+        } else {
+            // Marker chevron in the player's colour under the name.
+            let m = Rect::from_center_size(vec2(p.x, r.max.y + 4.0), vec2(5.0, 2.0));
+            list.fill(m.expand(1.0), ink);
+            list.fill(m, fade(tag.color, alpha));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_changes_become_signed_popups() {
+        let mut hud = Hud::new();
+        hud.track_health(100.0, 0.0);
+        assert!(hud.popups.is_empty(), "first frame sets the baseline");
+        hud.track_health(90.0, 0.1);
+        hud.track_health(84.0, 0.2); // same burst: merged
+        assert_eq!(hud.popups.len(), 1);
+        assert_eq!(hud.popups[0].amount, -16.0);
+        hud.track_health(96.0, 0.3); // heal: a new popup
+        assert_eq!(hud.popups.len(), 2);
+        assert_eq!(hud.popups[1].amount, 12.0);
+        hud.track_health(96.2, 0.4); // tiny changes don't count
+        assert_eq!(hud.popups.len(), 2);
+        hud.track_health(0.0, 0.5);
+        hud.track_health(100.0, 0.6); // respawn: no "+100"
+        assert_eq!(hud.popups.len(), 3, "the death counts, the respawn doesn't");
+        assert!((hud.popups[2].amount + 96.2).abs() < 1e-3);
+        hud.track_health(100.0, 5.0);
+        assert!(hud.popups.is_empty(), "old popups expire");
     }
 }
