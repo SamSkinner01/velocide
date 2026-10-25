@@ -1,24 +1,39 @@
 //! Authoritative game simulation state and tick.
 //!
 //! [`SimWorld`] is the whole game state the server simulates (and the client mirrors for
-//! prediction): the level and its collision world, the players, and — as they are added —
-//! enemies, projectiles, pickups, prisms and blood orbs.
+//! prediction): the level and its collision world, the players (movement + combat state),
+//! enemies, projectiles, ricochet prisms and blood bursts.
 //!
-//! One server tick ([`SimWorld::step`]) is structured as a fixed pipeline so new systems slot
-//! in without touching the networking:
+//! One server tick ([`SimWorld::step`]) is a fixed pipeline:
 //!
-//! 1. **inputs → movement**: each queued [`PlayerInput`] is exactly one fixed movement step
-//!    ([`player_move_step`], the same function client prediction runs).
-//! 2. *(future)* weapons fired by those inputs (lag-compensated hitscan via the server's
-//!    history), projectiles, enemy AI, pickups / blood orbs, prisms, encounters.
-//! 3. **world rules**: kill volumes / falling out of the level.
-//! 4. **events**: everything that happened is returned as [`SimEvent`]s; the server forwards
-//!    the ones clients need reliably.
+//! 1. **inputs → movement → weapons**: each queued [`PlayerInput`] is exactly one fixed
+//!    movement step ([`player_move_step`], the same function client prediction runs; dead
+//!    players move with [`neutral_input`]), followed by [`weapons::step_weapons`] (also
+//!    predictable) whose fire intents are resolved right away: lag-compensated hitscan via the
+//!    server's history, projectile spawns, punches/parries, prism throws, slam shockwaves.
+//! 2. **projectiles** (sweeps, impacts, explosions, parry-delayed impacts), then open parry
+//!    windows are re-checked against the moved projectiles.
+//! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
+//! 4. **prisms**, **blood bursts** (healing), **vitals** (hard damage recovery, respawns).
+//! 5. **world rules**: kill volumes / falling out of the level.
+//! 6. **events**: everything that happened is returned as [`SimEvent`]s; the server forwards
+//!    them to clients (reliably or batched in snapshots) and the style system scores them.
+//!
+//! All damage goes through [`SimWorld::apply_damage`] (`combat.rs`). See `docs/combat.md`.
 //!
 //! Replication: [`SimWorld::replicate`] writes every replicated entity into a
 //! [`NetFrame`]; new entity types add themselves there with their own [`kind`] constant.
 
+pub mod blood;
+pub mod combat;
+pub mod enemy;
 mod hitbox;
+pub mod hitscan;
+pub mod parry;
+pub mod prism;
+pub mod projectiles;
+pub mod trail;
+pub mod weapons;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,11 +41,21 @@ use std::sync::Arc;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+pub use blood::{BloodBurst, HealSource};
+pub use combat::{
+    Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
+    PlayerCombat,
+};
+pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry};
 pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
+pub use parry::{ParryEvent, ParryTarget};
+pub use prism::Prism;
+pub use projectiles::{Projectile, ProjectileKind};
+pub use weapons::{FireIntent, Weapon, WeaponState, step_weapons};
 
 use crate::input::PlayerInput;
 use crate::level::{Brush, Door, JumpPad, LevelCollision, LevelDef, LevelKind, SpawnPoint, Volume};
-use crate::movement::{self, MoveEnv, MoveEvents, MoveState};
+use crate::movement::{self, MoveEnv, MoveEvents, MoveState, SlamLanded};
 use crate::protocol::{EntityState, NetFrame, NetId, door_flags, kind, player_flags};
 use crate::tuning::{MovementTuning, Tuning};
 
@@ -68,6 +93,22 @@ pub fn player_move_step(
     movement::step(state, input, env, tuning, dt)
 }
 
+/// The input a dead player's body is simulated with: no movement axes or buttons, view angles
+/// kept (the corpse keeps falling/sliding naturally). Client prediction must use the same
+/// while its `OwnState::combat.dead` is set.
+pub fn neutral_input(input: &PlayerInput) -> PlayerInput {
+    PlayerInput {
+        seq: input.seq,
+        yaw: input.yaw,
+        pitch: input.pitch,
+        weapon: input.weapon,
+        weapon_mode: input.weapon_mode,
+        view_tick: input.view_tick,
+        view_frac: input.view_frac,
+        ..Default::default()
+    }
+}
+
 /// Inputs to apply this tick, per player, ascending `seq`. Each input is one movement step.
 pub type TickInputs = BTreeMap<PlayerId, Vec<PlayerInput>>;
 
@@ -95,6 +136,13 @@ pub struct SimPlayer {
     /// Sequence number of the last processed input (0 = none yet).
     pub last_input_seq: u32,
     pub inputs_processed: u64,
+    /// Health, hard damage, death/respawn, weapons (sent to the owner in `OwnState`).
+    pub combat: PlayerCombat,
+    /// How far in the past (ticks) this player sees remote entities: server tick minus the
+    /// view time of its last input. Used for parry tolerance (0 for bots).
+    pub view_lag_ticks: f32,
+    /// Dev `/notarget`: enemies ignore this player.
+    pub notarget: bool,
 }
 
 impl SimPlayer {
@@ -108,7 +156,42 @@ impl SimPlayer {
             last_input: PlayerInput::default(),
             last_input_seq: 0,
             inputs_processed: 0,
+            combat: PlayerCombat::default(),
+            view_lag_ticks: 0.0,
+            notarget: false,
         }
+    }
+
+    /// Replicated state including combat presentation fields (see `docs/combat.md`):
+    /// `flags` += `DEAD`, `PARRY`, `CHARGING`, `PROTECTED`; `state` = weapon (bits 0–3) |
+    /// alt mode (bits 4–5) | Overcharge charge 0..255 (bits 8–15); `health` = health (rounded
+    /// up); `aux` = hard damage (bits 0–7, rounded up) | prism charges (bits 8–11) | live
+    /// stickies (bits 12–15).
+    pub fn replicated_state(&self, t: &Tuning, tick_rate: u32) -> EntityState {
+        let mut e = self.entity_state(&t.movement);
+        let c = &self.combat;
+        let w = &c.weapons;
+        if c.dead {
+            e.flags |= player_flags::DEAD;
+            e.flags &= !player_flags::INVULNERABLE;
+        }
+        if w.parry > 0 {
+            e.flags |= player_flags::PARRY;
+        }
+        if w.charge > 0 {
+            e.flags |= player_flags::CHARGING;
+        }
+        if c.protection > 0 || c.god {
+            e.flags |= player_flags::PROTECTED;
+        }
+        let charge = (w.charge_fraction(&t.combat, tick_rate) * 255.0).round() as u16;
+        e.state = (w.weapon as u16 & 0xF) | ((w.mode as u16 & 0x3) << 4) | (charge << 8);
+        e.health = c.health(&t.combat).ceil().clamp(0.0, 65535.0) as u16;
+        let hard = c.hard.ceil().clamp(0.0, 255.0) as u32;
+        let prisms = w.prisms(&t.combat).min(15);
+        let stickies = (w.stickies as u32).min(15);
+        e.aux = hard | (prisms << 8) | (stickies << 12);
+        e
     }
 
     /// Replicated state of this player.
@@ -133,20 +216,26 @@ impl SimPlayer {
         }
     }
 
-    /// Body capsule + head sphere.
+    /// Body capsule (feet to shoulders) + head sphere at the eyes. The body stops below the
+    /// head so the head is exposed from every side (headshots).
     pub fn hitbox(&self, t: &MovementTuning) -> Hitbox {
         let (center, half_height, radius) = self.movement.capsule(t);
         let head = self.movement.eye_position(t);
+        let head_radius = radius * 0.6;
+        let bottom = center - Vec3::Y * half_height;
+        let top_y = (center.y + half_height)
+            .min(head.y - head_radius - radius * 0.875)
+            .max(bottom.y);
         Hitbox {
             target: HitTarget::Player(self.id),
             shapes: vec![
                 HitShape::capsule(
                     HitPart::Body,
-                    center - Vec3::Y * half_height,
-                    center + Vec3::Y * half_height,
+                    bottom,
+                    Vec3::new(center.x, top_y, center.z),
                     radius,
                 ),
-                HitShape::sphere(HitPart::Head, head, radius * 0.6),
+                HitShape::sphere(HitPart::Head, head, head_radius),
             ],
         }
     }
@@ -162,12 +251,128 @@ pub enum SimEvent {
         player: PlayerId,
         speed: f32,
     },
-    /// Teleported to a spawn point (fell out of the level, or later: died and respawned).
+    /// Teleported to a spawn point (fell out of the level, or died and respawned).
     Respawned {
         player: PlayerId,
         position: Vec3,
         yaw: f32,
     },
+
+    // ---- combat (see docs/combat.md for who receives what) ----
+    /// Every damage instance (also blocked ones: i-frames, friendly fire...).
+    Damage(DamageEvent),
+    /// A player or enemy died.
+    Killed(KillInfo),
+    Parried(ParryEvent),
+    Healed {
+        player: PlayerId,
+        amount: f32,
+        source: HealSource,
+        /// Where the heal came from (burst position / the parrier).
+        position: Vec3,
+    },
+    /// A player fired (hitscan: `ends` = end of each ray; projectile weapons: empty).
+    Shot(ShotEvent),
+    /// A hitscan shot bounced off prisms: prism positions, then the final end point.
+    Ricochet {
+        shooter: Owner,
+        attack: Attack,
+        points: Vec<Vec3>,
+    },
+    Explosion {
+        position: Vec3,
+        radius: f32,
+        attack: Attack,
+        owner: Owner,
+    },
+    Punched {
+        player: PlayerId,
+        /// Hit something or parried.
+        hit: bool,
+    },
+    PrismThrown {
+        player: PlayerId,
+        id: NetId,
+    },
+    PrismShattered {
+        id: NetId,
+        position: Vec3,
+    },
+    PrismExpired {
+        id: NetId,
+    },
+    StickiesDetonated {
+        player: PlayerId,
+        count: u32,
+    },
+    /// A slam landed: shockwave around `position` (`power` 0..=1).
+    SlamShockwave {
+        player: PlayerId,
+        position: Vec3,
+        power: f32,
+        radius: f32,
+    },
+    ProjectileBounced {
+        id: NetId,
+        kind: ProjectileKind,
+        position: Vec3,
+    },
+    /// A non-explosive projectile hit the level and vanished.
+    ProjectileImpact {
+        id: NetId,
+        kind: ProjectileKind,
+        position: Vec3,
+        normal: Vec3,
+    },
+    EnemySpawned {
+        id: NetId,
+        kind: u16,
+        position: Vec3,
+    },
+    /// The corpse is gone (entity removed).
+    EnemyRemoved {
+        id: NetId,
+    },
+    EnemyAlerted {
+        id: NetId,
+        target: Option<PlayerId>,
+    },
+    EnemyAttack {
+        id: NetId,
+        attack: u8,
+        phase: EnemyAttackPhase,
+        parryable: bool,
+    },
+    EnemyFired {
+        id: NetId,
+        attack: u8,
+        position: Vec3,
+    },
+    EnemyShockwave {
+        id: NetId,
+        position: Vec3,
+        radius: f32,
+    },
+}
+
+/// A player's shot (for remote tracers, muzzle flashes and sounds).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShotEvent {
+    pub shooter: PlayerId,
+    pub attack: Attack,
+    /// Eye position the shot left from.
+    pub origin: Vec3,
+    /// End point of each hitscan ray (empty for projectile weapons).
+    pub ends: Vec<Vec3>,
+}
+
+/// Phase of an enemy attack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EnemyAttackPhase {
+    /// Telegraph starts.
+    Windup,
+    /// The hit lands / projectiles leave.
+    Strike,
 }
 
 /// The simulation state.
@@ -179,6 +384,20 @@ pub struct SimWorld {
     pub level: Arc<LevelDef>,
     pub collision: LevelCollision,
     pub players: BTreeMap<PlayerId, SimPlayer>,
+    /// Game-mode combat rules (PvP friendly fire, co-op scaling). From the level kind.
+    pub rules: CombatRules,
+    /// Enemy definitions (built-ins; the server loads `assets/enemies/`).
+    pub enemy_defs: EnemyRegistry,
+    pub enemies: BTreeMap<NetId, Enemy>,
+    pub projectiles: BTreeMap<NetId, Projectile>,
+    pub prisms: BTreeMap<NetId, Prism>,
+    pub blood: BTreeMap<NetId, BloodBurst>,
+    /// Parry-delayed enemy melee damage.
+    pub pending_hits: Vec<parry::PendingHit>,
+    /// Events of the tick being simulated.
+    pub(crate) events: Vec<SimEvent>,
+    /// The projectile step of the current tick has run.
+    pub(crate) projectiles_stepped: bool,
     next_spawn: usize,
     next_dynamic_id: u32,
     /// Anything below this height is out of the level.
@@ -198,6 +417,10 @@ impl SimWorld {
         } else {
             -100.0
         };
+        let rules = match level.kind {
+            LevelKind::Arena => CombatRules::pvp(),
+            LevelKind::Campaign => CombatRules::coop(),
+        };
         Self {
             tick: 0,
             tick_rate: tick_rate.max(1),
@@ -205,6 +428,15 @@ impl SimWorld {
             level,
             collision,
             players: BTreeMap::new(),
+            rules,
+            enemy_defs: EnemyRegistry::builtin(),
+            enemies: BTreeMap::new(),
+            projectiles: BTreeMap::new(),
+            prisms: BTreeMap::new(),
+            blood: BTreeMap::new(),
+            pending_hits: Vec::new(),
+            events: Vec::new(),
+            projectiles_stepped: false,
             next_spawn: 0,
             next_dynamic_id: NetId::DYNAMIC_START,
             kill_floor,
@@ -253,7 +485,17 @@ impl SimWorld {
     }
 
     pub fn remove_player(&mut self, id: PlayerId) -> Option<SimPlayer> {
-        self.players.remove(&id)
+        let player = self.players.remove(&id)?;
+        // Their prisms vanish; their pending hits and projectiles' targets are moot.
+        self.prisms.retain(|_, p| p.owner != id);
+        self.cancel_pending_for_victim(id);
+        for e in self.enemies.values_mut() {
+            if e.target == Some(id) {
+                e.target = None;
+            }
+            e.aggro.retain(|a| a.0 != id);
+        }
+        Some(player)
     }
 
     /// External impulse (explosions, knockback): changes velocity between movement steps.
@@ -265,77 +507,158 @@ impl SimWorld {
     }
 
     /// Advances one tick. See the module docs for the pipeline. `history` gives weapons
-    /// lag-compensated hitboxes (the server passes its history; `None` where unavailable).
+    /// lag-compensated hitboxes (the server passes its history; `None` where unavailable:
+    /// shots then test current hitboxes).
     pub fn step(
         &mut self,
         inputs: &TickInputs,
         tuning: &Tuning,
         history: Option<&dyn HitboxHistory>,
     ) -> Vec<SimEvent> {
-        let _ = history; // used by weapons (step 2) once they exist
         self.tick = self.tick.wrapping_add(1);
-        let mut events = Vec::new();
+        self.projectiles_stepped = false;
         let dt = self.dt();
+        let tick_rate = self.tick_rate;
 
-        // 1. Inputs -> movement.
-        let env = MoveEnv {
-            world: &self.collision.world,
-            jump_pads: &self.level.jump_pads,
-        };
+        // 1. Inputs -> movement -> weapons.
         for (id, list) in inputs {
-            let Some(player) = self.players.get_mut(id) else {
-                continue;
-            };
             for input in list {
+                let tick = self.tick;
+                let env = MoveEnv {
+                    world: &self.collision.world,
+                    jump_pads: &self.level.jump_pads,
+                };
+                let Some(player) = self.players.get_mut(id) else {
+                    break;
+                };
                 player.yaw = input.yaw;
                 player.pitch = input.pitch;
-                let ev = player_move_step(&mut player.movement, input, &env, &tuning.movement, dt);
+                let alive = !player.combat.dead;
+                let move_input = if alive { *input } else { neutral_input(input) };
+                let ev = player_move_step(
+                    &mut player.movement,
+                    &move_input,
+                    &env,
+                    &tuning.movement,
+                    dt,
+                );
                 player.last_input = *input;
                 player.last_input_seq = input.seq;
                 player.inputs_processed += 1;
+                let view = input.view_time_ticks();
+                player.view_lag_ticks = if view.is_finite() {
+                    (tick as f64 - view).max(0.0) as f32
+                } else {
+                    0.0
+                };
+                let intents =
+                    step_weapons(&mut player.combat.weapons, input, alive, &tuning.combat, tick_rate);
                 if ev.jumped {
-                    events.push(SimEvent::Jumped { player: *id });
+                    self.events.push(SimEvent::Jumped { player: *id });
                 }
                 if let Some(speed) = ev.landed {
-                    events.push(SimEvent::Landed { player: *id, speed });
+                    self.events.push(SimEvent::Landed { player: *id, speed });
+                }
+                if let Some(slam) = ev.slam_landed
+                    && alive
+                {
+                    self.slam_shockwave(tuning, *id, slam);
+                }
+                for intent in intents {
+                    self.resolve_intent(tuning, history, *id, input, intent);
                 }
             }
         }
 
-        // 2. Future systems: weapons (fired by the inputs above; hitscan uses `history`),
-        //    projectiles, enemies, pickups, blood orbs, prisms, encounters (doors via
-        //    `self.collision.set_door_open`).
+        // 2. Projectiles, then parry windows against their new positions.
+        self.step_projectiles(tuning);
+        self.projectiles_stepped = true;
+        self.tick_parry_windows(tuning);
 
-        // 3. World rules.
-        self.apply_world_rules(&mut events);
+        // 3. Enemies and their parry-delayed hits.
+        self.step_enemies(tuning);
+        self.apply_due_pending_hits(tuning);
 
-        events
+        // 4. Prisms, healing, vitals.
+        self.step_prisms(tuning);
+        self.step_blood(tuning);
+        self.tick_vitals(tuning);
+
+        // 5. World rules.
+        self.apply_world_rules(tuning);
+
+        std::mem::take(&mut self.events)
     }
 
-    fn apply_world_rules(&mut self, events: &mut Vec<SimEvent>) {
-        let ids: Vec<PlayerId> = self
-            .players
-            .values()
-            .filter(|p| {
-                let pos = p.movement.position;
-                !pos.is_finite()
-                    || pos.y < self.kill_floor
-                    || self.level.kill_volumes.iter().any(|v| v.contains(pos))
-            })
-            .map(|p| p.id)
-            .collect();
-        for id in ids {
-            let spawn = self.next_spawn_point();
-            if let Some(p) = self.players.get_mut(&id) {
-                p.movement = MoveState::spawn(spawn.position);
-                p.yaw = spawn.yaw.to_radians();
-                p.pitch = 0.0;
-                events.push(SimEvent::Respawned {
-                    player: id,
-                    position: spawn.position,
-                    yaw: p.yaw,
-                });
+    /// Slam landing shockwave: damage + knockback (mostly upwards) to everything hostile
+    /// within `movement.slam_shockwave_radius`, scaled by the slam's power.
+    fn slam_shockwave(&mut self, t: &Tuning, id: PlayerId, slam: SlamLanded) {
+        let c = &t.combat;
+        let radius = t.movement.slam_shockwave_radius;
+        let scale = c.slam_min_power_scale + (1.0 - c.slam_min_power_scale) * slam.power.clamp(0.0, 1.0);
+        self.events.push(SimEvent::SlamShockwave {
+            player: id,
+            position: slam.position,
+            power: slam.power,
+            radius,
+        });
+        let me = Owner::Player(id);
+        let mut hits = Vec::new();
+        for h in self.current_hitboxes(t) {
+            if !self.can_hit(me, h.target) {
+                continue;
             }
+            let Some(center) = h.center() else {
+                continue;
+            };
+            let to = center - slam.position;
+            let flat = Vec3::new(to.x, 0.0, to.z);
+            if flat.length() > radius || to.y.abs() > 3.0 {
+                continue;
+            }
+            let dir = flat.normalize_or(Vec3::X);
+            let kb = (dir * 0.5 + Vec3::Y).normalize() * (c.slam_knockback * scale);
+            let info = DamageInfo::new(c.slam_damage * scale, me, Attack::Slam)
+                .at(center, dir)
+                .knockback(kb)
+                .flags(DamageFlags::SLAM);
+            hits.push((h.target, info));
+        }
+        for (target, info) in hits {
+            self.apply_damage(t, target, info);
+        }
+    }
+
+    fn apply_world_rules(&mut self, t: &Tuning) {
+        let kill_floor = self.kill_floor;
+        let mut reset = Vec::new();
+        let mut kill = Vec::new();
+        for p in self.players.values_mut() {
+            let pos = p.movement.position;
+            let out = !pos.is_finite() || pos.y < kill_floor;
+            if p.combat.dead {
+                // Corpses stop at the kill floor (they respawn on their own).
+                if out {
+                    p.movement.velocity = Vec3::ZERO;
+                    if !pos.is_finite() {
+                        p.movement.position = Vec3::ZERO;
+                    }
+                    p.movement.position.y = p.movement.position.y.max(kill_floor);
+                }
+                continue;
+            }
+            if out {
+                reset.push(p.id);
+            } else if self.level.kill_volumes.iter().any(|v| v.contains(pos)) {
+                kill.push(p.id);
+            }
+        }
+        // Out of the level entirely: put back immediately (safety net, not a death).
+        for id in reset {
+            self.respawn_player(t, id);
+        }
+        for id in kill {
+            self.kill_player(t, id, Attack::World);
         }
     }
 
@@ -343,7 +666,7 @@ impl SimWorld {
     pub fn replicate(&self, tuning: &Tuning, frame: &mut NetFrame) {
         frame.entities.clear();
         for p in self.players.values() {
-            frame.insert(&p.entity_state(&tuning.movement));
+            frame.insert(&p.replicated_state(tuning, self.tick_rate));
         }
         for door in &self.level.doors {
             let mut flags = 0;
@@ -359,7 +682,18 @@ impl SimWorld {
                 ..Default::default()
             });
         }
-        // Future: enemies, projectiles, pickups, prisms, blood orbs.
+        for e in self.enemies.values() {
+            frame.insert(&e.entity_state(self.tick));
+        }
+        for p in self.projectiles.values() {
+            frame.insert(&p.entity_state());
+        }
+        for p in self.prisms.values() {
+            frame.insert(&p.entity_state());
+        }
+        for b in self.blood.values() {
+            frame.insert(&b.entity_state());
+        }
     }
 
     /// Applies replicated level state (door open/closed) received in a snapshot so client
@@ -373,11 +707,16 @@ impl SimWorld {
         }
     }
 
-    /// Current hitboxes of everything that can be shot (players now, enemies later).
+    /// Current hitboxes of everything that can be shot: living players (body + head) and
+    /// living enemies (body + weak points). The server records these every tick for lag
+    /// compensation.
     pub fn hitboxes(&self, tuning: &Tuning, out: &mut Vec<Hitbox>) {
         out.clear();
-        for p in self.players.values() {
+        for p in self.players.values().filter(|p| !p.combat.dead) {
             out.push(p.hitbox(&tuning.movement));
+        }
+        for e in self.enemies.values().filter(|e| e.is_alive()) {
+            out.push(e.hitbox());
         }
     }
 }

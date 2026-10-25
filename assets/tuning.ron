@@ -1,10 +1,12 @@
 // VELOCIDE gameplay tuning. Watched at runtime: save to hot-reload. The server is
 // authoritative and sends its tuning to clients, so prediction always uses the same values.
-// Every section uses defaults for anything left out (see shared/src/tuning.rs); `combat` and
-// `net` are omitted here and use their code defaults.
+// Every section uses defaults for anything left out (see shared/src/tuning.rs); `net` is
+// omitted here and uses its code defaults.
 //
-// Units: metres, m/s, m/s², seconds, degrees. Rationale for each value: docs/movement.md.
-// Keep these equal to `MovementTuning::default()` when committing (a test checks it).
+// Units: metres, m/s, m/s², seconds, degrees. Rationale for each value: docs/movement.md
+// (movement) and docs/gameplay.md / docs/combat.md (combat).
+// Keep these equal to `MovementTuning::default()` / `CombatTuning::default()` when committing
+// (tests check both).
 (
     movement: (
         // Body
@@ -72,5 +74,163 @@
         slide_tilt_degrees: 4.0,
         wall_tilt_degrees: 7.0,
         landing_dip: 0.25,
+    ),
+
+    // Combat. HP, metres, m/s, seconds; cones are full apertures in degrees.
+    combat: (
+        // Player
+        max_health: 100.0,
+        hard_damage_fraction: 0.35,     // of every hit also lowers the effective max
+        hard_damage_recover_delay: 1.5,
+        hard_damage_recover_rate: 25.0, // HP/s
+        respawn_delay: 2.0,             // default death rule (game modes replace it)
+        spawn_protection: 1.5,
+        player_head_multiplier: 2.0,    // PvP headshots
+        self_damage_fraction: 0.35,     // own explosions (knockback stays full: rocket jumps)
+        hitscan_range: 400.0,
+
+        // Fist / parry
+        parry_window: 0.2,
+        parry_range: 3.0,
+        parry_cone_degrees: 70.0,
+        parry_close_range: 1.2,          // touching-close: any angle in front
+        parry_speed_multiplier: 1.5,
+        parry_damage_multiplier: 2.0,
+        parry_auto_aim_degrees: 15.0,
+        parry_auto_aim_range: 80.0,
+        parry_hard_damage_clear: 0.5,
+        parry_compensate_view_lag: true, // delay parryable hits by the victim's view lag too
+        melee_parry_range: 4.0,
+        punch_damage: 25.0,
+        punch_range: 2.6,
+        punch_cone_degrees: 50.0,
+        punch_knockback: 10.0,
+        punch_cooldown: 0.4,
+
+        // Explosions
+        explosion_edge_fraction: 0.3, // 100 % at the centre -> 30 % at the radius
+        explosion_up_bias: 0.3,
+
+        // Slam shockwave (radius: movement.slam_shockwave_radius)
+        slam_damage: 20.0,
+        slam_knockback: 12.0,
+        slam_min_power_scale: 0.3,
+
+        blood: (
+            heal_fraction: 0.4,       // of damage dealt becomes a heal pool
+            melee_heal_fraction: 1.0, // punches and parries
+            radius: 3.5,
+            lifetime: 0.6,
+            death_pool: 25.0,
+            death_radius: 4.5,
+            death_lifetime: 1.0,
+            merge_distance: 1.0,
+            merge_window: 0.2,
+        ),
+        prism: (
+            charges: 4,
+            recharge_time: 2.5,
+            throw_speed: 18.0,
+            throw_up_speed: 6.0,
+            gravity: 20.0,
+            lifetime: 4.0,
+            radius: 0.2,
+            ricochet_radius: 0.6,
+            chain_range: 30.0,
+            target_range: 40.0,
+            damage_multiplier: 1.5,
+            restitution: 0.35,
+        ),
+        // 1: hitscan sidearm. Alt A Overcharge (hold, release), alt B Fan.
+        lancet: (
+            damage: 22.0,
+            interval: 0.3,
+            overcharge_time: 0.8,
+            overcharge_min_damage: 25.0,
+            overcharge_max_damage: 75.0,
+            overcharge_pierce: 5,
+            overcharge_cooldown: 0.5,
+            fan_shots: 3,
+            fan_spread_degrees: 6.0,
+            fan_damage: 15.0,
+            fan_cooldown: 0.9,
+        ),
+        // 2: hitscan scattergun. Alt A Slug, alt B Flak (parryable grenade).
+        thresher: (
+            pellets: 10,
+            pellet_damage: 9.0,
+            cone_degrees: 7.0,
+            interval: 0.75,
+            pellet_knockback: 2.0,
+            pellet_range: 120.0,
+            slug_damage: 70.0,
+            slug_cooldown: 1.0,
+            slug_knockback: 14.0,
+            slug_recoil: 6.0,
+            flak_speed: 28.0,
+            flak_gravity: 25.0,
+            flak_fuse: 1.2,
+            flak_radius: 5.0,
+            flak_damage: 55.0,
+            flak_knockback: 18.0,
+            flak_cooldown: 1.0,
+            flak_projectile_radius: 0.2,
+            flak_parry_speed_multiplier: 2.0,
+        ),
+        // 3: projectile nailer. Alt A Sawblade, alt B Volley.
+        riveter: (
+            rivet_speed: 90.0,
+            rivet_damage: 8.0,
+            rate: 12.0,
+            spread_degrees: 1.5,
+            rivet_radius: 0.08,
+            rivet_lifetime: 2.0,
+            saw_speed: 40.0,
+            saw_damage: 10.0,
+            saw_damage_interval: 0.1,
+            saw_bounces: 3,
+            saw_lifetime: 3.0,
+            saw_cooldown: 1.0,
+            saw_radius: 0.35,
+            volley_count: 8,
+            volley_ring_degrees: 10.0,
+            volley_damage: 12.0,
+            volley_cooldown: 1.2,
+        ),
+        // 4: explosive launcher. Alt A Sticky (alt again detonates), alt B Mortar.
+        cinderbox: (
+            rocket_speed: 45.0,
+            rocket_radius: 4.5,
+            rocket_damage: 70.0,
+            rocket_knockback: 22.0,
+            rocket_interval: 0.9,
+            rocket_projectile_radius: 0.2,
+            rocket_lifetime: 5.0,
+            sticky_speed: 30.0,
+            sticky_gravity: 20.0,
+            sticky_radius: 4.0,
+            sticky_damage: 60.0,
+            sticky_knockback: 18.0,
+            sticky_max: 3,
+            sticky_cooldown: 0.2,
+            sticky_chain_window: 0.4, // alt within this of a throw throws another; later detonates
+            sticky_lifetime: 20.0,
+            mortar_speed: 22.0,
+            mortar_angle_degrees: 35.0,
+            mortar_gravity: 25.0,
+            mortar_radius: 7.0,
+            mortar_damage: 90.0,
+            mortar_knockback: 24.0,
+            mortar_cooldown: 2.0,
+        ),
+        // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
+        enemy_projectiles: (
+            orb_radius: 0.35,
+            orb_gravity: 0.0,
+            orb_lifetime: 6.0,
+            bolt_radius: 0.15,
+            bolt_gravity: 0.0,
+            bolt_lifetime: 3.0,
+        ),
     ),
 )

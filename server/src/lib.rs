@@ -20,6 +20,8 @@
 //! # #[allow(unreachable_code)] Ok::<(), anyhow::Error>(())
 //! ```
 
+pub mod combat;
+mod commands;
 pub mod input_queue;
 pub mod lagcomp;
 pub mod netsim;
@@ -44,8 +46,10 @@ use shared::protocol::{
     GameEvent, MAX_INPUTS_PER_PACKET, NetFrame, OwnState, PROTOCOL_VERSION, PlayerInfo,
     ServerMessage, ServerUnreliable, SnapshotMessage, Welcome,
 };
-use shared::sim::{Hitbox, PlayerId, SimEvent, SimWorld, TickInputs};
+use shared::sim::{EnemyRegistry, Hitbox, PlayerId, SimWorld, TickInputs};
 use shared::tuning::Tuning;
+
+pub use combat::FxLog;
 
 pub use input_queue::InputQueue;
 pub use lagcomp::{LagCompHistory, Rewound};
@@ -71,6 +75,8 @@ const CHAT_BURST: f32 = 5.0;
 const CHAT_PER_SECOND: f32 = 1.0;
 /// Delay between sending `Rejected` and disconnecting, so the message arrives.
 const KICK_DELAY_SECS: f64 = 0.5;
+/// Simulation events kept for [`Server::drain_sim_events`] when nobody drains them.
+const MAX_EVENT_LOG: usize = 8192;
 
 /// Server settings.
 #[derive(Clone, Debug)]
@@ -93,6 +99,10 @@ pub struct ServerConfig {
     /// Delta-compress snapshots (disable only to measure the savings).
     pub delta_compression: bool,
     pub server_name: String,
+    /// Allow dev chat commands (`/spawn husk 3`, `/god`, `/give`...). See `docs/combat.md`.
+    pub dev_commands: bool,
+    /// Enemy definitions directory; `None` = `assets/enemies` (built-ins as fallback).
+    pub enemies_dir: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -108,6 +118,8 @@ impl Default for ServerConfig {
             watch_tuning: true,
             delta_compression: true,
             server_name: format!("{} server", shared::GAME_NAME),
+            dev_commands: true,
+            enemies_dir: None,
         }
     }
 }
@@ -159,16 +171,44 @@ pub struct ServerStats {
     pub transport: TransportStats,
     /// Average simulation time per tick (microseconds).
     pub tick_time_us: f32,
+    /// Cosmetic effect events put into snapshots (all clients, repeats included).
+    pub fx_sent: u64,
+    /// Reliable combat `GameEvent`s sent (all clients).
+    pub combat_events_sent: u64,
+    /// Live simulation objects.
+    pub enemies: usize,
+    pub projectiles: usize,
 }
 
 /// Commands for a server running on its own thread ([`ServerHandle::send`]).
 #[derive(Clone, Debug)]
 pub enum ServerCommand {
     SetTuning(Box<Tuning>),
-    ApplyImpulse { player: PlayerId, impulse: Vec3 },
-    Kick { player: PlayerId, reason: String },
-    AddBot { name: String },
-    Chat { text: String },
+    ApplyImpulse {
+        player: PlayerId,
+        impulse: Vec3,
+    },
+    Kick {
+        player: PlayerId,
+        reason: String,
+    },
+    AddBot {
+        name: String,
+    },
+    Chat {
+        text: String,
+    },
+    /// Spawns `count` enemies of definition `name` around `position`.
+    SpawnEnemy {
+        name: String,
+        position: Vec3,
+        yaw: f32,
+        count: u32,
+    },
+    /// Kills every enemy (through the damage pipeline).
+    KillAllEnemies,
+    /// PvP damage between players on/off.
+    SetFriendlyFire(bool),
 }
 
 struct ClientConn {
@@ -233,6 +273,13 @@ pub struct Server {
     tick_time_count: u32,
     hitbox_scratch: Vec<Hitbox>,
     empty_frame: NetFrame,
+    /// Cosmetic combat events waiting to go out in snapshots.
+    fx: FxLog,
+    /// Simulation events since the last `drain_sim_events` (bounded).
+    event_log: Vec<shared::sim::SimEvent>,
+    /// Tick of the last and second-to-last snapshot (FX batching).
+    last_snapshot_tick: u32,
+    prev_snapshot_tick: u32,
 }
 
 impl Server {
@@ -266,7 +313,11 @@ impl Server {
             None
         };
         let tick_rate = config.tick_rate.clamp(1, 1000);
-        let world = SimWorld::new(&config.level, Arc::new(level), tick_rate);
+        let mut world = SimWorld::new(&config.level, Arc::new(level), tick_rate);
+        world.enemy_defs = match &config.enemies_dir {
+            Some(dir) => EnemyRegistry::load_dir(dir),
+            None => EnemyRegistry::load_default(),
+        };
         let mut server = Server {
             renet: RenetServer::new(connection_config()),
             transport,
@@ -285,6 +336,10 @@ impl Server {
             tick_time_count: 0,
             hitbox_scratch: Vec::new(),
             empty_frame: NetFrame::default(),
+            fx: FxLog::default(),
+            event_log: Vec::new(),
+            last_snapshot_tick: 0,
+            prev_snapshot_tick: 0,
             config,
         };
         server.config.tick_rate = tick_rate;
@@ -352,7 +407,45 @@ impl Server {
         s.clients = self.clients.len();
         s.players = self.world.players.len();
         s.transport = self.transport.stats();
+        s.enemies = self.world.enemies.len();
+        s.projectiles = self.world.projectiles.len();
         s
+    }
+
+    /// Spawns `count` enemies of definition `name` spread around `position` (on the ground
+    /// below it when there is one). Returns their ids (empty if the name is unknown).
+    pub fn spawn_enemies(
+        &mut self,
+        name: &str,
+        position: Vec3,
+        yaw: f32,
+        count: u32,
+    ) -> Vec<shared::protocol::NetId> {
+        let mut ids = Vec::new();
+        let n = count.clamp(1, 64);
+        for i in 0..n {
+            // A small ring so they don't spawn inside each other.
+            let offset = if n == 1 {
+                Vec3::ZERO
+            } else {
+                let a = i as f32 / n as f32 * std::f32::consts::TAU;
+                Vec3::new(a.cos(), 0.0, a.sin()) * (0.6 + 0.25 * n as f32).min(6.0)
+            };
+            let mut pos = position + offset;
+            if let Some(hit) = self.world.collision.world.cast_ray(
+                pos + Vec3::Y * 1.5,
+                Vec3::NEG_Y,
+                20.0,
+                engine::physics::MASK_MOVEMENT,
+            ) {
+                pos = hit.point + Vec3::Y * 0.05;
+            }
+            match self.world.spawn_enemy(name, pos, yaw) {
+                Some(id) => ids.push(id),
+                None => break,
+            }
+        }
+        ids
     }
 
     /// Connected players (and bots).
@@ -435,6 +528,31 @@ impl Server {
                 self.add_bot(&name);
             }
             ServerCommand::Chat { text } => self.say(&text),
+            ServerCommand::SpawnEnemy {
+                name,
+                position,
+                yaw,
+                count,
+            } => {
+                self.spawn_enemies(&name, position, yaw, count);
+            }
+            ServerCommand::KillAllEnemies => self.kill_all_enemies(),
+            ServerCommand::SetFriendlyFire(on) => self.world.rules.friendly_fire = on,
+        }
+    }
+
+    /// Kills every living enemy through the damage pipeline.
+    pub fn kill_all_enemies(&mut self) {
+        let ids: Vec<_> = self
+            .world
+            .enemies
+            .values()
+            .filter(|e| e.is_alive())
+            .map(|e| e.id)
+            .collect();
+        let tuning = self.tuning.clone();
+        for id in ids {
+            self.world.kill_enemy(&tuning, id);
         }
     }
 
@@ -515,8 +633,9 @@ impl Server {
             .send_message(client, CHANNEL_RELIABLE, protocol::encode(msg));
     }
 
-    /// Reliable message to every client that has joined the game.
-    fn broadcast(&mut self, msg: &ServerMessage) {
+    /// Reliable message to every client that has joined the game. Returns the number of
+    /// recipients.
+    fn broadcast(&mut self, msg: &ServerMessage) -> usize {
         let bytes = protocol::encode(msg);
         let ids: Vec<ClientId> = self
             .clients
@@ -524,9 +643,10 @@ impl Server {
             .filter(|c| c.player.is_some())
             .map(|c| c.id)
             .collect();
-        for id in ids {
-            self.renet.send_message(id, CHANNEL_RELIABLE, bytes.clone());
+        for id in &ids {
+            self.renet.send_message(*id, CHANNEL_RELIABLE, bytes.clone());
         }
+        ids.len()
     }
 
     fn free_player_id(&self) -> Option<PlayerId> {
@@ -736,6 +856,14 @@ impl Server {
                 if conn.chat_tokens < 1.0 {
                     return;
                 }
+                if self.config.dev_commands && text.trim_start().starts_with('/') {
+                    // Dev commands are not chat (and not rate limited like it).
+                    let reply = self.run_chat_command(player, text.trim());
+                    if let Some(text) = protocol::sanitize_chat(&reply) {
+                        self.send(client, &ServerMessage::Chat { from: None, text });
+                    }
+                    return;
+                }
                 conn.chat_tokens -= 1.0;
                 if let Some(text) = protocol::sanitize_chat(&text) {
                     self.broadcast(&ServerMessage::Chat {
@@ -815,19 +943,26 @@ impl Server {
         self.lagcomp.record(self.world.tick, scratch.clone());
         self.hitbox_scratch = scratch;
 
-        for event in events {
-            if let SimEvent::Respawned {
-                player,
-                position,
-                yaw,
-            } = event
-            {
-                self.broadcast(&ServerMessage::Game(GameEvent::Respawned {
-                    player,
-                    position,
-                    yaw,
-                }));
+        // Combat events: reliable reports to the players concerned, cosmetic FX batched into
+        // the next snapshots.
+        let routed = combat::route_events(&events, &self.world, &mut self.fx);
+        for event in routed.broadcast {
+            let is_combat = !matches!(event, GameEvent::Respawned { .. });
+            let sent = self.broadcast(&ServerMessage::Game(event));
+            if is_combat {
+                self.stats.combat_events_sent += sent as u64;
             }
+        }
+        for (player, event) in routed.to_player {
+            if let Some(client) = self.client_of(player) {
+                self.send(client, &ServerMessage::Game(event));
+                self.stats.combat_events_sent += 1;
+            }
+        }
+        self.event_log.extend(events);
+        if self.event_log.len() > MAX_EVENT_LOG {
+            let excess = self.event_log.len() - MAX_EVENT_LOG / 2;
+            self.event_log.drain(..excess);
         }
 
         if self.world.tick.is_multiple_of(self.snapshot_interval) {
@@ -849,6 +984,7 @@ impl Server {
         let mut frame = NetFrame::new();
         self.world.replicate(&self.tuning, &mut frame);
         let frame = Arc::new(frame);
+        let (since, repeat_since) = (self.last_snapshot_tick, self.prev_snapshot_tick);
 
         for conn in self.clients.values_mut() {
             let Some(player) = conn.player else {
@@ -876,14 +1012,18 @@ impl Server {
 
             let own_player = self.world.players.get(&player);
             let entity_bytes = entities.len() as u64;
+            let fx = self.fx.collect(Some(player), since, repeat_since);
+            self.stats.fx_sent += fx.len() as u64;
             let msg = ServerUnreliable::Snapshot(SnapshotMessage {
                 tick,
                 baseline_tick: baseline.as_ref().map(|(t, _)| *t),
                 last_input_seq: own_player.map_or(0, |p| p.last_input_seq),
                 own: own_player.map(|p| OwnState {
                     movement: p.movement,
+                    combat: p.combat,
                 }),
                 entities,
+                fx,
             });
             let bytes = protocol::encode(&msg);
             self.stats.snapshots_sent += 1;
@@ -899,6 +1039,29 @@ impl Server {
                 conn.sent_frames.pop_front();
             }
         }
+        // FX up to `since` have now been sent twice (if important) or once.
+        self.fx.prune(since);
+        self.prev_snapshot_tick = since;
+        self.last_snapshot_tick = tick;
+    }
+
+    /// The connection of a player (bots have none).
+    fn client_of(&self, player: PlayerId) -> Option<ClientId> {
+        self.clients
+            .values()
+            .find(|c| c.player == Some(player) && c.kick_at.is_none())
+            .map(|c| c.id)
+    }
+
+    /// Simulation events since the last call (tests, tools, a server-side style system).
+    /// Bounded: if nobody drains, only the most recent events are kept.
+    pub fn drain_sim_events(&mut self) -> Vec<shared::sim::SimEvent> {
+        std::mem::take(&mut self.event_log)
+    }
+
+    /// FX waiting in the log (tests / debugging).
+    pub fn fx_log(&self) -> &FxLog {
+        &self.fx
     }
 }
 

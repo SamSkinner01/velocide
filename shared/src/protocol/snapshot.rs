@@ -73,15 +73,62 @@ impl NetId {
 /// Entity kinds (the `kind` field of [`NetEntity`]). Gameplay code adds its own constants here
 /// (keep them stable: they are part of the protocol).
 pub mod kind {
-    /// A player (`owner` = player id).
+    /// A player (`owner` = player id). See `docs/combat.md` for `flags/state/health/aux`.
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
-    // Reserved ranges for upcoming systems:
-    //   16..64   enemies (Husk, Spitter, Gnat, Bastion...)
-    //   64..128  projectiles (rivets, sawblades, grenades, enemy projectiles)
-    //   128..160 pickups / blood orbs
-    //   160..176 prisms
+
+    // 16..64: enemies (`EnemyDef::net_kind`). `owner` = target player (OWNER_NONE), `state` =
+    // `AiState`, `health` = health, `aux` = progress | attack << 8 | max health << 16.
+    pub const ENEMY_FIRST: u16 = 16;
+    pub const ENEMY_LAST: u16 = 63;
+    pub const HUSK: u16 = 16;
+    pub const SPITTER: u16 = 17;
+    pub const GNAT: u16 = 18;
+    pub const BASTION: u16 = 19;
+
+    // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
+    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left.
+    pub const PROJECTILE_FIRST: u16 = 64;
+    pub const PROJECTILE_LAST: u16 = 127;
+    pub const RIVET: u16 = 64;
+    pub const SAWBLADE: u16 = 65;
+    pub const ROCKET: u16 = 66;
+    pub const FLAK: u16 = 67;
+    pub const STICKY: u16 = 68;
+    pub const MORTAR: u16 = 69;
+    pub const SPITTER_ORB: u16 = 70;
+    pub const GNAT_BOLT: u16 = 71;
+
+    // 128..160: pickups / blood.
+    /// Heal pool: `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
+    pub const BLOOD_BURST: u16 = 128;
+
+    // 160..176: prisms.
+    /// Ricochet prism, replicated by trajectory like projectiles; `owner` = thrower.
+    pub const PRISM: u16 = 160;
+
+    pub fn is_enemy(kind: u16) -> bool {
+        (ENEMY_FIRST..=ENEMY_LAST).contains(&kind)
+    }
+
+    pub fn is_projectile(kind: u16) -> bool {
+        (PROJECTILE_FIRST..=PROJECTILE_LAST).contains(&kind)
+    }
+}
+
+/// `owner` of an entity owned by no player.
+pub const OWNER_NONE: u16 = 0xFFFF;
+/// `owner` of a projectile fired by an enemy.
+pub const OWNER_ENEMY: u16 = 0xFFFE;
+
+/// Wire form of an [`crate::sim::Owner`] in `NetEntity::owner`.
+pub fn owner_code(owner: crate::sim::Owner) -> u16 {
+    match owner {
+        crate::sim::Owner::Player(p) => p.0 as u16,
+        crate::sim::Owner::Enemy(_) => OWNER_ENEMY,
+        crate::sim::Owner::World => OWNER_NONE,
+    }
 }
 
 /// Flag bits of player entities.
@@ -90,6 +137,55 @@ pub mod player_flags {
     pub const LOW_PROFILE: u32 = 1 << 0;
     /// Dash invulnerability frames.
     pub const INVULNERABLE: u32 = 1 << 1;
+    /// Dead (corpse; waiting to respawn).
+    pub const DEAD: u32 = 1 << 2;
+    /// Parry window open (punch pose).
+    pub const PARRY: u32 = 1 << 3;
+    /// Charging the Lancet Overcharge (charge level in `state` bits 8–15).
+    pub const CHARGING: u32 = 1 << 4;
+    /// Spawn protection / god mode: can't be hurt.
+    pub const PROTECTED: u32 = 1 << 5;
+    /// Reserved for co-op downed state.
+    pub const DOWNED: u32 = 1 << 6;
+}
+
+/// Flag bits of enemy entities.
+pub mod enemy_flags {
+    /// Has a target (`owner`).
+    pub const ALERT: u32 = 1 << 0;
+    /// In the parryable phase of a telegraphed attack (flash the parry colour).
+    pub const PARRYABLE: u32 = 1 << 1;
+    pub const STUNNED: u32 = 1 << 2;
+    /// Dead (corpse, no hitboxes).
+    pub const DYING: u32 = 1 << 3;
+    /// Not on the ground (knocked up / flying).
+    pub const AIRBORNE: u32 = 1 << 4;
+    /// Has directional armour.
+    pub const ARMOURED: u32 = 1 << 5;
+}
+
+/// Flag bits of projectile entities.
+pub mod projectile_flags {
+    /// Deflected by a punch: flies straight (no gravity), now owned by the parrier.
+    pub const PARRIED: u32 = 1 << 0;
+    /// Stuck to the level / a target: `position` is current (no trajectory).
+    pub const STUCK: u32 = 1 << 1;
+    /// Touched a player and waits out the parry tolerance at `position`.
+    pub const PENDING: u32 = 1 << 2;
+    /// Originally fired by an enemy.
+    pub const ENEMY: u32 = 1 << 3;
+}
+
+/// Flag bits of blood bursts.
+pub mod blood_flags {
+    /// Enemy death burst.
+    pub const BIG: u32 = 1 << 0;
+}
+
+/// Flag bits of prisms.
+pub mod prism_flags {
+    /// Lying still: `position` is current (no trajectory).
+    pub const RESTING: u32 = 1 << 0;
 }
 
 /// Flag bits of door entities.

@@ -3290,6 +3290,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "client",
  "ctrlc",
  "engine",
  "env_logger",
