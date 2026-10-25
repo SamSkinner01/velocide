@@ -2,6 +2,8 @@
 //!
 //! - `crucible_of_veins.ron` — "Crucible of Veins", the co-op campaign level (5 arenas).
 //! - `cistern_nine.ron` — "Cistern Nine", the PvP deathmatch arena.
+//! - `knell_yard.ron` — "Knell Yard", the compact, vertical PvP arena (`level_gen/knell_yard.rs`).
+//! - `ingot_run.ron` — "Ingot Run", the long, lane-based PvP arena (`level_gen/ingot_run.rs`).
 //!
 //! ```text
 //! cargo run -p client --example level_gen            # writes both files
@@ -22,6 +24,13 @@ use shared::level::{
     Brush, Checkpoint, Door, Encounter, EnemySpawn, Environment, JumpPad, LevelDef, LevelKind,
     LightDef, SpawnPoint, Volume, Wave,
 };
+
+// Arena generators live next to this file (an example's crate root resolves `mod` paths from
+// `examples/`, hence the `#[path]`).
+#[path = "level_gen/ingot_run.rs"]
+mod ingot_run;
+#[path = "level_gen/knell_yard.rs"]
+mod knell_yard;
 
 // ------------------------------------------------------------------------------------------
 // Builder
@@ -1520,6 +1529,16 @@ fn main() -> anyhow::Result<()> {
             "cistern_nine.ron",
             cistern(),
             "Cistern Nine — PvP deathmatch arena (up to 8 players). See docs/levels.md.",
+        ),
+        (
+            "knell_yard.ron",
+            knell_yard::knell_yard(),
+            "Knell Yard — compact PvP deathmatch arena (2-5 players, up to 8). See docs/levels.md.",
+        ),
+        (
+            "ingot_run.ron",
+            ingot_run::ingot_run(),
+            "Ingot Run — long lane-based PvP deathmatch arena (4-8 players). See docs/levels.md.",
         ),
     ] {
         let text = emit(&g, header);
