@@ -30,14 +30,15 @@ use crate::input::PlayerInput;
 use crate::level::LevelDef;
 use crate::movement::MoveState;
 pub use crate::sim::PlayerId;
-use crate::sim::{KillInfo, ParryEvent, PlayerCombat};
+use crate::sim::{KillInfo, ModeEvent, ParryEvent, PlayerCombat, StyleEvent, StyleView};
 use crate::tuning::Tuning;
 
 /// netcode protocol id ("VELOCIDE"). Clients with a different id cannot even handshake.
 pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// Bumped on every incompatible protocol / simulation change. Checked on connect.
 /// 2: combat (OwnState::combat, SnapshotMessage::fx, combat GameEvents, entity kinds).
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;
@@ -243,6 +244,12 @@ pub enum GameEvent {
     /// A successful parry (hitstop + white flash for the parrier, `Sfx::Parry` for all).
     /// Everyone.
     Parried(ParryEvent),
+    /// A style bonus or rank change of the recipient (style feed, rank-up banner and sound).
+    /// Owner only. `docs/style_modes.md`.
+    Style(StyleEvent),
+    /// Game mode: checkpoint, downed / revive, team wipe, exit countdown, scoreboard, match end
+    /// with results. Everyone. `docs/style_modes.md`.
+    Mode(ModeEvent),
 }
 
 /// Unreliable server -> client messages.
@@ -278,6 +285,8 @@ pub struct OwnState {
     /// charges, parry window, prisms, stickies — after `last_input_seq` (the weapon state is
     /// predictable: compare it like the movement state).
     pub combat: PlayerCombat,
+    /// Style meter, rank and freshness (HUD).
+    pub style: StyleView,
 }
 
 // ---------------------------------------------------------------------------------------------

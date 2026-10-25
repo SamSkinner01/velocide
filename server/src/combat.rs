@@ -321,6 +321,8 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             | SimEvent::PrismShattered { .. }
             | SimEvent::EnemySpawned { .. }
             | SimEvent::EnemyRemoved { .. } => {}
+            // Style and game-mode events are routed by `server::modes`.
+            SimEvent::Style(_) | SimEvent::Mode(_) => {}
         }
     }
     for ((attacker, _), report) in confirms {

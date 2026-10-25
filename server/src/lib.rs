@@ -24,6 +24,8 @@ pub mod combat;
 mod commands;
 pub mod input_queue;
 pub mod lagcomp;
+// Style / game-mode messages and the end-of-match hook (docs/style_modes.md).
+pub mod modes;
 pub mod netsim;
 pub mod transport;
 
@@ -1009,6 +1011,8 @@ impl Server {
                 self.stats.combat_events_sent += 1;
             }
         }
+        // Style (owner only) and game-mode events (everyone), match end: server::modes.
+        self.send_mode_events(&events);
         self.event_log.extend(events);
         if self.event_log.len() > MAX_EVENT_LOG {
             let excess = self.event_log.len() - MAX_EVENT_LOG / 2;
@@ -1071,6 +1075,7 @@ impl Server {
                 own: own_player.map(|p| OwnState {
                     movement: p.movement,
                     combat: p.combat,
+                    style: self.world.style.view(p.id, &self.tuning.style),
                 }),
                 entities,
                 fx,

@@ -596,47 +596,22 @@ impl SimWorld {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Death & respawn rules. These two functions are the whole default rule (respawn at a
-    // spawn point after `respawn_delay`); game modes (checkpoints, downed/revive, deathmatch
-    // spawns) replace them.
+    // Death & respawn rules. The game modes own them (`modes.rs`: solo checkpoint restart,
+    // co-op downed / revive, deathmatch respawns at the farthest spawn); these two entry points
+    // are what the damage pipeline and `tick_vitals` call.
     // -----------------------------------------------------------------------------------------
 
-    /// A player just died. Default rule: stay dead (body keeps falling, no input) for
-    /// `combat.respawn_delay` seconds, then [`SimWorld::respawn_player`].
-    pub fn on_player_died(&mut self, t: &Tuning, id: PlayerId, _kill: &KillInfo) {
-        let rate = self.tick_rate;
-        if let Some(p) = self.players.get_mut(&id) {
-            p.combat.dead = true;
-            p.combat.respawn_in = secs_to_ticks(t.combat.respawn_delay, rate, 1);
-            p.combat.weapons.on_death();
-        }
-        // Their pending parryable hits are moot.
-        self.cancel_pending_for_victim(id);
+    /// A player just died: dead / downed and the respawn delay by mode
+    /// ([`SimWorld::mode_player_died`]).
+    pub fn on_player_died(&mut self, t: &Tuning, id: PlayerId, kill: &KillInfo) {
+        self.mode_player_died(t, id, kill);
     }
 
-    /// Puts a player back into the game at a spawn point with full health, fresh weapons and
-    /// spawn protection, and emits [`SimEvent::Respawned`].
+    /// Puts a player back into the game where the mode says (checkpoint / farthest spawn) with
+    /// full health, fresh weapons and spawn protection, and emits [`SimEvent::Respawned`]
+    /// ([`SimWorld::mode_respawn_player`]).
     pub fn respawn_player(&mut self, t: &Tuning, id: PlayerId) {
-        let spawn = self.next_spawn_point();
-        let rate = self.tick_rate;
-        let Some(p) = self.players.get_mut(&id) else {
-            return;
-        };
-        let god = p.combat.god;
-        p.movement = crate::movement::MoveState::spawn(spawn.position);
-        p.yaw = spawn.yaw.to_radians();
-        p.pitch = 0.0;
-        p.combat = PlayerCombat {
-            god,
-            protection: secs_to_ticks(t.combat.spawn_protection, rate, 0),
-            weapons: WeaponState::fresh(p.combat.weapons.weapon, p.combat.weapons.mode),
-            ..Default::default()
-        };
-        self.events.push(SimEvent::Respawned {
-            player: id,
-            position: spawn.position,
-            yaw: spawn.yaw.to_radians(),
-        });
+        self.mode_respawn_player(t, id);
     }
 
     /// Per-tick vitals: hard damage recovery, spawn protection, respawn timers.

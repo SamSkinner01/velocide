@@ -6,5 +6,7 @@
 
 pub mod backdrop;
 pub mod main_menu;
+/// End-of-match results screens (campaign tally / co-op table / deathmatch standings).
+pub mod results;
 pub mod settings_menu;
 pub mod style;

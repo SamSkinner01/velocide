@@ -228,6 +228,8 @@ pub struct NetClient {
     snapshot_arrivals: VecDeque<f64>,
     time: f64,
     stats: NetStats,
+    /// Style meter / rank / freshness from the newest `OwnState` (style HUD).
+    own_style: Option<shared::sim::StyleView>,
 }
 
 impl NetClient {
@@ -275,6 +277,7 @@ impl NetClient {
             snapshot_arrivals: VecDeque::new(),
             time: 0.0,
             stats: NetStats::default(),
+            own_style: None,
         }
     }
 
@@ -295,6 +298,11 @@ impl NetClient {
     /// Why we were disconnected (or rejected).
     pub fn disconnect_reason(&self) -> Option<&str> {
         self.disconnect_reason.as_deref()
+    }
+
+    /// The local player's style meter, rank and freshness (newest snapshot).
+    pub fn own_style(&self) -> Option<&shared::sim::StyleView> {
+        self.own_style.as_ref()
     }
 
     pub fn local_player_id(&self) -> Option<PlayerId> {
@@ -723,6 +731,7 @@ impl NetClient {
         let Some(own) = snap.own else {
             return;
         };
+        self.own_style = Some(own.style);
         let (Some(world), Some(_)) = (&self.world, &self.welcome) else {
             return; // level not loaded yet; a later snapshot starts prediction
         };

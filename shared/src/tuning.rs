@@ -15,6 +15,10 @@ pub struct Tuning {
     pub movement: MovementTuning,
     pub combat: CombatTuning,
     pub net: NetTuning,
+    // Style meter / ranks and game-mode rules (`sim::style`, `sim::modes`,
+    // docs/style_modes.md).
+    pub style: StyleTuning,
+    pub modes: ModeTuning,
 }
 
 /// Player movement. Distances in metres, speeds in m/s, accelerations in m/s², times in
@@ -650,6 +654,161 @@ impl Default for NetTuning {
             max_extrapolation_ms: 100.0,
             interp_jitter_factor: 2.0,
             interp_delay_max_ms: 250.0,
+        }
+    }
+}
+
+/// Style meter, ranks, bonuses and freshness (`sim::style`). Points are meter points: one rank's
+/// bar holds `points_per_rank`. Rules and rationale: `docs/gameplay.md` ("Style") and
+/// `docs/style_modes.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StyleTuning {
+    /// Size of one rank's bar.
+    pub points_per_rank: f32,
+    /// Meter decay (points/s) at the lowest rank (DULL) ...
+    pub decay_lowest: f32,
+    /// ... rising linearly to this at the highest (VELOCIDE).
+    pub decay_highest: f32,
+    /// After dropping a rank the meter restarts at this fraction of the lower rank's bar.
+    pub rank_down_refill: f32,
+    /// After ranking up, the new rank can't be lost for this long (the bar may empty, but no
+    /// instant up/down flicker when a bonus just reaches the next rank).
+    pub rank_grace: f32,
+    /// Dying (or going down in co-op) empties the meter back to DULL.
+    pub reset_on_death: bool,
+    // ---- bonuses (base points, multiplied by freshness) ----
+    pub kill: f32,
+    /// PvP player kill (instead of `kill`).
+    pub frag: f32,
+    pub headshot: f32,
+    /// The killer was airborne.
+    pub airkill: f32,
+    /// The victim was airborne (flying enemies don't count).
+    pub airshot: f32,
+    /// Per extra kill within `multikill_window` (n kills: `multikill × (n − 1)`).
+    pub multikill: f32,
+    pub multikill_window: f32,
+    pub parry: f32,
+    /// Kill with a parried projectile.
+    pub return_to_sender: f32,
+    /// A ricochet shot hit something ...
+    pub ricochet: f32,
+    /// ... plus this per prism bounce after the first.
+    pub ricochet_per_bounce: f32,
+    /// Explosive kill.
+    pub exploded: f32,
+    pub slam_kill: f32,
+    /// Punch kill.
+    pub fisted: f32,
+    /// Kills while the killer's health is below this ...
+    pub close_call_health: f32,
+    /// ... score this much more (the extra is shown as CLOSE CALL).
+    pub close_call_multiplier: f32,
+    // ---- freshness (variety) ----
+    /// Each scoring use of a weapon mode / action costs this much of its freshness ...
+    pub freshness_cost: f32,
+    /// ... and restores every other one by this much ...
+    pub freshness_restore: f32,
+    /// ... and everything recovers this much per second.
+    pub freshness_regen: f32,
+    /// Freshness never drops below this (it multiplies every gain).
+    pub freshness_min: f32,
+    /// Below this the weapon / action is STALE (HUD indicator, "- STALE" in the feed).
+    pub stale_threshold: f32,
+}
+
+impl Default for StyleTuning {
+    fn default() -> Self {
+        Self {
+            points_per_rank: 100.0,
+            decay_lowest: 4.0,
+            decay_highest: 30.0,
+            rank_down_refill: 0.6,
+            rank_grace: 1.0,
+            reset_on_death: true,
+            kill: 30.0,
+            frag: 100.0,
+            headshot: 15.0,
+            airkill: 40.0,
+            airshot: 20.0,
+            multikill: 40.0,
+            multikill_window: 0.6,
+            parry: 60.0,
+            return_to_sender: 80.0,
+            ricochet: 30.0,
+            ricochet_per_bounce: 20.0,
+            exploded: 20.0,
+            slam_kill: 40.0,
+            fisted: 30.0,
+            close_call_health: 30.0,
+            close_call_multiplier: 1.5,
+            freshness_cost: 0.12,
+            freshness_restore: 0.04,
+            freshness_regen: 0.02,
+            freshness_min: 0.2,
+            stale_threshold: 0.5,
+        }
+    }
+}
+
+/// Game-mode rules (`sim::modes`): campaign checkpoints, death / downed / revive, the co-op exit,
+/// deathmatch, results grading. Deathmatch respawn delay and spawn protection are
+/// `combat.respawn_delay` / `combat.spawn_protection`; frag and time limits are match settings
+/// (`sim::modes::ModeRules`), not tuning. See `docs/style_modes.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModeTuning {
+    /// Single player: seconds of death cam before restarting at the last checkpoint.
+    pub sp_death_time: f32,
+    /// Co-op: seconds a downed player waits for a revive before respawning at the checkpoint.
+    pub downed_time: f32,
+    /// A teammate holding USE this close (metres, feet to feet) ...
+    pub revive_range: f32,
+    /// ... for this long revives ...
+    pub revive_time: f32,
+    /// ... with this much health.
+    pub revive_health: f32,
+    /// Co-op deaths in kill volumes leave nothing to revive: respawn at the checkpoint after this.
+    pub fall_respawn_time: f32,
+    /// Co-op: everyone down at once → the team respawns at the checkpoint after this.
+    pub wipe_respawn_time: f32,
+    /// Co-op exit: the first player in starts this countdown; the level ends when it runs out
+    /// or as soon as every living player is in the exit.
+    pub exit_countdown: f32,
+    /// Deathmatch: a kill-volume death within this many seconds of being hit by another player
+    /// also frags that player.
+    pub knockoff_credit: f32,
+    /// Seconds between scoreboard broadcasts while something changed.
+    pub scoreboard_interval: f32,
+    /// Results grade thresholds, best first: S, A, B, C (anything worse is D).
+    /// Level time as a multiple of the par time (at most).
+    pub grade_time: [f32; 4],
+    /// Kills as a fraction of the player's share of the level's enemies (at least).
+    pub grade_kills: [f32; 4],
+    /// Style points earned per enemy share (at least).
+    pub grade_style: [f32; 4],
+    /// Damage taken per enemy share (at most).
+    pub grade_damage: [f32; 4],
+}
+
+impl Default for ModeTuning {
+    fn default() -> Self {
+        Self {
+            sp_death_time: 1.5,
+            downed_time: 15.0,
+            revive_range: 2.5,
+            revive_time: 1.5,
+            revive_health: 40.0,
+            fall_respawn_time: 4.0,
+            wipe_respawn_time: 3.0,
+            exit_countdown: 10.0,
+            knockoff_credit: 3.0,
+            scoreboard_interval: 0.25,
+            grade_time: [1.0, 1.25, 1.65, 2.2],
+            grade_kills: [1.0, 0.9, 0.75, 0.5],
+            grade_style: [120.0, 85.0, 60.0, 35.0],
+            grade_damage: [1.0, 3.0, 6.0, 10.0],
         }
     }
 }

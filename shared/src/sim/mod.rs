@@ -16,8 +16,10 @@
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
 //! 4. **prisms**, **blood bursts** (healing), **vitals** (hard damage recovery, respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
-//! 6. **events**: everything that happened is returned as [`SimEvent`]s; the server forwards
-//!    them to clients (reliably or batched in snapshots) and the style system scores them.
+//! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
+//!    events, checkpoints, revives, the exit, deathmatch limits, the scoreboard.
+//! 7. **events**: everything that happened is returned as [`SimEvent`]s; the server forwards
+//!    them to clients (reliably or batched in snapshots).
 //!
 //! All damage goes through [`SimWorld::apply_damage`] (`combat.rs`). See `docs/combat.md`.
 //!
@@ -29,9 +31,13 @@ pub mod combat;
 pub mod enemy;
 mod hitbox;
 pub mod hitscan;
+// Game modes (death rule, checkpoints, downed/revive, deathmatch, results) and the style
+// meter: docs/style_modes.md.
+pub mod modes;
 pub mod parry;
 pub mod prism;
 pub mod projectiles;
+pub mod style;
 pub mod trail;
 pub mod weapons;
 
@@ -48,9 +54,14 @@ pub use combat::{
 };
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry};
 pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
+pub use modes::{
+    EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeKind,
+    ModeRules, ModeState, PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
+};
 pub use parry::{ParryEvent, ParryTarget};
 pub use prism::Prism;
 pub use projectiles::{Projectile, ProjectileKind};
+pub use style::{PlayerStyle, StyleBonus, StyleEvent, StyleKey, StyleSystem, StyleView};
 pub use weapons::{FireIntent, Weapon, WeaponState, step_weapons};
 
 use crate::input::PlayerInput;
@@ -373,6 +384,12 @@ pub enum SimEvent {
         position: Vec3,
         radius: f32,
     },
+
+    // ---- style & game modes (docs/style_modes.md) ----
+    /// A style bonus / rank change (sent to that player only).
+    Style(StyleEvent),
+    /// Checkpoints, downed / revive, exit countdown, scoreboard, match end (everyone).
+    Mode(ModeEvent),
 }
 
 /// A player's shot (for remote tracers, muzzle flashes and sounds).
@@ -414,6 +431,10 @@ pub struct SimWorld {
     pub blood: BTreeMap<NetId, BloodBurst>,
     /// Parry-delayed enemy melee damage.
     pub pending_hits: Vec<parry::PendingHit>,
+    /// Game-mode state: rules, stats, checkpoint, downed players, match phase (`modes.rs`).
+    pub mode: ModeState,
+    /// Every player's style meter (`style.rs`).
+    pub style: StyleSystem,
     /// Events of the tick being simulated.
     pub(crate) events: Vec<SimEvent>,
     /// The projectile step of the current tick has run.
@@ -441,6 +462,7 @@ impl SimWorld {
             LevelKind::Arena => CombatRules::pvp(),
             LevelKind::Campaign => CombatRules::coop(),
         };
+        let mode = ModeState::new(ModeRules::for_level(&level));
         Self {
             tick: 0,
             tick_rate: tick_rate.max(1),
@@ -455,6 +477,8 @@ impl SimWorld {
             prisms: BTreeMap::new(),
             blood: BTreeMap::new(),
             pending_hits: Vec::new(),
+            mode,
+            style: StyleSystem::default(),
             events: Vec::new(),
             projectiles_stepped: false,
             next_spawn: 0,
@@ -557,6 +581,8 @@ impl SimWorld {
                 });
             }
         }
+        // Game mode: stats, style, checkpoint and the match clock start over (modes.rs).
+        self.reset_modes();
         events
     }
 
@@ -649,6 +675,10 @@ impl SimWorld {
         // 5. World rules.
         self.apply_world_rules(tuning);
 
+        // 6. Game mode + style: scores this tick's events, checkpoints, revives, exit,
+        //    deathmatch limits, scoreboard (modes.rs / style.rs).
+        self.step_modes(tuning);
+
         std::mem::take(&mut self.events)
     }
 
@@ -728,7 +758,10 @@ impl SimWorld {
     pub fn replicate(&self, tuning: &Tuning, frame: &mut NetFrame) {
         frame.entities.clear();
         for p in self.players.values() {
-            frame.insert(&p.replicated_state(tuning, self.tick_rate));
+            let mut e = p.replicated_state(tuning, self.tick_rate);
+            // Game mode flags (co-op DOWNED), modes.rs.
+            self.decorate_player_entity(&mut e);
+            frame.insert(&e);
         }
         for door in &self.level.doors {
             let mut flags = 0;

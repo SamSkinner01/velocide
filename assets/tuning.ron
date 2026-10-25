@@ -233,4 +233,56 @@
             bolt_lifetime: 3.0,
         ),
     ),
+    // Style meter (shared/src/sim/style.rs, docs/gameplay.md "Style", docs/style_modes.md).
+    // Points fill the current rank's bar; gains are multiplied by the freshness of the weapon
+    // mode / action used.
+    style: (
+        points_per_rank: 100.0,
+        decay_lowest: 4.0,          // points/s at DULL ...
+        decay_highest: 30.0,        // ... rising linearly to VELOCIDE
+        rank_down_refill: 0.6,      // meter after dropping a rank (fraction of the lower bar)
+        rank_grace: 1.0,            // a fresh rank can't be lost for this long
+        reset_on_death: true,
+        kill: 30.0,
+        frag: 100.0,                // PvP player kill (instead of kill)
+        headshot: 15.0,
+        airkill: 40.0,              // killer airborne
+        airshot: 20.0,              // victim airborne (not flying enemies)
+        multikill: 40.0,            // per extra kill within the window
+        multikill_window: 0.6,
+        parry: 60.0,
+        return_to_sender: 80.0,     // kill with a parried projectile
+        ricochet: 30.0,             // ricochet hit ...
+        ricochet_per_bounce: 20.0,  // ... + per extra prism bounce
+        exploded: 20.0,
+        slam_kill: 40.0,
+        fisted: 30.0,
+        close_call_health: 30.0,    // kills under this health ...
+        close_call_multiplier: 1.5, // ... score x1.5
+        freshness_cost: 0.12,       // per scoring use of a weapon mode / action
+        freshness_restore: 0.04,    // to every other one per use
+        freshness_regen: 0.02,      // per second, everything
+        freshness_min: 0.2,
+        stale_threshold: 0.5,       // "STALE" below this
+    ),
+    // Game modes (shared/src/sim/modes.rs, docs/style_modes.md). Deathmatch respawn delay and
+    // spawn protection are combat.respawn_delay / combat.spawn_protection; frag / time limits
+    // are match settings.
+    modes: (
+        sp_death_time: 1.5,         // solo: death cam, then back to the last checkpoint
+        downed_time: 15.0,          // co-op: downed, waiting for a revive
+        revive_range: 2.5,
+        revive_time: 1.5,           // hold USE
+        revive_health: 40.0,
+        fall_respawn_time: 4.0,     // co-op kill-volume deaths (nothing to revive)
+        wipe_respawn_time: 3.0,     // co-op: everyone down -> team back to the checkpoint
+        exit_countdown: 10.0,       // co-op: first one in starts it; everyone in ends at once
+        knockoff_credit: 3.0,       // DM: kill-volume death this soon after a hit frags the hitter
+        scoreboard_interval: 0.25,
+        // Results grades, thresholds for S, A, B, C (worse = D); docs/style_modes.md.
+        grade_time: (1.0, 1.25, 1.65, 2.2),       // x par time, at most
+        grade_kills: (1.0, 0.9, 0.75, 0.5),       // fraction of your share of the enemies
+        grade_style: (120.0, 85.0, 60.0, 35.0),   // style points per enemy share
+        grade_damage: (1.0, 3.0, 6.0, 10.0),      // damage taken per enemy share, at most
+    ),
 )

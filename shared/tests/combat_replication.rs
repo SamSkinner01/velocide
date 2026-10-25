@@ -173,6 +173,7 @@ fn own_state_and_events_survive_bincode() {
     let own = OwnState {
         movement: shared::movement::MoveState::spawn(Vec3::new(1.0, 2.0, 3.0)),
         combat: c,
+        style: Default::default(),
     };
     let snap = ServerUnreliable::Snapshot(SnapshotMessage {
         tick: 99,

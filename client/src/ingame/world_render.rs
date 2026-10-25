@@ -32,6 +32,9 @@ pub struct WorldRender {
     kind: LevelKind,
     name: String,
     props: Vec<PropInstance>,
+    /// Index of the last checkpoint the team reached (game mode, `ingame::mode_hud`):
+    /// checkpoints up to it are drawn active.
+    pub checkpoint_reached: Option<usize>,
 }
 
 /// Prop models for the level's gameplay volumes.
@@ -125,17 +128,23 @@ impl WorldRender {
         &self.name
     }
 
-    /// Appends the level's model props (animated by `time`). Checkpoints are drawn inactive
-    /// until checkpoint state is replicated.
+    /// Appends the level's model props (animated by `time`). Checkpoints up to
+    /// `checkpoint_reached` are drawn active.
     pub fn draw_props(&self, lib: Option<&ModelLibrary>, time: f64, draws: &mut Vec<DrawItem>) {
         let Some(lib) = lib else {
             return;
         };
         let tint = Tint::default();
+        // Checkpoint props are created in level order.
+        let mut checkpoint = 0;
         for p in &self.props {
             let pose = match p.model {
                 ModelId::JumpPad => props::jump_pad_pose(time),
-                ModelId::Checkpoint => props::checkpoint_pose(false, time),
+                ModelId::Checkpoint => {
+                    let active = self.checkpoint_reached.is_some_and(|r| checkpoint <= r);
+                    checkpoint += 1;
+                    props::checkpoint_pose(active, time)
+                }
                 ModelId::ExitGate => props::exit_gate_pose(time),
                 _ => lib.get(p.model).rest_pose(),
             };

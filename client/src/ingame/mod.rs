@@ -28,9 +28,12 @@ pub mod debug;
 pub mod effects;
 pub mod feedback;
 pub mod hud;
+// Game-mode HUD / scoreboard state / results, and the style meter (docs/style_modes.md).
+pub mod mode_hud;
 pub mod pause;
 pub mod remote_players;
 pub mod scoreboard;
+pub mod style_hud;
 pub mod tuning_edit;
 pub mod viewmodel;
 pub mod world_render;
@@ -65,8 +68,10 @@ use debug::DebugOverlay;
 use effects::Effects;
 use feedback::Feedback;
 use hud::{Hud, HudInfo, NameTag};
+use mode_hud::ModeHud;
 use pause::{PauseAction, PauseMenu};
 use remote_players::{RemotePlayers, player_color};
+use style_hud::StyleHud;
 use viewmodel::Viewmodel;
 use world_render::WorldRender;
 
@@ -90,6 +95,10 @@ pub struct InGame {
     pub world: WorldRender,
     pub remote: RemotePlayers,
     pub hud: Hud,
+    /// Style meter, style feed, rank banner (`style_hud.rs`).
+    pub style: StyleHud,
+    /// Game-mode state: scoreboard, downed / revive, countdowns, results (`mode_hud.rs`).
+    pub modes: ModeHud,
     pub chat: Chat,
     pause: PauseMenu,
     remote_sounds: audio_hooks::RemoteSounds,
@@ -180,6 +189,8 @@ impl InGame {
             world: WorldRender::new(),
             remote: RemotePlayers::new(),
             hud: Hud::new(),
+            style: StyleHud::new(),
+            modes: ModeHud::new(),
             chat: Chat::new(),
             pause: PauseMenu::new(),
             remote_sounds: audio_hooks::RemoteSounds::new(),
@@ -308,6 +319,8 @@ impl InGame {
                     self.world.load(renderer, &name, &level);
                 }
                 self.effects.clear();
+                self.style.reset();
+                self.modes = ModeHud::new();
                 common
                     .audio
                     .set_music(Common::game_music(self.world.kind()));
@@ -363,6 +376,9 @@ impl InGame {
                 common.audio.play_2d(Sfx::ChatMessage);
             }
             NetEvent::Game(GameEvent::Respawned { .. }) => {}
+            // Style (owner only) and game modes: style_hud.rs / mode_hud.rs.
+            NetEvent::Game(GameEvent::Style(e)) => self.style.on_event(&e, &mut common.audio, now),
+            NetEvent::Game(GameEvent::Mode(e)) => self.on_mode_event(&e, common),
             // Combat events (damage, hit confirms, kills, parries) are presented by the combat
             // client layer; see docs/combat.md "client presentation contract".
             NetEvent::Game(_) => {}
@@ -452,12 +468,14 @@ impl InGame {
             }
         }
         let in_game = self.is_playing();
+        // The results screen (match over) takes the keys and the cursor.
+        let results = self.modes.results_open();
 
         // 2. Hotkeys.
         let input = io.input;
         let typing = common.ui_state.wants_text_input() || common.ui_state.is_capturing();
         let pressed = |a: Action| common.settings.bindings.pressed(input, a);
-        if !typing && !self.chat.is_open() && in_game {
+        if !typing && !self.chat.is_open() && in_game && !results {
             if self.pause.is_open() {
                 // Gamepad Start toggles back (Escape is handled by the pause menu itself).
                 if pressed(Action::Pause) && !input.key_pressed(Key::Escape) {
@@ -472,8 +490,9 @@ impl InGame {
                 self.restart();
             }
         }
-        let playing = in_game && !self.pause.is_open() && !self.chat.is_open();
+        let playing = in_game && !self.pause.is_open() && !self.chat.is_open() && !results;
         let scoreboard = in_game
+            && !results
             && !self.chat.is_open()
             && !self.pause.is_open()
             && common.settings.bindings.is_down(input, Action::Scoreboard);
@@ -523,6 +542,10 @@ impl InGame {
         }
         if !in_game {
             common.audio.set_music_intensity(0.0);
+        } else if !results {
+            common
+                .audio
+                .set_music_intensity(self.mode_music_intensity());
         }
         self.debug.editor.update(self.time);
 
@@ -628,6 +651,8 @@ impl InGame {
     }
 
     fn draw_world(&mut self, common: &Common, out: &mut FrameBuffers, dt: f32, vdt: f32) {
+        // Game mode: active checkpoint props, downed poses (mode_hud.rs).
+        self.update_mode_visuals();
         let net = self.session.as_ref().map(Session::client);
         let world = net.and_then(NetClient::world);
         let lib = common.models.as_ref();
@@ -723,13 +748,15 @@ impl InGame {
         scoreboard: bool,
         transition: &mut Option<Transition>,
     ) {
-        let now = io.time;
+        // Same clock as `on_net_event` (feeds, banners and chat are stamped with `self.time`).
+        let now = self.time;
         let status = self.status_line(common);
         let in_game = self.is_playing();
+        let results = self.modes.results_open();
         let list = &mut out.ui;
         let canvas = Rect::from_min_size(Vec2::ZERO, list.canvas_size);
 
-        if in_game {
+        if in_game && !results {
             // Name tags.
             if let Some(net) = self.net() {
                 let world = net.world().map(|w| &w.collision.world);
@@ -756,6 +783,7 @@ impl InGame {
                 status.as_ref().map(|(s, c)| (s.as_str(), *c)),
                 now,
             );
+            self.draw_mode_hud(common, list, now, io.dt);
             self.chat.draw_log(list, &common.theme, canvas, now);
             if scoreboard {
                 self.draw_scoreboard(common, list, canvas);
@@ -775,17 +803,21 @@ impl InGame {
 
         // Interactive layers (only build a Ui when something needs input).
         let connecting = !in_game;
-        if !(connecting || self.pause.is_open() || self.chat.is_open()) {
+        if !(connecting || results || self.pause.is_open() || self.chat.is_open()) {
             return;
         }
         let theme = &common.theme;
         let mut ui = Ui::new(&mut out.ui, &mut common.ui_state, io.ui_input, theme);
         let mut sound = None;
+        let mut results_out = None;
         if connecting {
             if self.connecting_ui(&mut ui) {
                 sound = Some(Sfx::UiBack);
                 *transition = Some(Transition::MainMenu { message: None });
             }
+        } else if let Some(screen) = &mut self.modes.results {
+            // Match over: the results screen (menus/results.rs).
+            results_out = Some(screen.ui(&mut ui, now));
         } else if self.pause.is_open() {
             let subtitle = self.target.clone();
             let single = self.kind == SessionKind::SinglePlayer;
@@ -823,6 +855,11 @@ impl InGame {
         drop(ui);
         if let Some(s) = sound {
             common.ui_sound(s);
+        }
+        if let Some(out) = results_out
+            && let Some(t) = self.on_results_output(out, common)
+        {
+            *transition = Some(t);
         }
     }
 
@@ -904,35 +941,17 @@ impl InGame {
     }
 
     fn draw_scoreboard(&self, common: &Common, list: &mut engine::gfx::UiDrawList, canvas: Rect) {
-        let Some(net) = self.net() else {
-            return;
-        };
-        let local = net.local_player_id();
-        let rtt = net.stats().rtt_ms;
-        let rows: Vec<scoreboard::ScoreRow> = net
-            .players()
-            .values()
-            .map(|p| scoreboard::ScoreRow {
-                name: p.name.clone(),
-                color: player_color(p.id),
-                ping_ms: (Some(p.id) == local && self.kind != SessionKind::SinglePlayer)
-                    .then_some(rtt),
-                is_local: Some(p.id) == local,
-                status: if p.bot {
-                    "BOT"
-                } else if Some(p.id) == local && self.kind == SessionKind::Host {
-                    "HOST"
-                } else {
-                    "ALIVE"
-                },
-            })
-            .collect();
+        // Rows with the game-mode stats (mode_hud.rs); columns per mode (scoreboard.rs).
+        let rows = self.scoreboard_rows();
+        let mode = self.modes.mode();
         let title = format!(
-            "{}  //  {}",
+            "{}  //  {}{}",
             self.world.name().to_uppercase(),
-            hud_mode_name(self.kind)
+            hud_mode_name(self.kind),
+            mode.map(|m| format!("  //  {}", m.name())).unwrap_or_default()
         );
-        scoreboard::draw(list, &common.theme, canvas, &title, &rows);
+        let columns = scoreboard::columns(mode);
+        scoreboard::draw(list, &common.theme, canvas, &title, &columns, &rows, self.time);
     }
 
     /// The egui debug window (feature `debug-ui`).
