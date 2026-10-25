@@ -1391,10 +1391,8 @@ fn performance(rig: &mut Rig) {
         })
         .collect();
     let mut ticks_us = Vec::new();
-    let mut seq = 0u32;
     for frame in 0..(60 * 25) {
         std::thread::sleep(Duration::from_secs_f32(DT));
-        seq += 1;
         for (i, n) in clients.iter_mut().enumerate() {
             n.update(Duration::from_secs_f32(DT));
             let t = frame as f32 * DT;
@@ -1406,7 +1404,6 @@ fn performance(rig: &mut Rig) {
                 buttons.set(shared::input::Buttons::DASH, true);
             }
             let input = shared::input::PlayerInput {
-                seq,
                 forward: 127,
                 right: if (frame / 90 + i) % 2 == 0 { 60 } else { -60 },
                 yaw: t * (0.6 + i as f32 * 0.1) + i as f32,
