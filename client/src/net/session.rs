@@ -108,11 +108,9 @@ impl Session {
             SessionSpec::Host { mut server } => {
                 let mut client = client;
                 if server.lobby.enabled {
-                    // Only our own client knows the token, so only we can be the host.
-                    let token = *server
-                        .lobby
-                        .host_token
-                        .get_or_insert_with(super::random_client_id);
+                    // Only our own client knows the token, so only we can be the host: it
+                    // must be unguessable (OS randomness, not time ^ pid).
+                    let token = *server.lobby.host_token.get_or_insert_with(random_host_token);
                     client.host_token = Some(token);
                 }
                 let server = ServerHandle::spawn(*server)?;
@@ -203,9 +201,25 @@ pub fn parse_netsim(text: &str) -> anyhow::Result<NetSimConfig> {
     NetSimConfig::parse(text).map_err(|e| anyhow::anyhow!(e))
 }
 
+/// A listen server's host secret ([`server::LobbyConfig::host_token`]) from the OS's
+/// cryptographic random source: whoever presents it becomes the lobby host, so a guest must
+/// not be able to guess it (it used to be derived from the clock and the process id).
+pub fn random_host_token() -> u64 {
+    u64::from_le_bytes(renet_netcode::generate_random_bytes::<8>())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_tokens_are_random() {
+        let tokens: std::collections::BTreeSet<u64> = (0..64).map(|_| random_host_token()).collect();
+        assert_eq!(tokens.len(), 64);
+        // Not clustered like time-derived values: the high bits vary too.
+        let high: std::collections::BTreeSet<u64> = tokens.iter().map(|t| t >> 48).collect();
+        assert!(high.len() > 32, "{high:?}");
+    }
 
     #[test]
     fn resolves_addresses() {

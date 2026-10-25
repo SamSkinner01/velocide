@@ -149,6 +149,20 @@ fn a_low_ping_client_cannot_claim_the_maximum_rewind() {
 }
 
 #[test]
+fn look_alike_and_reserved_names_are_neutralised() {
+    let mut h = Harness::new(server_config());
+    let a = h.add_client("Bob", None, script_idle);
+    h.wait_in_game();
+    let b = h.add_client("Bob\u{200B}", None, script_idle); // zero-width space
+    let c = h.add_client("\u{202E}SERVER", None, script_idle); // RTL override + reserved
+    h.wait_in_game();
+    let name = |i: usize| h.server.world().players[&h.clients[i].id()].name.clone();
+    assert_eq!(name(a), "Bob");
+    assert_eq!(name(b), "Bob (2)", "invisible characters must not make a new name");
+    assert_eq!(name(c), "Shrike", "nobody chats as 'server'");
+}
+
+#[test]
 fn dev_commands_cost_chat_tokens() {
     // Single-player rules (no lobby, dev commands on).
     let mut h = Harness::new(ServerConfig {

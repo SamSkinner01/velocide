@@ -404,12 +404,20 @@ pub fn sanitize_input(input: &mut PlayerInput) {
     }
 }
 
-/// Printable, trimmed, at most [`MAX_NAME_CHARS`] characters; never empty.
+/// Name given to players whose name is empty or reserved.
+pub const DEFAULT_NAME: &str = "Shrike";
+
+/// Player names: printable ASCII only (the HUD's bitmap font draws nothing else, and
+/// invisible Unicode — zero-width spaces, bidi overrides — would let two names look the same
+/// and defeat the server's de-duplication), whitespace runs collapsed to one space, trimmed,
+/// at most [`MAX_NAME_CHARS`] characters. Empty names and "server" (any case: chat from it
+/// would pass for a server announcement) become [`DEFAULT_NAME`].
 pub fn sanitize_name(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
-        .filter(|c| !c.is_control())
-        .take(MAX_NAME_CHARS * 4)
+        .take(MAX_NAME_CHARS * 8)
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
         .collect();
     let name: String = cleaned
         .split_whitespace()
@@ -418,10 +426,11 @@ pub fn sanitize_name(raw: &str) -> String {
         .chars()
         .take(MAX_NAME_CHARS)
         .collect();
-    if name.is_empty() {
-        "Shrike".to_string()
+    let name = name.trim_end();
+    if name.is_empty() || name.eq_ignore_ascii_case("server") {
+        DEFAULT_NAME.to_string()
     } else {
-        name
+        name.to_string()
     }
 }
 
@@ -549,6 +558,34 @@ mod tests {
             i
         };
         assert_eq!(again, input);
+    }
+
+    #[test]
+    fn names_are_printable_ascii_and_never_reserved() {
+        // Invisible / direction-changing Unicode would make "Bob" and "Bob\u{200B}" distinct
+        // names that look the same (defeating `unique_name`), or reverse what follows.
+        for evil in ["Bob\u{200B}", "\u{202E}Bob", "B\u{2066}ob\u{2069}", "Bob\u{FEFF}", "Bøb", "Bob\u{0301}"] {
+            let name = sanitize_name(evil);
+            assert!(name.chars().all(|c| c.is_ascii_graphic() || c == ' '), "{evil:?} -> {name:?}");
+        }
+        assert_eq!(sanitize_name("Bob\u{200B}"), "Bob");
+        assert_eq!(sanitize_name("\u{202E}Bob"), "Bob");
+        assert_eq!(sanitize_name("Ünïcode Shrike"), "ncode Shrike");
+        assert_eq!(sanitize_name("名前"), DEFAULT_NAME);
+        // "server" would pass for server announcements in chat.
+        for reserved in ["server", "SERVER", "Server", "  sErVeR  ", "ser\u{200B}ver", ""] {
+            assert_eq!(sanitize_name(reserved), DEFAULT_NAME, "{reserved:?}");
+        }
+        assert_eq!(sanitize_name("server2"), "server2");
+        assert_eq!(sanitize_name("Neo\u{3000}Shrike"), "Neo Shrike");
+        // Truncation never leaves a trailing space.
+        let long = format!("{} tail", "x".repeat(MAX_NAME_CHARS - 1));
+        assert_eq!(sanitize_name(&long), "x".repeat(MAX_NAME_CHARS - 1));
+        // Idempotent.
+        for raw in ["  Neo\n  Shrike\t ", "Bøb the \u{202E}great", "server"] {
+            let once = sanitize_name(raw);
+            assert_eq!(sanitize_name(&once), once);
+        }
     }
 
     #[test]

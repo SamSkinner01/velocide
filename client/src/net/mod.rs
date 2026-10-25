@@ -57,7 +57,6 @@ pub mod transport;
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use glam::Vec3;
@@ -1108,20 +1107,8 @@ mod tests {
     }
 }
 
-/// Random 64-bit id for netcode's unsecure mode (must be unique per connection).
+/// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS
+/// random source, so other clients can't predict it).
 fn random_client_id() -> u64 {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let mut x = nanos
-        ^ (std::process::id() as u64) << 32
-        ^ COUNTER
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    // splitmix64 finaliser
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
+    u64::from_le_bytes(renet_netcode::generate_random_bytes::<8>())
 }
