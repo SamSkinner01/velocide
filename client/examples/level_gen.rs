@@ -1,0 +1,1515 @@
+//! Generates the shipping levels in `assets/levels/` from code:
+//!
+//! - `crucible_of_veins.ron` — "Crucible of Veins", the co-op campaign level (5 arenas).
+//! - `cistern_nine.ron` — "Cistern Nine", the PvP deathmatch arena.
+//!
+//! ```text
+//! cargo run -p client --example level_gen            # writes both files
+//! cargo run -p client --example level_gen -- --check # fails if the files are out of date
+//! ```
+//!
+//! The RON files are the shipped data (and can be read/edited by hand), but this generator is
+//! the source of truth: rooms are described once (interior box + openings) and the walls,
+//! sills, lintels and doors are derived, which keeps everything sealed and seam-free. Layout
+//! maps, encounter tables and routes are documented in `docs/levels.md`.
+//!
+//! Conventions: Y up, metres, yaw 0 looks down -Z, positive yaw turns left. "North" = -Z.
+
+use std::fmt::Write as _;
+
+use glam::Vec3;
+use shared::level::{
+    Brush, Checkpoint, Door, Encounter, EnemySpawn, Environment, JumpPad, LevelDef, LevelKind,
+    LightDef, SpawnPoint, Volume, Wave,
+};
+
+// ------------------------------------------------------------------------------------------
+// Builder
+
+/// Material + tint.
+#[derive(Clone, Copy)]
+struct Mat(&'static str, [f32; 3]);
+
+/// Wall thickness.
+const T: f32 = 1.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Side {
+    /// -Z
+    N,
+    /// +Z
+    S,
+    /// -X
+    W,
+    /// +X
+    E,
+}
+
+/// A hole in a room wall: `lo..hi` along the wall (x for N/S walls, z for W/E walls),
+/// `bottom..top` vertically.
+#[derive(Clone, Copy)]
+struct Opening {
+    side: Side,
+    lo: f32,
+    hi: f32,
+    bottom: f32,
+    top: f32,
+}
+
+fn op(side: Side, lo: f32, hi: f32, bottom: f32, top: f32) -> Opening {
+    Opening {
+        side,
+        lo,
+        hi,
+        bottom,
+        top,
+    }
+}
+
+/// A box-shaped space: interior `lo..hi` (`lo.y` = floor top, `hi.y` = ceiling bottom),
+/// enclosed by 1 m walls outside the interior.
+struct Room {
+    name: &'static str,
+    lo: [f32; 3],
+    hi: [f32; 3],
+    wall: Mat,
+    floor: Option<Mat>,
+    ceiling: Option<Mat>,
+    /// Walls reach down to here (default: floor - 1).
+    bottom: Option<f32>,
+    /// Sides without any wall (corridor ends that butt against a room wall).
+    open: Vec<Side>,
+    openings: Vec<Opening>,
+}
+
+impl Room {
+    fn new(name: &'static str, lo: [f32; 3], hi: [f32; 3], wall: Mat) -> Self {
+        Self {
+            name,
+            lo,
+            hi,
+            wall,
+            floor: None,
+            ceiling: None,
+            bottom: None,
+            open: Vec::new(),
+            openings: Vec::new(),
+        }
+    }
+    fn floor(mut self, m: Mat) -> Self {
+        self.floor = Some(m);
+        self
+    }
+    fn ceiling(mut self, m: Mat) -> Self {
+        self.ceiling = Some(m);
+        self
+    }
+    fn bottom(mut self, y: f32) -> Self {
+        self.bottom = Some(y);
+        self
+    }
+    fn open(mut self, sides: &[Side]) -> Self {
+        self.open.extend_from_slice(sides);
+        self
+    }
+    fn opening(mut self, o: Opening) -> Self {
+        self.openings.push(o);
+        self
+    }
+    fn walled(&self, side: Side) -> bool {
+        !self.open.contains(&side)
+    }
+}
+
+#[derive(Default)]
+struct Gen {
+    def: LevelDef,
+    brush_notes: Vec<String>,
+    /// (first brush index, title)
+    sections: Vec<(usize, String)>,
+    light_notes: Vec<String>,
+    door_notes: Vec<String>,
+    encounter_notes: Vec<String>,
+    checkpoint_notes: Vec<String>,
+    pad_notes: Vec<String>,
+    kill_notes: Vec<String>,
+}
+
+fn r4(x: f32) -> f32 {
+    let r = (x * 10000.0).round() / 10000.0;
+    if r == 0.0 { 0.0 } else { r }
+}
+
+fn rv(v: Vec3) -> Vec3 {
+    Vec3::new(r4(v.x), r4(v.y), r4(v.z))
+}
+
+fn vol(min: [f32; 3], max: [f32; 3]) -> Volume {
+    Volume {
+        min: rv(Vec3::from(min)),
+        max: rv(Vec3::from(max)),
+    }
+}
+
+fn brush(min: Vec3, max: Vec3, m: Mat) -> Brush {
+    Brush {
+        min: rv(min.min(max)),
+        max: rv(min.max(max)),
+        rotation: Vec3::ZERO,
+        material: m.0.into(),
+        tint: Vec3::from(m.1),
+        clip_only: false,
+        no_collide: false,
+    }
+}
+
+impl Gen {
+    fn new(name: &str, kind: LevelKind, environment: Environment) -> Self {
+        Self {
+            def: LevelDef {
+                name: name.into(),
+                kind,
+                environment,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn section(&mut self, title: &str) {
+        self.sections.push((self.def.brushes.len(), title.into()));
+    }
+
+    fn push(&mut self, note: &str, b: Brush) -> &mut Brush {
+        self.brush_notes.push(note.into());
+        self.def.brushes.push(b);
+        self.def.brushes.last_mut().expect("just pushed")
+    }
+
+    /// Axis-aligned solid brush.
+    fn bx(&mut self, note: &str, min: [f32; 3], max: [f32; 3], m: Mat) -> &mut Brush {
+        self.push(note, brush(Vec3::from(min), Vec3::from(max), m))
+    }
+
+    /// Decoration without collision.
+    fn deco(&mut self, note: &str, min: [f32; 3], max: [f32; 3], m: Mat) {
+        self.bx(note, min, max, m).no_collide = true;
+    }
+
+    /// Invisible player clip.
+    fn clip(&mut self, note: &str, min: [f32; 3], max: [f32; 3]) {
+        self.bx(note, min, max, Mat("concrete", [1.0; 3])).clip_only = true;
+    }
+
+    /// A sloped slab whose `surface` goes from `a` to `b` (each `(horizontal, y)`) along Z
+    /// (`along_x == false`) or X, spanning `w0..w1` on the other horizontal axis. `ramp`: the
+    /// slab lies below the surface (walkable top); otherwise above it (sloped ceiling).
+    /// `ext_a` / `ext_b` extend the slab past the ends along the slope (to bury seams).
+    #[allow(clippy::too_many_arguments)]
+    fn slope(
+        &mut self,
+        note: &str,
+        along_x: bool,
+        (w0, w1): (f32, f32),
+        a: (f32, f32),
+        b: (f32, f32),
+        thick: f32,
+        ramp: bool,
+        (ext_a, ext_b): (f32, f32),
+        m: Mat,
+    ) {
+        let (dh, dy) = (b.0 - a.0, b.1 - a.1);
+        let s = (dh * dh + dy * dy).sqrt();
+        let (uh, uy) = (dh / s, dy / s);
+        // Normal with positive y.
+        let (nh, ny) = if uh > 0.0 { (-uy, uh) } else { (uy, -uh) };
+        let p0 = (a.0 - uh * ext_a, a.1 - uy * ext_a);
+        let p1 = (b.0 + uh * ext_b, b.1 + uy * ext_b);
+        let len = s + ext_a + ext_b;
+        let side = if ramp { -0.5 * thick } else { 0.5 * thick };
+        let ch = (p0.0 + p1.0) * 0.5 + nh * side;
+        let cy = (p0.1 + p1.1) * 0.5 + ny * side;
+        let cw = (w0 + w1) * 0.5;
+        let hw = (w1 - w0).abs() * 0.5;
+        let (center, half, rotation) = if along_x {
+            let roll = (-nh).atan2(ny).to_degrees();
+            (
+                Vec3::new(ch, cy, cw),
+                Vec3::new(len * 0.5, thick * 0.5, hw),
+                Vec3::new(0.0, 0.0, roll),
+            )
+        } else {
+            let pitch = nh.atan2(ny).to_degrees();
+            (
+                Vec3::new(cw, cy, ch),
+                Vec3::new(hw, thick * 0.5, len * 0.5),
+                Vec3::new(pitch, 0.0, 0.0),
+            )
+        };
+        let b = self.push(note, brush(center - half, center + half, m));
+        b.rotation = rv(rotation);
+    }
+
+    /// Walkable ramp rising from `(z_a, y_a)` to `(z_b, y_b)` along Z; the low end is buried
+    /// 1 m into the ground. `thick` big enough fills the wedge underneath.
+    #[allow(clippy::too_many_arguments)]
+    fn ramp_z(&mut self, note: &str, x: (f32, f32), a: (f32, f32), b: (f32, f32), thick: f32, m: Mat) {
+        self.slope(note, false, x, a, b, thick, true, (1.0, 0.0), m);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ramp_x(&mut self, note: &str, z: (f32, f32), a: (f32, f32), b: (f32, f32), thick: f32, m: Mat) {
+        self.slope(note, true, z, a, b, thick, true, (1.0, 0.0), m);
+    }
+
+    fn room(&mut self, r: &Room) {
+        let [x0, y0, z0] = r.lo;
+        let [x1, y1, z1] = r.hi;
+        let bottom = r.bottom.unwrap_or(y0 - T);
+        if let Some(m) = r.floor {
+            self.bx(&format!("{} floor", r.name), [x0, y0 - T, z0], [x1, y0, z1], m);
+        }
+        if let Some(m) = r.ceiling {
+            let ex = |side, v: f32, d: f32| if r.walled(side) { v + d } else { v };
+            self.bx(
+                &format!("{} ceiling", r.name),
+                [ex(Side::W, x0, -T), y1, ex(Side::N, z0, -T)],
+                [ex(Side::E, x1, T), y1 + T, ex(Side::S, z1, T)],
+                m,
+            );
+        }
+        for side in [Side::N, Side::S, Side::W, Side::E] {
+            if !r.walled(side) {
+                continue;
+            }
+            let (a0, a1) = match side {
+                Side::N | Side::S => (
+                    if r.walled(Side::W) { x0 - T } else { x0 },
+                    if r.walled(Side::E) { x1 + T } else { x1 },
+                ),
+                Side::W | Side::E => (z0, z1),
+            };
+            let piece = |g: &mut Gen, what: &str, a: f32, b: f32, lo: f32, hi: f32| {
+                if b - a < 1e-3 || hi - lo < 1e-3 {
+                    return;
+                }
+                let note = format!("{} wall {:?} {what}", r.name, side);
+                let (min, max) = match side {
+                    Side::N => ([a, lo, z0 - T], [b, hi, z0]),
+                    Side::S => ([a, lo, z1], [b, hi, z1 + T]),
+                    Side::W => ([x0 - T, lo, a], [x0, hi, b]),
+                    Side::E => ([x1, lo, a], [x1 + T, hi, b]),
+                };
+                g.bx(&note, min, max, r.wall);
+            };
+            let mut ops: Vec<Opening> =
+                r.openings.iter().copied().filter(|o| o.side == side).collect();
+            ops.sort_by(|a, b| a.lo.total_cmp(&b.lo));
+            let mut cur = a0;
+            for o in ops {
+                piece(self, "", cur, o.lo, bottom, y1);
+                piece(self, "sill", o.lo, o.hi, bottom, o.bottom);
+                piece(self, "lintel", o.lo, o.hi, o.top, y1);
+                cur = o.hi;
+            }
+            piece(self, "", cur, a1, bottom, y1);
+        }
+    }
+
+    /// A door filling `o` in room `r`'s wall (0.6 m thick, recessed in the 1 m wall, overlapping
+    /// the jambs and lintel by 0.25 m so it seals the opening).
+    fn door(&mut self, id: u32, note: &str, r: &Room, o: Opening, starts_open: bool, m: Mat) {
+        let (lo, hi) = (o.lo - 0.25, o.hi + 0.25);
+        let (b, t) = (o.bottom, o.top + 0.25);
+        let (min, max) = match o.side {
+            Side::N => ([lo, b, r.lo[2] - 0.8], [hi, t, r.lo[2] - 0.2]),
+            Side::S => ([lo, b, r.hi[2] + 0.2], [hi, t, r.hi[2] + 0.8]),
+            Side::W => ([r.lo[0] - 0.8, b, lo], [r.lo[0] - 0.2, t, hi]),
+            Side::E => ([r.hi[0] + 0.2, b, lo], [r.hi[0] + 0.8, t, hi]),
+        };
+        self.def.doors.push(Door {
+            id,
+            brush: brush(Vec3::from(min), Vec3::from(max), m),
+            starts_open,
+        });
+        self.door_notes.push(note.into());
+    }
+
+    fn light(&mut self, note: &str, pos: [f32; 3], color: [f32; 3], radius: f32) {
+        self.def.lights.push(LightDef {
+            position: rv(Vec3::from(pos)),
+            color: Vec3::from(color),
+            radius,
+        });
+        self.light_notes.push(note.into());
+    }
+
+    fn spawn(&mut self, pos: [f32; 3], yaw: f32) {
+        self.def.spawns.push(SpawnPoint {
+            position: rv(Vec3::from(pos)),
+            yaw,
+        });
+    }
+
+    fn checkpoint(&mut self, note: &str, trigger: Volume, pos: [f32; 3], yaw: f32) {
+        self.def.checkpoints.push(Checkpoint {
+            trigger,
+            spawn: SpawnPoint {
+                position: rv(Vec3::from(pos)),
+                yaw,
+            },
+        });
+        self.checkpoint_notes.push(note.into());
+    }
+
+    fn pad(&mut self, note: &str, trigger: Volume, velocity: [f32; 3]) {
+        self.def.jump_pads.push(JumpPad {
+            trigger,
+            velocity: Vec3::from(velocity),
+        });
+        self.pad_notes.push(note.into());
+    }
+
+    fn kill(&mut self, note: &str, v: Volume) {
+        self.def.kill_volumes.push(v);
+        self.kill_notes.push(note.into());
+    }
+
+    fn encounter(&mut self, note: &str, e: Encounter) {
+        self.def.encounters.push(e);
+        self.encounter_notes.push(note.into());
+    }
+}
+
+fn enemy(name: &str, pos: [f32; 3], yaw: f32) -> EnemySpawn {
+    EnemySpawn {
+        enemy: name.into(),
+        position: rv(Vec3::from(pos)),
+        yaw,
+    }
+}
+
+fn wave(delay: f32, spawns: Vec<EnemySpawn>) -> Wave {
+    Wave { delay, spawns }
+}
+
+// ------------------------------------------------------------------------------------------
+// RON output
+
+fn f(x: f32) -> String {
+    let s = format!("{x}");
+    if s.contains('.') { s } else { format!("{s}.0") }
+}
+
+fn v(v: Vec3) -> String {
+    format!("({}, {}, {})", f(v.x), f(v.y), f(v.z))
+}
+
+fn volume(vl: &Volume) -> String {
+    format!("(min: {}, max: {})", v(vl.min), v(vl.max))
+}
+
+fn brush_ron(b: &Brush) -> String {
+    let mut s = format!("(min: {}, max: {}", v(b.min), v(b.max));
+    if b.rotation != Vec3::ZERO {
+        let _ = write!(s, ", rotation: {}", v(b.rotation));
+    }
+    let _ = write!(s, ", material: {:?}, tint: {}", b.material, v(b.tint));
+    if b.clip_only {
+        s.push_str(", clip_only: true");
+    }
+    if b.no_collide {
+        s.push_str(", no_collide: true");
+    }
+    s.push(')');
+    s
+}
+
+fn spawn_ron(p: &SpawnPoint) -> String {
+    format!("(position: {}, yaw: {})", v(p.position), f(p.yaw))
+}
+
+fn emit(g: &Gen, header: &str) -> String {
+    let d = &g.def;
+    let e = &d.environment;
+    let mut s = String::new();
+    for line in header.lines() {
+        let _ = writeln!(s, "// {line}");
+    }
+    let _ = writeln!(
+        s,
+        "// GENERATED by `cargo run -p client --example level_gen` — edit client/examples/level_gen.rs."
+    );
+    s.push_str("(\n");
+    let _ = writeln!(s, "    name: {:?},", d.name);
+    let _ = writeln!(s, "    kind: {:?},", d.kind);
+    s.push_str("    environment: (\n");
+    let _ = writeln!(s, "        sky_color: {},", v(e.sky_color));
+    let _ = writeln!(s, "        fog_color: {},", v(e.fog_color));
+    let _ = writeln!(s, "        fog_start: {},", f(e.fog_start));
+    let _ = writeln!(s, "        fog_end: {},", f(e.fog_end));
+    let _ = writeln!(s, "        ambient: {},", v(e.ambient));
+    let _ = writeln!(s, "        light_dir: {},", v(e.light_dir));
+    let _ = writeln!(s, "        light_color: {},", v(e.light_color));
+    let _ = writeln!(s, "        music: {:?},", e.music);
+    s.push_str("    ),\n");
+
+    let _ = writeln!(s, "    // {} brushes", d.brushes.len());
+    s.push_str("    brushes: [\n");
+    let mut sec = g.sections.iter().peekable();
+    for (i, b) in d.brushes.iter().enumerate() {
+        while let Some((_, title)) = sec.next_if(|(at, _)| *at == i) {
+            let _ = writeln!(s, "        // ==== {title} ====");
+        }
+        let _ = writeln!(s, "        // {}", g.brush_notes[i]);
+        let _ = writeln!(s, "        {},", brush_ron(b));
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    lights: [\n");
+    for (l, note) in d.lights.iter().zip(&g.light_notes) {
+        let _ = writeln!(
+            s,
+            "        (position: {}, color: {}, radius: {}), // {note}",
+            v(l.position),
+            v(l.color),
+            f(l.radius)
+        );
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    spawns: [\n");
+    for p in &d.spawns {
+        let _ = writeln!(s, "        {},", spawn_ron(p));
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    checkpoints: [\n");
+    for (c, note) in d.checkpoints.iter().zip(&g.checkpoint_notes) {
+        let _ = writeln!(s, "        // {note}");
+        let _ = writeln!(
+            s,
+            "        (trigger: {}, spawn: {}),",
+            volume(&c.trigger),
+            spawn_ron(&c.spawn)
+        );
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    doors: [\n");
+    for (dr, note) in d.doors.iter().zip(&g.door_notes) {
+        let _ = writeln!(s, "        // {note}");
+        let _ = writeln!(
+            s,
+            "        (id: {}, brush: {}, starts_open: {}),",
+            dr.id,
+            brush_ron(&dr.brush),
+            dr.starts_open
+        );
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    encounters: [\n");
+    for (en, note) in d.encounters.iter().zip(&g.encounter_notes) {
+        let _ = writeln!(s, "        // {note}");
+        s.push_str("        (\n");
+        let _ = writeln!(s, "            trigger: {},", volume(&en.trigger));
+        let _ = writeln!(s, "            lock_doors: {:?},", en.lock_doors);
+        let _ = writeln!(s, "            unlock_doors: {:?},", en.unlock_doors);
+        s.push_str("            waves: [\n");
+        for w in &en.waves {
+            let _ = writeln!(s, "                (delay: {}, spawns: [", f(w.delay));
+            for sp in &w.spawns {
+                let _ = writeln!(
+                    s,
+                    "                    (enemy: {:?}, position: {}, yaw: {}),",
+                    sp.enemy,
+                    v(sp.position),
+                    f(sp.yaw)
+                );
+            }
+            s.push_str("                ]),\n");
+        }
+        s.push_str("            ],\n");
+        s.push_str("        ),\n");
+    }
+    s.push_str("    ],\n");
+
+    match &d.exit {
+        Some(x) => {
+            let _ = writeln!(s, "    exit: Some({}),", volume(x));
+        }
+        None => s.push_str("    exit: None,\n"),
+    }
+
+    s.push_str("    jump_pads: [\n");
+    for (p, note) in d.jump_pads.iter().zip(&g.pad_notes) {
+        let _ = writeln!(
+            s,
+            "        (trigger: {}, velocity: {}), // {note}",
+            volume(&p.trigger),
+            v(p.velocity)
+        );
+    }
+    s.push_str("    ],\n");
+
+    s.push_str("    kill_volumes: [\n");
+    for (k, note) in d.kill_volumes.iter().zip(&g.kill_notes) {
+        let _ = writeln!(s, "        {}, // {note}", volume(k));
+    }
+    s.push_str("    ],\n");
+    s.push_str("    props: [],\n");
+    s.push_str(")\n");
+    s
+}
+
+// ------------------------------------------------------------------------------------------
+// Crucible of Veins (campaign)
+
+mod blood {
+    use super::Mat;
+    pub const BRICK: Mat = Mat("brick", [0.92, 0.64, 0.56]);
+    pub const BRICK_DARK: Mat = Mat("brick", [0.74, 0.52, 0.48]);
+    pub const RUST: Mat = Mat("rust", [0.82, 0.64, 0.54]);
+    pub const RUST_DARK: Mat = Mat("rust", [0.64, 0.52, 0.46]);
+    pub const METAL: Mat = Mat("metal", [0.82, 0.78, 0.76]);
+    pub const METAL_DARK: Mat = Mat("metal", [0.56, 0.52, 0.52]);
+    pub const BRASS: Mat = Mat("metal", [1.0, 0.8, 0.46]);
+    pub const FLOOR: Mat = Mat("concrete", [0.8, 0.72, 0.68]);
+    pub const STONE: Mat = Mat("concrete", [0.9, 0.82, 0.76]);
+    pub const WALL_STONE: Mat = Mat("concrete", [0.74, 0.64, 0.6]);
+    pub const MACHINE: Mat = Mat("panel", [0.7, 0.62, 0.62]);
+    pub const TILE: Mat = Mat("tile", [0.86, 0.68, 0.62]);
+    pub const GRATE: Mat = Mat("grate", [0.85, 0.74, 0.64]);
+    pub const FLESH: Mat = Mat("flesh", [0.96, 0.74, 0.72]);
+    pub const BONE: Mat = Mat("bone", [0.92, 0.86, 0.78]);
+    pub const LAVA: Mat = Mat("lava", [1.0, 1.0, 1.0]);
+    pub const HAZARD: Mat = Mat("hazard", [1.0, 0.82, 0.4]);
+    pub const PANEL: Mat = Mat("panel", [0.78, 0.72, 0.74]);
+    pub const DOOR: Mat = Mat("panel", [0.95, 0.55, 0.42]);
+    pub const EXIT_DOOR: Mat = Mat("hazard", [1.0, 0.7, 0.45]);
+}
+
+// Light colours.
+const L_WARM: [f32; 3] = [1.0, 0.68, 0.45];
+const L_FIRE: [f32; 3] = [1.3, 0.5, 0.14];
+const L_BLOOD: [f32; 3] = [1.2, 0.18, 0.12];
+const L_DIM: [f32; 3] = [0.6, 0.42, 0.38];
+const L_TOXIC: [f32; 3] = [0.55, 1.1, 0.35];
+const L_HOLY: [f32; 3] = [1.3, 1.1, 0.9];
+
+fn crucible() -> Gen {
+    use blood::*;
+    use Side::*;
+    let mut g = Gen::new(
+        "Crucible of Veins",
+        LevelKind::Campaign,
+        Environment {
+            sky_color: Vec3::new(0.09, 0.025, 0.02),
+            fog_color: Vec3::new(0.15, 0.04, 0.03),
+            fog_start: 22.0,
+            fog_end: 130.0,
+            ambient: Vec3::new(0.5, 0.42, 0.4),
+            light_dir: Vec3::new(-0.35, -1.0, -0.45),
+            light_color: Vec3::new(0.5, 0.38, 0.3),
+            music: "campaign".into(),
+        },
+    );
+
+    // ---------------------------------------------------------------- R0 Receiving Nave (start)
+    g.section("R0 Receiving Nave (start)");
+    let r0 = Room::new("R0", [-12.0, 0.0, 2.0], [12.0, 10.0, 32.0], BRICK)
+        .ceiling(METAL_DARK)
+        .opening(op(N, -2.5, 2.5, 0.0, 5.0));
+    g.room(&r0);
+    g.bx("R0 floor W", [-10.0, -1.0, 2.0], [-1.0, 0.0, 32.0], FLOOR);
+    g.bx("R0 floor E", [1.0, -1.0, 2.0], [10.0, 0.0, 32.0], FLOOR);
+    // Three grated lava channels: two gutters along the walls and a blood channel down the
+    // middle that leads from the furnace to the way out.
+    for (x0, x1) in [(-12.0, -10.0), (-1.0, 1.0), (10.0, 12.0)] {
+        g.bx("R0 channel end", [x0, -1.0, 2.0], [x1, 0.0, 4.0], FLOOR);
+        g.bx("R0 channel end", [x0, -1.0, 30.0], [x1, 0.0, 32.0], FLOOR);
+        g.bx("R0 channel lava (under grate)", [x0, -1.0, 4.0], [x1, -0.8, 30.0], LAVA);
+        g.bx("R0 channel grate", [x0, -0.1, 4.0], [x1, 0.0, 30.0], GRATE);
+    }
+    for (x, z) in [(-8.5, 9.0), (8.5, 9.0), (-8.5, 19.0), (8.5, 19.0)] {
+        g.bx("R0 pillar", [x - 1.0, 0.8, z - 1.0], [x + 1.0, 10.0, z + 1.0], BRICK_DARK);
+        g.bx("R0 pillar base", [x - 1.3, 0.0, z - 1.3], [x + 1.3, 0.8, z + 1.3], RUST_DARK);
+    }
+    for z in [4.0, 14.0, 24.0] {
+        g.bx("R0 ceiling beam", [-12.0, 9.2, z - 0.4], [12.0, 10.0, z + 0.4], RUST_DARK);
+    }
+    g.bx("R0 furnace machine", [-6.0, 0.0, 30.5], [6.0, 6.0, 32.0], PANEL);
+    g.bx("R0 furnace mouth", [-4.0, 1.0, 30.3], [4.0, 4.0, 30.5], LAVA);
+    g.bx("R0 furnace grille", [-4.2, 0.8, 30.1], [4.2, 4.2, 30.3], GRATE);
+    g.bx("R0 door frame W", [-3.5, 0.0, 2.0], [-2.5, 5.5, 2.4], HAZARD);
+    g.bx("R0 door frame E", [2.5, 0.0, 2.0], [3.5, 5.5, 2.4], HAZARD);
+    g.bx("R0 door frame top", [-2.5, 5.0, 2.0], [2.5, 5.5, 2.4], HAZARD);
+    g.light("R0 hall", [0.0, 8.0, 17.0], L_WARM, 18.0);
+    g.light("R0 gutter", [-11.0, 0.4, 10.0], L_FIRE, 8.0);
+    g.light("R0 gutter", [-11.0, 0.4, 24.0], L_FIRE, 8.0);
+    g.light("R0 gutter", [11.0, 0.4, 10.0], L_FIRE, 8.0);
+    g.light("R0 gutter", [11.0, 0.4, 24.0], L_FIRE, 8.0);
+    g.light("R0 furnace", [0.0, 2.5, 28.0], L_FIRE, 10.0);
+    g.light("R0 exit", [0.0, 6.0, 4.5], L_BLOOD, 10.0);
+    for x in [-4.5, -1.5, 1.5, 4.5] {
+        g.spawn([x, 0.0, 25.0], 0.0);
+    }
+
+    // ---------------------------------------------------------------- C1 Split Gullet
+    g.section("C1 Split Gullet (corridor: slide slot W / hurdle E)");
+    let c1 = Room::new("C1", [-3.0, 0.0, -22.0], [3.0, 6.0, 1.0], RUST_DARK)
+        .floor(FLOOR)
+        .ceiling(METAL_DARK)
+        .open(&[N, S]);
+    g.room(&c1);
+    g.bx("C1 divider", [-0.5, 0.0, -16.0], [0.5, 6.0, -6.0], STONE);
+    g.bx("C1 shutter (slide under)", [-3.0, 1.2, -12.0], [-0.5, 6.0, -11.0], HAZARD);
+    g.bx("C1 hurdle (jump over)", [0.5, 0.0, -12.0], [3.0, 1.0, -11.0], RUST);
+    g.light("C1 south", [0.0, 5.0, -2.0], L_DIM, 9.0);
+    g.light("C1 slot", [-1.75, 0.6, -10.0], L_FIRE, 5.0);
+    g.light("C1 north", [0.0, 5.0, -19.5], L_BLOOD, 9.0);
+
+    // ---------------------------------------------------------------- R1 Rendering Floor
+    g.section("R1 Rendering Floor (arena 1: husks)");
+    let r1_in = op(S, -2.5, 2.5, 0.0, 5.0);
+    let r1_out = op(N, -2.5, 2.5, 0.0, 5.0);
+    let r1 = Room::new("R1", [-20.0, 0.0, -63.0], [20.0, 12.0, -23.0], BRICK)
+        .floor(FLOOR)
+        .ceiling(METAL_DARK)
+        .opening(r1_in)
+        .opening(r1_out);
+    g.room(&r1);
+    g.door(1, "door 1: R1 entry (locked by encounter 1)", &r1, r1_in, true, DOOR);
+    g.door(2, "door 2: R1 exit (opened by encounter 1)", &r1, r1_out, false, EXIT_DOOR);
+    for ((x0, x1), (l0, l1)) in [((-20.0, -14.0), (-14.6, -14.0)), ((14.0, 20.0), (14.0, 14.6))] {
+        g.bx("R1 terrace", [x0, 0.0, -63.0], [x1, 4.0, -35.0], STONE);
+        g.ramp_z("R1 terrace ramp", (x0, x1), (-27.0, 0.0), (-35.0, 4.0), 5.0, STONE);
+        g.bx("R1 terrace lip", [l0, 4.0, -63.0], [l1, 4.15, -35.0], HAZARD);
+    }
+    g.bx("R1 vat base", [-3.0, 0.0, -46.0], [3.0, 1.9, -40.0], RUST);
+    g.bx("R1 vat rim N", [-3.0, 1.9, -46.0], [3.0, 2.4, -45.5], METAL);
+    g.bx("R1 vat rim S", [-3.0, 1.9, -40.5], [3.0, 2.4, -40.0], METAL);
+    g.bx("R1 vat rim W", [-3.0, 1.9, -45.5], [-2.5, 2.4, -40.5], METAL);
+    g.bx("R1 vat rim E", [2.5, 1.9, -45.5], [3.0, 2.4, -40.5], METAL);
+    g.bx("R1 vat lava", [-2.5, 1.9, -45.5], [2.5, 2.0, -40.5], LAVA);
+    g.kill("R1 vat", vol([-2.5, 1.9, -45.5], [2.5, 2.25, -40.5]));
+    // Hanging hood above the vat: a perch reachable with a dash-jump from either terrace
+    // (12 m out, 1.6 m up) — or a fall into the lava.
+    g.deco("R1 vat chain", [-0.2, 5.6, -43.2], [0.2, 12.0, -42.8], METAL_DARK);
+    g.bx("R1 vat perch", [-2.0, 5.0, -45.0], [2.0, 5.6, -41.0], RUST_DARK);
+    for (x, z) in [(-8.0, -33.0), (8.0, -33.0), (-8.0, -54.0), (8.0, -54.0)] {
+        g.bx("R1 pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 12.0, z + 1.0], BRICK_DARK);
+    }
+    g.light("R1 vat", [0.0, 3.6, -43.0], L_FIRE, 13.0);
+    g.light("R1 terrace W", [-17.0, 8.0, -50.0], L_BLOOD, 14.0);
+    g.light("R1 terrace E", [17.0, 8.0, -50.0], L_BLOOD, 14.0);
+    g.light("R1 entry", [0.0, 9.0, -27.0], L_WARM, 14.0);
+    g.light("R1 exit", [0.0, 8.0, -60.0], L_WARM, 12.0);
+    g.checkpoint(
+        "checkpoint 1: R1 vestibule",
+        vol([-14.0, -1.0, -29.0], [14.0, 6.0, -23.0]),
+        [0.0, 0.0, -25.5],
+        0.0,
+    );
+    g.encounter(
+        "encounter 1: Rendering Floor — husks",
+        Encounter {
+            arena: None,
+            rally: None,
+            trigger: vol([-20.0, -1.0, -63.0], [20.0, 12.0, -31.0]),
+            lock_doors: vec![1],
+            unlock_doors: vec![2],
+            waves: vec![
+                wave(0.5, vec![
+                    enemy("husk", [-10.0, 0.0, -57.0], 180.0),
+                    enemy("husk", [10.0, 0.0, -57.0], 180.0),
+                    enemy("husk", [-4.0, 0.0, -52.0], 180.0),
+                    enemy("husk", [4.0, 0.0, -52.0], 180.0),
+                ]),
+                wave(1.5, vec![
+                    enemy("husk", [-17.0, 4.0, -52.0], 180.0),
+                    enemy("husk", [17.0, 4.0, -52.0], 180.0),
+                    enemy("husk", [-11.0, 0.0, -40.0], 180.0),
+                    enemy("husk", [11.0, 0.0, -40.0], 180.0),
+                    enemy("husk", [-5.0, 0.0, -60.0], 180.0),
+                    enemy("husk", [5.0, 0.0, -60.0], 180.0),
+                ]),
+            ],
+        },
+    );
+
+    // ---------------------------------------------------------------- C2 Sluice
+    g.section("C2 Sluice (corridor with a lava trench)");
+    let c2 = Room::new("C2", [-3.0, 0.0, -90.0], [3.0, 7.0, -64.0], RUST_DARK)
+        .ceiling(METAL_DARK)
+        .bottom(-4.0)
+        .open(&[N, S]);
+    g.room(&c2);
+    g.bx("C2 floor S", [-3.0, -4.0, -75.0], [3.0, 0.0, -64.0], FLOOR);
+    g.bx("C2 floor N", [-3.0, -4.0, -90.0], [3.0, 0.0, -80.0], FLOOR);
+    g.bx("C2 trench lava", [-3.0, -4.0, -80.0], [3.0, -3.0, -75.0], LAVA);
+    g.bx("C2 trench edge S", [-3.0, -0.15, -75.4], [3.0, 0.0, -75.0], HAZARD);
+    g.bx("C2 trench edge N", [-3.0, -0.15, -80.0], [3.0, 0.0, -79.6], HAZARD);
+    g.kill("C2 trench", vol([-3.0, -4.0, -80.0], [3.0, -1.5, -75.0]));
+    for z in [-68.0, -86.0] {
+        g.bx("C2 pipe", [-3.0, 5.6, z - 0.4], [3.0, 6.4, z + 0.4], BRASS);
+    }
+    g.light("C2 trench", [0.0, -1.5, -77.5], L_FIRE, 9.0);
+    g.light("C2 north", [0.0, 5.5, -86.0], L_DIM, 9.0);
+
+    // ---------------------------------------------------------------- R2 Bleeding Cloister
+    g.section("R2 Bleeding Cloister (arena 2: spitters)");
+    let r2_in = op(S, -2.5, 2.5, 0.0, 5.0);
+    let r2_out = op(N, -25.0, -20.0, 5.0, 10.0);
+    let r2 = Room::new("R2", [-30.0, 0.0, -141.0], [30.0, 14.0, -91.0], WALL_STONE)
+        .ceiling(METAL_DARK)
+        .bottom(-4.0)
+        .opening(r2_in)
+        .opening(r2_out);
+    g.room(&r2);
+    g.door(3, "door 3: R2 entry (locked by encounter 2)", &r2, r2_in, true, DOOR);
+    g.door(4, "door 4: R2 exit on the mezzanine (opened by encounter 2)", &r2, r2_out, false, EXIT_DOOR);
+    g.bx("R2 floor S", [-30.0, -4.0, -114.0], [30.0, 0.0, -91.0], TILE);
+    g.bx("R2 floor N", [-30.0, -4.0, -141.0], [30.0, 0.0, -122.0], TILE);
+    g.bx("R2 trench lava", [-30.0, -4.0, -122.0], [30.0, -3.0, -114.0], LAVA);
+    g.kill("R2 trench", vol([-30.0, -4.0, -122.0], [30.0, -1.5, -114.0]));
+    for (x0, x1) in [(-18.0, -13.0), (13.0, 18.0)] {
+        g.bx("R2 bridge", [x0, -0.6, -122.0], [x1, 0.0, -114.0], METAL);
+    }
+    // Hazard strips overhanging both trench edges (between the bridges).
+    for (x0, x1) in [(-30.0, -18.0), (-13.0, 13.0), (18.0, 30.0)] {
+        g.bx("R2 trench edge S", [x0, -0.15, -114.4], [x1, 0.0, -114.0], HAZARD);
+        g.bx("R2 trench edge N", [x0, -0.15, -122.0], [x1, 0.0, -121.6], HAZARD);
+    }
+    g.bx("R2 mezzanine", [-30.0, 4.4, -141.0], [30.0, 5.0, -133.0], METAL);
+    for x in [-18.0, -6.0, 6.0, 18.0] {
+        g.bx("R2 mezzanine post", [x - 0.5, 0.0, -134.5], [x + 0.5, 4.4, -133.5], RUST);
+    }
+    g.bx("R2 parapet W", [-24.0, 5.0, -133.4], [-4.0, 6.0, -133.0], BRICK);
+    g.bx("R2 parapet E", [4.0, 5.0, -133.4], [24.0, 6.0, -133.0], BRICK);
+    g.ramp_z("R2 ramp W", (-30.0, -25.0), (-123.0, 0.0), (-133.0, 5.0), 6.0, STONE);
+    g.ramp_z("R2 ramp E", (25.0, 30.0), (-123.0, 0.0), (-133.0, 5.0), 6.0, STONE);
+    g.pad(
+        "R2 floor -> mezzanine",
+        vol([-2.0, 0.0, -128.0], [2.0, 1.0, -124.0]),
+        [0.0, 24.0, -8.0],
+    );
+    g.bx("R2 pad ring", [-2.6, 0.0, -128.6], [2.6, 0.06, -123.4], HAZARD);
+    for (x, z) in [(-10.0, -100.0), (10.0, -100.0), (-10.0, -108.0), (10.0, -108.0)] {
+        g.bx("R2 cloister pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 14.0, z + 1.0], BONE);
+    }
+    for x in [-10.0, 10.0] {
+        g.bx("R2 arch beam", [x - 0.4, 10.0, -107.0], [x + 0.4, 11.0, -101.0], BONE);
+    }
+    for z in [-102.0, -127.0] {
+        g.bx("R2 flesh banner W", [-30.0, 3.0, z - 2.0], [-29.6, 12.0, z + 2.0], FLESH);
+        g.bx("R2 flesh banner E", [29.6, 3.0, z - 2.0], [30.0, 12.0, z + 2.0], FLESH);
+    }
+    g.light("R2 trench W", [-20.0, -1.5, -118.0], L_FIRE, 10.0);
+    g.light("R2 trench", [0.0, -1.5, -118.0], L_FIRE, 10.0);
+    g.light("R2 trench E", [20.0, -1.5, -118.0], L_FIRE, 10.0);
+    g.light("R2 mezzanine", [0.0, 9.0, -137.0], L_BLOOD, 16.0);
+    g.light("R2 exit", [-22.5, 9.0, -138.0], L_WARM, 9.0);
+    g.light("R2 entry", [0.0, 10.0, -96.0], L_WARM, 14.0);
+    g.light("R2 cloister W", [-20.0, 10.0, -104.0], L_DIM, 14.0);
+    g.light("R2 cloister E", [20.0, 10.0, -104.0], L_DIM, 14.0);
+    g.checkpoint(
+        "checkpoint 2: R2 vestibule",
+        vol([-30.0, -1.0, -97.0], [30.0, 6.0, -91.0]),
+        [0.0, 0.0, -93.5],
+        0.0,
+    );
+    g.encounter(
+        "encounter 2: Bleeding Cloister — husks + spitters on the mezzanine",
+        Encounter {
+            arena: None,
+            rally: None,
+            trigger: vol([-30.0, -4.0, -141.0], [30.0, 14.0, -98.0]),
+            lock_doors: vec![3],
+            unlock_doors: vec![4],
+            waves: vec![
+                wave(0.5, vec![
+                    enemy("husk", [-13.0, 0.0, -110.0], 180.0),
+                    enemy("husk", [13.0, 0.0, -110.0], 180.0),
+                    enemy("husk", [-6.0, 0.0, -127.0], 180.0),
+                    enemy("husk", [6.0, 0.0, -127.0], 180.0),
+                    enemy("spitter", [-15.0, 5.0, -137.0], 180.0),
+                    enemy("spitter", [15.0, 5.0, -137.0], 180.0),
+                ]),
+                wave(1.5, vec![
+                    enemy("spitter", [-10.0, 5.0, -138.0], 180.0),
+                    enemy("spitter", [10.0, 5.0, -138.0], 180.0),
+                    enemy("spitter", [0.0, 0.0, -138.0], 180.0),
+                    enemy("husk", [-22.0, 0.0, -128.0], 180.0),
+                    enemy("husk", [22.0, 0.0, -128.0], 180.0),
+                    enemy("husk", [-6.0, 0.0, -104.0], 180.0),
+                    enemy("husk", [6.0, 0.0, -104.0], 180.0),
+                ]),
+            ],
+        },
+    );
+
+    // ---------------------------------------------------------------- C3 Vein Stair
+    g.section("C3 Vein Stair (climbing corridor)");
+    let c3 = Room::new("C3", [-26.0, 5.0, -172.0], [-19.0, 17.0, -142.0], FLESH)
+        .ceiling(RUST_DARK)
+        .bottom(4.0)
+        .open(&[N, S]);
+    g.room(&c3);
+    g.bx("C3 floor", [-26.0, 4.0, -150.0], [-19.0, 5.0, -142.0], FLOOR);
+    g.ramp_z("C3 ramp", (-26.0, -19.0), (-150.0, 5.0), (-162.0, 10.0), 6.0, FLOOR);
+    g.bx("C3 landing", [-26.0, 4.0, -172.0], [-19.0, 10.0, -162.0], FLOOR);
+    for z in [-146.0, -154.0, -163.0, -170.0] {
+        g.bx("C3 rib W", [-26.0, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4], [-25.6, 17.0, z + 0.4], BONE);
+        g.bx("C3 rib E", [-19.4, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4], [-19.0, 17.0, z + 0.4], BONE);
+        g.bx("C3 rib arch", [-26.0, 16.4, z - 0.4], [-19.0, 17.0, z + 0.4], BONE);
+    }
+    g.light("C3 low", [-22.5, 9.0, -146.0], L_BLOOD, 12.0);
+    g.light("C3 high", [-22.5, 14.0, -166.0], L_BLOOD, 12.0);
+
+    // ---------------------------------------------------------------- R3 Bell Loft
+    g.section("R3 Bell Loft (arena 3: tall room, gnats)");
+    let r3_in = op(S, -25.0, -20.0, 10.0, 15.0);
+    let r3_out = op(E, -211.0, -206.0, 22.0, 27.0);
+    let r3 = Room::new("R3", [-44.0, 10.0, -215.0], [0.0, 46.0, -173.0], MACHINE)
+        .ceiling(METAL_DARK)
+        .opening(r3_in)
+        .opening(r3_out);
+    g.room(&r3);
+    g.door(5, "door 5: R3 entry (locked by encounter 3)", &r3, r3_in, true, DOOR);
+    g.door(6, "door 6: R3 exit on the upper platform (opened by encounter 3)", &r3, r3_out, false, EXIT_DOOR);
+    g.bx("R3 floor S", [-44.0, -5.0, -188.0], [0.0, 10.0, -173.0], FLOOR);
+    g.bx("R3 floor N", [-44.0, -5.0, -215.0], [0.0, 10.0, -200.0], FLOOR);
+    g.bx("R3 floor W", [-44.0, -5.0, -200.0], [-28.0, 10.0, -188.0], FLOOR);
+    g.bx("R3 floor E", [-16.0, -5.0, -200.0], [0.0, 10.0, -188.0], FLOOR);
+    g.bx("R3 pit bottom", [-28.0, -6.0, -200.0], [-16.0, -5.0, -188.0], BONE);
+    g.kill("R3 bell pit", vol([-28.0, -5.0, -200.0], [-16.0, 3.0, -188.0]));
+    for (x0, z0, x1, z1) in [
+        (-28.6, -200.6, -15.4, -200.0),
+        (-28.6, -188.0, -15.4, -187.4),
+        (-28.6, -200.0, -28.0, -188.0),
+        (-16.0, -200.0, -15.4, -188.0),
+    ] {
+        g.bx("R3 pit lip", [x0, 10.0, z0], [x1, 10.2, z1], HAZARD);
+    }
+    // Tier 1 (y 16): west balcony + north catwalk; tier 2 (y 22): east platform.
+    g.bx("R3 balcony W (tier 1)", [-44.0, 15.4, -215.0], [-36.0, 16.0, -180.0], METAL);
+    g.bx("R3 balcony post", [-37.0, 10.0, -191.0], [-36.0, 15.4, -190.0], RUST);
+    g.bx("R3 balcony post", [-37.0, 10.0, -206.0], [-36.0, 15.4, -205.0], RUST);
+    g.bx("R3 catwalk N (tier 1)", [-36.0, 15.4, -215.0], [-20.0, 16.0, -208.0], METAL);
+    g.slope("R3 ramp tier 1 -> 2", true, (-215.0, -208.0), (-20.0, 16.0), (-8.0, 22.0), 0.6, true, (0.6, 0.0), METAL);
+    g.bx("R3 platform E (tier 2)", [-8.0, 21.4, -215.0], [0.0, 22.0, -195.0], METAL);
+    g.bx("R3 platform post", [-8.0, 10.0, -197.0], [-7.0, 21.4, -196.0], RUST);
+    g.bx("R3 platform post", [-8.0, 10.0, -214.0], [-7.0, 21.4, -213.0], RUST);
+    g.bx("R3 platform fascia", [-8.3, 21.3, -195.0], [0.0, 22.1, -194.7], HAZARD);
+    g.pad(
+        "R3 floor -> west balcony (tier 1)",
+        vol([-34.0, 10.0, -186.0], [-30.0, 11.0, -182.0]),
+        [-8.0, 24.0, 0.0],
+    );
+    g.pad(
+        "R3 floor -> east platform (tier 2)",
+        vol([-12.0, 10.0, -186.0], [-8.0, 11.0, -182.0]),
+        [3.0, 34.0, -11.0],
+    );
+    g.bx("R3 wall-jump fin", [-40.5, 10.0, -180.0], [-39.5, 19.0, -174.0], BRICK);
+    // Boilers: floor cover with glowing fireboxes behind grilles.
+    g.bx("R3 boiler W", [-44.0, 10.0, -200.0], [-40.0, 13.0, -193.0], RUST_DARK);
+    g.bx("R3 boiler W fire", [-40.0, 10.5, -198.5], [-39.9, 12.5, -194.5], LAVA);
+    g.bx("R3 boiler W grille", [-39.9, 10.3, -198.7], [-39.7, 12.7, -194.3], GRATE);
+    g.bx("R3 boiler E", [-4.0, 10.0, -211.0], [0.0, 13.0, -204.0], RUST_DARK);
+    g.bx("R3 boiler E fire", [-4.1, 10.5, -209.5], [-4.0, 12.5, -205.5], LAVA);
+    g.bx("R3 boiler E grille", [-4.3, 10.3, -209.7], [-4.1, 12.7, -205.3], GRATE);
+    g.bx("R3 bell", [-26.0, 30.0, -198.0], [-18.0, 38.0, -190.0], METAL_DARK);
+    g.bx("R3 bell lip", [-27.0, 29.4, -199.0], [-17.0, 30.0, -189.0], BRASS);
+    g.bx("R3 bell crown", [-24.0, 38.0, -196.0], [-20.0, 39.0, -192.0], BRASS);
+    g.bx("R3 bell rod", [-22.5, 39.0, -194.5], [-21.5, 46.0, -193.5], METAL_DARK);
+    for (i, x) in [-42.0f32, -40.5, -39.0, -37.5, -36.0, -34.5, -16.5, -15.0, -13.5, -12.0, -10.5, -9.0]
+        .into_iter()
+        .enumerate()
+    {
+        let h = [30.0, 34.0, 38.0, 35.0, 31.0, 27.0, 27.0, 31.0, 35.0, 38.0, 34.0, 30.0][i];
+        g.deco("R3 organ pipe", [x, 20.0, -174.0], [x + 1.0, h, -173.0], BRASS);
+    }
+    g.bx("R3 organ console", [-43.0, 19.0, -174.2], [-8.0, 20.0, -173.0], RUST_DARK);
+    g.light("R3 pit glow", [-22.0, -2.0, -194.0], L_BLOOD, 18.0);
+    g.light("R3 under bell", [-22.0, 27.5, -194.0], L_FIRE, 14.0);
+    g.light("R3 balcony", [-40.0, 19.5, -197.0], L_WARM, 12.0);
+    g.light("R3 platform", [-4.0, 25.5, -205.0], L_WARM, 12.0);
+    g.light("R3 floor", [-10.0, 14.0, -180.0], L_WARM, 14.0);
+    g.light("R3 floor N", [-30.0, 14.0, -209.0], L_WARM, 14.0);
+    g.light("R3 boiler W", [-37.5, 11.5, -196.5], L_FIRE, 9.0);
+    g.light("R3 boiler E", [-6.5, 11.5, -207.5], L_FIRE, 9.0);
+    g.light("R3 vault", [-22.0, 42.0, -184.0], L_BLOOD, 20.0);
+    g.checkpoint(
+        "checkpoint 3: R3 vestibule",
+        vol([-39.0, 9.0, -179.0], [0.0, 16.0, -173.0]),
+        [-22.5, 10.0, -175.5],
+        0.0,
+    );
+    g.encounter(
+        "encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers",
+        Encounter {
+            arena: None,
+            rally: None,
+            trigger: vol([-44.0, -5.0, -215.0], [0.0, 46.0, -180.0]),
+            lock_doors: vec![5],
+            unlock_doors: vec![6],
+            waves: vec![
+                wave(0.5, vec![
+                    enemy("gnat", [-34.0, 16.0, -192.0], 180.0),
+                    enemy("gnat", [-11.0, 16.0, -194.0], 180.0),
+                    enemy("gnat", [-22.0, 17.0, -183.0], 180.0),
+                    enemy("husk", [-36.0, 10.0, -208.0], 180.0),
+                    enemy("husk", [-14.0, 10.0, -207.0], 180.0),
+                    enemy("husk", [-4.0, 10.0, -190.0], 180.0),
+                ]),
+                wave(1.5, vec![
+                    enemy("gnat", [-22.0, 17.0, -207.0], 180.0),
+                    enemy("gnat", [-36.0, 23.0, -199.0], 180.0),
+                    enemy("gnat", [-4.0, 28.0, -203.0], 180.0),
+                    enemy("gnat", [-12.0, 16.0, -180.0], 180.0),
+                    enemy("spitter", [-40.0, 16.0, -200.0], 180.0),
+                    enemy("spitter", [-4.0, 22.0, -210.0], 180.0),
+                    enemy("husk", [-30.0, 10.0, -207.0], 180.0),
+                    enemy("husk", [-10.0, 10.0, -182.0], 180.0),
+                ]),
+            ],
+        },
+    );
+
+    // ---------------------------------------------------------------- C4 Spillway
+    g.section("C4 Spillway (long downhill slide)");
+    let c4 = Room::new("C4", [1.0, 0.0, -212.0], [65.0, 30.0, -205.0], RUST_DARK)
+        .open(&[W, E]);
+    g.room(&c4);
+    g.bx("C4 top landing", [1.0, 18.0, -212.0], [6.0, 22.0, -205.0], FLOOR);
+    g.ramp_x("C4 slide ramp", (-212.0, -205.0), (54.0, 0.0), (6.0, 22.0), 4.0, TILE);
+    g.bx("C4 run-out floor", [54.0, -1.0, -212.0], [65.0, 0.0, -205.0], FLOOR);
+    g.bx("C4 ceiling top", [1.0, 29.0, -212.0], [6.0, 30.0, -205.0], METAL_DARK);
+    g.slope("C4 ceiling slope", true, (-212.0, -205.0), (54.0, 7.0), (6.0, 29.0), 1.0, false, (0.0, 1.5), METAL_DARK);
+    g.bx("C4 ceiling bottom", [54.0, 7.0, -212.0], [65.0, 8.0, -205.0], METAL_DARK);
+    g.light("C4 top", [3.5, 26.0, -208.5], L_BLOOD, 10.0);
+    g.light("C4 upper", [18.0, 21.0, -208.5], L_FIRE, 12.0);
+    g.light("C4 middle", [32.0, 15.0, -208.5], L_BLOOD, 12.0);
+    g.light("C4 lower", [46.0, 8.0, -208.5], L_FIRE, 12.0);
+    g.light("C4 bottom", [60.0, 5.0, -208.5], L_WARM, 9.0);
+
+    // ---------------------------------------------------------------- R4 Crucible Heart
+    g.section("R4 Crucible Heart (arena 4: bastion)");
+    let r4_in = op(W, -211.0, -206.0, 0.0, 5.0);
+    let r4_out = op(N, 88.5, 93.5, 0.0, 5.0);
+    let r4 = Room::new("R4", [66.0, 0.0, -233.0], [116.0, 18.0, -183.0], BRICK)
+        .ceiling(METAL_DARK)
+        .opening(r4_in)
+        .opening(r4_out);
+    g.room(&r4);
+    g.door(7, "door 7: R4 entry (locked by encounter 4)", &r4, r4_in, true, DOOR);
+    g.door(8, "door 8: R4 exit (opened by encounter 4)", &r4, r4_out, false, EXIT_DOOR);
+    g.bx("R4 floor W", [66.0, -4.0, -233.0], [82.0, 0.0, -183.0], FLOOR);
+    g.bx("R4 floor E", [100.0, -4.0, -233.0], [116.0, 0.0, -183.0], FLOOR);
+    g.bx("R4 floor N", [82.0, -4.0, -233.0], [100.0, 0.0, -217.0], FLOOR);
+    g.bx("R4 floor S", [82.0, -4.0, -199.0], [100.0, 0.0, -183.0], FLOOR);
+    g.bx("R4 cauldron moat lava", [82.0, -4.0, -217.0], [100.0, -3.0, -199.0], LAVA);
+    g.kill("R4 cauldron moat", vol([82.0, -4.0, -217.0], [100.0, -1.2, -199.0]));
+    g.bx("R4 island", [85.0, -3.0, -214.0], [97.0, 1.0, -202.0], TILE);
+    for (x, z) in [(86.0, -213.0), (96.0, -213.0), (86.0, -203.0), (96.0, -203.0)] {
+        g.bx("R4 island horn", [x - 0.5, 1.0, z - 0.5], [x + 0.5, 3.5, z + 0.5], BONE);
+    }
+    g.ramp_x("R4 bridge W", (-209.5, -206.5), (82.0, 0.0), (85.0, 1.0), 0.6, METAL);
+    g.ramp_x("R4 bridge E", (-209.5, -206.5), (100.0, 0.0), (97.0, 1.0), 0.6, METAL);
+    g.ramp_z("R4 bridge N", (89.5, 92.5), (-217.0, 0.0), (-214.0, 1.0), 0.6, METAL);
+    g.ramp_z("R4 bridge S", (89.5, 92.5), (-199.0, 0.0), (-202.0, 1.0), 0.6, METAL);
+    for (x, z) in [(78.0, -195.0), (104.0, -195.0), (78.0, -221.0), (104.0, -221.0)] {
+        g.bx("R4 column", [x - 1.5, 0.0, z - 1.5], [x + 1.5, 18.0, z + 1.5], BONE);
+    }
+    for (z0, z1) in [(-233.0, -223.0), (-193.0, -183.0)] {
+        g.bx("R4 corner platform", [106.0, 0.0, z0], [116.0, 4.0, z1], STONE);
+        g.bx("R4 corner platform lip", [105.7, 4.0, z0], [106.0, 4.15, z1], HAZARD);
+    }
+    g.pad(
+        "R4 floor -> NE platform",
+        vol([101.0, 0.0, -230.0], [104.0, 1.0, -227.0]),
+        [9.0, 22.0, 0.0],
+    );
+    g.pad(
+        "R4 floor -> SE platform",
+        vol([101.0, 0.0, -189.0], [104.0, 1.0, -186.0]),
+        [9.0, 22.0, 0.0],
+    );
+    g.bx("R4 crucible", [87.0, 12.0, -212.0], [95.0, 14.5, -204.0], RUST_DARK);
+    g.bx("R4 crucible glow", [87.5, 11.8, -211.5], [94.5, 12.0, -204.5], LAVA);
+    g.deco("R4 crucible chain", [86.8, 14.5, -212.2], [87.2, 18.0, -211.8], METAL_DARK);
+    g.deco("R4 crucible chain", [94.8, 14.5, -204.2], [95.2, 18.0, -203.8], METAL_DARK);
+    for z in [-196.0, -220.0] {
+        g.bx("R4 flesh wall W", [66.0, 2.0, z - 3.0], [66.4, 14.0, z + 3.0], FLESH);
+        g.bx("R4 flesh wall E", [115.6, 6.0, z - 3.0], [116.0, 14.0, z + 3.0], FLESH);
+    }
+    g.light("R4 moat W", [83.5, -1.0, -208.0], L_FIRE, 10.0);
+    g.light("R4 moat E", [98.5, -1.0, -208.0], L_FIRE, 10.0);
+    g.light("R4 moat N", [91.0, -1.0, -215.5], L_FIRE, 10.0);
+    g.light("R4 moat S", [91.0, -1.0, -200.5], L_FIRE, 10.0);
+    g.light("R4 crucible", [91.0, 10.5, -208.0], L_FIRE, 14.0);
+    g.light("R4 NE", [110.0, 8.0, -228.0], L_BLOOD, 13.0);
+    g.light("R4 SE", [110.0, 8.0, -188.0], L_BLOOD, 13.0);
+    g.light("R4 entry", [70.0, 8.0, -208.5], L_WARM, 14.0);
+    g.light("R4 exit", [91.0, 8.0, -229.0], L_WARM, 10.0);
+    g.checkpoint(
+        "checkpoint 4: R4 vestibule (bottom of the spillway)",
+        vol([66.0, -1.0, -233.0], [72.0, 6.0, -183.0]),
+        [68.5, 0.0, -208.5],
+        -90.0,
+    );
+    g.encounter(
+        "encounter 4: Crucible Heart — a bastion on the island, then a mixed wave",
+        Encounter {
+            arena: None,
+            rally: None,
+            trigger: vol([73.0, -4.0, -233.0], [116.0, 18.0, -183.0]),
+            lock_doors: vec![7],
+            unlock_doors: vec![8],
+            waves: vec![
+                wave(1.0, vec![
+                    enemy("bastion", [91.0, 1.0, -208.0], 90.0),
+                    enemy("husk", [78.0, 0.0, -189.0], -90.0),
+                    enemy("husk", [78.0, 0.0, -227.0], -90.0),
+                    enemy("husk", [104.0, 0.0, -201.0], 90.0),
+                    enemy("husk", [104.0, 0.0, -215.0], 90.0),
+                ]),
+                wave(1.5, vec![
+                    enemy("spitter", [111.0, 4.0, -228.0], 90.0),
+                    enemy("spitter", [111.0, 4.0, -188.0], 90.0),
+                    enemy("gnat", [91.0, 7.0, -190.0], 90.0),
+                    enemy("gnat", [91.0, 7.0, -226.0], 90.0),
+                    enemy("gnat", [108.0, 7.0, -208.0], 90.0),
+                    enemy("husk", [76.0, 0.0, -200.0], -90.0),
+                    enemy("husk", [76.0, 0.0, -216.0], -90.0),
+                    enemy("husk", [108.0, 0.0, -200.0], 90.0),
+                ]),
+            ],
+        },
+    );
+
+    // ---------------------------------------------------------------- C5 Pipe Run
+    g.section("C5 Pipe Run (slide under / hop over)");
+    let c5 = Room::new("C5", [87.0, 0.0, -262.0], [95.0, 8.0, -234.0], METAL_DARK)
+        .floor(FLOOR)
+        .ceiling(RUST_DARK)
+        .open(&[N, S]);
+    g.room(&c5);
+    for z in [-242.0, -248.0, -254.0] {
+        g.bx("C5 pipe (1.2 m under, 1.9 m top)", [87.0, 1.2, z - 0.35], [95.0, 1.9, z + 0.35], BRASS);
+        g.bx("C5 pipe hanger W", [88.0, 1.9, z - 0.15], [88.3, 8.0, z + 0.15], METAL);
+        g.bx("C5 pipe hanger E", [93.7, 1.9, z - 0.15], [94.0, 8.0, z + 0.15], METAL);
+    }
+    g.light("C5 toxic", [91.0, 5.0, -245.0], L_TOXIC, 10.0);
+    g.light("C5 toxic", [91.0, 5.0, -256.0], L_TOXIC, 10.0);
+
+    // ---------------------------------------------------------------- R5 Furnace Cathedral
+    g.section("R5 Furnace Cathedral (arena 5: finale)");
+    let r5_in = op(S, 88.5, 93.5, 0.0, 5.0);
+    let r5_out = op(N, 88.5, 93.5, 4.0, 9.0);
+    let r5 = Room::new("R5", [60.0, 0.0, -330.0], [122.0, 28.0, -263.0], WALL_STONE)
+        .ceiling(METAL_DARK)
+        .bottom(-22.0)
+        .opening(r5_in)
+        .opening(r5_out);
+    g.room(&r5);
+    g.door(9, "door 9: R5 entry (locked by encounter 5)", &r5, r5_in, true, DOOR);
+    g.door(10, "door 10: R5 exit behind the altar (opened by encounter 5)", &r5, r5_out, false, EXIT_DOOR);
+    // Floors: nave (x 73..109) split by the chasm (z -299..-291); aisles W/E with lava pools.
+    g.bx("R5 nave floor S", [73.0, -21.0, -291.0], [109.0, 0.0, -263.0], TILE);
+    g.bx("R5 nave floor N", [73.0, -21.0, -330.0], [109.0, 0.0, -299.0], TILE);
+    g.bx("R5 chasm bottom", [73.0, -22.0, -299.0], [109.0, -21.0, -291.0], BONE);
+    g.kill("R5 chasm", vol([73.0, -21.0, -299.0], [109.0, -8.0, -291.0]));
+    g.bx("R5 chasm bridge", [89.0, -1.0, -299.0], [93.0, 0.0, -291.0], METAL);
+    // Aisles: (x range, pool x range, the two paths beside the pool).
+    for ((x0, x1), (px0, px1), paths) in [
+        ((60.0, 73.0), (62.0, 70.0), [(60.0, 62.0), (70.0, 73.0)]),
+        ((109.0, 122.0), (112.0, 120.0), [(109.0, 112.0), (120.0, 122.0)]),
+    ] {
+        g.bx("R5 aisle floor S", [x0, -21.0, -290.0], [x1, 0.0, -263.0], FLOOR);
+        g.bx("R5 aisle floor N", [x0, -21.0, -330.0], [x1, 0.0, -300.0], FLOOR);
+        for (a, b) in paths {
+            g.bx("R5 aisle path beside the pool", [a, -21.0, -300.0], [b, 0.0, -290.0], FLOOR);
+        }
+        g.bx("R5 aisle lava pool", [px0, -3.0, -300.0], [px1, -2.0, -290.0], LAVA);
+        g.kill("R5 aisle lava pool", vol([px0, -3.0, -300.0], [px1, -0.8, -290.0]));
+    }
+    for x in [72.0, 110.0] {
+        for z in [-272.0, -284.0, -306.0, -318.0] {
+            g.bx("R5 colonnade pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 28.0, z + 1.0], BONE);
+        }
+    }
+    g.bx("R5 gallery W", [60.0, 7.4, -322.0], [71.0, 8.0, -268.0], METAL);
+    g.bx("R5 gallery E", [111.0, 7.4, -322.0], [122.0, 8.0, -268.0], METAL);
+    g.pad(
+        "R5 nave -> west gallery",
+        vol([75.0, 0.0, -280.0], [78.0, 1.0, -277.0]),
+        [-9.0, 28.0, 0.0],
+    );
+    g.pad(
+        "R5 nave -> east gallery",
+        vol([104.0, 0.0, -280.0], [107.0, 1.0, -277.0]),
+        [9.0, 28.0, 0.0],
+    );
+    g.bx("R5 altar dais", [76.0, 0.0, -330.0], [106.0, 4.0, -314.0], STONE);
+    g.bx("R5 dais lip", [76.0, 4.0, -314.3], [106.0, 4.15, -314.0], HAZARD);
+    g.ramp_z("R5 dais ramp W", (78.0, 83.0), (-306.0, 0.0), (-314.0, 4.0), 5.0, STONE);
+    g.ramp_z("R5 dais ramp E", (99.0, 104.0), (-306.0, 0.0), (-314.0, 4.0), 5.0, STONE);
+    for (x0, x1) in [(80.0, 86.0), (96.0, 102.0)] {
+        g.bx("R5 furnace", [x0, 4.0, -330.0], [x1, 11.0, -325.0], RUST);
+        g.bx("R5 furnace fire", [x0 + 1.0, 5.0, -325.0], [x1 - 1.0, 8.0, -324.9], LAVA);
+        g.bx("R5 furnace grille", [x0 + 0.8, 4.8, -324.9], [x1 - 0.8, 8.2, -324.6], GRATE);
+        g.bx("R5 furnace flue", [x0 + 1.5, 11.0, -330.0], [x1 - 1.5, 28.0, -327.0], RUST_DARK);
+    }
+    g.bx("R5 rose window fire", [86.0, 14.0, -330.0], [96.0, 24.0, -329.8], LAVA);
+    g.bx("R5 rose window grille", [85.8, 13.8, -329.8], [96.2, 24.2, -329.5], GRATE);
+    g.deco("R5 rose mullion V", [90.6, 13.8, -329.5], [91.4, 24.2, -329.2], BONE);
+    g.deco("R5 rose mullion H", [85.8, 18.6, -329.5], [96.2, 19.4, -329.2], BONE);
+    g.bx("R5 chandelier", [87.0, 17.0, -287.0], [95.0, 19.0, -279.0], RUST_DARK);
+    g.bx("R5 chandelier glow", [87.5, 16.8, -286.5], [94.5, 17.0, -279.5], LAVA);
+    g.deco("R5 chandelier chain", [90.8, 19.0, -283.2], [91.2, 28.0, -282.8], METAL_DARK);
+    for z in [-276.0, -296.0, -316.0] {
+        g.bx("R5 ceiling rib", [60.0, 26.8, z - 0.5], [122.0, 28.0, z + 0.5], BONE);
+    }
+    for z in [-278.0, -308.0] {
+        g.bx("R5 flesh tapestry W", [60.0, 10.0, z - 4.0], [60.4, 24.0, z + 4.0], FLESH);
+        g.bx("R5 flesh tapestry E", [121.6, 10.0, z - 4.0], [122.0, 24.0, z + 4.0], FLESH);
+    }
+    g.light("R5 entry", [91.0, 10.0, -268.0], L_WARM, 16.0);
+    g.light("R5 chandelier", [91.0, 14.0, -283.0], L_FIRE, 18.0);
+    g.light("R5 chasm", [91.0, -10.0, -295.0], L_BLOOD, 18.0);
+    g.light("R5 pool W", [66.0, 0.5, -295.0], L_FIRE, 9.0);
+    g.light("R5 pool E", [116.0, 0.5, -295.0], L_FIRE, 9.0);
+    g.light("R5 gallery W", [65.0, 12.0, -284.0], L_BLOOD, 14.0);
+    g.light("R5 gallery E", [117.0, 12.0, -284.0], L_BLOOD, 14.0);
+    g.light("R5 gallery W N", [65.0, 12.0, -312.0], L_DIM, 14.0);
+    g.light("R5 gallery E N", [117.0, 12.0, -312.0], L_DIM, 14.0);
+    g.light("R5 furnace W", [83.0, 6.5, -322.0], L_FIRE, 10.0);
+    g.light("R5 furnace E", [99.0, 6.5, -322.0], L_FIRE, 10.0);
+    g.light("R5 rose window", [91.0, 19.0, -326.0], L_FIRE, 16.0);
+    g.checkpoint(
+        "checkpoint 5: R5 vestibule",
+        vol([60.0, -1.0, -269.0], [122.0, 6.0, -263.0]),
+        [91.0, 0.0, -265.5],
+        0.0,
+    );
+    g.encounter(
+        "encounter 5: Furnace Cathedral — finale, four waves of everything",
+        Encounter {
+            arena: None,
+            rally: None,
+            trigger: vol([60.0, -22.0, -330.0], [122.0, 28.0, -270.0]),
+            lock_doors: vec![9],
+            unlock_doors: vec![10],
+            waves: vec![
+                wave(0.5, vec![
+                    enemy("husk", [80.0, 0.0, -280.0], 180.0),
+                    enemy("husk", [102.0, 0.0, -280.0], 180.0),
+                    enemy("husk", [66.0, 0.0, -284.0], 180.0),
+                    enemy("husk", [116.0, 0.0, -284.0], 180.0),
+                    enemy("husk", [85.0, 0.0, -308.0], 180.0),
+                    enemy("husk", [97.0, 0.0, -308.0], 180.0),
+                    enemy("spitter", [86.0, 4.0, -319.0], 180.0),
+                    enemy("spitter", [96.0, 4.0, -319.0], 180.0),
+                ]),
+                wave(1.5, vec![
+                    enemy("gnat", [80.0, 6.0, -284.0], 180.0),
+                    enemy("gnat", [102.0, 6.0, -284.0], 180.0),
+                    enemy("gnat", [91.0, 7.0, -306.0], 180.0),
+                    enemy("gnat", [91.0, 7.0, -274.0], 180.0),
+                    enemy("spitter", [65.0, 8.0, -300.0], -90.0),
+                    enemy("spitter", [117.0, 8.0, -300.0], 90.0),
+                    enemy("husk", [76.0, 0.0, -310.0], 180.0),
+                    enemy("husk", [106.0, 0.0, -310.0], 180.0),
+                    enemy("husk", [91.0, 0.0, -310.0], 180.0),
+                ]),
+                wave(2.0, vec![
+                    enemy("bastion", [91.0, 0.0, -305.0], 180.0),
+                    enemy("husk", [66.0, 0.0, -271.0], 180.0),
+                    enemy("husk", [116.0, 0.0, -271.0], 180.0),
+                    enemy("husk", [66.0, 0.0, -320.0], 180.0),
+                    enemy("husk", [116.0, 0.0, -320.0], 180.0),
+                    enemy("gnat", [91.0, 8.0, -295.0], 180.0),
+                    enemy("gnat", [84.0, 6.0, -274.0], 180.0),
+                    enemy("gnat", [98.0, 6.0, -274.0], 180.0),
+                ]),
+                wave(2.0, vec![
+                    enemy("bastion", [91.0, 4.0, -321.0], 180.0),
+                    enemy("spitter", [65.0, 8.0, -275.0], -90.0),
+                    enemy("spitter", [117.0, 8.0, -275.0], 90.0),
+                    enemy("spitter", [65.0, 8.0, -316.0], -90.0),
+                    enemy("gnat", [78.0, 7.0, -303.0], 180.0),
+                    enemy("gnat", [104.0, 7.0, -303.0], 180.0),
+                    enemy("gnat", [91.0, 7.0, -287.0], 180.0),
+                    enemy("husk", [76.0, 0.0, -274.0], 180.0),
+                    enemy("husk", [106.0, 0.0, -274.0], 180.0),
+                    enemy("husk", [75.0, 0.0, -310.0], 180.0),
+                    enemy("husk", [107.0, 0.0, -310.0], 180.0),
+                ]),
+            ],
+        },
+    );
+
+    // ---------------------------------------------------------------- C6 + Exit
+    g.section("C6 Ascension Hall + exit");
+    let c6 = Room::new("C6", [87.0, 4.0, -351.0], [95.0, 11.0, -331.0], BONE)
+        .floor(STONE)
+        .ceiling(METAL_DARK)
+        .open(&[N, S]);
+    g.room(&c6);
+    let ex = Room::new("Exit", [81.0, 4.0, -372.0], [101.0, 20.0, -352.0], BRICK_DARK)
+        .floor(STONE)
+        .ceiling(METAL_DARK)
+        .opening(op(S, 87.0, 95.0, 4.0, 11.0));
+    g.room(&ex);
+    g.bx("Exit dais", [86.0, 4.0, -367.0], [96.0, 4.3, -357.0], PANEL);
+    for (x, z) in [(84.0, -355.0), (98.0, -355.0), (84.0, -369.0), (98.0, -369.0)] {
+        g.bx("Exit pillar", [x - 0.75, 4.0, z - 0.75], [x + 0.75, 20.0, z + 0.75], BONE);
+    }
+    g.bx("Exit halo", [86.0, 18.0, -367.0], [96.0, 19.0, -357.0], LAVA);
+    g.light("C6 hall", [91.0, 9.0, -341.0], L_WARM, 12.0);
+    g.light("Exit halo", [91.0, 16.0, -362.0], L_HOLY, 18.0);
+    g.light("Exit floor", [91.0, 6.0, -362.0], L_BLOOD, 10.0);
+    g.def.exit = Some(vol([86.0, 4.0, -367.0], [96.0, 12.0, -357.0]));
+
+    g.kill("below the world", vol([-1000.0, -200.0, -1000.0], [1000.0, -40.0, 1000.0]));
+    g
+}
+
+// ------------------------------------------------------------------------------------------
+// Cistern Nine (PvP arena)
+
+mod cold {
+    use super::Mat;
+    pub const WALL: Mat = Mat("concrete", [0.5, 0.62, 0.68]);
+    pub const WALL_TILE: Mat = Mat("tile", [0.55, 0.72, 0.78]);
+    pub const FLOOR: Mat = Mat("concrete", [0.46, 0.54, 0.58]);
+    pub const BOWL: Mat = Mat("tile", [0.42, 0.56, 0.62]);
+    pub const METAL: Mat = Mat("metal", [0.56, 0.66, 0.76]);
+    pub const METAL_DARK: Mat = Mat("metal", [0.34, 0.4, 0.48]);
+    pub const GRATE: Mat = Mat("grate", [0.62, 0.78, 0.84]);
+    pub const PANEL: Mat = Mat("panel", [0.62, 0.82, 0.92]);
+    pub const VIOLET: Mat = Mat("tile", [0.52, 0.42, 0.72]);
+    pub const RUST: Mat = Mat("rust", [0.62, 0.58, 0.56]);
+    pub const HAZARD: Mat = Mat("hazard", [1.0, 0.86, 0.42]);
+    pub const COOLANT: Mat = Mat("glass", [0.35, 0.95, 1.0]);
+    pub const DEEP: Mat = Mat("panel", [0.15, 0.55, 0.65]);
+}
+
+const L_CYAN: [f32; 3] = [0.35, 1.05, 1.2];
+const L_TEAL: [f32; 3] = [0.3, 0.85, 0.8];
+const L_VIOLET: [f32; 3] = [0.85, 0.45, 1.2];
+const L_COLD: [f32; 3] = [0.75, 0.85, 1.0];
+
+fn cistern() -> Gen {
+    use cold::*;
+    let mut g = Gen::new(
+        "Cistern Nine",
+        LevelKind::Arena,
+        Environment {
+            sky_color: Vec3::new(0.03, 0.07, 0.1),
+            fog_color: Vec3::new(0.05, 0.12, 0.15),
+            fog_start: 30.0,
+            fog_end: 150.0,
+            ambient: Vec3::new(0.32, 0.38, 0.44),
+            light_dir: Vec3::new(0.45, -1.0, 0.3),
+            light_color: Vec3::new(0.5, 0.62, 0.75),
+            music: "arena".into(),
+        },
+    );
+    const H: f32 = 36.0; // interior half size
+    const TOP: f32 = 16.0; // visible wall height
+    const SKY: f32 = 32.0; // invisible clip ceiling
+
+    // `span(s, a, b)`: the interval between s*a and s*b (s = ±1 mirrors).
+    let span = |s: f32, a: f32, b: f32| ((s * a).min(s * b), (s * a).max(s * b));
+
+    g.section("Outer shell (open sky, clipped at 32 m)");
+    let shell = Room::new("Shell", [-H, 0.0, -H], [H, TOP, H], WALL).bottom(-4.0);
+    g.room(&shell);
+    g.clip("sky clip wall N", [-H - 1.0, TOP, -H - 1.0], [H + 1.0, SKY, -H]);
+    g.clip("sky clip wall S", [-H - 1.0, TOP, H], [H + 1.0, SKY, H + 1.0]);
+    g.clip("sky clip wall W", [-H - 1.0, TOP, -H], [-H, SKY, H]);
+    g.clip("sky clip wall E", [H, TOP, -H], [H + 1.0, SKY, H]);
+    g.clip("sky clip ceiling", [-H - 1.0, SKY, -H - 1.0], [H + 1.0, SKY + 1.0, H + 1.0]);
+    for x in [-24.0, -12.0, 0.0, 12.0, 24.0] {
+        g.bx("pilaster N", [x - 1.0, 0.0, -H], [x + 1.0, TOP, -H + 0.6], WALL_TILE);
+        g.bx("pilaster S", [x - 1.0, 0.0, H - 0.6], [x + 1.0, TOP, H], WALL_TILE);
+    }
+    for z in [-20.0, 0.0, 20.0] {
+        g.deco("wall pipe W", [-H, 11.0, z - 6.0], [-H + 1.2, 12.2, z + 6.0], METAL);
+        g.deco("wall pipe E", [H - 1.2, 11.0, z - 6.0], [H, 12.2, z + 6.0], METAL);
+    }
+
+    // Ring floor (y 0) around the sunken bowl, coolant pits N/S, slide trenches W/E.
+    g.section("Ring floor, coolant pits, slide trenches");
+    for s in [-1.0f32, 1.0] {
+        let side = if s < 0.0 { "N" } else { "S" };
+        let (o0, o1) = span(s, H, 26.0);
+        let (i0, i1) = span(s, 20.0, 16.0);
+        let (p0, p1) = span(s, 26.0, 20.0);
+        g.bx(&format!("ring {side} outer band"), [-H, -4.0, o0], [H, 0.0, o1], FLOOR);
+        g.bx(&format!("ring {side} inner band"), [-H, -4.0, i0], [H, 0.0, i1], FLOOR);
+        g.bx(&format!("ring {side} beside pit W"), [-H, -4.0, p0], [-4.0, 0.0, p1], FLOOR);
+        g.bx(&format!("ring {side} beside pit E"), [4.0, -4.0, p0], [H, 0.0, p1], FLOOR);
+        g.bx(&format!("coolant pit {side} bed"), [-4.0, -4.0, p0], [4.0, -3.4, p1], DEEP);
+        g.bx(&format!("coolant pit {side} surface"), [-4.0, -3.4, p0], [4.0, -3.0, p1], COOLANT);
+        g.kill(&format!("coolant pit {side}"), vol([-4.0, -4.0, p0], [4.0, -1.5, p1]));
+        for (x0, x1, a, b) in [
+            (-4.3, 4.3, 26.0, 26.3),
+            (-4.3, 4.3, 19.7, 20.0),
+            (-4.3, -4.0, 20.0, 26.0),
+            (4.0, 4.3, 20.0, 26.0),
+        ] {
+            let (l0, l1) = span(s, a, b);
+            g.bx(&format!("coolant pit {side} lip"), [x0, 0.0, l0], [x1, 0.12, l1], HAZARD);
+        }
+    }
+    for s in [-1.0f32, 1.0] {
+        let side = if s < 0.0 { "W" } else { "E" };
+        let (b0, b1) = span(s, H, 16.0);
+        let (e0, e1) = span(s, H, 28.0);
+        let (t0, t1) = span(s, 20.0, 16.0);
+        let (w0, w1) = span(s, 26.0, 20.0);
+        g.bx(&format!("ring {side} band north"), [b0, -4.0, -16.0], [b1, 0.0, -1.5], FLOOR);
+        g.bx(&format!("ring {side} band south"), [b0, -4.0, 1.5], [b1, 0.0, 16.0], FLOOR);
+        g.bx(&format!("ring {side} trench end"), [e0, -4.0, -1.5], [e1, 0.0, 1.5], FLOOR);
+        g.bx(&format!("slide tunnel {side} floor"), [t0, -4.0, -1.5], [t1, -3.0, 1.5], BOWL);
+        g.bx(&format!("slide tunnel {side} roof (1.2 m gap)"), [t0, -1.8, -1.5], [t1, 0.0, 1.5], GRATE);
+        g.ramp_x(&format!("slide trench {side} ramp"), (-1.5, 1.5), (s * 20.0, -3.0), (s * 28.0, 0.0), 4.0, BOWL);
+        for (za, zb) in [(-6.0, -5.0), (5.0, 6.0)] {
+            g.bx(&format!("ring {side} low wall"), [w0, 0.0, za], [w1, 1.2, zb], RUST);
+        }
+    }
+
+    g.section("Bowl (y -3) and reactor core");
+    g.bx("bowl floor", [-16.0, -4.0, -16.0], [16.0, -3.0, 16.0], BOWL);
+    g.ramp_z("bowl ramp N", (-3.0, 3.0), (-8.0, -3.0), (-16.0, 0.0), 4.0, METAL);
+    g.ramp_z("bowl ramp S", (-3.0, 3.0), (8.0, -3.0), (16.0, 0.0), 4.0, METAL);
+    for (x, z) in [(-10.0, -10.0), (10.0, -10.0), (-10.0, 10.0), (10.0, 10.0)] {
+        g.bx("bowl pillar", [x - 1.0, -3.0, z - 1.0], [x + 1.0, 9.0, z + 1.0], WALL_TILE);
+        g.bx("bowl pillar cap", [x - 1.3, 9.0, z - 1.3], [x + 1.3, 9.6, z + 1.3], METAL_DARK);
+    }
+    g.bx("reactor core", [-3.0, -3.0, -3.0], [3.0, 3.9, 3.0], METAL);
+    g.bx("reactor core band", [-3.3, 0.6, -3.3], [3.3, 1.4, 3.3], PANEL);
+    g.bx("reactor core cap", [-3.0, 3.9, -3.0], [3.0, 4.0, 3.0], VIOLET);
+    g.pad("bowl E -> core top", vol([8.0, -3.0, -1.25], [10.5, -2.0, 1.25]), [-7.0, 26.0, 0.0]);
+    g.pad("bowl W -> core top", vol([-10.5, -3.0, -1.25], [-8.0, -2.0, 1.25]), [7.0, 26.0, 0.0]);
+
+    g.section("Corner towers (y 6), catwalks, ramps, wall-jump fins, cover");
+    for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let (x0, x1) = span(sx, H, 28.0);
+        let (z0, z1) = span(sz, H, 28.0);
+        g.bx("tower", [x0, 0.0, z0], [x1, 5.9, z1], WALL_TILE);
+        g.bx("tower top plate", [x0, 5.9, z0], [x1, 6.0, z1], VIOLET);
+        // Ramp along the outer W/E wall from the ring (z ±10) up to the tower (z ±28).
+        g.ramp_z("tower ramp", span(sx, H, 32.0), (sz * 10.0, 0.0), (sz * 28.0, 6.0), 8.0, FLOOR);
+        // Fin parallel to the tower's inner face: a 3.5 m wall-jump shaft onto the tower.
+        let (fx0, fx1) = span(sx, 24.5, 23.5);
+        let (fz0, fz1) = span(sz, 32.0, 28.5);
+        g.bx("wall-jump fin", [fx0, 0.0, fz0], [fx1, 9.0, fz1], METAL);
+    }
+    for s in [-1.0f32, 1.0] {
+        let (z0, z1) = span(s, H - 0.6, 33.0);
+        g.bx("catwalk", [-28.0, 5.5, z0], [28.0, 6.0, z1], METAL);
+        let (pz0, pz1) = span(s, 35.0, 34.0);
+        for x in [-14.0, 0.0, 14.0] {
+            g.bx("catwalk post", [x - 0.4, 0.0, pz0], [x + 0.4, 5.5, pz1], METAL_DARK);
+        }
+    }
+    for (x, z) in [(-22.0, -22.0), (22.0, 22.0)] {
+        g.bx("crate", [x - 1.5, 0.0, z - 1.5], [x + 1.5, 2.0, z + 1.5], RUST);
+    }
+    for (x, z) in [(22.0, -22.0), (-22.0, 22.0)] {
+        g.bx("low crate", [x - 1.0, 0.0, z - 1.5], [x + 1.0, 1.2, z + 1.5], RUST);
+    }
+    // Pump houses on the north/south ring: a 3 m layer between the ring and the catwalks that
+    // breaks the catwalk sightlines; a step crate on the bowl side makes them climbable.
+    for s in [-1.0f32, 1.0] {
+        let (z0, z1) = span(s, 31.0, 27.0);
+        let (c0, c1) = span(s, 27.0, 25.5);
+        for (x0, x1) in [(-17.0, -11.0), (11.0, 17.0)] {
+            g.bx("pump house", [x0, 0.0, z0], [x1, 2.9, z1], METAL_DARK);
+            g.bx("pump house roof", [x0, 2.9, z0], [x1, 3.0, z1], PANEL);
+            let cx = (x0 + x1) * 0.5;
+            g.bx("pump house step", [cx - 1.5, 0.0, c0], [cx + 1.5, 1.2, c1], RUST);
+        }
+    }
+
+    g.light("core", [0.0, 7.5, 0.0], L_CYAN, 14.0);
+    for (x, z) in [(-13.0, -13.0), (13.0, -13.0), (-13.0, 13.0), (13.0, 13.0)] {
+        g.light("bowl", [x, -1.0, z], L_TEAL, 10.0);
+    }
+    for (x, z) in [(-32.0, -32.0), (32.0, -32.0), (-32.0, 32.0), (32.0, 32.0)] {
+        g.light("tower", [x, 9.5, z], L_VIOLET, 12.0);
+    }
+    g.light("coolant pit N", [0.0, -1.5, -23.0], L_CYAN, 9.0);
+    g.light("coolant pit S", [0.0, -1.5, 23.0], L_CYAN, 9.0);
+    g.light("slide tunnel W", [-18.0, -2.3, 0.0], L_CYAN, 6.0);
+    g.light("slide tunnel E", [18.0, -2.3, 0.0], L_CYAN, 6.0);
+    g.light("ring W", [-30.0, 5.0, 0.0], L_COLD, 14.0);
+    g.light("ring E", [30.0, 5.0, 0.0], L_COLD, 14.0);
+
+    // Spawns face the centre: yaw = atan2(dx, dz) of the position (see input::look_dir).
+    for (x, y, z) in [
+        (-32.0, 6.0, -32.0),
+        (32.0, 6.0, -32.0),
+        (-32.0, 6.0, 32.0),
+        (32.0, 6.0, 32.0),
+        (-12.0, -3.0, 5.0),
+        (12.0, -3.0, -5.0),
+        (0.0, 0.0, -30.0),
+        (0.0, 0.0, 30.0),
+        (-24.0, 0.0, -10.0),
+        (24.0, 0.0, 10.0),
+    ] {
+        g.spawn([x, y, z], r4(f32::atan2(x, z).to_degrees()));
+    }
+    g.kill("below the world", vol([-1000.0, -200.0, -1000.0], [1000.0, -30.0, 1000.0]));
+    g
+}
+
+fn main() -> anyhow::Result<()> {
+    let check = std::env::args().any(|a| a == "--check");
+    let dir = shared::level::LevelDef::dir();
+    let mut stale = Vec::new();
+    for (file, g, header) in [
+        (
+            "crucible_of_veins.ron",
+            crucible(),
+            "Crucible of Veins — co-op campaign level (1-4 players). See docs/levels.md.",
+        ),
+        (
+            "cistern_nine.ron",
+            cistern(),
+            "Cistern Nine — PvP deathmatch arena (up to 8 players). See docs/levels.md.",
+        ),
+    ] {
+        let text = emit(&g, header);
+        let parsed: LevelDef = ron::from_str(&text)
+            .map_err(|e| anyhow::anyhow!("generated {file} does not parse: {e}"))?;
+        anyhow::ensure!(parsed == g.def, "generated {file} does not round-trip");
+        let path = dir.join(file);
+        if check {
+            let current = std::fs::read_to_string(&path).unwrap_or_default();
+            if current != text {
+                stale.push(file);
+            }
+        } else {
+            std::fs::write(&path, &text)?;
+            println!(
+                "wrote {} ({} brushes, {} lights, {} doors, {} encounters)",
+                path.display(),
+                g.def.brushes.len(),
+                g.def.lights.len(),
+                g.def.doors.len(),
+                g.def.encounters.len()
+            );
+        }
+    }
+    anyhow::ensure!(stale.is_empty(), "out of date (re-run level_gen): {stale:?}");
+    Ok(())
+}
