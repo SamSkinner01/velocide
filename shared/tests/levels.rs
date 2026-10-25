@@ -1,7 +1,8 @@
 //! Checks for the shipped levels in `assets/levels/`:
 //!
 //! - every level parses and its markup is consistent (materials, doors, enemy names);
-//! - campaign / arena structure (spawns, checkpoints, encounters, exit, enemy mix);
+//! - campaign / arena structure (spawns, checkpoints, encounters, exit, enemy mix); every
+//!   `Arena` level in `assets/levels/` gets the arena checks;
 //! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry, gnats
 //!   hover in open air;
 //! - jump pads land somewhere solid;
@@ -11,7 +12,9 @@
 //! - chaotic players never leave the level;
 //! - traversability: waypoint-following bots driven through the real movement code
 //!   (`shared::movement::step`) walk the whole critical path from every spawn and every
-//!   checkpoint to the exit with doors open, using only running, jumping, sliding and pads.
+//!   checkpoint to the exit with doors open, using only running, jumping, sliding and pads;
+//!   every arena has a full lap through its ramps, pads, tunnels and catwalks, and scripted
+//!   checks for its movement-tech spots (wall-jump shafts, slide routes).
 //!
 //! `cargo test -p shared --test levels -- --nocapture` prints route times (par suggestions).
 
@@ -28,7 +31,13 @@ use shared::tuning::MovementTuning;
 const DT: f32 = 1.0 / 60.0;
 const CAMPAIGN: &str = "crucible_of_veins";
 const ARENA: &str = "cistern_nine";
-const SHIPPED: [&str; 2] = [CAMPAIGN, ARENA];
+const KNELL: &str = "knell_yard";
+const INGOT: &str = "ingot_run";
+/// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
+/// the shipping checks (see [`shipped`]).
+const SHIPPED: [&str; 4] = [CAMPAIGN, ARENA, KNELL, INGOT];
+/// Test levels that aren't held to the shipping standards.
+const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 const ENEMIES: [&str; 4] = ["husk", "spitter", "gnat", "bastion"];
 const MATERIALS: [&str; 14] = [
     "concrete", "brick", "metal", "rust", "grate", "flesh", "bone", "lava", "tile", "wood",
@@ -59,6 +68,23 @@ fn all_level_names() -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+/// Every shipped level: everything in `assets/levels/` except the playgrounds.
+fn shipped() -> Vec<String> {
+    all_level_names().into_iter().filter(|n| !PLAYGROUNDS.contains(&n.as_str())).collect()
+}
+
+/// Every shipped deathmatch arena.
+fn arenas() -> Vec<(String, LevelDef)> {
+    shipped()
+        .into_iter()
+        .map(|n| {
+            let level = load(&n);
+            (n, level)
+        })
+        .filter(|(_, l)| l.kind == LevelKind::Arena)
+        .collect()
 }
 
 fn collision(level: &LevelDef, doors_open: Option<bool>) -> LevelCollision {
@@ -142,7 +168,7 @@ fn every_level_parses_with_consistent_markup() {
         let level = load(&name);
         // (Only our shipped levels are held to "every brush has volume"; the movement test
         // level has a deliberate zero-height bottom stair.)
-        let strict = SHIPPED.contains(&name.as_str());
+        let strict = !PLAYGROUNDS.contains(&name.as_str());
         for (i, b) in level.brushes.iter().enumerate() {
             assert!(
                 !strict || (b.max - b.min).min_element() > 0.0,
@@ -185,8 +211,8 @@ fn every_level_parses_with_consistent_markup() {
 
 #[test]
 fn shipped_levels_fit_the_budget_and_have_a_safety_net() {
-    for name in SHIPPED {
-        let level = load(name);
+    for name in shipped() {
+        let level = load(&name);
         assert!(
             level.brushes.len() < MAX_BRUSHES,
             "{name}: {} brushes (budget {MAX_BRUSHES})",
@@ -272,27 +298,64 @@ fn campaign_structure() {
 
 #[test]
 fn arena_structure() {
-    let level = load(ARENA);
-    assert_eq!(level.kind, LevelKind::Arena);
-    assert!(level.spawns.len() >= 8, "8+ deathmatch spawns");
-    assert!(level.encounters.is_empty() && level.exit.is_none() && level.checkpoints.is_empty());
-    assert!(level.doors.is_empty(), "no doors in the arena");
-    assert!(level.jump_pads.len() >= 2, "jump pads");
-    for (i, a) in level.spawns.iter().enumerate() {
-        for b in &level.spawns[i + 1..] {
-            let d = a.position.distance(b.position);
-            assert!(d >= 10.0, "spawns {} and {} only {d:.1} m apart", a.position, b.position);
+    let arenas = arenas();
+    for a in [ARENA, KNELL, INGOT] {
+        assert!(arenas.iter().any(|(n, _)| n == a), "{a} should be an arena");
+    }
+    for (name, level) in &arenas {
+        assert!(level.spawns.len() >= 8, "{name}: 8+ deathmatch spawns");
+        assert!(
+            level.encounters.is_empty() && level.exit.is_none() && level.checkpoints.is_empty(),
+            "{name}: no encounters, exit or checkpoints"
+        );
+        assert!(level.doors.is_empty(), "{name}: no doors in an arena");
+        assert!(level.jump_pads.len() >= 2, "{name}: jump pads");
+        assert_eq!(level.par_time, 0.0, "{name}: deathmatch arenas have no par time");
+        assert_eq!(level.environment.music, "arena", "{name}: arena music");
+        let (lo, hi) = level_bounds(level);
+        // A hazard inside the arena (not just the safety net under the world).
+        assert!(level.kill_volumes.iter().any(|k| k.max.y > lo.y), "{name}: no kill hazard");
+        // An invisible clip ceiling over the whole arena, well above every spawn.
+        let top_spawn = level.spawns.iter().map(|s| s.position.y).fold(f32::MIN, f32::max);
+        assert!(
+            level.brushes.iter().any(|b| {
+                b.clip_only
+                    && b.min.x <= lo.x
+                    && b.min.z <= lo.z
+                    && b.max.x >= hi.x
+                    && b.max.z >= hi.z
+                    && b.min.y >= top_spawn + 15.0
+            }),
+            "{name}: no clip ceiling over the arena"
+        );
+        for (i, a) in level.spawns.iter().enumerate() {
+            for b in &level.spawns[i + 1..] {
+                let d = a.position.distance(b.position);
+                assert!(d >= 10.0, "{name}: spawns {} and {} only {d:.1} m apart", a.position, b.position);
+            }
+        }
+        // Spawns spread over the arena: every quadrant (around the middle of the level) has
+        // one, there are 3+ heights, and each one faces into the arena.
+        let mid = (lo + hi) * 0.5;
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            assert!(
+                level.spawns.iter().any(|s| (s.position.x - mid.x) * sx > 0.0 && (s.position.z - mid.z) * sz > 0.0),
+                "{name}: no spawn in quadrant ({sx}, {sz})"
+            );
+        }
+        let heights: HashSet<i32> = level.spawns.iter().map(|s| s.position.y.round() as i32).collect();
+        assert!(heights.len() >= 3, "{name}: spawns on 3+ levels: {heights:?}");
+        for s in &level.spawns {
+            let look = shared::input::look_dir(s.yaw.to_radians(), 0.0);
+            let inward = Vec3::new(mid.x - s.position.x, 0.0, mid.z - s.position.z).normalize_or_zero();
+            assert!(
+                look.dot(inward) > 0.5,
+                "{name}: spawn at {} (yaw {}) faces away from the arena",
+                s.position,
+                s.yaw
+            );
         }
     }
-    // Spawns spread over the arena: every quadrant has one, and there are 3+ heights.
-    for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-        assert!(
-            level.spawns.iter().any(|s| s.position.x * sx > 0.0 && s.position.z * sz > 0.0),
-            "no spawn in quadrant ({sx}, {sz})"
-        );
-    }
-    let heights: HashSet<i32> = level.spawns.iter().map(|s| s.position.y.round() as i32).collect();
-    assert!(heights.len() >= 3, "spawns on 3+ levels: {heights:?}");
 }
 
 // ------------------------------------------------------------------------------------------
@@ -333,8 +396,8 @@ fn check_player_spot(level: &LevelDef, world: &CollisionWorld, p: Vec3, what: &s
 
 #[test]
 fn player_and_checkpoint_spawns_are_valid() {
-    for name in SHIPPED {
-        let level = load(name);
+    for name in shipped() {
+        let level = load(&name);
         // Closed doors must not overlap spawn points either.
         for doors in [None, Some(false)] {
             let col = collision(&level, doors);
@@ -415,8 +478,8 @@ fn enemy_spawns_are_valid() {
 #[test]
 fn jump_pads_land_on_higher_ground() {
     let t = MovementTuning::default();
-    for name in SHIPPED {
-        let level = load(name);
+    for name in shipped() {
+        let level = load(&name);
         let col = collision(&level, Some(true));
         let env = MoveEnv { world: &col.world, jump_pads: &level.jump_pads };
         for (i, pad) in level.jump_pads.iter().enumerate() {
@@ -455,8 +518,8 @@ fn jump_pads_land_on_higher_ground() {
 
 #[test]
 fn no_coplanar_faces_of_different_materials() {
-    for name in SHIPPED {
-        let level = load(name);
+    for name in shipped() {
+        let level = load(&name);
         let brushes: Vec<&Brush> = level
             .brushes
             .iter()
@@ -609,7 +672,9 @@ fn par_times() {
         "campaign par time {} s",
         campaign.par_time
     );
-    assert_eq!(load(ARENA).par_time, 0.0, "deathmatch arenas have no par time");
+    for (name, level) in arenas() {
+        assert_eq!(level.par_time, 0.0, "{name}: deathmatch arenas have no par time");
+    }
 }
 
 #[test]
@@ -659,14 +724,14 @@ fn campaign_compartments_are_sealed_when_doors_close() {
 }
 
 #[test]
-fn arena_is_sealed() {
-    let level = load(ARENA);
-    let col = collision(&level, None);
-    let (lo, hi) = level_bounds(&level);
-    for s in level.spawns.iter().take(1) {
-        let cells = flood(&col.world, s.position + Vec3::Y, (lo - Vec3::ONE, hi + Vec3::ONE), &[])
-            .unwrap_or_else(|e| panic!("arena leaks: {e}"));
-        println!("arena: {cells} free cells");
+fn arenas_are_sealed() {
+    for (name, level) in arenas() {
+        let col = collision(&level, None);
+        let (lo, hi) = level_bounds(&level);
+        let start = level.spawns[0].position + Vec3::Y;
+        let cells = flood(&col.world, start, (lo - Vec3::ONE, hi + Vec3::ONE), &[])
+            .unwrap_or_else(|e| panic!("{name} leaks: {e}"));
+        println!("{name}: {cells} free cells");
     }
 }
 
@@ -714,6 +779,8 @@ struct Bot<'a> {
     /// Volumes entered (by label), in order of first entry.
     entered: Vec<String>,
     marks: Vec<(String, Volume)>,
+    /// Jump pads fired (indices, in order of first use).
+    pads: Vec<u16>,
 }
 
 impl<'a> Bot<'a> {
@@ -741,6 +808,7 @@ impl<'a> Bot<'a> {
             trail: VecDeque::new(),
             entered: Vec::new(),
             marks,
+            pads: Vec::new(),
         };
         bot.mark();
         bot
@@ -760,6 +828,9 @@ impl<'a> Bot<'a> {
         self.ticks += 1;
         let input = PlayerInput { seq: self.seq, ..input };
         let ev = movement::step(&mut self.s, &input, &self.env, &self.t, DT);
+        if let Some(i) = ev.jump_pad.filter(|i| !self.pads.contains(i)) {
+            self.pads.push(i);
+        }
         self.trail.push_back(self.s.position);
         if self.trail.len() > 12 {
             self.trail.pop_front();
@@ -1034,45 +1105,167 @@ fn campaign_alternate_routes_are_traversable() {
     }
 }
 
+/// A full lap of every arena: (level, start spawn, waypoints, distinct pads it must take).
+fn arena_laps() -> Vec<(&'static str, usize, Vec<Wp>, usize)> {
+    vec![
+        // Cistern Nine: NW tower, north catwalk, NE tower, ramp down, east slide tunnel into
+        // the bowl, pad onto the core, south ramp out, SE tower, south catwalk, SW tower, ramp
+        // down, west slide tunnel, pad onto the core again.
+        (
+            ARENA,
+            0,
+            vec![
+                run(-26.0, 6.0, -34.5),
+                run(26.0, 6.0, -34.5),
+                run(32.0, 6.0, -30.0),
+                run(34.0, 3.0, -19.0),
+                run(34.0, 0.0, -8.0),
+                run(30.0, 0.0, 0.0),
+                run(27.0, 0.0, 0.0),
+                slide(14.0, -3.0, 0.0),
+                pad(9.25, -3.0, 0.0),
+                run(0.0, 4.0, 0.0),
+                run(-6.0, -3.0, 6.0),
+                run(0.0, -3.0, 7.0),
+                run(0.0, 0.0, 17.0),
+                run(10.0, 0.0, 18.0),
+                run(34.0, 0.0, 9.0),
+                run(34.0, 6.0, 30.0),
+                run(26.0, 6.0, 34.5),
+                run(-26.0, 6.0, 34.5),
+                run(-32.0, 6.0, 30.0),
+                run(-34.0, 3.0, 19.0),
+                run(-34.0, 0.0, 8.0),
+                run(-30.0, 0.0, 0.0),
+                run(-27.0, 0.0, 0.0),
+                slide(-14.0, -3.0, 0.0),
+                pad(-9.25, -3.0, 0.0),
+                run(0.0, 4.0, 0.0),
+            ],
+            2,
+        ),
+        // Knell Yard, all four quarters of the pinwheel: north shed roof, down the north ramp,
+        // kiln pad onto the kiln roof, over the flask rack onto the east shed roof, east deck
+        // bridge, corner pad onto the crown, off it onto the west deck bridge, west shed roof,
+        // down the west ramp, moat pad onto the deck,
+        // south deck bridge, south shed roof, down the south ramp, south moat bridge through
+        // the arcade and out over the east one, slide under the east casting table straight
+        // onto the south-east kiln pad.
+        (
+            KNELL,
+            1,
+            vec![
+                run(4.0, 5.0, -22.0),
+                run(15.5, 0.0, -22.0),
+                run(15.0, 0.0, -18.5),
+                pad(12.5, 0.0, -12.5),
+                run(20.5, 7.5, -20.5),
+                run(22.0, 5.0, -7.0),
+                run(21.5, 5.0, -2.75),
+                run(8.0, 5.0, -2.75),
+                run(5.5, 5.0, 2.0),
+                pad(6.2, 5.0, 6.2),
+                run(1.5, 10.0, 1.5),
+                run(-12.0, 5.0, 2.75),
+                run(-19.0, 5.0, 2.75),
+                run(-22.0, 5.0, -4.0),
+                run(-22.0, 0.0, -15.5),
+                run(-18.5, 0.0, -11.0),
+                run(-17.0, 0.0, -3.0),
+                pad(-12.3, 0.0, -0.1),
+                run(-5.5, 5.0, 2.0),
+                run(-4.8, 5.0, 4.8),
+                run(2.75, 5.0, 5.5),
+                run(2.75, 5.0, 19.0),
+                run(-4.0, 5.0, 22.0),
+                run(-15.5, 0.0, 22.0),
+                run(-15.0, 0.0, 19.0),
+                run(-11.0, 0.0, 18.8),
+                run(-5.5, 0.0, 19.0),
+                run(-3.0, 0.0, 11.0),
+                run(-3.0, 0.0, 7.0),
+                run(-3.0, 0.0, 3.0),
+                run(3.0, 0.0, 3.0),
+                run(8.0, 0.0, 3.0),
+                run(15.0, 0.0, 2.0),
+                run(15.0, 0.0, 4.5),
+                slide(15.0, 0.0, 11.5),
+                pad(12.5, 0.0, 12.5),
+                run(20.5, 7.5, 20.5),
+            ],
+            4,
+        ),
+        // Ingot Run, end to end three ways: east walkway, the whole crane gantry west, west
+        // walkway, down the west ramp, into the ingot trough and slide its whole length east
+        // (cooling beds, the duct under the slag), up the trough ramp, furnace pad onto the
+        // furnace, over the walkway down to the casting floor, east floor pad onto the
+        // gantry, off it and up again with the west floor pad, over the pour bridge, step
+        // crate onto the east ladle stand.
+        (
+            INGOT,
+            0,
+            vec![
+                run(41.0, 7.0, -18.0),
+                run(34.0, 7.0, -19.0),
+                run(28.0, 7.0, -19.0),
+                run(18.0, 7.0, -17.0),
+                run(-18.0, 7.0, -17.0),
+                run(-28.0, 7.0, -19.0),
+                run(-34.0, 7.0, -19.0),
+                run(-41.0, 7.0, -17.0),
+                run(-41.0, 7.0, 11.0),
+                run(-38.0, 7.0, 12.0),
+                run(-25.0, 0.0, 12.0),
+                run(-33.0, 0.0, 15.0),
+                run(-40.5, -1.5, 18.0),
+                run(-37.0, -1.5, 18.0),
+                slide(-10.0, -1.5, 18.0),
+                slide(10.0, -1.5, 18.0),
+                slide(38.0, -1.5, 18.0),
+                run(46.0, 0.0, 18.0),
+                pad(45.5, 0.0, 9.5),
+                run(45.5, 11.0, 5.0),
+                run(30.0, 0.0, 0.0),
+                run(20.0, 0.0, -6.0),
+                pad(10.2, 0.0, -9.0),
+                run(6.0, 7.0, -18.0),
+                run(-14.0, 7.0, -17.0),
+                run(-14.0, 0.0, -6.0),
+                pad(-10.2, 0.0, -9.0),
+                run(-6.0, 7.0, -17.0),
+                run(-6.0, 0.0, -6.0),
+                run(-13.0, 0.0, -5.0),
+                run(-13.0, 0.0, 0.0),
+                run(-4.0, 3.0, 0.0),
+                run(4.0, 3.0, 0.0),
+                run(13.0, 0.0, 0.0),
+                run(12.5, 0.0, 6.0),
+                run(14.25, 1.2, 6.0),
+                run(17.0, 3.0, 5.5),
+            ],
+            3,
+        ),
+    ]
+}
+
 #[test]
-fn arena_loop_is_traversable() {
-    let level = load(ARENA);
-    let col = collision(&level, None);
-    // A full lap: NW tower, north catwalk, NE tower, ramp down, east slide tunnel into the
-    // bowl, pad onto the core, south ramp out, SE tower, south catwalk, SW tower, ramp down,
-    // west slide tunnel, pad onto the core again.
-    let lap = vec![
-        run(-26.0, 6.0, -34.5),
-        run(26.0, 6.0, -34.5),
-        run(32.0, 6.0, -30.0),
-        run(34.0, 3.0, -19.0),
-        run(34.0, 0.0, -8.0),
-        run(30.0, 0.0, 0.0),
-        run(27.0, 0.0, 0.0),
-        slide(14.0, -3.0, 0.0),
-        pad(9.25, -3.0, 0.0),
-        run(0.0, 4.0, 0.0),
-        run(-6.0, -3.0, 6.0),
-        run(0.0, -3.0, 7.0),
-        run(0.0, 0.0, 17.0),
-        run(10.0, 0.0, 18.0),
-        run(34.0, 0.0, 9.0),
-        run(34.0, 6.0, 30.0),
-        run(26.0, 6.0, 34.5),
-        run(-26.0, 6.0, 34.5),
-        run(-32.0, 6.0, 30.0),
-        run(-34.0, 3.0, 19.0),
-        run(-34.0, 0.0, 8.0),
-        run(-30.0, 0.0, 0.0),
-        run(-27.0, 0.0, 0.0),
-        slide(-14.0, -3.0, 0.0),
-        pad(-9.25, -3.0, 0.0),
-        run(0.0, 4.0, 0.0),
-    ];
-    let s = level.spawns[0];
-    let mut bot = Bot::new(&level, &col, s.position);
-    bot.follow(&lap, 12.0).unwrap_or_else(|e| panic!("arena lap: {e}"));
-    println!("arena lap: {:.1} s", bot.seconds());
+fn arena_laps_are_traversable() {
+    let laps = arena_laps();
+    for (name, _) in arenas() {
+        assert!(laps.iter().any(|l| l.0 == name), "{name}: no traversal lap");
+    }
+    for (name, start, lap, min_pads) in laps {
+        let level = load(name);
+        let col = collision(&level, None);
+        let mut bot = Bot::new(&level, &col, level.spawns[start].position);
+        bot.follow(&lap, 12.0).unwrap_or_else(|e| panic!("{name} lap: {e}"));
+        assert!(
+            bot.pads.len() >= min_pads,
+            "{name}: the lap took pads {:?}, expected {min_pads}+",
+            bot.pads
+        );
+        println!("{name} lap: {:.1} s (pads {:?})", bot.seconds(), bot.pads);
+    }
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1188,6 +1381,136 @@ fn advanced_shortcuts_work() {
     );
 }
 
+/// Slides from `start` along `dir` (crouch held from the 5th tick) until `done` or 600 ticks;
+/// returns the state, the slowest horizontal speed once sliding, and the seconds taken.
+fn slide_run(level: &LevelDef, col: &LevelCollision, start: Vec3, dir: Vec3, done: impl Fn(Vec3) -> bool) -> (MoveState, f32, f32) {
+    let t = MovementTuning::default();
+    let env = MoveEnv { world: &col.world, jump_pads: &level.jump_pads };
+    let mut s = MoveState::spawn(start);
+    let mut slowest = f32::MAX;
+    let mut ticks = 0;
+    for seq in 1..=600u32 {
+        let b = if seq > 5 { Buttons::CROUCH } else { Buttons::NONE };
+        let mut input = input_towards(dir, b);
+        input.seq = seq;
+        movement::step(&mut s, &input, &env, &t, DT);
+        assert!(!in_kill_volume(level, s.position), "{}: slide from {start} hit a kill volume at {}", level.name, s.position);
+        if s.is_sliding() {
+            slowest = slowest.min(s.horizontal_speed());
+        }
+        ticks = seq;
+        if done(s.position) {
+            break;
+        }
+    }
+    (s, slowest, ticks as f32 * DT)
+}
+
+/// Runs (no crouch) from `start` along `dir` for `secs`; returns the final state.
+fn run_for(level: &LevelDef, col: &LevelCollision, start: Vec3, dir: Vec3, secs: f32) -> MoveState {
+    let t = MovementTuning::default();
+    let env = MoveEnv { world: &col.world, jump_pads: &level.jump_pads };
+    let mut s = MoveState::spawn(start);
+    for seq in 1..=(secs / DT) as u32 {
+        let mut input = input_towards(dir, Buttons::NONE);
+        input.seq = seq;
+        movement::step(&mut s, &input, &env, &t, DT);
+    }
+    s
+}
+
+/// Like [`climb_shaft`], but once above `top` it steers towards `land` (x, z) and lets go of
+/// the stick when it's above it, so it also lands on narrow ledges.
+fn climb_shaft_to(level: &LevelDef, col: &LevelCollision, start: Vec3, land: Vec3, top: f32) -> MoveState {
+    let t = MovementTuning::default();
+    let env = MoveEnv { world: &col.world, jump_pads: &level.jump_pads };
+    let mut s = MoveState::spawn(start);
+    let mut push = Vec3::ZERO;
+    let mut prev_jump = false;
+    for seq in 1..=600u32 {
+        let mut jump = false;
+        if s.on_ground && seq > 5 && s.position.y < top - 1.0 {
+            jump = !prev_jump;
+        } else if !s.on_ground && s.wall_normal != Vec3::ZERO && s.velocity.y < 3.0 && s.position.y < top + 0.5 {
+            push = Vec3::new(s.wall_normal.x, 0.0, s.wall_normal.z).normalize_or_zero();
+            jump = !prev_jump;
+        }
+        let to = Vec3::new(land.x - s.position.x, 0.0, land.z - s.position.z);
+        let dir = if s.position.y <= top + 0.3 {
+            push
+        } else if to.length() > 0.5 {
+            to.normalize()
+        } else {
+            Vec3::ZERO
+        };
+        let mut input = input_towards(dir, if jump { Buttons::JUMP } else { Buttons::NONE });
+        input.seq = seq;
+        prev_jump = jump;
+        movement::step(&mut s, &input, &env, &t, DT);
+        if s.on_ground && s.position.y > top - 0.1 {
+            break;
+        }
+    }
+    s
+}
+
+#[test]
+fn knell_yard_tech() {
+    let level = load(KNELL);
+    let col = collision(&level, None);
+
+    // Wall-jump shaft between a kiln and its flask rack, up onto the kiln roof (7.5 m). The
+    // pinwheel has four identical copies; this is the north-east one.
+    let s = climb_shaft_to(&level, &col, Vec3::new(21.0, 0.0, -13.9), Vec3::new(21.0, 0.0, -20.0), 7.5);
+    assert!(
+        s.on_ground && (s.position.y - 7.5).abs() < 0.05 && s.position.z < -16.8,
+        "kiln shaft should reach the kiln roof, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // Casting tables are slide-only: running into one stops you, sliding passes under the
+    // 1.2 m gap at full slide speed.
+    let start = Vec3::new(3.5, 0.0, -15.0);
+    let s = run_for(&level, &col, start, Vec3::X, 1.0);
+    assert!(s.position.x < 7.0 && s.position.y < 0.1, "a runner should be stopped by the casting table, got {}", s.position);
+    let (s, slowest, secs) = slide_run(&level, &col, start, Vec3::X, |p| p.x > 11.5);
+    assert!(s.position.x > 11.5 && s.position.y.abs() < 0.1, "slide under the casting table, got {}", s.position);
+    assert!(slowest >= 23.9, "the slide under the table slowed to {slowest:.1} m/s");
+    println!("knell yard: casting-table slide {secs:.2} s");
+}
+
+#[test]
+fn ingot_run_tech() {
+    let level = load(INGOT);
+    let col = collision(&level, None);
+
+    // Wall-jump shaft between the ingot racks up onto the crane gantry (7 m).
+    let s = climb_shaft_to(&level, &col, Vec3::new(20.4, 0.0, -13.5), Vec3::new(21.75, 0.0, -18.0), 7.0);
+    assert!(
+        s.on_ground && (s.position.y - 7.0).abs() < 0.05 && s.position.z < -16.0,
+        "rack shaft should reach the gantry, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+    // Wall-jump shaft between the furnace and the buttress up onto the end walkway (7 m).
+    let s = climb_shaft_to(&level, &col, Vec3::new(45.5, 0.0, -10.1), Vec3::new(41.0, 0.0, -8.75), 7.0);
+    assert!(
+        s.on_ground && (s.position.y - 7.0).abs() < 0.05 && s.position.x < 43.0,
+        "furnace shaft should reach the end walkway, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // The ingot trough: one slide from the west tapping floor to the east one, under both
+    // cooling beds and through the duct below the slag, never slower than a slide.
+    let (s, slowest, secs) = slide_run(&level, &col, Vec3::new(-46.0, 0.0, 18.0), Vec3::X, |p| p.x > 44.5);
+    assert!(s.position.x > 44.5 && s.position.y.abs() < 0.1, "trough slide should reach the east end, got {}", s.position);
+    assert!(slowest >= 23.9, "the trough slide slowed to {slowest:.1} m/s");
+    assert!(secs < 4.5, "the end-to-end slide took {secs:.2} s");
+    println!("ingot run: end-to-end trough slide {secs:.2} s (slowest {slowest:.1} m/s)");
+}
+
 // ------------------------------------------------------------------------------------------
 // Chaos
 
@@ -1209,8 +1532,8 @@ impl Rng {
 #[test]
 fn chaotic_players_never_leave_the_level() {
     let t = MovementTuning::default();
-    for name in SHIPPED {
-        let level = load(name);
+    for name in shipped() {
+        let level = load(&name);
         let (lo, hi) = level_bounds(&level);
         for doors in [Some(true), Some(false)] {
             let col = collision(&level, doors);
