@@ -17,62 +17,104 @@ pub struct Tuning {
     pub net: NetTuning,
 }
 
-/// Player movement. Distances in metres, speeds in m/s, times in seconds, angles in degrees.
+/// Player movement. Distances in metres, speeds in m/s, accelerations in m/s², times in
+/// seconds, angles in degrees. See `docs/movement.md` for what each value does and why it has
+/// its default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MovementTuning {
     // Body
     pub radius: f32,
     pub standing_height: f32,
+    /// Capsule height while sliding (and while stuck crouched under a low ceiling).
     pub slide_height: f32,
     pub eye_height: f32,
     pub slide_eye_height: f32,
+    /// Ledges up to this height are climbed automatically while on the ground; also the
+    /// maximum distance the player is snapped down to stay on the ground (stairs, ramps).
     pub step_height: f32,
+    /// Steeper surfaces are not ground: you slide off them and can't walk up them.
     pub max_ground_slope_degrees: f32,
 
     // Ground / air
     pub ground_speed: f32,
+    /// Acceleration towards the wish velocity (also used for braking and turning).
     pub ground_accel: f32,
+    /// How fast speed above `ground_speed` bleeds off while running with input held.
+    pub ground_overspeed_decel: f32,
+    /// Quake-style friction, applied only when there is no movement input.
     pub ground_friction: f32,
+    /// Below this speed friction acts as if moving at this speed (quick final stop).
+    pub ground_stop_speed: f32,
     pub air_accel: f32,
+    /// Air control accelerates up to this speed; it never reduces speed above it.
     pub air_max_speed: f32,
     pub gravity: f32,
     pub max_fall_speed: f32,
+    /// Hard cap on total speed (safety net for stacked explosions).
+    pub max_speed: f32,
     pub jump_speed: f32,
     pub coyote_time: f32,
     pub jump_buffer_time: f32,
+    /// Horizontal distance between footstep events while walking.
+    pub footstep_stride: f32,
 
     // Dash
     pub dash_speed: f32,
     pub dash_duration: f32,
+    /// Invulnerability granted when a dash starts.
+    pub dash_invuln_time: f32,
     pub dash_charges: f32,
     /// Charges regenerated per second.
     pub dash_regen_rate: f32,
+    /// Horizontal speed kept when a dash ends normally (or the speed you dashed in with, if
+    /// that was higher).
+    pub dash_end_speed: f32,
     /// Fraction of dash speed kept when jumping out of a dash.
     pub dash_jump_keep: f32,
 
     // Slide
     pub slide_min_speed: f32,
+    /// Slopes can't accelerate a slide beyond this (entry speed above it is kept).
+    pub slide_max_speed: f32,
+    /// Steering rate with full sideways input.
+    pub slide_steer_degrees: f32,
+    /// Downhill acceleration as a fraction of gravity × sin(slope).
+    pub slide_slope_accel: f32,
+    /// Multiplier on horizontal speed when jumping out of a slide.
     pub slide_jump_boost: f32,
 
     // Slam
     pub slam_speed: f32,
+    /// Pressing crouch closer than this to the ground doesn't slam (you slide on landing).
+    pub slam_min_height: f32,
+    /// Fraction of horizontal speed kept when a slam starts.
+    pub slam_horizontal_keep: f32,
+    /// Slam fall height that gives full power (1.0) to the landing shockwave and bounce.
+    pub slam_full_power_height: f32,
     pub slam_bounce_window: f32,
     pub slam_bounce_speed: f32,
+    /// Extra bounce speed at full slam power.
+    pub slam_bounce_power_bonus: f32,
+    /// Used by the server for the landing shockwave.
     pub slam_shockwave_radius: f32,
 
     // Walls
     pub wall_jumps: u32,
     pub wall_jump_up_speed: f32,
     pub wall_jump_out_speed: f32,
+    /// Extra speed in the input direction (along/away from the wall) on a wall jump.
+    pub wall_jump_input_speed: f32,
     pub wall_cling_max_fall_speed: f32,
     pub wall_detect_distance: f32,
 
     // Camera feel (client only)
     pub fov_kick_degrees: f32,
+    /// Speed at which the full FOV kick is reached (starts at `ground_speed`).
     pub fov_kick_speed: f32,
     pub slide_tilt_degrees: f32,
     pub wall_tilt_degrees: f32,
+    /// Eye dip (metres) for a hard landing.
     pub landing_dip: f32,
 }
 
@@ -84,44 +126,58 @@ impl Default for MovementTuning {
             slide_height: 0.9,
             eye_height: 1.6,
             slide_eye_height: 0.75,
-            step_height: 0.4,
+            step_height: 0.45,
             max_ground_slope_degrees: 50.0,
 
             ground_speed: 16.0,
             ground_accel: 160.0,
-            ground_friction: 12.0,
+            ground_overspeed_decel: 30.0,
+            ground_friction: 10.0,
+            ground_stop_speed: 4.0,
             air_accel: 70.0,
             air_max_speed: 16.0,
             gravity: 38.0,
             max_fall_speed: 90.0,
+            max_speed: 150.0,
             jump_speed: 14.0,
             coyote_time: 0.12,
             jump_buffer_time: 0.12,
+            footstep_stride: 2.6,
 
             dash_speed: 48.0,
             dash_duration: 0.17,
+            dash_invuln_time: 0.2,
             dash_charges: 3.0,
             dash_regen_rate: 0.85,
+            dash_end_speed: 20.0,
             dash_jump_keep: 0.6,
 
             slide_min_speed: 24.0,
+            slide_max_speed: 60.0,
+            slide_steer_degrees: 70.0,
+            slide_slope_accel: 1.0,
             slide_jump_boost: 1.0,
 
-            slam_speed: 85.0,
+            slam_speed: 75.0,
+            slam_min_height: 1.0,
+            slam_horizontal_keep: 0.0,
+            slam_full_power_height: 15.0,
             slam_bounce_window: 0.2,
-            slam_bounce_speed: 24.0,
+            slam_bounce_speed: 21.0,
+            slam_bounce_power_bonus: 5.0,
             slam_shockwave_radius: 6.0,
 
             wall_jumps: 3,
             wall_jump_up_speed: 13.0,
-            wall_jump_out_speed: 13.0,
+            wall_jump_out_speed: 11.0,
+            wall_jump_input_speed: 4.0,
             wall_cling_max_fall_speed: 4.0,
-            wall_detect_distance: 0.25,
+            wall_detect_distance: 0.4,
 
             fov_kick_degrees: 10.0,
             fov_kick_speed: 45.0,
             slide_tilt_degrees: 4.0,
-            wall_tilt_degrees: 6.0,
+            wall_tilt_degrees: 7.0,
             landing_dip: 0.25,
         }
     }

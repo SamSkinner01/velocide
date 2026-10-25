@@ -12,10 +12,10 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use glam::{Quat, Vec3};
+use glam::{Mat3, Quat, Vec3};
 use parry3d::math::Pose;
 use parry3d::query::{self, Ray, ShapeCastOptions};
-use parry3d::shape::{Shape, SharedShape};
+use parry3d::shape::{Cuboid, Shape, SharedShape};
 
 /// Solid level geometry: blocks players, enemies, projectiles and bullets.
 pub const GROUP_WORLD: u32 = 1 << 0;
@@ -30,6 +30,9 @@ pub const MASK_MOVEMENT: u32 = GROUP_WORLD | GROUP_PLAYER_CLIP | GROUP_DOOR;
 pub const MASK_SHOTS: u32 = GROUP_WORLD | GROUP_DOOR;
 
 const CELL_SIZE: f32 = 8.0;
+
+/// Margin around the query region kept when clipping large boxes (see [`clip_box`]).
+const CLIP_MARGIN: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ColliderId(pub u32);
@@ -196,13 +199,15 @@ impl CollisionWorld {
 
         let mut best: Option<SweepHit> = None;
         self.for_each_candidate(lo, hi, mask, |id, collider| {
+            let clipped = clip_box(collider, lo, hi);
+            let (shape2, pose2) = query_shape(collider, &clipped);
             let Ok(Some(hit)) = query::cast_shapes(
                 &start_pose,
                 motion,
                 shape,
-                &collider.pose,
+                pose2,
                 Vec3::ZERO,
-                collider.shape.as_ref(),
+                shape2,
                 options,
             ) else {
                 return;
@@ -340,7 +345,9 @@ impl CollisionWorld {
         let mut hit = false;
         self.for_each_candidate(aabb.mins, aabb.maxs, mask, |_, collider| {
             if !hit {
-                hit = query::intersection_test(&pose, shape, &collider.pose, collider.shape.as_ref())
+                let clipped = clip_box(collider, aabb.mins, aabb.maxs);
+                let (shape2, pose2) = query_shape(collider, &clipped);
+                hit = query::intersection_test(&pose, shape, pose2, shape2)
                     .is_ok_and(|r| r.intersecting);
             }
         });
@@ -366,9 +373,9 @@ impl CollisionWorld {
         let hi = aabb.maxs + Vec3::splat(prediction);
         let mut out = Vec::new();
         self.for_each_candidate(lo, hi, mask, |id, collider| {
-            if let Ok(Some(c)) =
-                query::contact(&pose, shape, &collider.pose, collider.shape.as_ref(), prediction)
-            {
+            let clipped = clip_box(collider, lo, hi);
+            let (shape2, pose2) = query_shape(collider, &clipped);
+            if let Ok(Some(c)) = query::contact(&pose, shape, pose2, shape2, prediction) {
                 out.push(ContactInfo {
                     // normal1 points from the query shape towards the obstacle.
                     normal: (-c.normal1).normalize_or(Vec3::Y),
@@ -424,6 +431,45 @@ impl CollisionWorld {
                 f(id, c);
             }
         }
+    }
+}
+
+/// GJK-based queries (shape casts, contacts, intersections) lose precision with large shapes
+/// because their tolerances scale with the shapes' extents: against a 400 m floor brush a
+/// capsule sweep that starts already penetrating can report no hit at all, and contact normals
+/// come back off by several degrees. A query only cares about the part of a box near it, so
+/// boxes are clipped (in their own frame) to the query region grown by [`CLIP_MARGIN`]. The
+/// clipped-away faces lie outside anything the query can touch, so results are unchanged
+/// except for precision. Returns `None` when clipping isn't needed.
+fn clip_box(collider: &Collider, lo: Vec3, hi: Vec3) -> Option<(Cuboid, Pose)> {
+    let he = collider.shape.as_cuboid()?.half_extents;
+    let half = (hi - lo) * 0.5 + Vec3::splat(CLIP_MARGIN);
+    let local_center = collider.pose.inverse_transform_point((lo + hi) * 0.5);
+    let to_local = Mat3::from_quat(collider.pose.rotation.inverse());
+    let local_half = Vec3::new(
+        to_local.row(0).abs().dot(half),
+        to_local.row(1).abs().dot(half),
+        to_local.row(2).abs().dot(half),
+    );
+    let clo = (local_center - local_half).max(-he);
+    let chi = (local_center + local_half).min(he);
+    if clo.cmpge(chi).any() || (clo.cmple(-he) & chi.cmpge(he)).all() {
+        return None;
+    }
+    let center = (clo + chi) * 0.5;
+    Some((
+        Cuboid::new((chi - clo) * 0.5),
+        collider.pose * Pose::from_translation(center),
+    ))
+}
+
+fn query_shape<'a>(
+    collider: &'a Collider,
+    clipped: &'a Option<(Cuboid, Pose)>,
+) -> (&'a dyn Shape, &'a Pose) {
+    match clipped {
+        Some((cuboid, pose)) => (cuboid, pose),
+        None => (collider.shape.as_ref(), &collider.pose),
     }
 }
 
@@ -510,6 +556,35 @@ mod tests {
         let hit = w
             .cast_ray(Vec3::new(-19.0, 1.0, 0.0), Vec3::X, 100.0, MASK_SHOTS);
         assert!(hit.is_none());
+    }
+
+    #[test]
+    fn huge_boxes_stay_precise() {
+        // A 400 m floor: GJK on the full box misses hits that start inside the skin distance
+        // and returns badly tilted normals; clipping the box to the query keeps it exact.
+        let mut w = CollisionWorld::new();
+        w.add_box(
+            Vec3::new(0.0, -0.5, 0.0),
+            Vec3::new(200.0, 0.5, 200.0),
+            Quat::IDENTITY,
+            GROUP_WORLD,
+            0,
+        );
+        for (x, z) in [(0.0, 0.0), (-0.0035, -0.0035), (3.7, -11.3), (123.4, -77.7)] {
+            for gap in [-0.0056, -0.002, 0.002, 0.005, 0.008, 0.0099] {
+                let c = Vec3::new(x, 0.9 + gap, z);
+                let hit = w
+                    .cast_capsule(c, 0.5, 0.4, Vec3::new(0.0, -0.0106, 0.0), 0.01, MASK_MOVEMENT)
+                    .unwrap_or_else(|| panic!("missed the floor at ({x}, {gap}, {z})"));
+                assert_eq!(hit.fraction, 0.0);
+                if gap > 0.001 {
+                    assert!(hit.normal.y > 0.9999, "normal {} at gap {gap}", hit.normal);
+                }
+            }
+            let contacts = w.capsule_contacts(Vec3::new(x, 0.91, z), 0.5, 0.4, 0.02, MASK_MOVEMENT);
+            assert_eq!(contacts.len(), 1);
+            assert!(contacts[0].normal.y > 0.99999 && (contacts[0].distance - 0.01).abs() < 1e-4);
+        }
     }
 
     #[test]
