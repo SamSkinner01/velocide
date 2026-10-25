@@ -1,7 +1,22 @@
 //! VELOCIDE game client: rendering, input, prediction, interpolation, UI and audio.
 //!
-//! [`net`] is the networking core (connection, prediction/reconciliation, interpolation,
-//! clock sync, net stats, sessions); the game client is built on top of it.
+//! - [`net`]: networking core (connection, prediction/reconciliation, interpolation, clock
+//!   sync, net stats, sessions).
+//! - [`app`]: the `engine::app::Game` implementation and the screen state machine.
+//! - [`menus`]: main menu, settings screen; [`ingame`]: everything while playing.
+//! - [`settings`], [`controls`], [`ui_input`], [`cli`], [`bot`], [`frame`]: shared plumbing.
+//! - [`level_mesh`]: level geometry for the renderer.
+//!
+//! Architecture and extension points: `docs/client.md`.
 
-pub mod net;
+pub mod app;
+pub mod bot;
+pub mod cli;
+pub mod controls;
+pub mod frame;
+pub mod ingame;
 pub mod level_mesh;
+pub mod menus;
+pub mod net;
+pub mod settings;
+pub mod ui_input;

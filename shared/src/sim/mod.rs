@@ -256,6 +256,30 @@ impl SimWorld {
         self.players.remove(&id)
     }
 
+    /// Restarts the level: every player is put back at the level start (spawn points handed
+    /// out from the first one again, in player order) with fresh movement state. Returns a
+    /// `Respawned` event per player. Systems that keep level state (encounters, enemies,
+    /// pickups, doors) reset themselves here as they are added.
+    pub fn restart_level(&mut self) -> Vec<SimEvent> {
+        self.next_spawn = 0;
+        let ids: Vec<PlayerId> = self.players.keys().copied().collect();
+        let mut events = Vec::with_capacity(ids.len());
+        for id in ids {
+            let spawn = self.next_spawn_point();
+            if let Some(p) = self.players.get_mut(&id) {
+                p.movement = MoveState::spawn(spawn.position);
+                p.yaw = spawn.yaw.to_radians();
+                p.pitch = 0.0;
+                events.push(SimEvent::Respawned {
+                    player: id,
+                    position: spawn.position,
+                    yaw: p.yaw,
+                });
+            }
+        }
+        events
+    }
+
     /// External impulse (explosions, knockback): changes velocity between movement steps.
     /// Clients pick it up through reconciliation.
     pub fn apply_impulse(&mut self, id: PlayerId, delta_velocity: Vec3) {
@@ -596,6 +620,25 @@ mod tests {
         let events = w.step(&TickInputs::new(), &tuning, None);
         assert!(matches!(events[0], SimEvent::Respawned { .. }));
         assert!(w.players[&PlayerId(0)].movement.position.y > -1.0);
+    }
+
+    #[test]
+    fn restart_puts_players_back_at_the_start() {
+        let mut w = world();
+        w.add_player(PlayerId(0), "A").movement.position = Vec3::new(20.0, 3.0, 20.0);
+        w.add_player(PlayerId(1), "B").movement.velocity = Vec3::new(5.0, 0.0, 0.0);
+        let events = w.restart_level();
+        assert_eq!(events.len(), 2);
+        let spawns = &w.level.spawns;
+        assert_eq!(
+            w.players[&PlayerId(0)].movement.position,
+            spawns[0].position
+        );
+        assert_eq!(
+            w.players[&PlayerId(1)].movement.position,
+            spawns[1].position
+        );
+        assert_eq!(w.players[&PlayerId(1)].movement.velocity, Vec3::ZERO);
     }
 
     #[test]

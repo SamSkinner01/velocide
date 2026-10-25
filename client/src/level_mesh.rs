@@ -279,7 +279,11 @@ mod tests {
         assert!(!geometry.batches.is_empty());
         for (_, mesh) in &geometry.batches {
             assert!(!mesh.indices.is_empty());
-            assert!(mesh.indices.iter().all(|&i| (i as usize) < mesh.vertices.len()));
+            assert!(
+                mesh.indices
+                    .iter()
+                    .all(|&i| (i as usize) < mesh.vertices.len())
+            );
         }
         assert_eq!(geometry.doors.len(), level.doors.len());
     }

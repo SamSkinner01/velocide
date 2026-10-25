@@ -103,6 +103,12 @@ impl InputQueue {
         self.jitter
     }
 
+    /// Forget the arrival timing (after a pause, inputs resume with a gap that is not jitter).
+    pub fn reset_timing(&mut self) {
+        self.last_transit = None;
+        self.primed = false;
+    }
+
     /// Current de-jitter buffer target (inputs held back).
     pub fn target_buffer(&self) -> usize {
         ((self.jitter * 2.0).ceil() as usize).min(MAX_BUFFER_TICKS)
