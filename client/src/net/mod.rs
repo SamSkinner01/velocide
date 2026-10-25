@@ -799,6 +799,12 @@ impl NetClient {
         if self.frames.contains(snap.tick) {
             return; // duplicate
         }
+        if self.frames.is_stale(snap.tick) {
+            // Far older than the newest frame: useless, and keeping it would let late or
+            // replayed snapshots grow the buffer without bound.
+            self.stats.snapshots_dropped += 1;
+            return;
+        }
         // Effects don't depend on the entity baseline: keep them even if the delta is lost.
         let fx = std::mem::take(&mut snap.fx);
         self.receive_fx(fx);
@@ -821,7 +827,10 @@ impl NetClient {
                 return;
             }
         };
-        self.frames.insert(snap.tick, frame.clone());
+        if !self.frames.insert(snap.tick, frame.clone()) {
+            self.stats.snapshots_dropped += 1;
+            return;
+        }
         self.stats.snapshots_received += 1;
         if snap.baseline_tick.is_none() {
             self.stats.full_snapshots_received += 1;
@@ -839,7 +848,6 @@ impl NetClient {
             }
         }
         self.latest_snapshot_tick = Some(snap.tick);
-        self.frames.prune();
 
         if let Some(world) = &mut self.world {
             world.apply_replicated_level_state(&frame);
@@ -1060,6 +1068,28 @@ mod tests {
             level: proving_ground(),
         });
         assert!(c.world().is_some() && !c.is_disconnected());
+    }
+
+    #[test]
+    fn late_snapshots_cannot_grow_the_frame_buffer() {
+        let mut c = client();
+        let snapshot = |tick: u32| SnapshotMessage {
+            tick,
+            baseline_tick: None,
+            last_input_seq: 0,
+            own: None,
+            entities: protocol::encode_full(&NetFrame::default()),
+            fx: Vec::new(),
+        };
+        c.handle_snapshot(snapshot(10_000));
+        for tick in (1..10_000).rev() {
+            c.handle_snapshot(snapshot(tick));
+        }
+        let kept = interpolation::FRAME_RETENTION_TICKS as usize + 1;
+        assert_eq!(c.frames.len(), kept);
+        assert_eq!(c.stats.snapshots_received, kept as u64);
+        assert_eq!(c.stats.snapshots_dropped, 10_000 - kept as u64);
+        assert_eq!(c.latest_snapshot_tick, Some(10_000));
     }
 
     #[test]

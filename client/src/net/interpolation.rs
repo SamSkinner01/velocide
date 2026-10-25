@@ -40,8 +40,22 @@ impl SnapshotBuffer {
         Self::default()
     }
 
-    pub fn insert(&mut self, tick: u32, frame: Arc<NetFrame>) {
+    /// Stores a frame and drops frames more than [`FRAME_RETENTION_TICKS`] behind the newest.
+    /// A frame that old itself is refused (returns false): late or replayed snapshots can't
+    /// grow the buffer.
+    pub fn insert(&mut self, tick: u32, frame: Arc<NetFrame>) -> bool {
+        if self.is_stale(tick) {
+            return false;
+        }
         self.frames.insert(tick, frame);
+        self.prune();
+        true
+    }
+
+    /// Is `tick` too far behind the newest frame to be kept?
+    pub fn is_stale(&self, tick: u32) -> bool {
+        self.latest()
+            .is_some_and(|(latest, _)| tick < latest.saturating_sub(FRAME_RETENTION_TICKS))
     }
 
     pub fn get(&self, tick: u32) -> Option<&Arc<NetFrame>> {
@@ -227,6 +241,27 @@ mod tests {
 
         buf.sample(11.0, 6.0, 1.0 / 60.0, Some(NetId(1)), &mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn old_frames_are_refused_and_pruned_on_every_insert() {
+        let mut buf = SnapshotBuffer::new();
+        assert!(buf.insert(5000, frame(0.0, 0.0)));
+        // Late / replayed snapshots used to be stored (pruning only ran when a newer tick
+        // arrived), so the buffer could grow without bound.
+        for tick in (0..5000).rev() {
+            buf.insert(tick, frame(0.0, 0.0));
+            assert!(buf.len() <= FRAME_RETENTION_TICKS as usize + 1);
+        }
+        assert_eq!(buf.len(), FRAME_RETENTION_TICKS as usize + 1);
+        assert!(buf.is_stale(5000 - FRAME_RETENTION_TICKS - 1));
+        assert!(!buf.insert(5000 - FRAME_RETENTION_TICKS - 1, frame(0.0, 0.0)));
+        assert!(buf.contains(5000 - FRAME_RETENTION_TICKS));
+        // A newer frame prunes right away.
+        assert!(buf.insert(5100, frame(0.0, 0.0)));
+        // 4920..=5000 and 5100.
+        assert_eq!(buf.len(), FRAME_RETENTION_TICKS as usize + 1 - 100 + 1);
+        assert!(!buf.contains(5100 - FRAME_RETENTION_TICKS - 1));
     }
 
     #[test]
