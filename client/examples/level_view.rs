@@ -239,6 +239,14 @@ fn roofless(level: &LevelDef) -> LevelDef {
     out
 }
 
+/// A copy of the level without the brushes that lie entirely above `y` (rooms stacked over an
+/// arena hide it from a top-down camera).
+fn below(level: &LevelDef, y: f32) -> LevelDef {
+    let mut out = level.clone();
+    out.brushes.retain(|b| brush_aabb(b).0.y < y - 0.01);
+    out
+}
+
 // ------------------------------------------------------------------------------------------
 // Rendering
 
@@ -558,7 +566,14 @@ fn main() -> anyhow::Result<()> {
                 lines: &all_lines,
                 bright: true,
             };
-            let img = render_shot(&mut top, &scene, &shot)?;
+            // Without whatever is stacked above the arena (vertical levels).
+            let cut = e.arena.map_or(e.trigger.max.y, |a| a.max.y);
+            let area_scene = if level.kind == LevelKind::Campaign {
+                Some(Scene::new(&mut top, roofless(&below(&level, cut)), args.doors))
+            } else {
+                None
+            };
+            let img = render_shot(&mut top, area_scene.as_ref().unwrap_or(&scene), &shot)?;
             save(&img, &out.join(format!("area_{}_top.png", i + 1)))?;
             imgs.push(img);
             // Angled views from two high corners inside the trigger volume, looking at the
