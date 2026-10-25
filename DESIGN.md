@@ -24,6 +24,10 @@ is exactly one code path for SP, co-op and PvP.
 
 ## Conventions
 
+- **Colour:** everything is shaded in gamma space. Texture, tint, fog, clear, sprite, flash and
+  UI colours are sRGB-encoded 0..1 values; light colours are plain multipliers. Depth is
+  reverse-Z.
+
 - Right-handed, **Y up**, metres. Yaw 0 looks down **-Z**; positive yaw turns left
   (counter-clockwise from above); positive pitch looks up. `shared::input::look_dir`.
 - Player position = feet (bottom of capsule). Capsule radius 0.4, height 1.8 (0.9 sliding).
@@ -76,6 +80,8 @@ fn capture_png(&mut self, path: &Path)           // saves the next rendered fram
 fn reload_shaders(&mut self) -> Result<(), String> // from assets/shaders/*.wgsl, keeps old on error
 fn device(&self) -> &wgpu::Device; fn queue(&self) -> &wgpu::Queue; fn surface_format(&self) -> wgpu::TextureFormat
 fn window_size(&self) -> (u32, u32); fn internal_size(&self) -> (u32, u32)
+// also: free_mesh, update_texture, free_texture, font_texture, read_pixels (headless),
+// reload_shaders_from, set_shader_hot_reload, shader_error, stats, settings, adapter_name
 trait OverlayPainter { fn paint(&mut self, device, queue, encoder, target_view, size_px: [u32; 2]); }
 ```
 
@@ -99,7 +105,9 @@ converts `InputState` into `ui::UiInput`).
 Never fails to construct (silently disabled if there is no audio device). `play(Sfx, PlayParams)`,
 `play_2d`, `play_at`, `set_listener(pos, rot)`, `set_volumes(master, sfx, music)`,
 `set_music(MusicTrack)`, `set_music_intensity(f32)`, `update(dt)`. All sounds are synthesised
-at startup.
+at startup. Additions: `Audio::disabled()`, `stop(Sfx)`, `music_ready`, `active_voices`,
+`PlayParams::at/with_volume/with_pitch`. Music: 6 sample-locked stems per track; stem thresholds
+in `docs/audio.md`.
 
 ### `engine::physics::CollisionWorld`
 Static boxes / convex hulls / trimeshes in a uniform XZ grid. `cast_capsule`, `cast_sphere`,
@@ -119,5 +127,6 @@ spawns, checkpoints, doors, encounters (trigger, lock/unlock doors, waves of ene
 jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 
 ## Docs per area
-- `docs/render.md`, `docs/ui.md`, `docs/audio.md`, `docs/movement.md`, `docs/network.md`
-  (written by each area as it is built).
+- `docs/gameplay.md` — combat, enemies, style and game-mode rules with default numbers.
+- `docs/render.md`, `docs/ui.md`, `docs/audio.md`, `docs/movement.md`, `docs/network.md`,
+  `docs/models.md` (written by each area as it is built).
