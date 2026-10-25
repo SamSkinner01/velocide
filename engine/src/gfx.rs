@@ -212,6 +212,9 @@ pub struct UiQuad {
     pub max: Vec2,
     pub uv_min: Vec2,
     pub uv_max: Vec2,
+    /// sRGB-encoded colour in `0..1` (as picked in a paint program), multiplied with the
+    /// texture. The renderer blends UI in gamma space and only linearises when the output view
+    /// is an sRGB format.
     pub color: Vec4,
     pub texture: UiTexture,
 }
