@@ -4,8 +4,9 @@
 // bolts. The exposed core under the abdomen is a weak point (x2.5).
 //
 // Format: shared/src/sim/enemy/def.rs (EnemyDef), docs/combat.md and docs/enemies.md.
-// A FLYING enemy's origin is the centre of its collision capsule (the model's hover centre):
-// local offsets below are from that centre, and hover heights are measured from it.
+// Like every enemy, its position is the bottom of the collision capsule ("feet"); the hover
+// centre (the model's origin) is 0.45 m above it. Local offsets are from the feet; hover
+// heights are measured from the centre.
 (
     name: "Gnat",
     net_kind: 18,
@@ -17,12 +18,12 @@
     radius: 0.45,
     height: 0.9,
     body_top: None,
-    eye_height: 0.1,
+    eye_height: 0.55,
     step_height: 0.0,
     locomotion: Flying(min_height: 4.0, max_height: 8.0),
     knockback_scale: 1.6,
     weak_points: [
-        (name: "core", kind: Core, offset: (0.0, -0.3, 0.15), radius: 0.2, multiplier: 2.5),
+        (name: "core", kind: Core, offset: (0.0, 0.15, 0.15), radius: 0.2, multiplier: 2.5),
     ],
     armour: None,
     attacks: [
@@ -47,7 +48,7 @@
                 interval: 0.12,
                 spread: 2.5,
                 // The head emitters.
-                muzzle: (0.0, 0.05, -0.5),
+                muzzle: (0.0, 0.5, -0.5),
                 lead: 0.2,
             )),
         ),

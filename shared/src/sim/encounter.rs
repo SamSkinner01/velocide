@@ -101,7 +101,8 @@ impl SimWorld {
     /// Runs the encounter rules (start on trigger, waves, clear). Called once per tick after
     /// the world rules.
     pub(crate) fn step_encounters(&mut self, t: &Tuning) {
-        if self.level.kind != LevelKind::Campaign || self.level.encounters.is_empty() {
+        if self.level.kind != LevelKind::Campaign || self.level.encounters.is_empty() || self.frozen
+        {
             return;
         }
         let n = self.level.encounters.len();
@@ -226,8 +227,14 @@ impl SimWorld {
         let total = scaled_count(wave.spawns.len(), players);
         let points = self.wave_spawn_points(&wave.spawns, total);
         let mut ids = Vec::with_capacity(points.len());
-        for (spawn, position) in points {
+        for (spawn, mut position) in points {
             let yaw = spawn.yaw.to_radians();
+            // Flyers are authored at their hover centre; enemies are placed by their feet.
+            if let Some(def) = self.enemy_defs.get(&spawn.enemy)
+                && matches!(def.locomotion, super::enemy::Locomotion::Flying { .. })
+            {
+                position.y -= def.height.max(2.0 * def.radius) * 0.5;
+            }
             match self.spawn_enemy_scaled(&spawn.enemy, position, yaw, health) {
                 Some(id) => {
                     if let Some(e) = self.enemies.get_mut(&id) {

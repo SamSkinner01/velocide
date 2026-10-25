@@ -24,6 +24,8 @@ pub mod combat;
 mod commands;
 pub mod input_queue;
 pub mod lagcomp;
+/// Lobby / match flow: phases, host, match settings, pings (docs/lobby.md).
+pub mod lobby;
 pub mod netsim;
 pub mod transport;
 
@@ -53,6 +55,7 @@ pub use combat::FxLog;
 
 pub use input_queue::InputQueue;
 pub use lagcomp::{LagCompHistory, Rewound};
+pub use lobby::{LobbyCommand, LobbyConfig};
 pub use netsim::{NetSim, NetSimConfig};
 pub use transport::{
     NetcodeServerTransport, RateMeter, ServerTransport, TransportStats, UdpLink, connection_config,
@@ -99,6 +102,10 @@ pub struct ServerConfig {
     /// Delta-compress snapshots (disable only to measure the savings).
     pub delta_compression: bool,
     pub server_name: String,
+    /// Lobby and match flow (docs/lobby.md). Disabled by default (single-player, tests):
+    /// `level` then runs immediately. `max_players` is the initial player limit (the lobby
+    /// host can change it up to `shared::lobby::MAX_PLAYERS`).
+    pub lobby: LobbyConfig,
     /// Allow dev chat commands (`/spawn husk 3`, `/god`, `/give`...). See `docs/combat.md`.
     pub dev_commands: bool,
     /// Enemy definitions directory; `None` = `assets/enemies` (built-ins as fallback).
@@ -118,6 +125,7 @@ impl Default for ServerConfig {
             watch_tuning: true,
             delta_compression: true,
             server_name: format!("{} server", shared::GAME_NAME),
+            lobby: LobbyConfig::default(),
             dev_commands: true,
             enemies_dir: None,
         }
@@ -135,12 +143,13 @@ impl ServerConfig {
         }
     }
 
-    /// Listen server on all interfaces.
+    /// Listen server on all interfaces, starting in the lobby.
     pub fn host(port: u16, level: &str, max_players: usize) -> Self {
         Self {
             bind: SocketAddr::from(([0, 0, 0, 0], port)),
             max_players,
             level: level.to_string(),
+            lobby: LobbyConfig::enabled(),
             ..Default::default()
         }
     }
@@ -202,6 +211,8 @@ pub enum ServerCommand {
     SetPaused(bool),
     /// Put every player back at the level start (single-player instant restart).
     RestartLevel,
+    /// Lobby / match flow control without host checks (docs/lobby.md).
+    Lobby(LobbyCommand),
     /// Spawns `count` enemies of definition `name` around `position`.
     SpawnEnemy {
         name: String,
@@ -280,6 +291,8 @@ pub struct Server {
     /// Simulation frozen (single-player pause): no ticks run, no snapshots are sent, but the
     /// transport keeps flushing so the connection stays alive.
     paused: bool,
+    /// Lobby / match flow state (`lobby.rs`).
+    flow: lobby::MatchFlow,
     /// Cosmetic combat events waiting to go out in snapshots.
     fx: FxLog,
     /// Simulation events since the last `drain_sim_events` (bounded).
@@ -292,8 +305,11 @@ pub struct Server {
 impl Server {
     /// Loads the level and tuning and starts listening on `config.bind` (UDP).
     pub fn new(config: ServerConfig) -> anyhow::Result<Server> {
-        let transport =
-            NetcodeServerTransport::new(config.bind, config.max_players, config.netsim)?;
+        // Spare slots beyond the player limit let a full server answer "server is full" (and
+        // the lobby host raise the limit) instead of netcode silently refusing.
+        let slots = config.max_players.max(shared::lobby::MAX_PLAYERS as usize)
+            + lobby::SPARE_CONNECTION_SLOTS;
+        let transport = NetcodeServerTransport::new(config.bind, slots, config.netsim)?;
         Self::with_transport(config, Box::new(transport))
     }
 
@@ -320,6 +336,7 @@ impl Server {
             None
         };
         let tick_rate = config.tick_rate.clamp(1, 1000);
+        let flow = lobby::MatchFlow::new(&config, &level);
         let mut world = SimWorld::new(&config.level, Arc::new(level), tick_rate);
         world.enemy_defs = match &config.enemies_dir {
             Some(dir) => EnemyRegistry::load_dir(dir),
@@ -346,6 +363,7 @@ impl Server {
             hitbox_scratch: Vec::new(),
             empty_frame: NetFrame::default(),
             paused: false,
+            flow,
             fx: FxLog::default(),
             event_log: Vec::new(),
             last_snapshot_tick: 0,
@@ -353,6 +371,7 @@ impl Server {
             config,
         };
         server.config.tick_rate = tick_rate;
+        server.init_match_flow();
         server.update_snapshot_interval();
         log::info!(
             "server listening on {:?}: level '{}', {} Hz tick, {:.1} Hz snapshots, max {} players{}",
@@ -432,6 +451,10 @@ impl Server {
         count: u32,
     ) -> Vec<shared::protocol::NetId> {
         let mut ids = Vec::new();
+        // Nothing to spawn into while the server is in its lobby.
+        if !self.flow.phase.level_running() {
+            return ids;
+        }
         let n = count.clamp(1, 64);
         for i in 0..n {
             // A small ring so they don't spawn inside each other.
@@ -494,7 +517,10 @@ impl Server {
     pub fn add_bot(&mut self, name: &str) -> Option<PlayerId> {
         let id = self.free_player_id()?;
         let name = self.unique_name(&protocol::sanitize_name(name));
-        self.world.add_player(id, &name);
+        // In the lobby bots wait without a body; `start_match` spawns them.
+        if self.flow.phase.level_running() {
+            self.world.add_player(id, &name);
+        }
         self.bots.insert(id, name.clone());
         self.broadcast(&ServerMessage::PlayerJoined(PlayerInfo {
             id,
@@ -540,6 +566,7 @@ impl Server {
             ServerCommand::Chat { text } => self.say(&text),
             ServerCommand::SetPaused(paused) => self.set_paused(paused),
             ServerCommand::RestartLevel => self.restart_level(),
+            ServerCommand::Lobby(cmd) => self.handle_lobby_command(cmd),
             ServerCommand::SpawnEnemy {
                 name,
                 position,
@@ -618,9 +645,11 @@ impl Server {
         self.receive_messages();
         self.process_kicks();
         self.check_tuning_reload();
+        self.update_lobby();
 
         let ticks = self.timestep.advance(real_dt.as_secs_f64());
-        if !self.paused {
+        // No level is simulated in the lobby / countdown.
+        if !self.paused && self.flow.phase.level_running() {
             for _ in 0..ticks {
                 self.run_tick();
             }
@@ -702,12 +731,19 @@ impl Server {
     }
 
     fn free_player_id(&self) -> Option<PlayerId> {
-        if self.world.players.len() >= self.config.max_players.max(1) {
+        // Lobby members (connected players and bots), with or without a body.
+        let taken: Vec<PlayerId> = self
+            .clients
+            .values()
+            .filter_map(|c| c.player)
+            .chain(self.bots.keys().copied())
+            .collect();
+        if taken.len() >= self.player_limit() {
             return None;
         }
         (0..=u8::MAX)
             .map(PlayerId)
-            .find(|id| !self.world.players.contains_key(id))
+            .find(|id| !taken.contains(id) && !self.world.players.contains_key(id))
     }
 
     fn unique_name(&self, name: &str) -> String {
@@ -787,7 +823,11 @@ impl Server {
             return;
         };
         let name = self.unique_name(&request.name);
-        self.world.add_player(player, &name);
+        // Join-in-progress gets a body now; in the lobby bodies come with `start_match`.
+        let level_running = self.flow.phase.level_running();
+        if level_running {
+            self.world.add_player(player, &name);
+        }
         if let Some(c) = self.clients.get_mut(&client_id) {
             c.player = Some(player);
             c.name = name.clone();
@@ -800,19 +840,22 @@ impl Server {
             tick_rate: self.config.tick_rate,
             snapshot_rate: self.snapshot_rate(),
             server_tick: self.world.tick,
-            max_players: self.config.max_players as u32,
+            max_players: self.player_limit() as u32,
         });
         self.send(client_id, &welcome);
-        let level = ServerMessage::LoadLevel {
-            name: self.world.level_name.clone(),
-            level: Box::new((*self.world.level).clone()),
-        };
-        self.send(client_id, &level);
+        if level_running {
+            let level = ServerMessage::LoadLevel {
+                name: self.world.level_name.clone(),
+                level: Box::new((*self.world.level).clone()),
+            };
+            self.send(client_id, &level);
+        }
         self.send(
             client_id,
             &ServerMessage::Tuning(Box::new(self.tuning.clone())),
         );
         self.send(client_id, &ServerMessage::PlayerList(self.player_infos()));
+        self.lobby_on_join(client_id, player);
 
         let info = PlayerInfo {
             id: player,
@@ -924,14 +967,8 @@ impl Server {
                     });
                 }
             }
-            ClientMessage::SetReady { ready } => {
-                if conn.ready != ready {
-                    conn.ready = ready;
-                    if let Some(info) = conn.info() {
-                        self.broadcast(&ServerMessage::PlayerUpdated(info));
-                    }
-                }
-            }
+            ClientMessage::SetReady { ready } => self.lobby_set_ready(client, player, ready),
+            ClientMessage::Lobby(request) => self.handle_lobby_request(client, player, request),
         }
     }
 

@@ -103,12 +103,16 @@ pub enum Fx {
         attack: Attack,
         points: Vec<QPos>,
     },
-    /// Fireball, light, shake by distance, `Sfx::Explosion`. Sent to everyone.
+    /// Fireball, light, shake by distance, `Sfx::Explosion`. Sent to everyone. `owner` is the
+    /// owner code (player id / `OWNER_ENEMY` / `OWNER_NONE`): the owner's client draws its own
+    /// projectiles at the present time, so it plays its own explosions right away instead of
+    /// at the render tick.
     Explosion {
         position: QPos,
         /// Radius in decimetres.
         radius_dm: u16,
         attack: Attack,
+        owner: u16,
     },
     /// Another player punched (viewmodel/arm anim for remote players). Not sent to the puncher.
     Punch { player: PlayerId, hit: bool },

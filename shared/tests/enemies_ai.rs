@@ -255,7 +255,7 @@ fn gnat_hovers_at_height_and_never_clips_walls() {
                 !a.world
                     .collision
                     .world
-                    .intersects_capsule(e.position, half, r - 0.05, MASK_MOVEMENT),
+                    .intersects_capsule(e.center(), half, r - 0.05, MASK_MOVEMENT),
                 "gnat inside the level at {} (tick {i})",
                 e.position
             );
@@ -264,7 +264,7 @@ fn gnat_hovers_at_height_and_never_clips_walls() {
                     .world
                     .collision
                     .world
-                    .cast_ray(e.position, Vec3::NEG_Y, 50.0, MASK_MOVEMENT)
+                    .cast_ray(e.center(), Vec3::NEG_Y, 50.0, MASK_MOVEMENT)
                     .map_or(50.0, |h| h.distance);
                 low = low.min(ground);
                 high = high.max(ground);
@@ -634,4 +634,31 @@ fn all_enemy_types_are_deterministic() {
         (v, a.events.len())
     };
     assert_eq!(run(), run());
+}
+
+#[test]
+fn frozen_world_stops_enemies() {
+    // Results screen: `SimWorld::frozen` — nobody attacks, nobody thinks.
+    let mut a = Arena::coop();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    let ids: Vec<NetId> = ["husk", "spitter", "bastion"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| spawn(&mut a, n, Vec3::new(-4.0 + 4.0 * i as f32, 0.0, -6.0), 0.0))
+        .collect();
+    a.ticks(50);
+    assert!(ids.iter().any(|id| a.world.enemies[id].target == Some(p)));
+    a.world.frozen = true;
+    let ev = a.ticks(300);
+    assert_eq!(damage_to(&ev, HitTarget::Player(p)), 0.0, "no damage while frozen");
+    assert!(!ev.iter().any(|e| matches!(
+        e,
+        SimEvent::EnemyAttack { .. } | SimEvent::EnemyFired { .. }
+    )));
+    for id in &ids {
+        let e = &a.world.enemies[id];
+        assert_eq!(e.state, AiState::Idle);
+        assert_eq!(e.target, None);
+        assert!(e.on_ground, "still standing on the floor");
+    }
 }

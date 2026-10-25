@@ -7,6 +7,9 @@
 #   --release               build and run optimised binaries
 #   --port <PORT>           server UDP port (default 47420)
 #   --level <NAME>          level to load (default proving_ground)
+#   --mode <MODE>           campaign | deathmatch (default: the level's kind)
+#   --lobby                 stay in the lobby: no autostart, clients don't ready up (the
+#                           first client is the host and starts the match)
 #   --clients <N>           number of clients (default 2)
 #   --netsim <L,J,LOSS>     network simulator on every client: one-way latency ms, jitter ms,
 #                           loss % (e.g. 100,20,2 = 200 ms ping, +-20 ms jitter, 2% loss)
@@ -20,10 +23,14 @@
 #   --no-audio              clients don't open the audio device
 #   --debug                 clients start with the debug overlay (F3) open
 #
+# The server starts in its lobby (docs/lobby.md). By default it runs with --autostart and the
+# clients with --ready, so they gather in the lobby, ready up and drop into the match after
+# the 3 s countdown (about 5 s after launch).
+#
 # Game client flags (binary `velocide`, see docs/client.md):
 #   --connect <ip:port>  --host [port]  --sp [level]  --name <name>  --netsim <l,j,loss>
-#   --bot  --capture <png> --capture-after <s>  --quit-after <s>  --windowed WxH  --fullscreen
-#   (no flags)  main menu
+#   --bot  --ready  --autostart  --mode <m>  --capture <png> --capture-after <s>
+#   --quit-after <s>  --windowed WxH  --fullscreen     (no flags)  main menu
 #
 # Example (the Milestone 4 online test, two bots at 200 ms ping, screenshots after 15 s):
 #   scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot \
@@ -38,6 +45,8 @@ PROFILE=debug
 CARGO_FLAGS=()
 PORT=47420
 LEVEL=proving_ground
+MODE=""
+LOBBY=0
 CLIENTS=2
 NETSIM=""
 SERVER_NETSIM=""
@@ -55,6 +64,8 @@ while [[ $# -gt 0 ]]; do
         --release) PROFILE=release; CARGO_FLAGS+=(--release) ;;
         --port) PORT="$2"; shift ;;
         --level) LEVEL="$2"; shift ;;
+        --mode) MODE="$2"; shift ;;
+        --lobby) LOBBY=1 ;;
         --clients) CLIENTS="$2"; shift ;;
         --no-clients) CLIENTS=0 ;;
         --netsim) NETSIM="$2"; shift ;;
@@ -67,7 +78,7 @@ while [[ $# -gt 0 ]]; do
         --no-audio) NO_AUDIO=1 ;;
         --debug) EXTRA_DEBUG=1 ;;
         --) shift; EXTRA=("$@"); break ;;
-        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -92,6 +103,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 server_args=(--port "$PORT" --level "$LEVEL")
+[[ -n "$MODE" ]] && server_args+=(--mode "$MODE")
+[[ "$LOBBY" == 0 ]] && server_args+=(--autostart)
 [[ -n "$SERVER_NETSIM" ]] && server_args+=(--netsim "$SERVER_NETSIM")
 echo "== server: velocide-server ${server_args[*]}"
 "$BIN/velocide-server" "${server_args[@]}" &
@@ -104,6 +117,7 @@ for i in $(seq 1 "$CLIENTS"); do
     client_args=(--connect "127.0.0.1:$PORT" --name "P$i" --windowed "$SIZE")
     [[ -n "$NETSIM" ]] && client_args+=(--netsim "$NETSIM")
     [[ "$BOT" == 1 ]] && client_args+=(--bot)
+    [[ "$LOBBY" == 0 ]] && client_args+=(--ready)
     [[ "$NO_AUDIO" == 1 ]] && client_args+=(--no-audio)
     [[ "$EXTRA_DEBUG" == 1 ]] && client_args+=(--debug)
     [[ -n "$QUIT_AFTER" ]] && client_args+=(--quit-after "$QUIT_AFTER")

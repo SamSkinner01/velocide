@@ -51,10 +51,9 @@ fn forty_eight_enemies_on_the_campaign_level() {
     assert!(n >= 48, "{n} enemies");
 
     let mut times = Vec::new();
-    let mut seq = 0;
     for tick in 0..900u32 {
         let mut inputs = TickInputs::new();
-        seq += 1;
+        let seq = tick + 1;
         for i in 0..4u8 {
             // Run in wide circles, jumping now and then (targets keep moving).
             let mut input = PlayerInput {
@@ -63,7 +62,7 @@ fn forty_eight_enemies_on_the_campaign_level() {
                 yaw: tick as f32 * 0.02 + i as f32 * 1.6,
                 ..Default::default()
             };
-            input.buttons.set(Buttons::JUMP, (tick + i as u32 * 17) % 90 == 0);
+            input.buttons.set(Buttons::JUMP, (tick + i as u32 * 17).is_multiple_of(90));
             inputs.insert(PlayerId(i), vec![input]);
         }
         let started = Instant::now();

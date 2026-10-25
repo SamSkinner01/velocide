@@ -138,6 +138,10 @@ impl SimWorld {
         if self.enemies.is_empty() {
             return;
         }
+        if self.frozen {
+            self.step_frozen_enemies(t);
+            return;
+        }
         if self.ai.nav.is_none() {
             self.build_nav();
         }
@@ -180,6 +184,28 @@ impl SimWorld {
         self.push_enemies_apart(cx.nav.as_deref());
         self.enemy_world_rules(t);
         self.ai.end_tick(cx);
+        let tick = self.tick;
+        for e in self.enemies.values_mut() {
+            e.trail.record(tick, e.position);
+        }
+    }
+
+    /// The match is over (`SimWorld::frozen`): living enemies drop their target and any attack
+    /// in progress and just stand (gravity still applies); corpses stay.
+    fn step_frozen_enemies(&mut self, t: &Tuning) {
+        let dt = self.dt();
+        let gravity = t.movement.gravity;
+        let world = &self.collision.world;
+        for e in self.enemies.values_mut() {
+            if e.is_alive() && (e.state != AiState::Idle || e.target.is_some()) {
+                e.target = None;
+                e.nav.reset();
+                e.set_state(AiState::Idle, 0);
+            }
+            if e.is_alive() {
+                move_enemy(world, e, Vec3::ZERO, dt, gravity);
+            }
+        }
         let tick = self.tick;
         for e in self.enemies.values_mut() {
             e.trail.record(tick, e.position);
@@ -367,11 +393,10 @@ impl SimWorld {
         if e.stagger > 0 {
             desired = Vec3::ZERO;
         }
-        let lunging = e.state == AiState::Strike
-            && def.attacks.get(e.attack).is_some_and(|a| a.lunge > 0.0);
         let guarded = steer::guard(cx.nav.as_deref(), e, desired, max_drop);
-        if lunging && guarded != desired {
-            // A lunge stops dead at a ledge / lava edge.
+        // Own momentum (a lunge, braking after a run) stops dead at a ledge / lava edge;
+        // knockback (stagger) doesn't: players may launch enemies into the lava.
+        if e.stagger == 0 && steer::heading_off_edge(cx.nav.as_deref(), e, max_drop, dt) {
             e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
         }
         move_enemy(&self.collision.world, e, guarded, dt, gravity);
@@ -918,8 +943,8 @@ pub(crate) fn move_enemy(
     let r = def.radius;
     let h = def.height.max(2.0 * r);
     let half = (h * 0.5 - r).max(0.0);
-    // Origin → capsule centre.
-    let lift = Vec3::Y * (h * 0.5 - e.origin_lift());
+    // Feet → capsule centre.
+    let lift = Vec3::Y * (h * 0.5);
     let flying = e.is_flying();
     let alive = e.is_alive();
     let staggered = e.stagger > 0;
@@ -1029,7 +1054,8 @@ pub(crate) fn move_enemy(
             } + SKIN;
             match world.cast_capsule(center, half, r, Vec3::NEG_Y * probe, SKIN, MASK_MOVEMENT) {
                 Some(hit) if hit.normal.y > 0.7 => {
-                    center += Vec3::NEG_Y * (probe * hit.fraction);
+                    // Rest just outside the skin band (stable, and sweeps along the floor stay clean).
+                    center += Vec3::NEG_Y * (probe * hit.fraction) + Vec3::Y * NUDGE;
                     e.on_ground = true;
                     e.velocity.y = 0.0;
                 }

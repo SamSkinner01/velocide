@@ -194,13 +194,14 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 position,
                 radius,
                 attack,
-                ..
+                owner,
             } => fx.push(
                 tick,
                 Fx::Explosion {
                     position: (*position).into(),
                     radius_dm: radius_dm(*radius),
                     attack: *attack,
+                    owner: shared::protocol::owner_code(*owner),
                 },
                 None,
             ),
@@ -370,6 +371,7 @@ mod tests {
             position: QPos::default(),
             radius_dm: 45,
             attack: Attack::Rocket,
+            owner: 0,
         }
     }
 

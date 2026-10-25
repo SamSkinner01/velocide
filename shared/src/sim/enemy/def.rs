@@ -29,9 +29,8 @@ pub enum Locomotion {
     /// Walks on the level with gravity (capsule sweeps against the world).
     #[default]
     Ground,
-    /// Flies without gravity, keeping between `min_height` and `max_height` above the ground
-    /// (measured from its origin). A flying enemy's origin (`Enemy::position`, local offsets)
-    /// is the **centre** of its collision capsule (the model's hover centre), not its feet.
+    /// Flies without gravity, keeping its centre (the model's hover centre, half the height
+    /// above `Enemy::position`) between `min_height` and `max_height` above the ground.
     Flying { min_height: f32, max_height: f32 },
 }
 

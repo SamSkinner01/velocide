@@ -4,8 +4,8 @@
 //! `sim::nav`). Overview: `docs/enemies.md`.
 //!
 //! Replicated as entity `kind = def.net_kind` (Husk 16, Spitter 17, Gnat 18, Bastion 19):
-//! `owner` = target player id (`OWNER_NONE` without a target), `position` = feet (flying
-//! enemies: the centre of their collision capsule = the model's hover centre), `velocity`,
+//! `owner` = target player id (`OWNER_NONE` without a target), `position` = feet (bottom of
+//! the collision capsule; a Gnat's hover centre is half its height above), `velocity`,
 //! `yaw`, `flags` = [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16,
 //! `health` = current health (rounded up), `aux` = state progress (bits 0–7, 0..255 through
 //! timed states) | attack index (bits 8–15) | max health (bits 16–31).
@@ -191,19 +191,10 @@ impl Enemy {
         matches!(self.def.locomotion, Locomotion::Flying { .. })
     }
 
-    /// Height of the origin above the bottom of the collision capsule: 0 for ground enemies
-    /// (origin = feet), half the height for flyers (origin = centre).
-    pub fn origin_lift(&self) -> f32 {
-        if self.is_flying() {
-            self.def.height.max(2.0 * self.def.radius) * 0.5
-        } else {
-            0.0
-        }
-    }
-
-    /// Bottom of the collision capsule.
+    /// Bottom of the collision capsule (= `position` for every enemy, flyers included; a
+    /// Gnat's hover centre is `center()`).
     pub fn feet(&self) -> Vec3 {
-        self.position - Vec3::Y * self.origin_lift()
+        self.position
     }
 
     /// Navigation size class (ground enemies).

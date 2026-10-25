@@ -47,6 +47,9 @@
 
 pub mod clock;
 pub mod interpolation;
+pub mod lan;
+/// Lobby state, level catalog and host commands on `NetClient` (docs/lobby.md).
+mod lobby;
 pub mod prediction;
 pub mod session;
 pub mod transport;
@@ -60,13 +63,14 @@ use std::time::Duration;
 use glam::Vec3;
 use renet::RenetClient;
 use shared::input::PlayerInput;
+use shared::lobby::{LevelInfo, LobbyPhase, LobbyState};
 use shared::movement::{MoveEvents, MoveState};
 use shared::protocol::{
     self, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE, ClientMessage, ClientUnreliable, ConnectRequest,
-    EntityState, GameEvent, INPUT_REDUNDANCY, InputPacket, NetFrame, NetId, PROTOCOL_VERSION,
-    PlayerInfo, ServerMessage, ServerUnreliable, SnapshotMessage, Welcome, kind,
+    EntityState, FxEvent, GameEvent, INPUT_REDUNDANCY, InputPacket, NetFrame, NetId,
+    PROTOCOL_VERSION, PlayerInfo, ServerMessage, ServerUnreliable, SnapshotMessage, Welcome, kind,
 };
-use shared::sim::{PlayerId, SimWorld, tick_dt};
+use shared::sim::{PlayerCombat, PlayerId, SimWorld, tick_dt};
 use shared::tuning::Tuning;
 
 pub use clock::ClockSync;
@@ -87,6 +91,9 @@ pub struct ClientConfig {
     pub netsim: Option<NetSimConfig>,
     /// Protocol version announced to the server (override only to test rejection).
     pub protocol_version: u32,
+    /// Listen-server host: the secret the session gave its in-process server; presented after
+    /// the welcome to become the lobby host (`LobbyRequest::ClaimHost`).
+    pub host_token: Option<u64>,
 }
 
 impl ClientConfig {
@@ -95,6 +102,7 @@ impl ClientConfig {
             name: name.to_string(),
             netsim: None,
             protocol_version: PROTOCOL_VERSION,
+            host_token: None,
         }
     }
 
@@ -151,6 +159,17 @@ pub enum NetEvent {
         text: String,
     },
     Game(GameEvent),
+    /// A lobby state arrived (`NetClient::lobby`): phase, settings, players, pings. Sent on
+    /// every change and once per second. When the phase leaves the match (`Lobby` /
+    /// `Countdown`) the level has already been unloaded (`world()` is `None`).
+    LobbyChanged {
+        phase: LobbyPhase,
+        previous: Option<LobbyPhase>,
+    },
+    /// The server refused a lobby request ("only the host can...").
+    Notice {
+        text: String,
+    },
     Disconnected {
         reason: String,
     },
@@ -228,6 +247,34 @@ pub struct NetClient {
     snapshot_arrivals: VecDeque<f64>,
     time: f64,
     stats: NetStats,
+    /// Latest lobby state / level catalog from the server (docs/lobby.md).
+    lobby: Option<LobbyState>,
+    levels: Vec<LevelInfo>,
+    host_token: Option<u64>,
+    /// Latest authoritative combat state of the local player (`OwnState::combat`).
+    own_combat: Option<OwnCombat>,
+    /// Cosmetic combat events received and not yet drained (de-duplicated by `seq`).
+    fx: Vec<FxEvent>,
+    fx_seen: std::collections::BTreeSet<u32>,
+}
+
+/// The local player's authoritative combat state from the newest snapshot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnCombat {
+    /// Snapshot tick.
+    pub tick: u32,
+    /// The state is after this input (`SnapshotMessage::last_input_seq`).
+    pub seq: u32,
+    pub combat: PlayerCombat,
+}
+
+impl OwnCombat {
+    /// Is input `seq` simulated while dead? Inputs up to the server's respawn tick are (one
+    /// input per server tick after `self.seq`); used to predict the corpse with
+    /// `shared::sim::neutral_input` and to stop predicted firing.
+    pub fn dead_at(&self, seq: u32) -> bool {
+        self.combat.dead && seq <= self.seq.wrapping_add(self.combat.respawn_in as u32)
+    }
 }
 
 impl NetClient {
@@ -243,7 +290,9 @@ impl NetClient {
             request.to_user_data(),
             config.netsim,
         )?;
-        Ok(Self::with_transport(Box::new(transport)))
+        let mut client = Self::with_transport(Box::new(transport));
+        client.host_token = config.host_token;
+        Ok(client)
     }
 
     /// Uses a custom transport (Steam networking, relays...).
@@ -275,6 +324,44 @@ impl NetClient {
             snapshot_arrivals: VecDeque::new(),
             time: 0.0,
             stats: NetStats::default(),
+            lobby: None,
+            levels: Vec::new(),
+            host_token: None,
+            own_combat: None,
+            fx: Vec::new(),
+            fx_seen: std::collections::BTreeSet::new(),
+        }
+    }
+
+    // ---- combat -------------------------------------------------------------------------------
+
+    /// The local player's latest authoritative combat state (health, hard damage, weapons,
+    /// death), `None` before the first snapshot.
+    pub fn own_combat(&self) -> Option<&OwnCombat> {
+        self.own_combat.as_ref()
+    }
+
+    /// Cosmetic combat events (`Fx`) received since the last call, each exactly once (repeats
+    /// are de-duplicated by `seq`), in arrival order. Play them when `render_tick` reaches
+    /// their `tick`.
+    pub fn drain_fx(&mut self) -> Vec<FxEvent> {
+        std::mem::take(&mut self.fx)
+    }
+
+    fn receive_fx(&mut self, fx: Vec<FxEvent>) {
+        for e in fx {
+            if self.fx_seen.insert(e.seq) {
+                self.fx.push(e);
+            }
+        }
+        // Keep the de-duplication window bounded (repeats come one snapshot later at most).
+        while self.fx_seen.len() > 4096 {
+            self.fx_seen.pop_first();
+        }
+        // Nobody drained for a long time (headless tools): don't grow without bound.
+        if self.fx.len() > 4096 {
+            let excess = self.fx.len() - 4096;
+            self.fx.drain(..excess);
         }
     }
 
@@ -435,6 +522,11 @@ impl NetClient {
         let view = self.render_tick.unwrap_or(0.0).max(0.0);
         input.view_tick = view.floor().min(u32::MAX as f64) as u32;
         input.view_frac = ((view - view.floor()) * 256.0).floor().clamp(0.0, 255.0) as u8;
+        // A dead body is simulated with a neutral input on the server: predict (and send)
+        // exactly that until the predicted respawn tick.
+        if self.own_combat.is_some_and(|c| c.dead_at(input.seq)) {
+            input = shared::sim::neutral_input(&input);
+        }
         let events = prediction.apply(
             input,
             &world.move_env(),
@@ -612,6 +704,7 @@ impl NetClient {
                 let player_id = welcome.player_id;
                 self.welcome = Some(welcome);
                 self.events.push_back(NetEvent::Connected { player_id });
+                self.claim_host();
             }
             ServerMessage::Rejected { reason } => {
                 self.rejected = Some(reason.clone());
@@ -621,6 +714,7 @@ impl NetClient {
                 self.world = Some(SimWorld::new(&name, Arc::new(*level), self.tick_rate()));
                 // A new level means a new body; the next snapshot re-creates the prediction.
                 self.prediction = None;
+                self.own_combat = None;
                 if self.state == ConnectionState::InGame {
                     self.state = ConnectionState::Loading;
                 }
@@ -671,13 +765,17 @@ impl NetClient {
                 }
                 self.events.push_back(NetEvent::Game(event));
             }
+            ServerMessage::Lobby(update) => self.on_lobby_update(update),
         }
     }
 
-    fn handle_snapshot(&mut self, snap: SnapshotMessage) {
+    fn handle_snapshot(&mut self, mut snap: SnapshotMessage) {
         if self.frames.contains(snap.tick) {
             return; // duplicate
         }
+        // Effects don't depend on the entity baseline: keep them even if the delta is lost.
+        let fx = std::mem::take(&mut snap.fx);
+        self.receive_fx(fx);
         let empty = NetFrame::default();
         let baseline = match snap.baseline_tick {
             None => &empty,
@@ -723,6 +821,11 @@ impl NetClient {
         let Some(own) = snap.own else {
             return;
         };
+        self.own_combat = Some(OwnCombat {
+            tick: snap.tick,
+            seq: snap.last_input_seq,
+            combat: own.combat,
+        });
         let (Some(world), Some(_)) = (&self.world, &self.welcome) else {
             return; // level not loaded yet; a later snapshot starts prediction
         };

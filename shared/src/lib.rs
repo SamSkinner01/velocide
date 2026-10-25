@@ -4,6 +4,8 @@
 
 pub mod input;
 pub mod level;
+/// Lobby / match flow model (game mode, match settings, lobby state and messages).
+pub mod lobby;
 pub mod movement;
 pub mod protocol;
 pub mod sim;

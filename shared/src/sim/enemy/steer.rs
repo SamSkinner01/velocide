@@ -322,6 +322,22 @@ pub(crate) fn guard(nav: Option<&NavGrid>, e: &Enemy, desired: Vec3, max_drop: f
     Vec3::new(0.0, desired.y, 0.0)
 }
 
+/// Is a grounded enemy's current horizontal velocity about to carry it over lava / off a
+/// ledge deeper than `max_drop` (within this tick plus its radius)?
+pub(crate) fn heading_off_edge(nav: Option<&NavGrid>, e: &Enemy, max_drop: f32, dt: f32) -> bool {
+    let Some(nav) = nav.filter(|n| !n.is_empty()) else {
+        return false;
+    };
+    let v = horizontal(e.velocity);
+    let speed = v.length();
+    if e.is_flying() || !e.on_ground || speed < 0.5 {
+        return false;
+    }
+    let pos = e.feet();
+    let look = pos + v / speed * (e.def.radius + 0.3 + speed * dt);
+    !nav.ground_ok(look, pos.y, max_drop)
+}
+
 /// Flight steering for a flying enemy: circle `tp` inside the preferred range band, hover
 /// between `min_height` and `max_height` above the ground (or the target's level when that is
 /// higher), dodge walls and ceilings with feeler sweeps. `scale` slows the horizontal part
@@ -342,7 +358,8 @@ pub(crate) fn fly_velocity(
         super::Locomotion::Ground => (0.0, 0.0),
     };
     let speed = def.speed;
-    let pos = e.position;
+    // Everything below is about the hover centre (the model's origin).
+    let pos = e.center();
     let r = def.radius;
 
     // Ground below (re-measured every few ticks).

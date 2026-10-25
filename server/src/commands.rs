@@ -12,15 +12,19 @@
 //! | `/kill` | kills you (respawn rule applies) |
 //! | `/ff [on/off]` | PvP damage between players |
 //! | `/hurt <amount>` | damages you (test hard damage / healing) |
+//! | `/orb [distance]` | a parryable Spitter orb flies at you from in front (parry practice) |
+//! | `/encounter <n>` | starts arena encounter n (1-based; stragglers incl. you go to its rally point) |
+//! | `/encounters` | encounter states (docs/enemies.md) |
 //! | `/help` | this list |
 
 use glam::Vec3;
 use shared::input::look_dir;
-use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, WeaponState};
+use shared::protocol::kind;
+use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind, WeaponState};
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>";
+const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /orb [dist], /encounter <n>, /encounters";
 
 impl Server {
     /// Runs one dev command for `player`; returns the reply.
@@ -29,6 +33,10 @@ impl Server {
         let cmd = words.next().unwrap_or("").to_ascii_lowercase();
         let args: Vec<&str> = words.collect();
         let tuning = self.tuning.clone();
+        // In the lobby there is no level being simulated (docs/lobby.md).
+        if !self.flow.phase.level_running() && !matches!(cmd.as_str(), "help" | "" | "enemies") {
+            return "no match is running".into();
+        }
         match cmd.as_str() {
             "help" | "" => HELP.to_string(),
             "enemies" => {
@@ -91,6 +99,34 @@ impl Server {
                 }
                 None => "no body".into(),
             },
+            "orb" => {
+                let dist = args
+                    .first()
+                    .and_then(|a| a.parse::<f32>().ok())
+                    .unwrap_or(16.0)
+                    .clamp(3.0, 60.0);
+                let Some(p) = self.world.players.get(&player) else {
+                    return "no body".into();
+                };
+                let eye = p.movement.eye_position(&tuning.movement);
+                let from = eye + look_dir(p.yaw, 0.0) * dist;
+                let speed = 22.0;
+                // A phantom enemy owns it (RETURN TO SENDER has nobody to hit).
+                let owner = self.world.alloc_net_id();
+                self.world.spawn_enemy_projectile(
+                    &tuning,
+                    ProjectileKind::SpitterOrb,
+                    owner,
+                    Attack::Enemy {
+                        kind: kind::SPITTER,
+                        attack: 0,
+                    },
+                    from,
+                    (eye - from).normalize_or(Vec3::Z) * speed,
+                    20.0,
+                );
+                format!("orb incoming from {dist:.0} m")
+            }
             "kill" => {
                 self.world.kill_player(&tuning, player, Attack::Dev);
                 "you died".into()
@@ -124,6 +160,38 @@ impl Server {
                 };
                 self.world.rules.friendly_fire = on;
                 format!("friendly fire {}", if on { "on" } else { "off" })
+            }
+            // Arena encounters (docs/enemies.md).
+            "encounter" => {
+                let n = self.world.level.encounters.len();
+                let Some(i) = args
+                    .first()
+                    .and_then(|a| a.parse::<usize>().ok())
+                    .filter(|i| (1..=n).contains(i))
+                else {
+                    return format!("usage: /encounter <1..{n}>");
+                };
+                self.world.reset_encounter(i - 1);
+                self.world.start_encounter(i - 1);
+                format!("encounter {i} started")
+            }
+            "encounters" => {
+                let states: Vec<String> = (0..self.world.level.encounters.len())
+                    .map(|i| {
+                        let phase = self
+                            .world
+                            .encounters
+                            .states
+                            .get(i)
+                            .map_or(shared::sim::encounter::EncounterPhase::Idle, |s| s.phase);
+                        format!("{}: {phase:?}", i + 1)
+                    })
+                    .collect();
+                if states.is_empty() {
+                    "no encounters on this level".into()
+                } else {
+                    states.join(", ")
+                }
             }
             other => format!("unknown command '/{other}'. {HELP}"),
         }

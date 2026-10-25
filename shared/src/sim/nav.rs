@@ -536,7 +536,7 @@ impl NavGrid {
             }
             let to = node.pos;
             let dy = to.y - from.y;
-            if dy < -MAX_DROP || dy > 1.2 * CELL {
+            if !(-MAX_DROP..=1.2 * CELL).contains(&dy) {
                 continue;
             }
             if best.is_some_and(|(b, _)| b <= dy.abs()) {

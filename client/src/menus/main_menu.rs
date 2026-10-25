@@ -1,5 +1,6 @@
-//! Main menu: SINGLE PLAYER (level select), HOST GAME (port, level, max players), JOIN GAME
-//! (address, name), SETTINGS, QUIT. A level renders behind it; messages (disconnect reasons,
+//! Main menu: SINGLE PLAYER (level select), HOST GAME (mode, level, port, max players), JOIN
+//! GAME (address, name), SETTINGS, QUIT. HOST and JOIN continue in the lobby screen
+//! (`menus::lobby`). A level renders behind it; messages (disconnect reasons,
 //! connection errors) appear in a modal box.
 //!
 //! Adding a page: add a [`Page`] variant, a menu item in `root_items`, and a `fn xxx_page`
@@ -10,6 +11,7 @@ use engine::render::Renderer;
 use engine::ui::{Rect, TextFilter, TextStyle, Ui, UiDrawExt};
 use glam::{Vec4, vec2};
 use shared::level::LevelDef;
+use shared::lobby::{GameMode, LevelInfo};
 
 use super::backdrop::Backdrop;
 use super::settings_menu::{self, SettingsMenu};
@@ -42,6 +44,10 @@ pub struct MainMenu {
     message: Option<String>,
     levels: Vec<String>,
     level: usize,
+    /// Host page: levels with their kinds, the chosen mode and level name.
+    catalog: Vec<LevelInfo>,
+    host_mode: GameMode,
+    host_level: String,
     port: String,
     max_players: f32,
     address: String,
@@ -74,6 +80,8 @@ impl MainMenu {
             .unwrap_or(0);
         menu.port = s.host_port.to_string();
         menu.max_players = s.host_max_players as f32;
+        menu.host_mode = s.host_mode;
+        menu.host_level = s.last_level.clone();
         menu.address = s.last_join_address.clone();
         menu
     }
@@ -87,6 +95,9 @@ impl MainMenu {
             message: None,
             levels: level_list(),
             level: 0,
+            catalog: Vec::new(),
+            host_mode: GameMode::Campaign,
+            host_level: String::new(),
             port: shared::DEFAULT_PORT.to_string(),
             max_players: 4.0,
             address: String::new(),
@@ -115,6 +126,10 @@ impl MainMenu {
         if page == Page::SinglePlayer || page == Page::Host {
             self.levels = level_list();
             self.level = self.level.min(self.levels.len().saturating_sub(1));
+        }
+        if page == Page::Host {
+            self.catalog = shared::lobby::scan_levels();
+            self.fit_host_level();
         }
         self.page = page;
     }
@@ -277,6 +292,31 @@ impl MainMenu {
         }
     }
 
+    /// Levels the host page offers for its mode: the mode's own kind first, then sandboxes.
+    fn host_levels(&self) -> Vec<&LevelInfo> {
+        let mode = self.host_mode;
+        let mut out: Vec<&LevelInfo> = self
+            .catalog
+            .iter()
+            .filter(|l| mode.accepts(l) && !l.any_mode())
+            .collect();
+        out.extend(self.catalog.iter().filter(|l| l.any_mode()));
+        out
+    }
+
+    /// Keeps the host level valid for the host mode (first level of the mode otherwise).
+    fn fit_host_level(&mut self) {
+        let levels = self.host_levels();
+        if !levels.iter().any(|l| l.name == self.host_level)
+            && let Some(first) = levels.first()
+        {
+            self.host_level = first.name.clone();
+        }
+        self.max_players = self
+            .max_players
+            .clamp(1.0, self.host_mode.max_players() as f32);
+    }
+
     fn level_name(&self) -> String {
         self.levels
             .get(self.level)
@@ -335,8 +375,11 @@ impl MainMenu {
         name_changed: &mut bool,
     ) -> Option<PageResult> {
         let mut result = None;
-        let names: Vec<String> = self.levels.iter().map(|l| level_display_name(l)).collect();
-        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let modes: Vec<&str> = GameMode::ALL.iter().map(|m| m.title()).collect();
+        let mut mode = GameMode::ALL
+            .iter()
+            .position(|m| *m == self.host_mode)
+            .unwrap_or(0);
         ui.panel(panel, "HOST GAME", |ui| {
             ui.default_focus();
             if ui
@@ -350,11 +393,26 @@ impl MainMenu {
             {
                 *name_changed = true;
             }
-            ui.choice("LEVEL", &mut self.level, &names);
+            if ui.choice("MODE", &mut mode, &modes) {
+                self.host_mode = GameMode::ALL[mode];
+                self.fit_host_level();
+            }
+            let levels = self.host_levels();
+            let names: Vec<String> = levels.iter().map(|l| l.display_title()).collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            let mut level = levels
+                .iter()
+                .position(|l| l.name == self.host_level)
+                .unwrap_or(0);
+            if !names.is_empty() && ui.choice("LEVEL", &mut level, &names) {
+                self.host_level = levels[level].name.clone();
+            }
             ui.text_field("PORT", &mut self.port, 5, TextFilter::Digits);
-            ui.slider("MAX PLAYERS", &mut self.max_players, 2.0, 8.0, 1.0, "{}");
+            let max = self.host_mode.max_players() as f32;
+            ui.slider("MAX PLAYERS", &mut self.max_players, 1.0, max, 1.0, "{}");
             ui.spacing(2.0);
             let dim = TextStyle::new(ui.theme().bone_dim);
+            ui.text("THE LOBBY OPENS FIRST: CHANGE ANYTHING THERE.", &dim);
             ui.text("FRIENDS JOIN WITH YOUR IP AND THIS PORT (UDP).", &dim);
             ui.text("FORWARD THE PORT TO PLAY OVER THE INTERNET.", &dim);
             ui.spacing(4.0);
@@ -362,10 +420,11 @@ impl MainMenu {
                 if ui.button("HOST") {
                     result = Some(match self.port.trim().parse::<u16>() {
                         Ok(port) if port > 0 => {
-                            let level = self.level_name();
+                            let level = self.host_level.clone();
                             settings.last_level = level.clone();
                             settings.host_port = port;
                             settings.host_max_players = self.max_players as u32;
+                            settings.host_mode = self.host_mode;
                             PageResult::Start(Transition::Start(StartMode::Host {
                                 port: Some(port),
                                 level: Some(level),

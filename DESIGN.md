@@ -146,6 +146,16 @@ errors and bad normals otherwise).
   network simulator (`NetSimConfig { latency_ms (one-way), jitter_ms, loss_percent }`) can sit
   between the socket and netcode. Full protocol notes: `docs/network.md`.
 
+### `shared::lobby` / `server::lobby` (match flow)
+`GameMode`, `MatchSettings` (`clamp`, `validate` against the server's `LevelInfo` catalog),
+`LobbyPhase { Lobby, Countdown, InMatch, Results }`, `LobbyState` (players with ready / ping /
+host), messages `ClientMessage::Lobby(LobbyRequest)` / `ServerMessage::Lobby(LobbyUpdate)`.
+The server owns the phase (`Server::start_match`, `end_match`, `return_to_lobby`; host-only
+requests validated and rate-limited); a fresh `SimWorld` is built per match with the settings
+in `SimWorld::match_settings` for the game-mode rules. Single-player has no lobby. Client:
+`menus::lobby::LobbyScreen` ⇄ `InGame` hand the session over (`Handoff`). Full notes:
+`docs/lobby.md`.
+
 ### `shared::level::LevelDef`
 RON brush levels in `assets/levels/`: brushes (boxes with rotation, material, tint), lights,
 spawns, checkpoints, doors, encounters (trigger, lock/unlock doors, waves of enemy spawns), exit,
@@ -155,11 +165,18 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 - `docs/gameplay.md` — combat, enemies, style and game-mode rules with default numbers.
 - `docs/render.md`, `docs/ui.md`, `docs/audio.md`, `docs/movement.md`, `docs/network.md`,
   `docs/models.md`, `docs/client.md` (client architecture + extension points),
-  `docs/levels.md` (shipping levels, generator, tests), `docs/combat.md`, `docs/lobby.md`
+  `docs/levels.md` (shipping levels, generator, tests), `docs/combat.md`
   (written by each area as it is built).
+- `docs/lobby.md` — lobby phases, messages, host rules, screens, how game modes plug in.
+- `docs/enemies.md` — the four enemy types, AI states and telegraphs, nav grid, arena
+  encounters, co-op scaling, hooks for game modes, measurements.
 
 ## Running it
 - Single-player: `cargo run -p client --release -- --sp crucible_of_veins`
-- Host: `cargo run -p client --release -- --host 47420`; friends: `--connect <ip>:47420`
+- Host: `cargo run -p client --release -- --host 47420` (opens the lobby; start the match
+  there); friends: `--connect <ip>:47420`
 - Dedicated server: `cargo run -p server --release --bin velocide-server -- --port 47420`
+  (starts in the lobby; the first player to join hosts; `--autostart` starts when all are
+  ready)
 - Server + two clients locally in one command: `scripts/local_test.sh --netsim 100,20,2`
+  (server `--autostart`, clients `--ready`: they reach the match after ~5 s)
