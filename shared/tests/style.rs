@@ -3,6 +3,7 @@
 //! `assets/tuning.ron` spells out every style / modes value equal to the defaults.
 
 mod combat_support;
+mod weapon_support;
 
 use std::f32::consts::PI;
 use std::path::Path;
@@ -19,6 +20,10 @@ use shared::sim::{
     StyleEvent, StyleKey,
 };
 use shared::tuning::{ModeTuning, StyleTuning, Tuning};
+use weapon_support::*;
+
+/// Replicated kind of the test dummies (`weapon_support`).
+const DUMMY_KIND: u16 = 60;
 
 fn st() -> StyleTuning {
     StyleTuning::default()
@@ -27,7 +32,7 @@ fn st() -> StyleTuning {
 fn kill(flags: DamageFlags, attack: Attack) -> KillInfo {
     KillInfo {
         victim: HitTarget::Entity(shared::protocol::NetId(2000)),
-        victim_kind: kind::HUSK,
+        victim_kind: DUMMY_KIND,
         killer: Owner::Player(PlayerId(0)),
         attack,
         flags,
@@ -61,13 +66,13 @@ fn bonuses(events: &[StyleEvent]) -> Vec<(StyleBonus, f32)> {
 #[test]
 fn every_kill_bonus_has_its_trigger() {
     let t = st();
-    let plain = kill(DamageFlags::HITSCAN, Attack::Lancet);
+    let plain = kill(DamageFlags::HITSCAN, Attack::Quill);
     assert_eq!(
         kill_bonuses(&plain, false, 1, &t),
         vec![(StyleBonus::Kill, 30.0, 0)]
     );
 
-    let head = kill(DamageFlags::HITSCAN | DamageFlags::HEADSHOT, Attack::Lancet);
+    let head = kill(DamageFlags::HITSCAN | DamageFlags::HEADSHOT, Attack::Quill);
     assert_eq!(
         labels(&kill_bonuses(&head, false, 1, &t)),
         [StyleBonus::Kill, StyleBonus::Headshot]
@@ -89,7 +94,7 @@ fn every_kill_bonus_has_its_trigger() {
     let mut rts = kill(
         DamageFlags::PROJECTILE | DamageFlags::PARRIED,
         Attack::Enemy {
-            kind: kind::SPITTER,
+            kind: DUMMY_KIND,
             attack: 0,
         },
     );
@@ -102,7 +107,7 @@ fn every_kill_bonus_has_its_trigger() {
         ]
     );
 
-    let boom = kill(DamageFlags::EXPLOSIVE, Attack::Rocket);
+    let boom = kill(DamageFlags::EXPLOSIVE, Attack::Tumble);
     assert_eq!(
         kill_bonuses(&boom, false, 1, &t)[1],
         (StyleBonus::Exploded, 20.0, 0)
@@ -194,22 +199,22 @@ fn points_rank_up_and_decay_ranks_down() {
 fn freshness_costs_restores_and_floors() {
     let t = st();
     let mut s = PlayerStyle::new();
-    assert_eq!(s.use_key(&t, StyleKey::Lancet, 1), 1.0);
-    assert!((s.freshness(StyleKey::Lancet) - 0.88).abs() < 1e-5);
+    assert_eq!(s.use_key(&t, StyleKey::Quill, 1), 1.0);
+    assert!((s.freshness(StyleKey::Quill) - 0.88).abs() < 1e-5);
     // Same key, same tick: charged once, same multiplier.
-    assert_eq!(s.use_key(&t, StyleKey::Lancet, 1), 1.0);
-    assert!((s.freshness(StyleKey::Lancet) - 0.88).abs() < 1e-5);
+    assert_eq!(s.use_key(&t, StyleKey::Quill, 1), 1.0);
+    assert!((s.freshness(StyleKey::Quill) - 0.88).abs() < 1e-5);
     for tick in 2..20 {
-        s.use_key(&t, StyleKey::Lancet, tick);
+        s.use_key(&t, StyleKey::Quill, tick);
     }
-    assert_eq!(s.freshness(StyleKey::Lancet), t.freshness_min, "floor");
+    assert_eq!(s.freshness(StyleKey::Quill), t.freshness_min, "floor");
     // Using something else restores it a little.
-    s.use_key(&t, StyleKey::Slug, 30);
-    assert!((s.freshness(StyleKey::Lancet) - 0.24).abs() < 1e-5);
-    assert!((s.freshness(StyleKey::Slug) - 0.88).abs() < 1e-5);
+    s.use_key(&t, StyleKey::Gust, 30);
+    assert!((s.freshness(StyleKey::Quill) - 0.24).abs() < 1e-5);
+    assert!((s.freshness(StyleKey::Gust) - 0.88).abs() < 1e-5);
     // And time heals: 0.02 / s.
     s.regen(&t, 10.0);
-    assert!((s.freshness(StyleKey::Lancet) - 0.44).abs() < 1e-4);
+    assert!((s.freshness(StyleKey::Quill) - 0.44).abs() < 1e-4);
     assert_eq!(s.freshness(StyleKey::Fist), 1.0);
 }
 
@@ -221,14 +226,14 @@ fn stale_gains_are_cut_and_reported() {
     let mut ev = Vec::new();
     let items = [(StyleBonus::Kill, 30.0, 0)];
     // Fresh: full points.
-    s.award(&t, p, Some(StyleKey::Thresher), &items, false, 1, &mut ev);
+    s.award(&t, p, Some(StyleKey::Bellows), &items, false, 1, &mut ev);
     assert_eq!(bonuses(&ev), [(StyleBonus::Kill, 30.0)]);
-    // Spam the scattergun until it is stale.
+    // Spam the Bellows until it is stale.
     for tick in 2..8 {
         s.award(
             &t,
             p,
-            Some(StyleKey::Thresher),
+            Some(StyleKey::Bellows),
             &items,
             false,
             tick,
@@ -236,9 +241,9 @@ fn stale_gains_are_cut_and_reported() {
         );
     }
     ev.clear();
-    let f = s.freshness(StyleKey::Thresher);
+    let f = s.freshness(StyleKey::Bellows);
     assert!(f < t.stale_threshold);
-    s.award(&t, p, Some(StyleKey::Thresher), &items, false, 10, &mut ev);
+    s.award(&t, p, Some(StyleKey::Bellows), &items, false, 10, &mut ev);
     let b = bonuses(&ev);
     assert!((b[0].1 - 30.0 * f).abs() < 1e-4, "gain x freshness");
     assert_eq!(
@@ -246,14 +251,14 @@ fn stale_gains_are_cut_and_reported() {
         StyleBonus::Stale,
         "- STALE in the feed"
     );
-    assert!(s.view(&t).is_stale(StyleKey::Thresher, &t));
-    assert!(!s.view(&t).is_stale(StyleKey::Lancet, &t));
+    assert!(s.view(&t).is_stale(StyleKey::Bellows, &t));
+    assert!(!s.view(&t).is_stale(StyleKey::Quill, &t));
 }
 
 #[test]
 fn close_call_multiplies_the_kill() {
     let t = st();
-    let mut k = kill(DamageFlags::HITSCAN | DamageFlags::HEADSHOT, Attack::Lancet);
+    let mut k = kill(DamageFlags::HITSCAN | DamageFlags::HEADSHOT, Attack::Quill);
     assert!(!is_close_call(&k, &t));
     k.killer_health = 20.0;
     assert!(is_close_call(&k, &t));
@@ -263,7 +268,7 @@ fn close_call_multiplies_the_kill() {
     s.award(
         &t,
         PlayerId(0),
-        Some(StyleKey::Lancet),
+        Some(StyleKey::Quill),
         &items,
         true,
         1,
@@ -336,26 +341,47 @@ fn style_events(events: &[SimEvent]) -> Vec<StyleEvent> {
         .collect()
 }
 
-fn range(husks: &[Vec3]) -> (Arena, PlayerId, Vec<shared::protocol::NetId>) {
+fn range(dummies: &[Vec3]) -> (Arena, PlayerId, Vec<shared::protocol::NetId>) {
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.world.players.get_mut(&p).unwrap().notarget = true;
-    let ids = husks.iter().map(|pos| a.husk(*pos, PI)).collect();
+    let ids = dummies
+        .iter()
+        .map(|pos| dummy(&mut a, *pos, PI, 40.0))
+        .collect();
     a.ticks(10);
     (a, p, ids)
 }
 
 #[test]
+fn style_keys_follow_the_attack() {
+    // A projectile turned around by a Gust scores as the Gust; a parried one as PARRY.
+    let enemy = Attack::Enemy {
+        kind: DUMMY_KIND,
+        attack: 0,
+    };
+    let parried = DamageFlags::PROJECTILE | DamageFlags::PARRIED;
+    assert_eq!(StyleKey::for_damage(enemy, parried, true), Some(StyleKey::Parry));
+    assert_eq!(StyleKey::for_damage(Attack::Gust, parried, true), Some(StyleKey::Gust));
+    assert_eq!(StyleKey::for_damage(enemy, DamageFlags::PROJECTILE, true), None);
+    assert_eq!(StyleKey::from_attack(Attack::Thorn), Some(StyleKey::Thorn));
+    assert_eq!(StyleKey::from_attack(Attack::Splinter), Some(StyleKey::Splinter));
+    assert_eq!(StyleKey::Discharge.label(), "DISCHARGE");
+    assert_eq!(StyleBonus::Deflect.label(), "DEFLECT");
+    assert_eq!(StyleKey::ALL.len(), StyleKey::COUNT);
+}
+
+#[test]
 fn a_headshot_kill_scores_kill_and_headshot() {
     let (mut a, p, h) = range(&[Vec3::new(0.0, 0.0, -15.0)]);
-    let head = a.husk_head(h[0]);
+    let head = dummy_head(&a, h[0]);
     a.aim(p, head);
     let ev = a.tap(p, Buttons::FIRE, 1);
     let b = bonuses(&style_events(&ev));
     assert_eq!(b, [(StyleBonus::Kill, 30.0), (StyleBonus::Headshot, 15.0)]);
     let s = &a.world.style.players[&p];
     assert_eq!(s.total, 45.0);
-    assert!(s.freshness(StyleKey::Lancet) < 1.0);
+    assert!(s.freshness(StyleKey::Quill) < 1.0);
     // The owner's view and the scoreboard follow.
     let v = a.world.style.view(p, &a.tuning.style);
     assert_eq!(v.rank, 0);
@@ -364,14 +390,14 @@ fn a_headshot_kill_scores_kill_and_headshot() {
 }
 
 #[test]
-fn a_rocket_through_a_crowd_is_a_multikill() {
+fn a_bomb_into_a_crowd_is_a_multikill() {
     let (mut a, p, h) = range(&[
         Vec3::new(-0.8, 0.0, -14.0),
         Vec3::new(0.8, 0.0, -14.0),
         Vec3::new(0.0, 0.0, -15.0),
     ]);
     a.select(p, 3, 0);
-    let target = a.husk_body(h[2]);
+    let target = dummy_body(&a, h[2]);
     a.aim(p, target);
     let ev = a.tap(p, Buttons::FIRE, 40);
     let style = style_events(&ev);
@@ -382,7 +408,7 @@ fn a_rocket_through_a_crowd_is_a_multikill() {
     assert_eq!(exploded, 3);
     let multi: Vec<_> = b.iter().filter(|x| x.0 == StyleBonus::Multikill).collect();
     assert_eq!(multi.len(), 2, "3 kills = 2 multikill awards");
-    // One rocket = one use of the Cinderbox: every kill got full points.
+    // One bomb = one use of the Tumbler: every kill got full points.
     assert!(b.iter().all(|x| x.1 >= 20.0), "{b:?}");
     // 3 x (30 + 20) + 2 x 40 = 230: two ranks up.
     assert_eq!(a.world.style.players[&p].rank, 2);
@@ -400,14 +426,18 @@ fn a_rocket_through_a_crowd_is_a_multikill() {
 fn parries_score_and_meter_decays_back_down() {
     let (mut a, p, h) = range(&[Vec3::new(0.0, 0.0, -60.0)]);
     let t = a.tuning.clone();
+    let kind = shared::sim::ProjectileKind::ALL
+        .into_iter()
+        .find(|k| k.parryable())
+        .expect("enemy projectiles");
     let orb = a
         .world
         .spawn_enemy_projectile(
             &t,
-            shared::sim::ProjectileKind::SpitterOrb,
+            kind,
             h[0],
             Attack::Enemy {
-                kind: kind::HUSK,
+                kind: DUMMY_KIND,
                 attack: 0,
             },
             Vec3::new(0.0, 1.4, -20.0),
@@ -434,23 +464,23 @@ fn parries_score_and_meter_decays_back_down() {
 #[test]
 fn a_ricochet_kill_scores_the_bounce() {
     let (mut a, p, _) = range(&[]);
-    let husk = a.husk(Vec3::new(9.0, 0.0, -6.0), -PI / 2.0);
+    let target = dummy(&mut a, Vec3::new(9.0, 0.0, -6.0), -PI / 2.0, 70.0);
     let t = a.tuning.clone();
-    let prism = a
+    let thorn = a
         .world
-        .spawn_prism(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO)
-        .expect("prism");
+        .spawn_thorn(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO)
+        .expect("thorn");
     {
-        let pr = a.world.prisms.get_mut(&prism).unwrap();
-        pr.position = Vec3::new(0.0, 1.6, -6.0);
-        pr.resting = true;
+        let th = a.world.thorns.get_mut(&thorn).unwrap();
+        th.position = Vec3::new(0.0, 1.6, -6.0);
+        th.state = shared::sim::ThornState::Planted;
     }
     a.ticks(5);
     a.aim(p, Vec3::new(0.4, 1.6, -6.0));
     let ev = a.tap(p, Buttons::FIRE, 1);
-    assert!(!a.enemy_alive(husk));
+    assert!(!a.enemy_alive(target));
     let b = bonuses(&style_events(&ev));
-    // KILL + HEADSHOT with the Lancet, then RICOCHET (same tick, same key: charged once).
+    // KILL + HEADSHOT with the Quill, then RICOCHET (same tick, same key: charged once).
     assert!(b.contains(&(StyleBonus::Kill, 30.0)), "{b:?}");
     assert!(b.contains(&(StyleBonus::Headshot, 15.0)), "{b:?}");
     assert!(b.contains(&(StyleBonus::Ricochet, 30.0)), "{b:?}");

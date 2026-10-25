@@ -2,13 +2,15 @@
 //!
 //! Every projectile is a swept sphere: each tick it moves along its (ballistic) trajectory,
 //! sweeping against the level (`MASK_SHOTS`) and against the current hitboxes of everything
-//! its owner may hurt (the owner itself and co-op teammates are never hit). What happens on
-//! contact depends on the [`ProjectileKind`]: rivets and enemy orbs deal direct damage,
-//! sawblades pierce (damage per contact interval) and bounce off walls, explosives explode,
-//! stickies stick to the world or to whatever they hit.
+//! its owner may hurt (the owner itself and co-op teammates are never hit; player-owned
+//! projectiles get hit assist, see [`SimWorld::hit_pads`]). What happens on contact depends on
+//! the [`ProjectileKind`]: enemy projectiles deal direct damage, Tumbler bombs bounce off the
+//! level and explode on their last contact, on a hostile or when the fuse runs out, the
+//! Gravewell sticks to the level, pulls hostiles in and implodes, the Wisp drifts through
+//! targets zapping the nearest one and pops on the level.
 //!
-//! **Parryable hits are delayed**: when a parryable projectile (rocket, flak, mortar, enemy
-//! orbs/bolts) touches a player it freezes in a *pending impact* for
+//! **Parryable hits are delayed**: when a parryable projectile (enemy projectiles) touches a
+//! player it freezes in a *pending impact* for
 //! [`SimWorld::parry_delay_ticks`] (`net.parry_tolerance_ms`, plus the victim's view lag when
 //! `combat.parry_compensate_view_lag`), so a parry that the victim made on what they saw — and
 //! that reaches the server a little later — still cancels it. See `parry.rs`.
@@ -17,7 +19,7 @@
 //! position: `position`/`velocity` are the state at `aux` = launch tick, and clients compute
 //! `pos(t) = p0 + v0·Δ − ½·g·Δ²·ŷ` (Δ = (t − aux)/tick_rate; g = the kind's gravity, 0 when
 //! `PARRIED`). The entity only changes when the trajectory changes (bounce, parry, stick), so
-//! a sky full of rivets costs almost no bandwidth.
+//! a sky full of projectiles costs almost no bandwidth.
 
 use engine::physics::{MASK_SHOTS, SweepHit};
 use glam::Vec3;
@@ -25,25 +27,19 @@ use serde::{Deserialize, Serialize};
 
 use super::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
 use super::trail::Trail;
-use super::{HitPart, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
-use crate::protocol::{EntityState, NetId, kind, owner_code, projectile_flags};
+use super::{HitPads, HitPart, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
+use crate::protocol::{EntityState, NetId, kind, owner_code, projectile_flags, thorn_flags};
 use crate::tuning::{CombatTuning, Tuning};
 
 /// Every projectile type. The replicated entity `kind` is [`ProjectileKind::net_kind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProjectileKind {
-    /// Riveter primary / Volley.
-    Rivet,
-    /// Riveter alt A: piercing, bouncing disc.
-    Sawblade,
-    /// Cinderbox primary.
-    Rocket,
-    /// Thresher alt B grenade (parryable by its owner too: punch it to launch it).
-    Flak,
-    /// Cinderbox alt A adhesive charge.
-    Sticky,
-    /// Cinderbox alt B lob.
-    Mortar,
+    /// Tumbler primary: bouncing bomb (`bounces_left` = world bounces before it explodes).
+    Bomb,
+    /// Tumbler alt B: sticks to the level, pulls hostiles in, implodes.
+    Gravewell,
+    /// Arclash alt A: slow ball of lightning that zaps the nearest hostile.
+    Wisp,
     /// Spitter's slow orb (enemy, parryable).
     SpitterOrb,
     /// Gnat's bolt (enemy, parryable).
@@ -51,25 +47,19 @@ pub enum ProjectileKind {
 }
 
 impl ProjectileKind {
-    pub const ALL: [ProjectileKind; 8] = [
-        ProjectileKind::Rivet,
-        ProjectileKind::Sawblade,
-        ProjectileKind::Rocket,
-        ProjectileKind::Flak,
-        ProjectileKind::Sticky,
-        ProjectileKind::Mortar,
+    pub const ALL: [ProjectileKind; 5] = [
+        ProjectileKind::Bomb,
+        ProjectileKind::Gravewell,
+        ProjectileKind::Wisp,
         ProjectileKind::SpitterOrb,
         ProjectileKind::GnatBolt,
     ];
 
     pub fn net_kind(self) -> u16 {
         match self {
-            ProjectileKind::Rivet => kind::RIVET,
-            ProjectileKind::Sawblade => kind::SAWBLADE,
-            ProjectileKind::Rocket => kind::ROCKET,
-            ProjectileKind::Flak => kind::FLAK,
-            ProjectileKind::Sticky => kind::STICKY,
-            ProjectileKind::Mortar => kind::MORTAR,
+            ProjectileKind::Bomb => kind::BOMB,
+            ProjectileKind::Gravewell => kind::GRAVEWELL,
+            ProjectileKind::Wisp => kind::WISP,
             ProjectileKind::SpitterOrb => kind::SPITTER_ORB,
             ProjectileKind::GnatBolt => kind::GNAT_BOLT,
         }
@@ -82,10 +72,9 @@ impl ProjectileKind {
     /// Downward acceleration (m/s²) of an un-parried projectile of this kind.
     pub fn gravity(self, t: &CombatTuning) -> f32 {
         match self {
-            ProjectileKind::Rivet | ProjectileKind::Sawblade | ProjectileKind::Rocket => 0.0,
-            ProjectileKind::Flak => t.thresher.flak_gravity,
-            ProjectileKind::Sticky => t.cinderbox.sticky_gravity,
-            ProjectileKind::Mortar => t.cinderbox.mortar_gravity,
+            ProjectileKind::Bomb => t.tumbler.bomb_gravity,
+            ProjectileKind::Gravewell => t.tumbler.gravewell_gravity,
+            ProjectileKind::Wisp => 0.0,
             ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_gravity,
             ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_gravity,
         }
@@ -94,56 +83,46 @@ impl ProjectileKind {
     /// Collision radius.
     pub fn radius(self, t: &CombatTuning) -> f32 {
         match self {
-            ProjectileKind::Rivet => t.riveter.rivet_radius,
-            ProjectileKind::Sawblade => t.riveter.saw_radius,
-            ProjectileKind::Rocket => t.cinderbox.rocket_projectile_radius,
-            ProjectileKind::Flak => t.thresher.flak_projectile_radius,
-            ProjectileKind::Sticky => 0.15,
-            ProjectileKind::Mortar => 0.25,
+            ProjectileKind::Bomb => t.tumbler.bomb_projectile_radius,
+            ProjectileKind::Gravewell => t.tumbler.gravewell_projectile_radius,
+            ProjectileKind::Wisp => t.arclash.wisp_radius,
             ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_radius,
             ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_radius,
         }
     }
 
-    /// Seconds before it expires (explosives explode then: the flak fuse).
+    /// Seconds before it expires (explosives explode then: the bomb fuse, the wisp pop).
     pub fn lifetime(self, t: &CombatTuning) -> f32 {
         match self {
-            ProjectileKind::Rivet => t.riveter.rivet_lifetime,
-            ProjectileKind::Sawblade => t.riveter.saw_lifetime,
-            ProjectileKind::Rocket => t.cinderbox.rocket_lifetime,
-            ProjectileKind::Flak => t.thresher.flak_fuse,
-            ProjectileKind::Sticky => t.cinderbox.sticky_lifetime,
-            ProjectileKind::Mortar => 10.0,
+            ProjectileKind::Bomb => t.tumbler.bomb_fuse,
+            ProjectileKind::Gravewell => t.tumbler.gravewell_flight_time,
+            ProjectileKind::Wisp => t.arclash.wisp_lifetime,
             ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_lifetime,
             ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_lifetime,
         }
     }
 
-    /// Can be deflected by a punch.
+    /// Can be deflected by a punch (and touching a player is parry-delayed). Players'
+    /// projectiles are not; a Gust deflects any hostile projectile.
     pub fn parryable(self) -> bool {
-        matches!(
-            self,
-            ProjectileKind::Rocket
-                | ProjectileKind::Flak
-                | ProjectileKind::Mortar
-                | ProjectileKind::SpitterOrb
-                | ProjectileKind::GnatBolt
-        )
+        matches!(self, ProjectileKind::SpitterOrb | ProjectileKind::GnatBolt)
     }
 
-    /// The shooter (and co-op teammates) may punch their own (the flak launch combo).
+    /// The shooter (and co-op teammates) may punch their own. No current kind.
     pub fn owner_can_parry(self) -> bool {
-        self == ProjectileKind::Flak
+        false
+    }
+
+    /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets).
+    pub fn hits_targets(self) -> bool {
+        !matches!(self, ProjectileKind::Gravewell | ProjectileKind::Wisp)
     }
 
     pub fn default_attack(self) -> Attack {
         match self {
-            ProjectileKind::Rivet => Attack::Rivet,
-            ProjectileKind::Sawblade => Attack::Sawblade,
-            ProjectileKind::Rocket => Attack::Rocket,
-            ProjectileKind::Flak => Attack::Flak,
-            ProjectileKind::Sticky => Attack::Sticky,
-            ProjectileKind::Mortar => Attack::Mortar,
+            ProjectileKind::Bomb => Attack::Tumble,
+            ProjectileKind::Gravewell => Attack::Gravewell,
+            ProjectileKind::Wisp => Attack::Wisp,
             ProjectileKind::SpitterOrb | ProjectileKind::GnatBolt => {
                 Attack::Enemy { kind: 0, attack: 0 }
             }
@@ -153,25 +132,20 @@ impl ProjectileKind {
     /// Explosion of explosive kinds.
     pub fn explosive(self, t: &CombatTuning) -> Option<Explosive> {
         let (radius, damage, knockback) = match self {
-            ProjectileKind::Rocket => (
-                t.cinderbox.rocket_radius,
-                t.cinderbox.rocket_damage,
-                t.cinderbox.rocket_knockback,
+            ProjectileKind::Bomb => (
+                t.tumbler.bomb_radius,
+                t.tumbler.bomb_damage,
+                t.tumbler.bomb_knockback,
             ),
-            ProjectileKind::Flak => (
-                t.thresher.flak_radius,
-                t.thresher.flak_damage,
-                t.thresher.flak_knockback,
+            ProjectileKind::Gravewell => (
+                t.tumbler.gravewell_radius,
+                t.tumbler.gravewell_damage,
+                t.tumbler.gravewell_knockback,
             ),
-            ProjectileKind::Sticky => (
-                t.cinderbox.sticky_radius,
-                t.cinderbox.sticky_damage,
-                t.cinderbox.sticky_knockback,
-            ),
-            ProjectileKind::Mortar => (
-                t.cinderbox.mortar_radius,
-                t.cinderbox.mortar_damage,
-                t.cinderbox.mortar_knockback,
+            ProjectileKind::Wisp => (
+                t.arclash.wisp_pop_radius,
+                t.arclash.wisp_pop_damage,
+                t.arclash.wisp_pop_knockback,
             ),
             _ => return None,
         };
@@ -228,7 +202,7 @@ pub struct Projectile {
     pub velocity: Vec3,
     pub radius: f32,
     pub gravity: f32,
-    /// Direct-hit damage (rivets, saw per contact interval, enemy orbs...).
+    /// Direct-hit damage (enemy projectiles; the Wisp: per zap).
     pub damage: f32,
     pub explosion: Option<Explosive>,
     pub spawn_tick: u32,
@@ -240,13 +214,14 @@ pub struct Projectile {
     pub launch_position: Vec3,
     pub launch_velocity: Vec3,
     pub bounces_left: u32,
-    /// Deflected by a punch (now flies straight, ×damage).
+    /// Deflected by a punch or a Gust (now flies straight, ×damage).
     pub parried: bool,
     pub stuck: Option<Stuck>,
     pub pending: Option<PendingImpact>,
     /// Positions at the end of each tick (parry rewinding).
     pub trail: Trail,
-    /// Sawblade: tick each target may be damaged again.
+    /// Per-target re-hit timers (target, tick it may be damaged again) for kinds that touch
+    /// targets repeatedly; cleared by a deflection.
     pub contacts: Vec<(HitTarget, u32)>,
 }
 
@@ -323,8 +298,7 @@ impl SimWorld {
         let c = &t.combat;
         let now = self.tick;
         let damage = match kind {
-            ProjectileKind::Rivet => c.riveter.rivet_damage,
-            ProjectileKind::Sawblade => c.riveter.saw_damage,
+            ProjectileKind::Wisp => c.arclash.wisp_zap_damage,
             _ => 0.0,
         };
         let lifetime = secs_to_ticks(kind.lifetime(c), self.tick_rate, 1) as u32;
@@ -347,8 +321,8 @@ impl SimWorld {
             launch_tick,
             launch_position: position,
             launch_velocity: velocity,
-            bounces_left: if kind == ProjectileKind::Sawblade {
-                c.riveter.saw_bounces
+            bounces_left: if kind == ProjectileKind::Bomb {
+                c.tumbler.bomb_contacts.saturating_sub(1)
             } else {
                 0
             },
@@ -377,18 +351,6 @@ impl SimWorld {
         let tick = self.tick;
         for p in self.projectiles.values_mut() {
             p.trail.record(tick, p.position);
-        }
-        // Live sticky counts (authoritative for the owners' weapon state).
-        for pl in self.players.values_mut() {
-            pl.combat.weapons.stickies = 0;
-        }
-        for p in self.projectiles.values() {
-            if p.kind == ProjectileKind::Sticky
-                && let Owner::Player(owner) = p.owner
-                && let Some(pl) = self.players.get_mut(&owner)
-            {
-                pl.combat.weapons.stickies = pl.combat.weapons.stickies.saturating_add(1);
-            }
         }
     }
 
@@ -419,6 +381,9 @@ impl SimWorld {
                 self.explode_projectile(t, p, None);
                 return false;
             }
+            if p.kind == ProjectileKind::Gravewell {
+                self.gravewell_pull(t, p);
+            }
             return true;
         }
         if now >= p.expire_tick {
@@ -426,6 +391,9 @@ impl SimWorld {
                 self.explode_projectile(t, p, None);
             }
             return false;
+        }
+        if p.kind == ProjectileKind::Wisp {
+            self.wisp_zap(t, p, boxes);
         }
 
         let dt = self.dt();
@@ -438,14 +406,13 @@ impl SimWorld {
         let world_f = world_hit.map_or(1.0, |h| h.fraction);
         let dir = motion.normalize_or(p.velocity.normalize_or(Vec3::NEG_Z));
 
-        if p.kind == ProjectileKind::Sawblade {
-            self.saw_contacts(t, p, motion * world_f, boxes);
-        } else {
+        if p.kind.hits_targets() {
             let first = boxes
                 .iter()
                 .filter(|h| self.can_hit(p.owner, h.target))
                 .filter_map(|h| {
-                    h.sweep_sphere(p.position, motion, p.radius)
+                    let pads = self.hit_pads(t, p.owner, h.target);
+                    h.sweep_sphere_padded(p.position, motion, p.radius, pads)
                         .map(|(f, part)| (f, h.target, part))
                 })
                 .filter(|(f, _, _)| *f <= world_f)
@@ -492,18 +459,6 @@ impl SimWorld {
         dir: Vec3,
     ) -> bool {
         let now = self.tick;
-        if p.kind == ProjectileKind::Sticky {
-            let offset = self
-                .target_origin(target)
-                .map_or(Vec3::ZERO, |o| p.position - o);
-            p.stuck = Some(Stuck {
-                to: Some(target),
-                offset,
-            });
-            p.velocity = Vec3::ZERO;
-            p.relaunch(now);
-            return true;
-        }
         if let HitTarget::Player(victim) = target
             && p.kind.parryable()
         {
@@ -563,9 +518,10 @@ impl SimWorld {
     fn projectile_hit_world(&mut self, t: &Tuning, p: &mut Projectile, hit: SweepHit) -> bool {
         let now = self.tick;
         match p.kind {
-            ProjectileKind::Sawblade if p.bounces_left > 0 => {
+            ProjectileKind::Bomb if p.bounces_left > 0 && !p.parried => {
                 let n = hit.normal;
-                p.velocity -= n * (2.0 * p.velocity.dot(n));
+                p.velocity = (p.velocity - n * (2.0 * p.velocity.dot(n)))
+                    * t.combat.tumbler.bomb_restitution;
                 p.bounces_left -= 1;
                 p.relaunch(now);
                 self.events.push(SimEvent::ProjectileBounced {
@@ -575,13 +531,20 @@ impl SimWorld {
                 });
                 true
             }
-            ProjectileKind::Sticky => {
+            ProjectileKind::Gravewell if !p.parried => {
+                // Sticks where it lands, pulls for `gravewell_pull_time`, then implodes.
                 p.stuck = Some(Stuck {
                     to: None,
                     offset: Vec3::ZERO,
                 });
                 p.velocity = Vec3::ZERO;
+                p.expire_tick =
+                    now + secs_to_ticks(t.combat.tumbler.gravewell_pull_time, self.tick_rate, 1) as u32;
                 p.relaunch(now);
+                self.events.push(SimEvent::GravewellStuck {
+                    id: p.id,
+                    position: p.position,
+                });
                 true
             }
             _ if p.explosion.is_some() => {
@@ -601,37 +564,102 @@ impl SimWorld {
         }
     }
 
-    /// Sawblade: damages everything it overlaps along this tick's motion, once per
-    /// `saw_damage_interval` per target.
-    fn saw_contacts(&mut self, t: &Tuning, p: &mut Projectile, motion: Vec3, boxes: &[Hitbox]) {
-        let now = self.tick;
-        let interval =
-            secs_to_ticks(t.combat.riveter.saw_damage_interval, self.tick_rate, 1) as u32;
-        p.contacts.retain(|(_, next)| *next > now);
-        let touching: Vec<(HitTarget, HitPart)> = boxes
+    /// Gravewell (stuck): pulls every hostile enemy within `gravewell_pull_radius` towards
+    /// its centre at up to `gravewell_pull_speed` × the enemy's `knockback_scale` (hostile
+    /// players in PvP at `gravewell_player_pull` of that), easing off within 2 m of the centre.
+    /// Pulled enemies are kept staggered so their own steering doesn't fight it.
+    fn gravewell_pull(&mut self, t: &Tuning, p: &Projectile) {
+        let tb = &t.combat.tumbler;
+        let center = p.position;
+        let pull = |d: f32| tb.gravewell_pull_speed * (d / 2.0).clamp(0.0, 1.0);
+        let targets: Vec<HitTarget> = self
+            .enemies
+            .keys()
+            .map(|id| HitTarget::Entity(*id))
+            .chain(self.players.keys().map(|id| HitTarget::Player(*id)))
+            .filter(|target| self.can_hit(p.owner, *target))
+            .collect();
+        for target in targets {
+            match target {
+                HitTarget::Entity(id) => {
+                    let Some(e) = self.enemies.get_mut(&id) else {
+                        continue;
+                    };
+                    let to = center - e.center();
+                    let d = to.length();
+                    if d > tb.gravewell_pull_radius || d < 1e-3 {
+                        continue;
+                    }
+                    let dir = to / d;
+                    let speed = pull(d) * e.def.knockback_scale;
+                    let along = e.velocity.dot(dir);
+                    if along < speed {
+                        e.velocity += dir * (speed - along);
+                        if e.velocity.y > 0.5 {
+                            e.on_ground = false;
+                        }
+                    }
+                    e.stagger = e.stagger.max(2);
+                }
+                HitTarget::Player(id) => {
+                    let Some(pl) = self.players.get_mut(&id) else {
+                        continue;
+                    };
+                    let (body, _, _) = pl.movement.capsule(&t.movement);
+                    let to = center - body;
+                    let d = to.length();
+                    if d > tb.gravewell_pull_radius || d < 1e-3 {
+                        continue;
+                    }
+                    let dir = to / d;
+                    let speed = pull(d) * tb.gravewell_player_pull;
+                    let along = pl.movement.velocity.dot(dir);
+                    if along < speed {
+                        pl.movement.velocity += dir * (speed - along);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wisp: every `wisp_zap_interval` it zaps the nearest hostile within `wisp_zap_range`
+    /// (hit assist, line of sight) for its damage. Emits [`SimEvent::WispZap`].
+    fn wisp_zap(&mut self, t: &Tuning, p: &Projectile, boxes: &[Hitbox]) {
+        let a = &t.combat.arclash;
+        let interval = secs_to_ticks(a.wisp_zap_interval, self.tick_rate, 1) as u32;
+        let age = self.tick.wrapping_sub(p.spawn_tick);
+        if age == 0 || !age.is_multiple_of(interval) {
+            return;
+        }
+        let world = &self.collision.world;
+        let best = boxes
             .iter()
             .filter(|h| self.can_hit(p.owner, h.target))
             .filter_map(|h| {
-                h.sweep_sphere(p.position, motion, p.radius)
-                    .map(|(_, part)| (h.target, part))
+                let pads = self.hit_pads(t, p.owner, h.target);
+                let (d, _) = h.distance_to_point_padded(p.position, pads)?;
+                let aim = h.center()?;
+                (d <= a.wisp_zap_range && !world.line_blocked(p.position, aim, MASK_SHOTS))
+                    .then_some((d, h.target, aim))
             })
-            .collect();
-        let dir = motion.normalize_or(Vec3::NEG_Z);
-        for (target, part) in touching {
-            if p.contacts.iter().any(|(c, _)| *c == target) {
-                continue;
-            }
-            p.contacts.push((target, now + interval));
-            let mut info = DamageInfo::new(p.damage, p.owner, p.attack)
-                .at(p.position, dir)
-                .part(part)
-                .flags(DamageFlags::PROJECTILE);
-            if p.parried {
-                info.flags.insert(DamageFlags::PARRIED);
-            }
-            info.projectile = Some(p.id);
-            self.apply_damage(t, target, info);
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, target, aim)) = best else {
+            return;
+        };
+        let dir = (aim - p.position).normalize_or(Vec3::NEG_Z);
+        let mut info = DamageInfo::new(p.damage, p.owner, p.attack)
+            .at(aim, dir)
+            .flags(DamageFlags::HITSCAN);
+        if p.parried {
+            info.flags.insert(DamageFlags::PARRIED);
         }
+        info.projectile = Some(p.id);
+        self.events.push(SimEvent::WispZap {
+            id: p.id,
+            from: p.position,
+            to: aim,
+        });
+        self.apply_damage(t, target, info);
     }
 
     fn explode_projectile(&mut self, t: &Tuning, p: &Projectile, direct: Option<HitTarget>) {
@@ -657,8 +685,9 @@ impl SimWorld {
 
     /// An explosion: damage with linear falloff and line of sight from the centre, and
     /// knockback away from the centre (with an upward bias) to everything in the radius —
-    /// including the owner (self-damage fraction, full knockback: rocket jumps) and co-op
-    /// teammates (knockback only).
+    /// including the owner (self-damage fraction, full knockback: blast jumps) and co-op
+    /// teammates (knockback only). Player-owned explosions measure the distance to the
+    /// shapes inflated by the hit assist.
     #[allow(clippy::too_many_arguments)]
     pub fn explode(
         &mut self,
@@ -689,7 +718,13 @@ impl SimWorld {
             if !alive {
                 continue;
             }
-            let Some((d, _)) = h.distance_to_point(center) else {
+            // Hit assist for player-owned explosions (not on the owner itself).
+            let pads = if owner.as_target() == Some(h.target) {
+                HitPads::NONE
+            } else {
+                self.hit_pads(t, owner, h.target)
+            };
+            let Some((d, _)) = h.distance_to_point_padded(center, pads) else {
                 continue;
             };
             let d = d.max(0.0);
@@ -735,31 +770,6 @@ impl SimWorld {
         }
     }
 
-    /// Detonates every sticky of `player` (Cinderbox alt A pressed again).
-    pub fn detonate_stickies(&mut self, t: &Tuning, player: PlayerId) {
-        let ids: Vec<NetId> = self
-            .projectiles
-            .values()
-            .filter(|p| p.kind == ProjectileKind::Sticky && p.owner == Owner::Player(player))
-            .map(|p| p.id)
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-        self.events.push(SimEvent::StickiesDetonated {
-            player,
-            count: ids.len() as u32,
-        });
-        for id in ids {
-            if let Some(p) = self.projectiles.remove(&id) {
-                self.explode_projectile(t, &p, None);
-            }
-        }
-        if let Some(p) = self.players.get_mut(&player) {
-            p.combat.weapons.stickies = 0;
-        }
-    }
-
     /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit. `None` when
     /// the projectile limit is reached.
     #[allow(clippy::too_many_arguments)]
@@ -782,23 +792,23 @@ impl SimWorld {
     }
 }
 
-/// Client helper: where a trajectory-replicated entity (projectile or prism) is at
+/// Client helper: where a trajectory-replicated entity (projectile or thorn) is at
 /// `time_ticks` (fractional server ticks, e.g. the render tick). Other kinds: `position`.
 ///
-/// `position`/`velocity` are the state at launch tick `aux`; gravity is the kind's (prisms:
-/// `prism.gravity`), 0 for `PARRIED` projectiles; `STUCK`/`PENDING` projectiles and `RESTING`
-/// prisms are at `position`.
+/// `position`/`velocity` are the state at launch tick `aux`; gravity is the kind's (thorns:
+/// `thorn.gravity`), 0 for `PARRIED` projectiles; `STUCK`/`PENDING` projectiles and `PLANTED`
+/// thorns are at `position`.
 pub fn replicated_position(
     e: &EntityState,
     time_ticks: f64,
     tick_rate: u32,
     t: &CombatTuning,
 ) -> Vec3 {
-    let gravity = if e.kind == kind::PRISM {
-        if e.flags & crate::protocol::prism_flags::RESTING != 0 {
+    let gravity = if e.kind == kind::THORN {
+        if e.flags & thorn_flags::PLANTED != 0 {
             return e.position;
         }
-        t.prism.gravity
+        t.thorn.gravity
     } else if let Some(k) = ProjectileKind::from_net_kind(e.kind) {
         if e.flags & (projectile_flags::STUCK | projectile_flags::PENDING) != 0 {
             return e.position;

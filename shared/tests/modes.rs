@@ -118,7 +118,7 @@ fn kill(a: &mut Arena, p: PlayerId) {
 fn hit(a: &mut Arena, victim: PlayerId, by: PlayerId, amount: f32) -> shared::sim::DamageEvent {
     let t = a.tuning.clone();
     let at = a.world.players[&victim].movement.position + Vec3::Y;
-    let info = DamageInfo::new(amount, Owner::Player(by), Attack::Slug).at(at, Vec3::NEG_Z);
+    let info = DamageInfo::new(amount, Owner::Player(by), Attack::Quill).at(at, Vec3::NEG_Z);
     a.world.apply_damage(&t, HitTarget::Player(victim), info)
 }
 
@@ -176,13 +176,15 @@ fn solo_death_restarts_at_the_last_checkpoint() {
     // Something nasty in flight when we died is gone after the restart.
     let t = a.tuning.clone();
     a.husk(Vec3::new(20.0, 0.0, -60.0), 0.0);
-    a.world.spawn_projectile(
+    let wisp = a.world.spawn_projectile(
         &t,
-        shared::sim::ProjectileKind::Rocket,
+        shared::sim::ProjectileKind::Wisp,
         Owner::World,
         Vec3::new(0.0, 1.0, -70.0),
         Vec3::ZERO,
     );
+    // Long-lived: it would still be around without the restart.
+    a.world.projectiles.get_mut(&wisp.unwrap()).unwrap().expire_tick += 6000;
     // Death cam: 1.5 s.
     let ev = a.ticks(85);
     assert!(respawned(&ev, p).is_none());
@@ -315,13 +317,14 @@ fn everyone_down_at_once_wipes_the_team_back_to_the_checkpoint() {
     let (mut a, pa, pb) = coop_downed(spot);
     a.ticks(30);
     let t = a.tuning.clone();
-    a.world.spawn_projectile(
+    let wisp = a.world.spawn_projectile(
         &t,
-        shared::sim::ProjectileKind::Rocket,
+        shared::sim::ProjectileKind::Wisp,
         Owner::World,
         Vec3::new(0.0, 1.0, -90.0),
         Vec3::ZERO,
     );
+    a.world.projectiles.get_mut(&wisp.unwrap()).unwrap().expire_tick += 6000;
     kill(&mut a, pb);
     let ev = a.tick();
     let wiped = mode_events(&ev)
@@ -591,7 +594,7 @@ fn frags_count_kills_and_cost_suicides() {
     a.ticks(200);
     let t = a.tuning.clone();
     let at = a.world.players[&p0].movement.position;
-    let info = DamageInfo::new(500.0, Owner::Player(p0), Attack::Rocket)
+    let info = DamageInfo::new(500.0, Owner::Player(p0), Attack::Tumble)
         .at(at, Vec3::NEG_Y)
         .flags(shared::sim::DamageFlags::EXPLOSIVE);
     a.world.apply_damage(&t, HitTarget::Player(p0), info);
@@ -785,7 +788,7 @@ fn a_solo_death_mid_fight_resets_the_encounter_and_its_kills() {
     // The player kills one of them...
     let t = a.tuning.clone();
     let at = a.world.enemies[&ids[0]].position;
-    let info = DamageInfo::new(500.0, Owner::Player(p), Attack::Slug).at(at, Vec3::NEG_Z);
+    let info = DamageInfo::new(500.0, Owner::Player(p), Attack::Quill).at(at, Vec3::NEG_Z);
     a.world.apply_damage(&t, HitTarget::Entity(ids[0]), info);
     a.tick();
     assert_eq!(a.world.mode.stats(p).kills, 1);

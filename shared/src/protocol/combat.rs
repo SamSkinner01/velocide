@@ -96,8 +96,8 @@ pub enum Fx {
         origin: QPos,
         ends: Vec<QPos>,
     },
-    /// A shot bounced off prisms: shatter each prism, draw the bright ricochet tracer through
-    /// `points` (prisms, then the final end). Sent to everyone (shooter included).
+    /// A Quill shot bounced off thorns: shatter each thorn, draw the bright ricochet tracer
+    /// through `points` (thorns, then the final end). Sent to everyone (shooter included).
     Ricochet {
         shooter: u16,
         attack: Attack,
@@ -132,15 +132,39 @@ pub enum Fx {
         power: u8,
         radius_dm: u16,
     },
-    /// Prism throw (arm anim, `Sfx::PrismThrow`). Not sent to the thrower.
-    PrismThrown { player: PlayerId },
-    /// A prism expired (small fizzle).
-    PrismExpired { id: NetId },
-    /// Stickies detonated by their owner (`Sfx::StickyDetonate` click).
-    StickiesDetonated { player: PlayerId },
-    /// A sawblade bounced (`Sfx::SawBounce`, sparks).
+    /// Thorn throw (arm anim, `Sfx::ThornThrow`). Not sent to the thrower.
+    ThornThrown { player: PlayerId },
+    /// A thrown thorn planted itself in the level (`Sfx::ThornPlant`, chips).
+    ThornPlanted { position: QPos },
+    /// A thorn expired (small glass crumble, `Sfx::ThornShatter`).
+    ThornExpired { id: NetId },
+    /// A Splinter shot burst into secondary traces at `origin`: splinter tracers to each end,
+    /// `Sfx::SplinterBurst`. Sent to everyone (the shooter can't predict them).
+    Splinters {
+        shooter: u16,
+        origin: QPos,
+        ends: Vec<QPos>,
+    },
+    /// An Arclash zap chained from target to target: jagged arcs through `points` (the first
+    /// target hit, then each target it jumped to), `Sfx::ArcChain`. Sent to everyone.
+    ArcChain { shooter: u16, points: Vec<QPos> },
+    /// A Wisp zapped a target: jagged arc `from` → `to`, `Sfx::WispZap`. Sent to everyone.
+    WispZap { from: QPos, to: QPos },
+    /// A Brand shot marked a target (sigil flash, `Sfx::Branded` at `position`). Sent to
+    /// everyone; the brand itself is the `BRANDED` entity flag.
+    Branded { position: QPos },
+    /// A Gust turned a hostile projectile around (`Sfx::Deflect`, sparks). Sent to everyone.
+    Deflected { player: PlayerId, position: QPos },
+    /// An Arclash Discharge nova around `position` (ring of `radius_dm`, `Sfx::DischargeRelease`).
+    /// Not sent to the player who discharged (it predicts its own).
+    Discharge {
+        player: PlayerId,
+        position: QPos,
+        radius_dm: u16,
+    },
+    /// A bomb bounced off the level (`Sfx::BombBounce`, sparks).
     ProjectileBounce { kind: u16, position: QPos },
-    /// A rivet / orb hit the level and vanished (sparks / splash, `Sfx::ProjectileImpact`).
+    /// An enemy projectile hit the level and vanished (sparks / splash, `Sfx::ProjectileImpact`).
     ProjectileImpact {
         kind: u16,
         position: QPos,
@@ -184,6 +208,11 @@ impl Fx {
             self,
             Fx::Explosion { .. }
                 | Fx::Ricochet { .. }
+                | Fx::Splinters { .. }
+                | Fx::ArcChain { .. }
+                | Fx::Branded { .. }
+                | Fx::Deflected { .. }
+                | Fx::Discharge { .. }
                 | Fx::SlamShockwave { .. }
                 | Fx::EnemyShockwave { .. }
                 | Fx::EnemyAttack { .. }

@@ -12,7 +12,7 @@
 //! | `/killall` | kills every enemy |
 //! | `/god` | toggles invulnerability |
 //! | `/notarget` | toggles: enemies ignore you |
-//! | `/give` | full health, no hard damage, full prisms, weapons ready |
+//! | `/give` | full health, no hard damage, full thorns, weapons ready |
 //! | `/kill` | kills you (respawn rule applies) |
 //! | `/ff [on/off]` | PvP damage between players |
 //! | `/hurt <amount>` | damages you (test hard damage / healing) |
@@ -104,10 +104,9 @@ impl Server {
                     p.combat.hard = 0.0;
                     p.combat.weapons = WeaponState {
                         prev_buttons: w.prev_buttons,
-                        stickies: w.stickies,
                         ..WeaponState::fresh(w.weapon, w.mode)
                     };
-                    "full health, prisms and weapons".into()
+                    "full health, thorns and weapons".into()
                 }
                 None => "no body".into(),
             },

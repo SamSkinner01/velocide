@@ -12,7 +12,8 @@
 //! | MULTIKILL | `n` kills within `multikill_window` (`multikill × (n − 1)` in total) |
 //! | CLOSE CALL | a kill while the killer's health is below `close_call_health` (×1.5) |
 //! | PARRY | `SimEvent::Parried` |
-//! | RICOCHET | a ricochet shot dealt damage (+ per extra bounce) |
+//! | DEFLECT | `SimEvent::Deflected` (a Gust turned a hostile projectile around) |
+//! | RICOCHET | a ricochet shot dealt damage (+ per extra thorn bounce) |
 //!
 //! Gains are multiplied by the **freshness** of the weapon mode / action ([`StyleKey`]) that
 //! scored: each use costs `freshness_cost`, restores every other key a little and everything
@@ -65,6 +66,8 @@ pub enum StyleBonus {
     Parry,
     ReturnToSender,
     Ricochet,
+    /// A Gust turned a hostile projectile around.
+    Deflect,
     Exploded,
     SlamKill,
     Fisted,
@@ -85,6 +88,7 @@ impl StyleBonus {
             StyleBonus::Parry => "PARRY",
             StyleBonus::ReturnToSender => "RETURN TO SENDER",
             StyleBonus::Ricochet => "RICOCHET",
+            StyleBonus::Deflect => "DEFLECT",
             StyleBonus::Exploded => "EXPLODED",
             StyleBonus::SlamKill => "SLAM KILL",
             StyleBonus::Fisted => "FISTED",
@@ -94,44 +98,47 @@ impl StyleBonus {
     }
 }
 
-/// What freshness is tracked for: every weapon fire mode plus the fist, the slam and parries.
+/// What freshness is tracked for: every weapon fire mode (weapon-major: primary, alt A,
+/// alt B) plus the fist, the slam, parries and thorns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StyleKey {
-    Lancet,
-    Overcharge,
-    Fan,
-    Thresher,
-    Slug,
-    Flak,
-    Riveter,
-    Sawblade,
-    Volley,
-    Cinderbox,
-    Sticky,
-    Mortar,
+    Quill,
+    Brand,
+    Splinter,
+    Bellows,
+    Gust,
+    BothBarrels,
+    Arclash,
+    Wisp,
+    Discharge,
+    Tumbler,
+    Breach,
+    Gravewell,
     Fist,
     Slam,
     Parry,
+    Thorn,
 }
 
 impl StyleKey {
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
     pub const ALL: [StyleKey; Self::COUNT] = [
-        StyleKey::Lancet,
-        StyleKey::Overcharge,
-        StyleKey::Fan,
-        StyleKey::Thresher,
-        StyleKey::Slug,
-        StyleKey::Flak,
-        StyleKey::Riveter,
-        StyleKey::Sawblade,
-        StyleKey::Volley,
-        StyleKey::Cinderbox,
-        StyleKey::Sticky,
-        StyleKey::Mortar,
+        StyleKey::Quill,
+        StyleKey::Brand,
+        StyleKey::Splinter,
+        StyleKey::Bellows,
+        StyleKey::Gust,
+        StyleKey::BothBarrels,
+        StyleKey::Arclash,
+        StyleKey::Wisp,
+        StyleKey::Discharge,
+        StyleKey::Tumbler,
+        StyleKey::Breach,
+        StyleKey::Gravewell,
         StyleKey::Fist,
         StyleKey::Slam,
         StyleKey::Parry,
+        StyleKey::Thorn,
     ];
 
     pub fn index(self) -> usize {
@@ -141,33 +148,35 @@ impl StyleKey {
     /// The key an attack scores under (`None` for enemy attacks, the world, dev commands).
     pub fn from_attack(attack: Attack) -> Option<StyleKey> {
         Some(match attack {
-            Attack::Lancet => StyleKey::Lancet,
-            Attack::Overcharge => StyleKey::Overcharge,
-            Attack::Fan => StyleKey::Fan,
-            Attack::Pellet => StyleKey::Thresher,
-            Attack::Slug => StyleKey::Slug,
-            Attack::Flak => StyleKey::Flak,
-            Attack::Rivet => StyleKey::Riveter,
-            Attack::Sawblade => StyleKey::Sawblade,
-            Attack::Volley => StyleKey::Volley,
-            Attack::Rocket => StyleKey::Cinderbox,
-            Attack::Sticky => StyleKey::Sticky,
-            Attack::Mortar => StyleKey::Mortar,
+            Attack::Quill => StyleKey::Quill,
+            Attack::Brand => StyleKey::Brand,
+            Attack::Splinter => StyleKey::Splinter,
+            Attack::Blast => StyleKey::Bellows,
+            Attack::Gust => StyleKey::Gust,
+            Attack::BothBarrels => StyleKey::BothBarrels,
+            Attack::Arc => StyleKey::Arclash,
+            Attack::Wisp => StyleKey::Wisp,
+            Attack::Discharge => StyleKey::Discharge,
+            Attack::Tumble => StyleKey::Tumbler,
+            Attack::Breach => StyleKey::Breach,
+            Attack::Gravewell => StyleKey::Gravewell,
+            Attack::Thorn => StyleKey::Thorn,
             Attack::Fist => StyleKey::Fist,
             Attack::Slam => StyleKey::Slam,
             Attack::Enemy { .. } | Attack::World | Attack::Dev => return None,
         })
     }
 
-    /// The key of a damage instance: a parried projectile scores as `Parry`.
+    /// The key of a damage instance: a parried projectile scores as `Parry`, one turned around
+    /// by a Gust (its attack becomes `Gust`) as `Gust`.
     pub fn for_damage(attack: Attack, flags: DamageFlags, projectile: bool) -> Option<StyleKey> {
-        if projectile && flags.contains(DamageFlags::PARRIED) {
+        if projectile && flags.contains(DamageFlags::PARRIED) && attack != Attack::Gust {
             return Some(StyleKey::Parry);
         }
         Self::from_attack(attack)
     }
 
-    /// The keys of a weapon slot (0 Lancet .. 3 Cinderbox): primary, alt A, alt B.
+    /// The keys of a weapon slot (0 Quill .. 3 Tumbler): primary, alt A, alt B.
     pub fn weapon_keys(slot: u8) -> [StyleKey; 3] {
         let base = (slot.min(3) as usize) * 3;
         [Self::ALL[base], Self::ALL[base + 1], Self::ALL[base + 2]]
@@ -175,21 +184,22 @@ impl StyleKey {
 
     pub fn label(self) -> &'static str {
         match self {
-            StyleKey::Lancet => "LANCET",
-            StyleKey::Overcharge => "OVERCHARGE",
-            StyleKey::Fan => "FAN",
-            StyleKey::Thresher => "THRESHER",
-            StyleKey::Slug => "SLUG",
-            StyleKey::Flak => "FLAK",
-            StyleKey::Riveter => "RIVETER",
-            StyleKey::Sawblade => "SAWBLADE",
-            StyleKey::Volley => "VOLLEY",
-            StyleKey::Cinderbox => "CINDERBOX",
-            StyleKey::Sticky => "STICKY",
-            StyleKey::Mortar => "MORTAR",
+            StyleKey::Quill => "QUILL",
+            StyleKey::Brand => "BRAND",
+            StyleKey::Splinter => "SPLINTER",
+            StyleKey::Bellows => "BELLOWS",
+            StyleKey::Gust => "GUST",
+            StyleKey::BothBarrels => "BOTH BARRELS",
+            StyleKey::Arclash => "ARCLASH",
+            StyleKey::Wisp => "WISP",
+            StyleKey::Discharge => "DISCHARGE",
+            StyleKey::Tumbler => "TUMBLER",
+            StyleKey::Breach => "BREACH",
+            StyleKey::Gravewell => "GRAVEWELL",
             StyleKey::Fist => "FIST",
             StyleKey::Slam => "SLAM",
             StyleKey::Parry => "PARRY",
+            StyleKey::Thorn => "THORN",
         }
     }
 }
@@ -259,7 +269,7 @@ impl StyleView {
 }
 
 /// Base points of a kill's bonuses (before freshness and close call), in feed order.
-/// `victim_flying`: the victim hovers (no AIRSHOT for shooting gnats out of the air they live
+/// `victim_flying`: the victim hovers (no AIRSHOT for shooting flyers out of the air they live
 /// in). `multikill`: kills by this killer within the window, this one included.
 pub fn kill_bonuses(
     kill: &KillInfo,
@@ -310,7 +320,7 @@ pub fn is_close_call(kill: &KillInfo, t: &StyleTuning) -> bool {
         && kill.killer_health < t.close_call_health
 }
 
-/// Points of a ricochet hit after `bounces` prism bounces.
+/// Points of a ricochet hit after `bounces` thorn bounces.
 pub fn ricochet_points(bounces: u8, t: &StyleTuning) -> f32 {
     t.ricochet + t.ricochet_per_bounce * bounces.saturating_sub(1) as f32
 }
@@ -337,7 +347,7 @@ pub struct PlayerStyle {
     pub grace: f32,
     /// Ticks of this player's recent kills (multikill window).
     recent_kills: Vec<u32>,
-    /// Freshness is charged once per key per tick (one rocket killing three is one use).
+    /// Freshness is charged once per key per tick (one bomb killing three is one use).
     last_use: Option<(StyleKey, u32)>,
 }
 
@@ -586,11 +596,7 @@ impl SimWorld {
                         && self.enemy_defs.by_kind(k.victim_kind).is_some_and(|d| {
                             matches!(d.locomotion, super::enemy::Locomotion::Flying { .. })
                         });
-                    let key = if k.parried_projectile {
-                        Some(StyleKey::Parry)
-                    } else {
-                        StyleKey::from_attack(k.attack)
-                    };
+                    let key = StyleKey::for_damage(k.attack, k.flags, k.parried_projectile);
                     let style = self.style.player(killer);
                     let n = style.register_kill(k.tick, window);
                     let items = kill_bonuses(k, flying, n, st);
@@ -606,6 +612,21 @@ impl SimWorld {
                         st,
                         p.player,
                         Some(StyleKey::Parry),
+                        &items,
+                        false,
+                        tick,
+                        &mut out,
+                    );
+                }
+                SimEvent::Deflected { player, .. } => {
+                    if !self.players.contains_key(player) {
+                        continue;
+                    }
+                    let items = [(StyleBonus::Deflect, st.deflect, 0)];
+                    self.style.player(*player).award(
+                        st,
+                        *player,
+                        Some(StyleKey::Gust),
                         &items,
                         false,
                         tick,
@@ -676,8 +697,19 @@ mod tests {
         }
         assert_eq!(
             StyleKey::weapon_keys(1),
-            [StyleKey::Thresher, StyleKey::Slug, StyleKey::Flak]
+            [StyleKey::Bellows, StyleKey::Gust, StyleKey::BothBarrels]
         );
+        assert_eq!(
+            StyleKey::weapon_keys(3),
+            [StyleKey::Tumbler, StyleKey::Breach, StyleKey::Gravewell]
+        );
+        // Every weapon mode's attack scores under its own slot's keys.
+        for w in crate::sim::Weapon::ALL {
+            let keys = StyleKey::weapon_keys(w.slot());
+            assert_eq!(StyleKey::from_attack(w.primary()), Some(keys[0]));
+            assert_eq!(StyleKey::from_attack(w.alt(0)), Some(keys[1]));
+            assert_eq!(StyleKey::from_attack(w.alt(1)), Some(keys[2]));
+        }
     }
 
     #[test]
@@ -689,8 +721,8 @@ mod tests {
         let v = s.view(&t);
         assert_eq!(v.freshness[0], 255);
         assert_eq!(v.freshness[3], 0);
-        assert!((v.freshness(StyleKey::Slug, &t) - 0.6).abs() < 0.01);
-        assert!(v.is_stale(StyleKey::Thresher, &t));
-        assert!(!v.is_stale(StyleKey::Slug, &t));
+        assert!((v.freshness(StyleKey::Gust, &t) - 0.6).abs() < 0.01);
+        assert!(v.is_stale(StyleKey::Bellows, &t));
+        assert!(!v.is_stale(StyleKey::Gust, &t));
     }
 }

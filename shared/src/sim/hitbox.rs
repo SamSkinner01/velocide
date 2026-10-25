@@ -1,5 +1,11 @@
-//! Hitboxes: spheres and capsules attached to players and (later) enemies. Used for hit
-//! detection and recorded per tick by the server's lag compensation history.
+//! Hitboxes: spheres and capsules attached to players and enemies. Used for hit detection and
+//! recorded per tick by the server's lag compensation history.
+//!
+//! **Hit assist**: attacks owned by players test against shapes inflated by [`HitPads`]
+//! (`combat.hit_assist`, see [`crate::sim::SimWorld::hit_pads`]); the recorded / rewound shapes
+//! stay plain and the padding is added at test time. A ray that hits the plain shapes keeps
+//! that result (the padding never turns a headshot into a body hit); only a near miss falls
+//! back to the padded shapes.
 
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -145,6 +151,33 @@ fn ray_capsule(origin: Vec3, dir: Vec3, pa: Vec3, pb: Vec3, radius: f32) -> Opti
     best
 }
 
+/// Extra radius for forgiving hit tests: `body` for [`HitPart::Body`] shapes, `weak` for heads
+/// and weak points. [`HitPads::NONE`] = the plain shapes.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HitPads {
+    pub body: f32,
+    pub weak: f32,
+}
+
+impl HitPads {
+    pub const NONE: HitPads = HitPads {
+        body: 0.0,
+        weak: 0.0,
+    };
+
+    pub fn is_none(self) -> bool {
+        self.body <= 0.0 && self.weak <= 0.0
+    }
+
+    /// Padding of a shape covering `part`.
+    pub fn for_part(self, part: HitPart) -> f32 {
+        match part {
+            HitPart::Body => self.body,
+            HitPart::Head | HitPart::Weak(_) => self.weak,
+        }
+    }
+}
+
 /// All hit shapes of one target at one point in time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hitbox {
@@ -153,6 +186,59 @@ pub struct Hitbox {
 }
 
 impl Hitbox {
+    /// The same shapes inflated by `pads`.
+    pub fn padded(&self, pads: HitPads) -> Hitbox {
+        Hitbox {
+            target: self.target,
+            shapes: self
+                .shapes
+                .iter()
+                .map(|s| HitShape {
+                    radius: s.radius + pads.for_part(s.part).max(0.0),
+                    ..*s
+                })
+                .collect(),
+        }
+    }
+
+    /// [`Hitbox::ray_hit`] with hit assist: the plain shapes first, then (a near miss) the
+    /// shapes inflated by `pads`.
+    pub fn ray_hit_padded(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+        pads: HitPads,
+    ) -> Option<(f32, HitPart)> {
+        let plain = self.ray_hit(origin, dir, max_dist);
+        if plain.is_some() || pads.is_none() {
+            return plain;
+        }
+        self.padded(pads).ray_hit(origin, dir, max_dist)
+    }
+
+    /// [`Hitbox::sweep_sphere`] against the shapes inflated by `pads`.
+    pub fn sweep_sphere_padded(
+        &self,
+        origin: Vec3,
+        motion: Vec3,
+        radius: f32,
+        pads: HitPads,
+    ) -> Option<(f32, HitPart)> {
+        if pads.is_none() {
+            return self.sweep_sphere(origin, motion, radius);
+        }
+        self.padded(pads).sweep_sphere(origin, motion, radius)
+    }
+
+    /// [`Hitbox::distance_to_point`] to the shapes inflated by `pads`.
+    pub fn distance_to_point_padded(&self, p: Vec3, pads: HitPads) -> Option<(f32, HitPart)> {
+        self.shapes
+            .iter()
+            .map(|s| (s.distance_to_point(p) - pads.for_part(s.part).max(0.0), s.part))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
     /// Interpolates towards `other` (same target). Falls back to `self` if the shape layouts
     /// differ (e.g. a stance change that swapped shapes).
     pub fn lerp(&self, other: &Hitbox, t: f32) -> Hitbox {
@@ -266,5 +352,45 @@ mod tests {
         let s = HitShape::sphere(HitPart::Head, Vec3::new(0.0, 0.0, -10.0), 1.0);
         let t = s.ray_hit(Vec3::ZERO, Vec3::NEG_Z, 100.0).unwrap();
         assert!((t - 9.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn padding_catches_near_misses_without_stealing_hits() {
+        let h = Hitbox {
+            target: HitTarget::Player(PlayerId(1)),
+            shapes: vec![
+                HitShape::capsule(HitPart::Body, Vec3::ZERO, Vec3::new(0.0, 1.2, 0.0), 0.4),
+                HitShape::sphere(HitPart::Head, Vec3::new(0.0, 1.6, 0.0), 0.25),
+            ],
+        };
+        let pads = HitPads {
+            body: 0.2,
+            weak: 0.1,
+        };
+        // 0.15 m past the body's edge: a miss, caught by the 0.2 m pad.
+        let origin = Vec3::new(0.55, 0.6, 10.0);
+        assert!(h.ray_hit(origin, Vec3::NEG_Z, 100.0).is_none());
+        let (_, part) = h.ray_hit_padded(origin, Vec3::NEG_Z, 100.0, pads).unwrap();
+        assert_eq!(part, HitPart::Body);
+        // Beyond the pad: still a miss.
+        let far = Vec3::new(0.65, 0.6, 10.0);
+        assert!(h.ray_hit_padded(far, Vec3::NEG_Z, 100.0, pads).is_none());
+        // A plain head hit stays a head hit (the padded body reaches this high too).
+        let head = Vec3::new(0.0, 1.7, 10.0);
+        assert_eq!(h.ray_hit(head, Vec3::NEG_Z, 100.0).unwrap().1, HitPart::Head);
+        assert_eq!(
+            h.ray_hit_padded(head, Vec3::NEG_Z, 100.0, pads).unwrap().1,
+            HitPart::Head
+        );
+        // No pads: identical to the plain test.
+        assert!(h.ray_hit_padded(origin, Vec3::NEG_Z, 100.0, HitPads::NONE).is_none());
+        // Distances and sweeps shrink by the pad.
+        let p = Vec3::new(1.0, 0.6, 0.0);
+        let (plain, _) = h.distance_to_point(p).unwrap();
+        let (padded, _) = h.distance_to_point_padded(p, pads).unwrap();
+        assert!((plain - padded - 0.2).abs() < 1e-5);
+        let motion = Vec3::new(0.0, 0.0, -20.0);
+        assert!(h.sweep_sphere(origin, motion, 0.05).is_none());
+        assert!(h.sweep_sphere_padded(origin, motion, 0.05, pads).is_some());
     }
 }

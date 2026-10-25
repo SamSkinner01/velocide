@@ -16,9 +16,10 @@
 //! If either is within `parry_range` of the eye inside `parry_cone_degrees` of the aim (or
 //! within `parry_close_range` at any angle) the projectile is **deflected**: it now belongs to
 //! the puncher, flies along the aim — auto-aimed at the nearest hostile within
-//! `parry_auto_aim_degrees` — without gravity, `parry_speed_multiplier` faster (flak:
-//! `flak_parry_speed_multiplier`) and with `parry_damage_multiplier` damage, but never beyond
-//! `parry_max_speed` / `parry_max_damage` however often it is punched back and forth.
+//! `parry_auto_aim_degrees` — without gravity, `parry_speed_multiplier` faster and with
+//! `parry_damage_multiplier` damage, but never beyond `parry_max_speed` / `parry_max_damage`
+//! however often it is punched back and forth. (The Bellows Gust deflects through the same
+//! [`SimWorld::redirect_projectile`] with its own multipliers.)
 //!
 //! **Network tolerance.** A parryable projectile that touches a player does not hurt
 //! immediately: it freezes in a *pending impact* for [`SimWorld::parry_delay_ticks`] =
@@ -126,8 +127,8 @@ impl SimWorld {
         });
     }
 
-    /// The melee part of a punch: nearest hittable target (rewound to the view time) within
-    /// range and cone, with line of sight.
+    /// The melee part of a punch: nearest hittable target (rewound to the view time, hit
+    /// assist) within range and cone, with line of sight.
     fn punch_hit(
         &mut self,
         t: &Tuning,
@@ -150,12 +151,13 @@ impl SimWorld {
             .iter()
             .filter(|h| self.can_hit(shooter, h.target))
             .filter_map(|h| {
+                let pads = self.hit_pads(t, shooter, h.target);
                 // Along the aim first (precise), else the closest shape in the cone.
-                if let Some((d, part)) = h.ray_hit(eye, aim, c.punch_range) {
+                if let Some((d, part)) = h.ray_hit_padded(eye, aim, c.punch_range, pads) {
                     return Some((d, h.target, part, eye + aim * d));
                 }
                 let center = h.center()?;
-                let (d, part) = h.distance_to_point(eye)?;
+                let (d, part) = h.distance_to_point_padded(eye, pads)?;
                 let to = center - eye;
                 (d <= c.punch_range && to.normalize_or_zero().angle_between(aim) <= half_cone)
                     .then_some((d.max(0.0), h.target, part, center))
@@ -224,7 +226,7 @@ impl SimWorld {
             if proj.parried && proj.owner == Owner::Player(id) {
                 continue;
             }
-            // Own / teammates' projectiles only for kinds made to be punched (flak).
+            // Own / teammates' projectiles only for kinds made to be punched.
             let friendly = match proj.owner {
                 Owner::Player(o) => o == id || !self.rules.friendly_fire,
                 _ => false,
@@ -281,11 +283,8 @@ impl SimWorld {
         let healed = self.parry_reward(t, id);
         let mut first = true;
         for (pid, late) in projectiles {
-            if let Some(position) = self.deflect(t, id, pid) {
-                let kind = self
-                    .projectiles
-                    .get(&pid)
-                    .map_or(ProjectileKind::Rocket, |p| p.kind);
+            let kind = self.projectiles.get(&pid).map(|p| p.kind);
+            if let (Some(kind), Some(position)) = (kind, self.deflect(t, id, pid)) {
                 self.events.push(SimEvent::Parried(ParryEvent {
                     player: id,
                     target: ParryTarget::Projectile { id: pid, kind },
@@ -312,15 +311,40 @@ impl SimWorld {
         true
     }
 
-    /// Deflects projectile `pid` for player `id`. Returns where it was parried.
+    /// Deflects projectile `pid` for player `id` (a parry). Returns where it was parried.
     fn deflect(&mut self, t: &Tuning, id: PlayerId, pid: NetId) -> Option<Vec3> {
+        let c = &t.combat;
+        self.redirect_projectile(
+            t,
+            id,
+            pid,
+            c.parry_speed_multiplier,
+            c.parry_damage_multiplier,
+            true,
+        )
+    }
+
+    /// Turns projectile `pid` around for player `id`: it now belongs to them and flies from
+    /// their eye along their aim (`auto_aim`: at the nearest hostile within
+    /// `parry_auto_aim_degrees`) without gravity, `speed_multiplier` faster and with
+    /// `damage_multiplier` damage (both capped by `parry_max_speed` / `parry_max_damage`).
+    /// Returns where it was.
+    pub(crate) fn redirect_projectile(
+        &mut self,
+        t: &Tuning,
+        id: PlayerId,
+        pid: NetId,
+        speed_multiplier: f32,
+        damage_multiplier: f32,
+        auto_aim: bool,
+    ) -> Option<Vec3> {
         let p = self.players.get(&id)?;
         let c = &t.combat;
         let eye = p.movement.eye_position(&t.movement);
         let aim = look_dir(p.yaw, p.pitch);
         let me = Owner::Player(id);
-        let dir = self
-            .auto_aim(
+        let target = if auto_aim {
+            self.auto_aim(
                 t,
                 eye,
                 aim,
@@ -328,29 +352,27 @@ impl SimWorld {
                 c.parry_auto_aim_degrees,
                 c.parry_auto_aim_range,
             )
-            .map_or(aim, |target| (target - eye).normalize_or(aim));
+        } else {
+            None
+        };
+        let dir = target.map_or(aim, |target| (target - eye).normalize_or(aim));
         let now = self.tick;
         let launch = self.launch_tick_now();
         let lifetime_secs = self.projectiles.get(&pid)?.kind.lifetime(c).max(3.0);
         let lifetime = secs_to_ticks(lifetime_secs, self.tick_rate, 1) as u32;
         let proj = self.projectiles.get_mut(&pid)?;
         let where_ = proj.position;
-        let mult = if proj.kind == ProjectileKind::Flak {
-            c.thresher.flak_parry_speed_multiplier
-        } else {
-            c.parry_speed_multiplier
-        };
         proj.owner = me;
         proj.parried = true;
         proj.pending = None;
         proj.gravity = 0.0;
         // Capped: two players punching one projectile back and forth must not grow it
         // geometrically (huge speeds made every sweep cover billions of grid cells).
-        proj.damage = parry_boost(proj.damage, c.parry_damage_multiplier, c.parry_max_damage);
+        proj.damage = parry_boost(proj.damage, damage_multiplier, c.parry_max_damage);
         if let Some(e) = &mut proj.explosion {
-            e.damage = parry_boost(e.damage, c.parry_damage_multiplier, c.parry_max_damage);
+            e.damage = parry_boost(e.damage, damage_multiplier, c.parry_max_damage);
         }
-        proj.speed = parry_boost(proj.speed.max(1.0), mult, c.parry_max_speed);
+        proj.speed = parry_boost(proj.speed.max(1.0), speed_multiplier, c.parry_max_speed);
         proj.position = eye + dir * 1.0;
         proj.velocity = dir * proj.speed;
         proj.expire_tick = now + lifetime;
@@ -490,7 +512,7 @@ mod tests {
         let rocket = w
             .spawn_projectile(
                 &t,
-                ProjectileKind::Rocket,
+                ProjectileKind::Bomb,
                 Owner::World,
                 Vec3::new(0.0, 1.0, 0.0),
                 Vec3::new(0.0, 0.0, 45.0),
@@ -522,7 +544,7 @@ mod tests {
 
         // A projectile already beyond the caps keeps its values (parrying never weakens it).
         let fast = w
-            .spawn_projectile(&t, ProjectileKind::Rocket, Owner::World, Vec3::Y, Vec3::ZERO)
+            .spawn_projectile(&t, ProjectileKind::Bomb, Owner::World, Vec3::Y, Vec3::ZERO)
             .unwrap();
         {
             let p = w.projectiles.get_mut(&fast).unwrap();
