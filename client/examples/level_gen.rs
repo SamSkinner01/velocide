@@ -715,6 +715,8 @@ fn crucible() -> Gen {
     g.encounter(
         "encounter 1: Rendering Floor — husks",
         Encounter {
+            arena: None,
+            rally: None,
             trigger: vol([-20.0, -1.0, -63.0], [20.0, 12.0, -31.0]),
             lock_doors: vec![1],
             unlock_doors: vec![2],
@@ -821,6 +823,8 @@ fn crucible() -> Gen {
     g.encounter(
         "encounter 2: Bleeding Cloister — husks + spitters on the mezzanine",
         Encounter {
+            arena: None,
+            rally: None,
             trigger: vol([-30.0, -4.0, -141.0], [30.0, 14.0, -98.0]),
             lock_doors: vec![3],
             unlock_doors: vec![4],
@@ -947,6 +951,8 @@ fn crucible() -> Gen {
     g.encounter(
         "encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers",
         Encounter {
+            arena: None,
+            rally: None,
             trigger: vol([-44.0, -5.0, -215.0], [0.0, 46.0, -180.0]),
             lock_doors: vec![5],
             unlock_doors: vec![6],
@@ -1058,6 +1064,8 @@ fn crucible() -> Gen {
     g.encounter(
         "encounter 4: Crucible Heart — a bastion on the island, then a mixed wave",
         Encounter {
+            arena: None,
+            rally: None,
             trigger: vol([73.0, -4.0, -233.0], [116.0, 18.0, -183.0]),
             lock_doors: vec![7],
             unlock_doors: vec![8],
@@ -1191,6 +1199,8 @@ fn crucible() -> Gen {
     g.encounter(
         "encounter 5: Furnace Cathedral — finale, four waves of everything",
         Encounter {
+            arena: None,
+            rally: None,
             trigger: vol([60.0, -22.0, -330.0], [122.0, 28.0, -270.0]),
             lock_doors: vec![9],
             unlock_doors: vec![10],

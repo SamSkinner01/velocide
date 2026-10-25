@@ -177,6 +177,14 @@ pub struct Wave {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Encounter {
     pub trigger: Volume,
+    /// The locked room itself. When the doors lock, living players outside it are pulled to
+    /// `rally` so co-op teammates can't be locked out.
+    #[serde(default)]
+    pub arena: Option<Volume>,
+    /// Where players outside `arena` are teleported when the encounter locks (usually the
+    /// checkpoint just inside the entry door).
+    #[serde(default)]
+    pub rally: Option<SpawnPoint>,
     #[serde(default)]
     pub lock_doors: Vec<u32>,
     #[serde(default)]
@@ -222,9 +230,11 @@ pub struct LevelDef {
     /// Reaching this volume completes a campaign level.
     pub exit: Option<Volume>,
     pub jump_pads: Vec<JumpPad>,
-    /// Falling into one of these kills the player (bottomless pits, lava).
+    /// A player whose *feet position* enters one of these dies (bottomless pits, lava).
     pub kill_volumes: Vec<Volume>,
     pub props: Vec<Prop>,
+    /// Par time in seconds for results-screen grading (0 = no par time).
+    pub par_time: f32,
 }
 
 /// Collision world for a level plus the collider ids of its doors.
