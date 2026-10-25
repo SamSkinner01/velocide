@@ -1,6 +1,6 @@
 //! First-person camera: sits at the predicted, smoothed eye position and layers the camera
 //! feel on top: speed FOV kick, view roll (slides / wall running), landing dip, stair
-//! smoothing, slide eye height and screen shake.
+//! smoothing, slide eye height, the low view while downed and screen shake.
 //!
 //! Everything here is presentation: it reads the predicted [`MoveState`] and the server's
 //! [`MovementTuning`] (via `shared::movement::{view_roll, fov_kick, landing_dip}`) and never
@@ -23,6 +23,10 @@ const STEP_RATE: f32 = 14.0;
 const DIP_OMEGA: f32 = 14.0;
 /// Dips smaller than this are ignored (tiny hops).
 const MIN_DIP: f32 = 0.01;
+/// Eye height while downed in co-op (lying on the floor, waiting for a revive).
+pub const DOWNED_EYE_HEIGHT: f32 = 0.6;
+/// How fast the view sinks when going down (1/s): slower than crouching, it reads as a fall.
+const DOWNED_EYE_RATE: f32 = 5.0;
 
 fn approach(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
     current + (target - current) * (1.0 - (-rate * dt).exp())
@@ -49,6 +53,8 @@ pub struct CameraFrame<'a> {
     pub pitch: f32,
     pub settings: &'a Settings,
     pub shake: ShakeOffset,
+    /// Downed (co-op): the view drops to [`DOWNED_EYE_HEIGHT`].
+    pub downed: bool,
     /// Real frame time.
     pub dt: f32,
 }
@@ -58,9 +64,13 @@ impl CameraRig {
         Self::default()
     }
 
-    /// Forget smoothing (spawn, respawn, teleport).
+    /// Forget smoothing (spawn, respawn, teleport). The eye height is kept (it is relative to
+    /// the feet), so getting up after a revive or a respawn rises smoothly.
     pub fn reset(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            eye_height: self.eye_height,
+            ..Self::default()
+        };
     }
 
     /// A landing at `speed` m/s (`MoveEvents::landed`): kick the dip spring.
@@ -96,13 +106,15 @@ impl CameraRig {
         self.roll = approach(self.roll, roll_target, ROLL_RATE, dt);
         self.fov_kick = approach(self.fov_kick, fov_kick(f.state, t), FOV_RATE, dt);
 
-        let eye_target = if f.state.crouched {
-            t.slide_eye_height
+        let (eye_target, eye_rate) = if f.downed {
+            (DOWNED_EYE_HEIGHT, DOWNED_EYE_RATE)
+        } else if f.state.crouched {
+            (t.slide_eye_height, EYE_RATE)
         } else {
-            t.eye_height
+            (t.eye_height, EYE_RATE)
         };
         let eye = match self.eye_height {
-            Some(e) => approach(e, eye_target, EYE_RATE, dt),
+            Some(e) => approach(e, eye_target, eye_rate, dt),
             None => eye_target,
         };
         self.eye_height = Some(eye);
@@ -157,6 +169,7 @@ mod tests {
             pitch: 0.0,
             settings: s,
             shake: ShakeOffset::default(),
+            downed: false,
             dt: 1.0 / 144.0,
         }
     }
@@ -215,5 +228,37 @@ mod tests {
         }
         let settled = rig.update(&frame(&crouched, &tuning, &settings)).position.y;
         assert!((settled - tuning.slide_eye_height).abs() < 1e-3);
+    }
+
+    #[test]
+    fn downed_lowers_the_eye_and_getting_up_restores_it() {
+        let tuning = MovementTuning::default();
+        let settings = Settings::default();
+        let state = MoveState::default();
+        let mut rig = CameraRig::new();
+        let standing = rig.update(&frame(&state, &tuning, &settings)).position.y;
+        assert!((standing - tuning.eye_height).abs() < 1e-4);
+        let downed = |rig: &mut CameraRig| {
+            let mut f = frame(&state, &tuning, &settings);
+            f.downed = true;
+            rig.update(&f).position.y
+        };
+        // Sinks smoothly, not in one frame.
+        let first = downed(&mut rig);
+        assert!(first < standing && first > DOWNED_EYE_HEIGHT + 0.5, "{first}");
+        let mut y = first;
+        for _ in 0..300 {
+            y = downed(&mut rig);
+        }
+        assert!((y - DOWNED_EYE_HEIGHT).abs() < 1e-3, "{y}");
+        // Revived / respawned: the Spawned event resets the rig; the view rises smoothly back
+        // to standing height.
+        rig.reset();
+        let first = rig.update(&frame(&state, &tuning, &settings)).position.y;
+        assert!(first > DOWNED_EYE_HEIGHT && first < standing, "{first}");
+        for _ in 0..300 {
+            y = rig.update(&frame(&state, &tuning, &settings)).position.y;
+        }
+        assert!((y - tuning.eye_height).abs() < 1e-3, "{y}");
     }
 }
