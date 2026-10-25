@@ -230,6 +230,11 @@ Shots should feel generous; being shot should feel fair.
 | enemy projectiles | 80 `EMBER_BOMB`, 81 `NEEDLE` (70–71 retired) |
 | relay | `THORN` takes over the prism's kind slot |
 
+Flag bits: `BRANDED` is bit 15 in both `player_flags` and `enemy_flags` (weapons area). Brand
+state lives in a `SimWorld` side table keyed by target and is OR-ed into the replicated flags in
+`SimWorld::replicate`, so it never touches the `Enemy` struct. New enemy flags (enemies area)
+use bits 6–14.
+
 `PROTOCOL_VERSION` is bumped once for the whole roster change.
 
 ## Ownership while the roster is being built
