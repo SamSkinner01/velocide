@@ -16,7 +16,8 @@
 //! within `parry_close_range` at any angle) the projectile is **deflected**: it now belongs to
 //! the puncher, flies along the aim — auto-aimed at the nearest hostile within
 //! `parry_auto_aim_degrees` — without gravity, `parry_speed_multiplier` faster (flak:
-//! `flak_parry_speed_multiplier`) and with `parry_damage_multiplier` damage.
+//! `flak_parry_speed_multiplier`) and with `parry_damage_multiplier` damage, but never beyond
+//! `parry_max_speed` / `parry_max_damage` however often it is punched back and forth.
 //!
 //! **Network tolerance.** A parryable projectile that touches a player does not hurt
 //! immediately: it freezes in a *pending impact* for [`SimWorld::parry_delay_ticks`] =
@@ -83,6 +84,12 @@ pub struct PendingHit {
     pub info: DamageInfo,
     pub apply_tick: u32,
     pub created_tick: u32,
+}
+
+/// `value × multiplier`, but a parry never raises it above `cap` (a value already above the
+/// cap is kept, not lowered).
+fn parry_boost(value: f32, multiplier: f32, cap: f32) -> f32 {
+    (value * multiplier).min(cap.max(value))
 }
 
 impl SimWorld {
@@ -336,11 +343,13 @@ impl SimWorld {
         proj.parried = true;
         proj.pending = None;
         proj.gravity = 0.0;
-        proj.damage *= c.parry_damage_multiplier;
+        // Capped: two players punching one projectile back and forth must not grow it
+        // geometrically (huge speeds made every sweep cover billions of grid cells).
+        proj.damage = parry_boost(proj.damage, c.parry_damage_multiplier, c.parry_max_damage);
         if let Some(e) = &mut proj.explosion {
-            e.damage *= c.parry_damage_multiplier;
+            e.damage = parry_boost(e.damage, c.parry_damage_multiplier, c.parry_max_damage);
         }
-        proj.speed = proj.speed.max(1.0) * mult;
+        proj.speed = parry_boost(proj.speed.max(1.0), mult, c.parry_max_speed);
         proj.position = eye + dir * 1.0;
         proj.velocity = dir * proj.speed;
         proj.expire_tick = now + lifetime;
@@ -457,5 +466,72 @@ impl SimWorld {
         for id in ids {
             self.projectiles.remove(&id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::sim::{BUILTIN_LEVEL, DEFAULT_TICK_RATE, TickInputs, builtin_level};
+
+    #[test]
+    fn parry_ping_pong_is_capped() {
+        let t = Tuning::default();
+        let level = Arc::new(builtin_level(BUILTIN_LEVEL).unwrap());
+        let mut w = SimWorld::new(BUILTIN_LEVEL, level, DEFAULT_TICK_RATE);
+        let (a, b) = (PlayerId(0), PlayerId(1));
+        w.add_player(a, "A").movement.position = Vec3::new(0.0, 0.0, 10.0);
+        w.add_player(b, "B").movement.position = Vec3::new(0.0, 0.0, -10.0);
+        w.players.get_mut(&a).unwrap().yaw = 0.0; // facing -Z, at B
+        w.players.get_mut(&b).unwrap().yaw = std::f32::consts::PI;
+        let rocket = w.spawn_projectile(
+            &t,
+            ProjectileKind::Rocket,
+            Owner::World,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 45.0),
+        );
+        let explosion = w.projectiles[&rocket].explosion.unwrap().damage;
+        // Two players punching it back and forth: 1.5^n grew without bound, and the swept box
+        // of every step soon covered billions of grid cells (seconds per tick).
+        for i in 0..100 {
+            let who = if i % 2 == 0 { a } else { b };
+            assert!(w.deflect(&t, who, rocket).is_some());
+            let p = &w.projectiles[&rocket];
+            assert!(p.speed <= t.combat.parry_max_speed, "parry {i}: {}", p.speed);
+            assert!(p.velocity.length() <= t.combat.parry_max_speed + 1e-3);
+            let e = p.explosion.unwrap().damage;
+            assert!(p.damage <= t.combat.parry_max_damage && e <= t.combat.parry_max_damage);
+        }
+        let p = &w.projectiles[&rocket];
+        assert_eq!(p.speed, t.combat.parry_max_speed);
+        assert_eq!(p.explosion.unwrap().damage, t.combat.parry_max_damage);
+        // One parry is still a full boost.
+        assert!(explosion * t.combat.parry_damage_multiplier < t.combat.parry_max_damage);
+        // The world keeps ticking quickly with the capped projectile in flight.
+        let start = std::time::Instant::now();
+        for _ in 0..30 {
+            w.step(&TickInputs::new(), &t, None);
+        }
+        assert!(start.elapsed().as_secs_f32() < 2.0);
+
+        // A projectile already beyond the caps keeps its values (parrying never weakens it).
+        let fast = w.spawn_projectile(
+            &t,
+            ProjectileKind::Rocket,
+            Owner::World,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::ZERO,
+        );
+        {
+            let p = w.projectiles.get_mut(&fast).unwrap();
+            p.speed = 400.0;
+            p.damage = 1000.0;
+        }
+        w.deflect(&t, a, fast).unwrap();
+        let p = &w.projectiles[&fast];
+        assert_eq!((p.speed, p.damage), (400.0, 1000.0));
     }
 }

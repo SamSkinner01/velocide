@@ -223,6 +223,11 @@ pub struct CombatTuning {
     /// Deflected projectiles fly this much faster (flak uses its own multiplier).
     pub parry_speed_multiplier: f32,
     pub parry_damage_multiplier: f32,
+    /// Parrying never makes a projectile faster than this (m/s) ...
+    pub parry_max_speed: f32,
+    /// ... or its direct / explosion damage higher than this, however often it is punched
+    /// back and forth (a projectile already beyond a cap keeps its value).
+    pub parry_max_damage: f32,
     /// Deflections auto-aim at the nearest hostile within this cone / range.
     pub parry_auto_aim_degrees: f32,
     pub parry_auto_aim_range: f32,
@@ -280,6 +285,8 @@ impl Default for CombatTuning {
             parry_close_range: 1.2,
             parry_speed_multiplier: 1.5,
             parry_damage_multiplier: 2.0,
+            parry_max_speed: 250.0,
+            parry_max_damage: 400.0,
             parry_auto_aim_degrees: 15.0,
             parry_auto_aim_range: 80.0,
             parry_hard_damage_clear: 0.5,
