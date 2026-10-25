@@ -19,14 +19,18 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use renet::{ChannelConfig, ClientId, ConnectionConfig, RenetServer, SendType};
-use renetcode::{NETCODE_MAX_PACKET_BYTES, NetcodeServer, ServerAuthentication, ServerResult};
+// Connection authentication/config types come from `renet_netcode` (which re-exports them from
+// `renetcode`); the netcode.io state machine itself is driven directly so the socket glue below
+// can insert the network simulator.
+use renet_netcode::{NETCODE_USER_DATA_BYTES, ServerAuthentication, ServerConfig as NetcodeServerConfig};
+use renetcode::{NETCODE_MAX_PACKET_BYTES, NetcodeServer, ServerResult};
 use shared::protocol::{
     CHANNEL_RELIABLE, CHANNEL_UNRELIABLE, CONNECT_USER_DATA_BYTES, PROTOCOL_ID,
 };
 
 use crate::netsim::{NetSim, NetSimConfig};
 
-const _: () = assert!(CONNECT_USER_DATA_BYTES == renetcode::NETCODE_USER_DATA_BYTES);
+const _: () = assert!(CONNECT_USER_DATA_BYTES == NETCODE_USER_DATA_BYTES);
 
 /// renet channel layout shared by client and server (see `shared::protocol`).
 pub fn connection_config() -> ConnectionConfig {
@@ -324,7 +328,7 @@ impl NetcodeServerTransport {
         let link =
             UdpLink::bind(bind, netsim).map_err(|e| anyhow::anyhow!("binding UDP {bind}: {e}"))?;
         let local = link.local_addr()?;
-        let netcode = NetcodeServer::new(renetcode::ServerConfig {
+        let netcode = NetcodeServer::new(NetcodeServerConfig {
             current_time: netcode_time(),
             max_clients: max_clients.clamp(1, 64),
             protocol_id: PROTOCOL_ID,

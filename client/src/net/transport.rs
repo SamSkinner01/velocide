@@ -9,7 +9,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use renet::RenetClient;
-use renetcode::{ClientAuthentication, NetcodeClient};
+// Authentication types from `renet_netcode`; the netcode.io client is driven directly so the
+// network simulator can sit between it and the socket.
+use renet_netcode::ClientAuthentication;
+use renetcode::NetcodeClient;
 use server::{NetSimConfig, TransportStats, UdpLink};
 use shared::protocol::{CONNECT_USER_DATA_BYTES, PROTOCOL_ID};
 
