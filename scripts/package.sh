@@ -42,6 +42,9 @@ mkdir -p dist "$REGISTRY"
 # apt packages, $4 = extra rustup target.
 build_image() {
     local image=$1 base=$2 packages=$3 target=$4
+    # Tag includes the recipe, so changing the package list builds a fresh image.
+    image="$image-$(echo "$base $packages $target" | md5sum | cut -c1-8)"
+    IMAGE=$image
     if "$ENGINE" image exists "$image" 2>/dev/null || "$ENGINE" image inspect "$image" >/dev/null 2>&1; then
         return
     fi
@@ -81,10 +84,9 @@ stage() {
 }
 
 if [ "$WHAT" = linux ] || [ "$WHAT" = all ]; then
-    image="velocide-build-linux:$RUST_VERSION"
-    build_image "$image" ubuntu:20.04 "libasound2-dev libudev-dev libdbus-1-dev" ""
+    build_image "velocide-build-linux:$RUST_VERSION" ubuntu:20.04 "libasound2-dev libudev-dev libdbus-1-dev" ""
     echo "==> building Linux binaries"
-    run_build "$image" dist-linux "$CARGO_BUILD"
+    run_build "$IMAGE" dist-linux "$CARGO_BUILD"
     out="target/dist-linux/release"
     name="velocide-$VERSION-linux-x86_64"
     stage "dist/$name" "$out/velocide" "$out/velocide-server"
@@ -94,11 +96,12 @@ if [ "$WHAT" = linux ] || [ "$WHAT" = all ]; then
 fi
 
 if [ "$WHAT" = windows ] || [ "$WHAT" = all ]; then
-    image="velocide-build-windows:$RUST_VERSION"
-    build_image "$image" ubuntu:24.04 "gcc-mingw-w64-x86-64" "x86_64-pc-windows-gnu"
+    build_image "velocide-build-windows:$RUST_VERSION" ubuntu:24.04 "gcc-mingw-w64-x86-64 lld" "x86_64-pc-windows-gnu"
     echo "==> building Windows binaries"
-    run_build "$image" dist-windows \
-        "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc $CARGO_BUILD --target x86_64-pc-windows-gnu"
+    # LLVM's linker: GNU ld prints a spurious "corrupt .drectve" warning for the import
+    # stubs rustc generates for Windows API calls.
+    run_build "$IMAGE" dist-windows \
+        "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS='-C link-arg=-fuse-ld=lld' $CARGO_BUILD --target x86_64-pc-windows-gnu"
     out="target/dist-windows/x86_64-pc-windows-gnu/release"
     name="velocide-$VERSION-windows-x86_64"
     stage "dist/$name" "$out/velocide.exe" "$out/velocide-server.exe"
