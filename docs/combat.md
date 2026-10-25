@@ -160,13 +160,15 @@ FISTED = `attack == Fist`; CLOSE CALL = `killer_health < 30`; FRAG = `victim_kin
 Variety/freshness can key off `attack` (weapon + mode). The server exposes every event via
 `Server::drain_sim_events()`.
 
-### Death and respawn (replaceable)
+### Death and respawn (game modes)
 
-`SimWorld::on_player_died` (sets `dead`, `respawn_in = respawn_delay`, cancels pending hits
-on the player) and `SimWorld::respawn_player` (spawn point, full health, fresh weapons, spawn
-protection, `SimEvent::Respawned`) are the whole default rule, driven by `tick_vitals`. The
-modes agent replaces these two for checkpoints, downed/revive and deathmatch spawns. While
-dead, the body is simulated with `neutral_input` (falls/slides naturally) and fires nothing.
+`SimWorld::on_player_died` and `SimWorld::respawn_player` are the entry points the damage
+pipeline and `tick_vitals` call; both delegate to the game-mode rule in `sim/modes.rs`
+(`mode_player_died` / `mode_respawn_player`): solo campaign death cam then the last
+checkpoint, co-op *downed* (revivable, `player_flags::DOWNED`), deathmatch respawn after
+`respawn_delay` at the farthest spawn with spawn protection. See `docs/style_modes.md`.
+While dead or downed, the body is simulated with `neutral_input` (falls/slides naturally)
+and fires nothing.
 
 ## Weapons
 

@@ -16,11 +16,10 @@ use engine::ui::draw::{self, fade, mix};
 use engine::ui::hud::format_timer;
 use engine::ui::{Rect, TextStyle, Theme, Ui, UiDrawExt};
 use glam::{Vec2, Vec3, vec2};
-use shared::protocol::{EntityState, PlayerInfo, player_flags};
 use shared::lobby::GameMode;
+use shared::protocol::{EntityState, PlayerInfo, player_flags};
 use shared::sim::style::rank_name;
 use shared::sim::{LifeState, MatchPhase, ModeEvent, PlayerId, Scoreboard};
-
 
 use super::InGame;
 use super::hud::{Hud, project};
@@ -246,11 +245,18 @@ impl ModeHud {
     }
 
     /// Draws the mode HUD (not the results screen, which is interactive).
-    pub fn draw(&mut self, list: &mut UiDrawList, t: &Theme, info: &ModeHudInfo, audio: &mut Audio) {
+    pub fn draw(
+        &mut self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        info: &ModeHudInfo,
+        audio: &mut Audio,
+    ) {
         let c = Rect::from_min_size(Vec2::ZERO, list.canvas_size);
         let rate = info.tick_rate.max(1) as f64;
         let secs_until = |tick: u32| -> Option<f64> {
-            info.server_tick.map(|now| ((tick as f64 - now) / rate).max(0.0))
+            info.server_tick
+                .map(|now| ((tick as f64 - now) / rate).max(0.0))
         };
         let outline = fade(t.ink, 0.9);
         let Some(board) = &self.scoreboard else {
@@ -363,7 +369,14 @@ impl ModeHud {
     }
 
     /// Top-left deathmatch block: frags / limit, place, time left.
-    fn draw_deathmatch(&self, list: &mut UiDrawList, t: &Theme, info: &ModeHudInfo, board: &Scoreboard, c: Rect) {
+    fn draw_deathmatch(
+        &self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        info: &ModeHudInfo,
+        board: &Scoreboard,
+        c: Rect,
+    ) {
         let outline = fade(t.ink, 0.9);
         let mut rows = board.rows.clone();
         rows.sort_by(|a, b| b.frags.cmp(&a.frags).then(a.deaths.cmp(&b.deaths)));
@@ -371,8 +384,16 @@ impl ModeHud {
         let my_frags = mine.map_or(0, |i| rows[i].frags);
         let slab = Rect::new(vec2(8.0, 6.0), vec2(150.0, 46.0));
         draw::slanted(list, slab, true, fade(t.ink, 0.5));
-        draw::fill(list, Rect::new(slab.min, vec2(slab.min.x + 2.0, slab.max.y)), t.blood);
-        list.text(vec2(18.0, 10.0), "FRAGS", &TextStyle::new(t.bone_dim).outline(outline));
+        draw::fill(
+            list,
+            Rect::new(slab.min, vec2(slab.min.x + 2.0, slab.max.y)),
+            t.blood,
+        );
+        list.text(
+            vec2(18.0, 10.0),
+            "FRAGS",
+            &TextStyle::new(t.bone_dim).outline(outline),
+        );
         let limit = if board.rules.frag_limit > 0 {
             format!(" / {}", board.rules.frag_limit)
         } else {
@@ -383,7 +404,11 @@ impl ModeHud {
             &format!("{my_frags}"),
             &TextStyle::new(t.bone).scale(2.0).outline(outline),
         );
-        list.text(vec2(r.max.x + 2.0, 28.0), &limit, &TextStyle::new(t.bone_dim).outline(outline));
+        list.text(
+            vec2(r.max.x + 2.0, 28.0),
+            &limit,
+            &TextStyle::new(t.bone_dim).outline(outline),
+        );
         if let Some(place) = mine {
             let tied = rows.iter().filter(|r| r.frags == my_frags).count() > 1;
             let text = match (place, tied) {
@@ -396,7 +421,11 @@ impl ModeHud {
             } else {
                 t.bone_dim
             };
-            list.text(vec2(96.0, 10.0), &text, &TextStyle::new(col).scale(2.0).outline(outline));
+            list.text(
+                vec2(96.0, 10.0),
+                &text,
+                &TextStyle::new(col).scale(2.0).outline(outline),
+            );
         }
         // Time left, top centre under the level timer slot.
         if board.rules.time_limit_secs > 0.0
@@ -410,7 +439,11 @@ impl ModeHud {
                 t.bone_dim
             };
             let text = format!("TIME LEFT {}", &format_timer(left)[..5]);
-            list.text(vec2(c.center().x, 30.0), &text, &TextStyle::new(col).centered().outline(outline));
+            list.text(
+                vec2(c.center().x, 30.0),
+                &text,
+                &TextStyle::new(col).centered().outline(outline),
+            );
         }
     }
 
@@ -435,12 +468,22 @@ impl ModeHud {
                 continue;
             };
             let p = p.round();
-            let dist = info.local_pos.map_or(f32::INFINITY, |l| l.distance(e.position));
+            let dist = info
+                .local_pos
+                .map_or(f32::INFINITY, |l| l.distance(e.position));
             let pulse = ((info.time * 5.0).sin() as f32 * 0.5 + 0.5) * 0.5 + 0.5;
             // Cross marker.
             let col = mix(t.blood_bright, t.bone, 0.3 * pulse);
-            draw::fill(list, Rect::from_center_size(p, vec2(9.0, 3.0)).expand(1.0), fade(t.ink, 0.8));
-            draw::fill(list, Rect::from_center_size(p, vec2(3.0, 9.0)).expand(1.0), fade(t.ink, 0.8));
+            draw::fill(
+                list,
+                Rect::from_center_size(p, vec2(9.0, 3.0)).expand(1.0),
+                fade(t.ink, 0.8),
+            );
+            draw::fill(
+                list,
+                Rect::from_center_size(p, vec2(3.0, 9.0)).expand(1.0),
+                fade(t.ink, 0.8),
+            );
             draw::fill(list, Rect::from_center_size(p, vec2(9.0, 3.0)), col);
             draw::fill(list, Rect::from_center_size(p, vec2(3.0, 9.0)), col);
             let style = TextStyle::new(t.bone).centered().outline(fade(t.ink, 0.9));
@@ -457,12 +500,20 @@ impl ModeHud {
             );
             if let Some((reviver, start, done)) = self.reviving.get(&id) {
                 let frac = progress(info, *start, *done);
-                progress_bar(list, t, Rect::from_center_size(p + vec2(0.0, 10.0), vec2(40.0, 3.0)), frac, t.stamina);
+                progress_bar(
+                    list,
+                    t,
+                    Rect::from_center_size(p + vec2(0.0, 10.0), vec2(40.0, 3.0)),
+                    frac,
+                    t.stamina,
+                );
                 if Some(*reviver) != info.local {
                     list.text(
                         p + vec2(0.0, 16.0),
                         &format!("{} REVIVING", name_of(info.players, *reviver)),
-                        &TextStyle::new(t.stamina).centered().outline(fade(t.ink, 0.9)),
+                        &TextStyle::new(t.stamina)
+                            .centered()
+                            .outline(fade(t.ink, 0.9)),
                     );
                 }
             } else if !info.local_dead && dist <= info.revive_range {
@@ -478,7 +529,9 @@ impl ModeHud {
                 list.text(
                     p + vec2(0.0, 10.0),
                     &format!("{:.0} M", dist),
-                    &TextStyle::new(t.bone_dim).centered().outline(fade(t.ink, 0.9)),
+                    &TextStyle::new(t.bone_dim)
+                        .centered()
+                        .outline(fade(t.ink, 0.9)),
                 );
             }
         }
@@ -502,7 +555,13 @@ impl ModeHud {
         if let Some(tick) = self.downed.get(&me) {
             let panel = Rect::from_center_size(vec2(c.center().x, y + 14.0), vec2(230.0, 44.0));
             draw::slanted(list, panel, true, fade(t.ink, 0.6));
-            draw::hline(list, panel.min.x + 10.0, panel.max.x, panel.min.y, t.blood_bright);
+            draw::hline(
+                list,
+                panel.min.x + 10.0,
+                panel.max.x,
+                panel.min.y,
+                t.blood_bright,
+            );
             let blink = (info.time * 1.5).fract() < 0.75;
             list.text(
                 vec2(c.center().x, y),
@@ -534,10 +593,7 @@ impl ModeHud {
                 &line,
                 &TextStyle::new(t.bone).centered().outline(outline),
             );
-        } else if info.local_dead
-            && board.rules.kind == GameMode::Campaign
-            && self.wipe.is_none()
-        {
+        } else if info.local_dead && board.rules.kind == GameMode::Campaign && self.wipe.is_none() {
             let text = if board.rows.len() <= 1 {
                 "BACK TO THE CHECKPOINT"
             } else {
@@ -564,7 +620,9 @@ impl ModeHud {
         list.text(
             vec2(c.center().x, y),
             &format!("REVIVING {}", name_of(info.players, *target)),
-            &TextStyle::new(t.stamina).centered().outline(fade(t.ink, 0.9)),
+            &TextStyle::new(t.stamina)
+                .centered()
+                .outline(fade(t.ink, 0.9)),
         );
         progress_bar(
             list,
@@ -601,8 +659,23 @@ impl InGame {
         }
         if fx.match_restarted {
             self.style.reset();
-            common.audio.set_music(Common::game_music(self.world.kind()));
+            common
+                .audio
+                .set_music(Common::game_music(self.world.kind()));
         }
+    }
+
+    /// The clock the HUD feeds, banners and the results reveal run on (tools / screenshots that
+    /// inject events).
+    pub fn hud_clock(&self) -> f64 {
+        self.time
+    }
+
+    /// Shows `results` on the results screen (tools / screenshots; the server's
+    /// `ModeEvent::Ended` normally does this). Drawn while the lobby phase is `Results`.
+    pub fn show_results(&mut self, results: shared::sim::MatchResults) {
+        let local = self.net().and_then(NetClient::local_player_id);
+        self.modes.results = Some(ResultsScreen::new(results, local, self.time));
     }
 
     /// Per-frame mode upkeep before the world is drawn: checkpoint props, downed poses.
@@ -662,7 +735,8 @@ impl InGame {
             use_key: &use_key,
             time: now,
         };
-        self.modes.draw(list, &common.theme, &info, &mut common.audio);
+        self.modes
+            .draw(list, &common.theme, &info, &mut common.audio);
     }
 
     /// Music intensity from game-mode state (style rank). Combat intensity can be combined
@@ -737,7 +811,11 @@ impl InGame {
     /// the animated tally / standings. `None` without results data (the lobby's plain
     /// scoreboard results are shown then); otherwise the first sound of the frame and whether
     /// the reveal is done (then the lobby's buttons go under it).
-    pub(super) fn draw_mode_results(&mut self, ui: &mut Ui, now: f64) -> Option<(Option<Sfx>, bool)> {
+    pub(super) fn draw_mode_results(
+        &mut self,
+        ui: &mut Ui,
+        now: f64,
+    ) -> Option<(Option<Sfx>, bool)> {
         let screen = self.modes.results.as_mut()?;
         let sounds = screen.draw(ui, now);
         Some((sounds.first().copied(), screen.finished(now)))
@@ -766,11 +844,18 @@ fn progress_bar(list: &mut UiDrawList, t: &Theme, rect: Rect, frac: f32, color: 
     draw::fill(list, rect.expand(1.0), fade(t.ink, 0.85));
     draw::fill(list, rect, fade(color, 0.2));
     let w = (rect.width() * frac.clamp(0.0, 1.0)).round();
-    draw::fill(list, Rect::new(rect.min, vec2(rect.min.x + w, rect.max.y)), color);
+    draw::fill(
+        list,
+        Rect::new(rect.min, vec2(rect.min.x + w, rect.max.y)),
+        color,
+    );
     if frac > 0.0 {
         draw::fill(
             list,
-            Rect::new(vec2(rect.min.x + w - 1.0, rect.min.y - 1.0), vec2(rect.min.x + w + 1.0, rect.max.y + 1.0)),
+            Rect::new(
+                vec2(rect.min.x + w - 1.0, rect.min.y - 1.0),
+                vec2(rect.min.x + w + 1.0, rect.max.y + 1.0),
+            ),
             t.bone,
         );
     }

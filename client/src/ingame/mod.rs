@@ -33,8 +33,8 @@ pub mod effects;
 pub mod feedback;
 pub mod hud;
 // Game-mode HUD / scoreboard state / results, and the style meter (docs/style_modes.md).
-pub mod mode_hud;
 pub mod match_flow;
+pub mod mode_hud;
 pub mod pause;
 pub mod remote_players;
 pub mod scoreboard;
@@ -546,9 +546,7 @@ impl InGame {
                 common.ui_sound(Sfx::UiSelect);
             } else if pressed(Action::Chat) && self.bot.is_none() {
                 self.chat.open();
-            } else if pressed(Action::Restart)
-                && self.kind == SessionKind::SinglePlayer
-                && !results
+            } else if pressed(Action::Restart) && self.kind == SessionKind::SinglePlayer && !results
             {
                 self.restart();
             }
@@ -731,10 +729,12 @@ impl InGame {
         self.effects.update(vdt, world.map(|w| &w.collision.world));
         self.effects.draw(&mut out.sprites, &mut out.decals);
 
-        if let Some(net) = net
+        // No weapon in front of the results screen.
+        let results = self.results_open();
+        if let Some(net) = self.session.as_ref().map(Session::client)
             && net.local_state().is_some()
         {
-            if common.settings.show_viewmodel {
+            if common.settings.show_viewmodel && !results {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);

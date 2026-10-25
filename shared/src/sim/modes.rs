@@ -27,7 +27,9 @@ use std::collections::BTreeMap;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use super::combat::{Attack, CombatRules, DamageFlags, KillInfo, Owner, PlayerCombat, secs_to_ticks};
+use super::combat::{
+    Attack, CombatRules, DamageFlags, KillInfo, Owner, PlayerCombat, secs_to_ticks,
+};
 use super::style::{StyleBonus, StyleEvent};
 use super::{HitTarget, PlayerId, SimEvent, SimWorld, WeaponState};
 use crate::input::Buttons;
@@ -36,7 +38,6 @@ use crate::lobby::{DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS, GameMode, MatchS
 use crate::movement::MoveState;
 use crate::protocol::{EntityState, player_flags};
 use crate::tuning::{ModeTuning, Tuning};
-
 
 /// The match configuration the mode rules run with: from the lobby's match settings
 /// (`SimWorld::apply_match_settings` → [`ModeRules::from_settings`]); worlds that never get any
@@ -206,7 +207,11 @@ impl Grade {
 
     /// Rounded (halves up) and clamped.
     pub fn from_value(v: f32) -> Grade {
-        let i = if v.is_finite() { v.round().clamp(0.0, 4.0) } else { 0.0 } as usize;
+        let i = if v.is_finite() {
+            v.round().clamp(0.0, 4.0)
+        } else {
+            0.0
+        } as usize;
         Self::ALL[i]
     }
 
@@ -272,8 +277,8 @@ pub fn grade_player(
     let kills = (total_enemies > 0).then(|| Grade::at_least(kills as f32 / share, &t.grade_kills));
     let style = Grade::at_least(style_points / per, &t.grade_style);
     let damage = Grade::at_most(damage_taken / per, &t.grade_damage);
-    let overall = Grade::average(time.into_iter().chain(kills).chain([style, damage]))
-        .unwrap_or(Grade::D);
+    let overall =
+        Grade::average(time.into_iter().chain(kills).chain([style, damage])).unwrap_or(Grade::D);
     Grades {
         time,
         kills,
@@ -335,9 +340,15 @@ pub struct MatchResults {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ModeEvent {
     /// The team's respawn point is now checkpoint `index` (`player` reached it).
-    Checkpoint { index: u8, player: PlayerId },
+    Checkpoint {
+        index: u8,
+        player: PlayerId,
+    },
     /// A co-op player is down; respawns at the checkpoint at `respawn_tick` unless revived.
-    Downed { player: PlayerId, respawn_tick: u32 },
+    Downed {
+        player: PlayerId,
+        respawn_tick: u32,
+    },
     /// A revive of `player` started (`reviver: Some`, done at `done_tick`) or stopped (`None`).
     Reviving {
         player: PlayerId,
@@ -345,12 +356,20 @@ pub enum ModeEvent {
         start_tick: u32,
         done_tick: u32,
     },
-    Revived { player: PlayerId, by: PlayerId },
+    Revived {
+        player: PlayerId,
+        by: PlayerId,
+    },
     /// Everyone was down at once: back to the checkpoint at `respawn_tick`, the fight resets.
-    TeamWiped { respawn_tick: u32 },
+    TeamWiped {
+        respawn_tick: u32,
+    },
     /// Co-op: `player` reached the exit; the level ends at `end_tick` (or once everyone alive
     /// is in).
-    ExitCountdown { player: PlayerId, end_tick: u32 },
+    ExitCountdown {
+        player: PlayerId,
+        end_tick: u32,
+    },
     Scoreboard(Scoreboard),
     /// The match is over.
     Ended(Box<MatchResults>),
@@ -407,7 +426,9 @@ impl ModeState {
     }
 
     pub fn stats(&self, id: PlayerId) -> PlayerStats {
-        self.players.get(&id).map_or_else(PlayerStats::default, |p| p.stats)
+        self.players
+            .get(&id)
+            .map_or_else(PlayerStats::default, |p| p.stats)
     }
 
     pub fn is_playing(&self) -> bool {
@@ -1099,10 +1120,9 @@ impl SimWorld {
             .keys()
             .map(|&id| {
                 let s = self.mode.stats(id);
-                let (rank, best_rank, style) = self
-                    .style
-                    .get(id)
-                    .map_or((0, 0, 0), |st| (st.rank, st.best_rank, st.total.round() as u32));
+                let (rank, best_rank, style) = self.style.get(id).map_or((0, 0, 0), |st| {
+                    (st.rank, st.best_rank, st.total.round() as u32)
+                });
                 ScoreEntry {
                     player: id,
                     kills: s.kills,
@@ -1119,10 +1139,7 @@ impl SimWorld {
             rules: self.mode.rules,
             phase: self.mode.phase,
             start_tick: self.mode.start_tick,
-            checkpoint: self
-                .mode
-                .checkpoint
-                .map(|c| c.min(u8::MAX as usize) as u8),
+            checkpoint: self.mode.checkpoint.map(|c| c.min(u8::MAX as usize) as u8),
             rows,
         }
     }
@@ -1170,7 +1187,10 @@ mod tests {
         assert_eq!(Grade::at_most(3.0, &lower), Grade::A);
         assert_eq!(Grade::at_most(11.0, &lower), Grade::D);
         assert_eq!(Grade::average([Grade::S, Grade::A]), Some(Grade::S));
-        assert_eq!(Grade::average([Grade::B, Grade::C, Grade::C]), Some(Grade::C));
+        assert_eq!(
+            Grade::average([Grade::B, Grade::C, Grade::C]),
+            Some(Grade::C)
+        );
         assert_eq!(Grade::average([]), None);
     }
 }

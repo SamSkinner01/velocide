@@ -20,15 +20,20 @@ use engine::ui::hud::format_timer;
 use engine::ui::text::line_width;
 use engine::ui::{Rect, TextStyle, Theme, Ui, UiDrawExt, UiKey};
 use glam::{Vec2, Vec4, vec2};
-use shared::sim::style::rank_name;
 use shared::lobby::GameMode;
+use shared::sim::style::rank_name;
 use shared::sim::{EndReason, Grade, MatchResults, PlayerId, PlayerResult};
 
 use crate::ingame::remote_players::player_color;
 use crate::ingame::style_hud::rank_text_color;
 
 /// One line of the solo tally: label, value at reveal progress 0..1, sub line, grade.
-type TallyRow<'a> = (&'a str, Box<dyn Fn(f32) -> String + 'a>, String, Option<Grade>);
+type TallyRow<'a> = (
+    &'a str,
+    Box<dyn Fn(f32) -> String + 'a>,
+    String,
+    Option<Grade>,
+);
 
 /// A reveal step: `(start, stamp)` seconds after opening.
 #[derive(Clone, Copy, Debug)]
@@ -215,10 +220,25 @@ impl ResultsScreen {
 
     // ---- layouts ----------------------------------------------------------------------------
 
-    fn draw_solo(&self, list: &mut UiDrawList, t: &Theme, c: Rect, age: f64, now: f64, steps: &[Step]) {
+    fn draw_solo(
+        &self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        c: Rect,
+        age: f64,
+        now: f64,
+        steps: &[Step],
+    ) {
         let r = &self.results;
         let cx = c.center().x;
-        title_block(list, t, vec2(cx, 22.0), "LEVEL COMPLETE", &r.level.to_uppercase(), age);
+        title_block(
+            list,
+            t,
+            vec2(cx, 22.0),
+            "LEVEL COMPLETE",
+            &r.level.to_uppercase(),
+            age,
+        );
         let Some(me) = r.players.first() else {
             return;
         };
@@ -305,7 +325,10 @@ impl ResultsScreen {
                     .right()
                     .outline(fade(t.ink, 0.9 * a)),
             );
-            let gbox = Rect::new(vec2(row.max.x - 36.0, y + 3.0), vec2(row.max.x - 8.0, y + 31.0));
+            let gbox = Rect::new(
+                vec2(row.max.x - 36.0, y + 3.0),
+                vec2(row.max.x - 8.0, y + 31.0),
+            );
             match grade {
                 Some(gr) => stamp(list, t, gbox, *gr, 3.0, age - s.stamp, now),
                 None if age >= s.stamp => {
@@ -329,7 +352,15 @@ impl ResultsScreen {
                 &TextStyle::new(fade(t.bone_dim, a)).centered(),
             );
             if let Some(g) = g {
-                stamp(list, t, frame.shrink(10.0), g.overall, 12.0, age - s.stamp, now);
+                stamp(
+                    list,
+                    t,
+                    frame.shrink(10.0),
+                    g.overall,
+                    12.0,
+                    age - s.stamp,
+                    now,
+                );
                 if age >= s.stamp {
                     let k = (age - s.stamp - 0.3).clamp(0.0, 1.0) as f32;
                     list.text(
@@ -342,10 +373,25 @@ impl ResultsScreen {
         }
     }
 
-    fn draw_coop(&self, list: &mut UiDrawList, t: &Theme, c: Rect, age: f64, now: f64, steps: &[Step]) {
+    fn draw_coop(
+        &self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        c: Rect,
+        age: f64,
+        now: f64,
+        steps: &[Step],
+    ) {
         let r = &self.results;
         let cx = c.center().x;
-        title_block(list, t, vec2(cx, 22.0), "LEVEL COMPLETE", &r.level.to_uppercase(), age);
+        title_block(
+            list,
+            t,
+            vec2(cx, 22.0),
+            "LEVEL COMPLETE",
+            &r.level.to_uppercase(),
+            age,
+        );
         let w = 600.0f32.min(c.width() - 20.0);
         let x0 = cx - w * 0.5;
         let x1 = cx + w * 0.5;
@@ -381,20 +427,23 @@ impl ResultsScreen {
             &TextStyle::new(fade(t.bone, a)),
         );
         // Columns.
-        let cols: [(&str, f32); 8] = [
-            ("KILLS", 250.0),
-            ("STYLE", 300.0),
-            ("DMG", 340.0),
-            ("DEATHS", 385.0),
-            ("REVIVES", 432.0),
-            ("T  K  S  D", 505.0),
-            ("RANK", 570.0),
-            ("", 0.0),
+        let cols: [(&str, f32); 7] = [
+            ("KILLS", 245.0),
+            ("STYLE", 298.0),
+            ("DMG", 338.0),
+            ("DEATHS", 388.0),
+            ("REVIVES", 444.0),
+            ("T  K  S  D", 520.0),
+            ("RANK", 578.0),
         ];
         let hy = ty + 38.0;
         let head = TextStyle::new(fade(t.ash, a)).right();
-        list.text(vec2(x0 + 12.0, hy), "PLAYER", &TextStyle::new(fade(t.ash, a)));
-        for (name, x) in cols.iter().filter(|c| !c.0.is_empty()) {
+        list.text(
+            vec2(x0 + 12.0, hy),
+            "PLAYER",
+            &TextStyle::new(fade(t.ash, a)),
+        );
+        for (name, x) in cols.iter() {
             list.text(vec2(x0 + x * w / 600.0, hy), name, &head);
         }
         draw::hline(list, x0 + 6.0, x1 - 6.0, hy + 10.0, fade(t.panel_edge, a));
@@ -426,7 +475,11 @@ impl ResultsScreen {
             );
             let xs = |x: f32| row.min.x + x * w / 600.0;
             let name = engine::ui::text::truncate(&p.name.to_uppercase(), 150.0, 1.0);
-            list.text(vec2(row.min.x + 16.0, y + 1.0), &name, &TextStyle::new(fade(t.bone, a)));
+            list.text(
+                vec2(row.min.x + 16.0, y + 1.0),
+                &name,
+                &TextStyle::new(fade(t.bone, a)),
+            );
             if !p.extracted {
                 list.text(
                     vec2(row.min.x + 16.0, y + 10.0),
@@ -437,11 +490,20 @@ impl ResultsScreen {
             let num = TextStyle::new(fade(t.bone, a)).right();
             let p01 = ease_out((age - s.start) / 0.3);
             let cells = [
-                (250.0, format!("{}", (p.stats.kills as f32 * p01).round() as u32)),
-                (300.0, thousands((p.style_points as f32 * p01).round() as u32)),
-                (340.0, format!("{}", (p.stats.damage_taken * p01).round() as u32)),
-                (385.0, format!("{}", p.stats.deaths)),
-                (432.0, format!("{}", p.stats.revives)),
+                (
+                    245.0,
+                    format!("{}", (p.stats.kills as f32 * p01).round() as u32),
+                ),
+                (
+                    298.0,
+                    thousands((p.style_points as f32 * p01).round() as u32),
+                ),
+                (
+                    338.0,
+                    format!("{}", (p.stats.damage_taken * p01).round() as u32),
+                ),
+                (388.0, format!("{}", p.stats.deaths)),
+                (444.0, format!("{}", p.stats.revives)),
             ];
             for (x, text) in cells {
                 list.text(vec2(xs(x), y + 4.0), &text, &num);
@@ -449,22 +511,28 @@ impl ResultsScreen {
             if let Some(g) = p.grades {
                 let small = [g.time, g.kills, Some(g.style), Some(g.damage)];
                 for (k, gr) in small.iter().enumerate() {
-                    let gx = xs(505.0) - 57.0 + k as f32 * 18.0;
+                    // Under the header letters ("T  K  S  D", right-aligned at 520).
+                    let gx = (xs(520.0) - 62.0 + k as f32 * 18.0).round();
                     let r = Rect::new(vec2(gx, y), vec2(gx + 12.0, y + 13.0));
                     match gr {
-                        Some(gr) => stamp(list, t, r, *gr, 1.0, age - s.stamp + 0.05 * k as f64, now),
+                        Some(gr) => {
+                            stamp(list, t, r, *gr, 1.0, age - s.stamp + 0.05 * k as f64, now)
+                        }
                         None if age >= s.stamp => {
                             list.text_in(r, "-", &TextStyle::new(t.ash).centered());
                         }
                         None => {}
                     }
                 }
-                let rr = Rect::new(vec2(xs(570.0) - 20.0, y - 2.0), vec2(xs(570.0), y + 16.0));
+                let rr = Rect::new(vec2(xs(578.0) - 22.0, y - 2.0), vec2(xs(578.0), y + 16.0));
                 stamp(list, t, rr, g.overall, 2.0, age - s.stamp - 0.15, now);
             }
         }
         // Team rank.
-        let s = *steps.last().unwrap_or(&Step { start: 0.0, stamp: 0.0 });
+        let s = *steps.last().unwrap_or(&Step {
+            start: 0.0,
+            stamp: 0.0,
+        });
         let a = ((age - s.start) / 0.2).clamp(0.0, 1.0) as f32;
         if a > 0.0
             && let Some(g) = r.team_grade
@@ -479,23 +547,44 @@ impl ResultsScreen {
         }
     }
 
-    fn draw_deathmatch(&self, list: &mut UiDrawList, t: &Theme, c: Rect, age: f64, now: f64, steps: &[Step]) {
+    fn draw_deathmatch(
+        &self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        c: Rect,
+        age: f64,
+        now: f64,
+        steps: &[Step],
+    ) {
         let r = &self.results;
         let cx = c.center().x;
         let reason = match r.reason {
             EndReason::FragLimit => format!("FRAG LIMIT ({})", r.rules.frag_limit),
-            EndReason::TimeLimit => format!("TIME LIMIT ({})", format_timer(r.rules.time_limit_secs as f64)),
+            EndReason::TimeLimit => format!(
+                "TIME LIMIT ({})",
+                format_timer(r.rules.time_limit_secs as f64)
+            ),
             EndReason::Exit => "LEVEL EXIT".into(),
             EndReason::Host => "ENDED BY THE HOST".into(),
         };
-        title_block(list, t, vec2(cx, 22.0), "MATCH OVER", &format!("{}  //  {}", r.level.to_uppercase(), reason), age);
+        title_block(
+            list,
+            t,
+            vec2(cx, 22.0),
+            "MATCH OVER",
+            &format!("{}  //  {}", r.level.to_uppercase(), reason),
+            age,
+        );
         // Winner banner.
         let s = steps[0];
         if let Some(winner) = r.players.first() {
             let a = ((age - s.start) / 0.2).clamp(0.0, 1.0) as f32;
             let pop = (1.0 - ((age - s.stamp) / 0.2).clamp(0.0, 1.0)) as f32;
             let me = Some(winner.player) == self.local;
-            let tied = r.players.get(1).is_some_and(|b| b.stats.frags == winner.stats.frags);
+            let tied = r
+                .players
+                .get(1)
+                .is_some_and(|b| b.stats.frags == winner.stats.frags);
             let head = if tied && !me {
                 "TOP OF THE TABLE"
             } else if me {
@@ -507,8 +596,20 @@ impl ResultsScreen {
             let band = Rect::new(vec2(cx - 200.0, y), vec2(cx + 200.0, y + 44.0));
             draw::slanted(list, band, true, fade(t.ink, 0.65 * a));
             let col = player_color(winner.player);
-            draw::hline(list, band.min.x + 20.0, band.max.x, band.min.y, fade(col, a));
-            draw::hline(list, band.min.x, band.max.x - 20.0, band.max.y - 1.0, fade(col, a));
+            draw::hline(
+                list,
+                band.min.x + 20.0,
+                band.max.x,
+                band.min.y,
+                fade(col, a),
+            );
+            draw::hline(
+                list,
+                band.min.x,
+                band.max.x - 20.0,
+                band.max.y - 1.0,
+                fade(col, a),
+            );
             list.text(
                 vec2(cx, y + 6.0),
                 head,
@@ -531,7 +632,10 @@ impl ResultsScreen {
                 for side in [-1.0f32, 1.0] {
                     for k in 0..3 {
                         let x = cx + side * (half + k as f32 * 7.0);
-                        let r = Rect::from_center_size(vec2(x, y + 28.0), vec2(3.0, 9.0 - k as f32 * 2.0));
+                        let r = Rect::from_center_size(
+                            vec2(x, y + 28.0),
+                            vec2(3.0, 9.0 - k as f32 * 2.0),
+                        );
                         draw::fill(list, r, fade(col, a * (1.0 - k as f32 * 0.25)));
                     }
                 }
@@ -543,7 +647,12 @@ impl ResultsScreen {
         let hy = 140.0;
         let a = ((age - 0.7) / 0.2).clamp(0.0, 1.0) as f32;
         let head = TextStyle::new(fade(t.ash, a));
-        let cols = [(330.0, "FRAGS"), (390.0, "DEATHS"), (470.0, "BEST RANK"), (515.0, "STYLE")];
+        let cols = [
+            (330.0, "FRAGS"),
+            (390.0, "DEATHS"),
+            (470.0, "BEST RANK"),
+            (515.0, "STYLE"),
+        ];
         list.text(vec2(x0 + 8.0, hy), "#", &head);
         list.text(vec2(x0 + 30.0, hy), "PLAYER", &head);
         for (x, name) in cols {
@@ -585,8 +694,16 @@ impl ResultsScreen {
             fade(t.ink, 0.45 * a)
         };
         draw::slanted(list, row, true, bg);
-        let place_col = if place == 0 { t.rank_color(7) } else { t.bone_dim };
-        list.text(vec2(x0 + 8.0, y), &format!("{}", place + 1), &TextStyle::new(fade(place_col, a)));
+        let place_col = if place == 0 {
+            t.rank_color(7)
+        } else {
+            t.bone_dim
+        };
+        list.text(
+            vec2(x0 + 8.0, y),
+            &format!("{}", place + 1),
+            &TextStyle::new(fade(place_col, a)),
+        );
         draw::fill(
             list,
             Rect::new(vec2(x0 + 22.0, y), vec2(x0 + 26.0, y + 7.0)),
@@ -596,15 +713,31 @@ impl ResultsScreen {
         list.text(vec2(x0 + 30.0, y), &name, &TextStyle::new(fade(t.bone, a)));
         let xs = |x: f32| x0 + x * w / 520.0;
         let num = |c: Vec4| TextStyle::new(fade(c, a)).right();
-        let frag_col = if p.stats.frags < 0 { t.blood_bright } else { t.bone };
-        list.text(vec2(xs(330.0), y), &format!("{}", p.stats.frags), &num(frag_col).scale(1.0));
-        list.text(vec2(xs(390.0), y), &format!("{}", p.stats.deaths), &num(t.bone_dim));
+        let frag_col = if p.stats.frags < 0 {
+            t.blood_bright
+        } else {
+            t.bone
+        };
+        list.text(
+            vec2(xs(330.0), y),
+            &format!("{}", p.stats.frags),
+            &num(frag_col).scale(1.0),
+        );
+        list.text(
+            vec2(xs(390.0), y),
+            &format!("{}", p.stats.deaths),
+            &num(t.bone_dim),
+        );
         list.text(
             vec2(xs(470.0), y),
             rank_name(p.best_rank),
             &num(rank_text_color(t, p.best_rank, now)),
         );
-        list.text(vec2(xs(515.0), y), &thousands(p.style_points), &num(t.bone_dim));
+        list.text(
+            vec2(xs(515.0), y),
+            &thousands(p.style_points),
+            &num(t.bone_dim),
+        );
     }
 }
 
@@ -629,11 +762,17 @@ fn backdrop(list: &mut UiDrawList, t: &Theme, c: Rect, age: f64) {
         let k = (1.0 - f).powf(2.0) * 0.35 * a;
         let wband = c.width() * 0.5 / steps as f32;
         list.fill(
-            Rect::new(vec2(c.min.x + wband * i as f32, c.min.y), vec2(c.min.x + wband * (i + 1) as f32, c.max.y)),
+            Rect::new(
+                vec2(c.min.x + wband * i as f32, c.min.y),
+                vec2(c.min.x + wband * (i + 1) as f32, c.max.y),
+            ),
             fade(t.blood_dark, k),
         );
         list.fill(
-            Rect::new(vec2(c.max.x - wband * (i + 1) as f32, c.min.y), vec2(c.max.x - wband * i as f32, c.max.y)),
+            Rect::new(
+                vec2(c.max.x - wband * (i + 1) as f32, c.min.y),
+                vec2(c.max.x - wband * i as f32, c.max.y),
+            ),
             fade(t.blood_dark, k),
         );
     }
@@ -645,7 +784,14 @@ fn backdrop(list: &mut UiDrawList, t: &Theme, c: Rect, age: f64) {
 }
 
 /// Big title with a blood extrusion, sliding in, and a subtitle under a slanted rule.
-fn title_block(list: &mut UiDrawList, t: &Theme, top_center: Vec2, title: &str, subtitle: &str, age: f64) {
+fn title_block(
+    list: &mut UiDrawList,
+    t: &Theme,
+    top_center: Vec2,
+    title: &str,
+    subtitle: &str,
+    age: f64,
+) {
     let p = ease_out(age / 0.3);
     let scale = 3.0;
     let w = line_width(title, scale);
@@ -662,7 +808,9 @@ fn title_block(list: &mut UiDrawList, t: &Theme, top_center: Vec2, title: &str, 
     list.text(
         vec2(x, y),
         title,
-        &TextStyle::new(fade(t.bone, p)).scale(scale).outline(fade(t.ink, 0.9 * p)),
+        &TextStyle::new(fade(t.bone, p))
+            .scale(scale)
+            .outline(fade(t.ink, 0.9 * p)),
     );
     let ry = y + 30.0;
     draw::slanted(
@@ -685,7 +833,9 @@ fn title_block(list: &mut UiDrawList, t: &Theme, top_center: Vec2, title: &str, 
     list.text(
         vec2(top_center.x, ry + 8.0),
         subtitle,
-        &TextStyle::new(fade(t.bone_dim, p)).centered().shadow(t.shadow),
+        &TextStyle::new(fade(t.bone_dim, p))
+            .centered()
+            .shadow(t.shadow),
     );
 }
 

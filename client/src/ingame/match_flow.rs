@@ -191,8 +191,11 @@ impl InGame {
         }
         if !status.is_empty() {
             let style = TextStyle::new(ui.theme().bone_dim).centered();
-            ui.painter()
-                .text(vec2(canvas.center().x, y - 13.0), &status.join("   //   "), &style);
+            ui.painter().text(
+                vec2(canvas.center().x, y - 13.0),
+                &status.join("   //   "),
+                &style,
+            );
         }
         let rect = Rect::new(
             vec2(canvas.center().x - w * 0.5, y),

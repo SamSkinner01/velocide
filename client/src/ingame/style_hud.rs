@@ -11,6 +11,7 @@ use engine::audio::{Audio, Sfx};
 use engine::gfx::UiDrawList;
 use engine::ui::draw::{self, fade, mix};
 use engine::ui::hud::{self, TextFeed};
+use engine::ui::text::line_width;
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec4, vec2};
 use shared::sim::style::{TOP_RANK, rank_name};
@@ -222,7 +223,10 @@ impl StyleHud {
         );
 
         // Backing slab with a rank-coloured edge.
-        let slab = Rect::new(rect.min - vec2(10.0, 4.0), vec2(rect.max.x + 6.0, rect.max.y + 18.0));
+        let slab = Rect::new(
+            rect.min - vec2(10.0, 4.0),
+            vec2(rect.max.x + 6.0, rect.max.y + 18.0),
+        );
         draw::slanted(list, slab, true, fade(t.ink, 0.45));
         draw::fill(
             list,
@@ -230,32 +234,45 @@ impl StyleHud {
             fade(color, 0.8),
         );
         if flash > 0.0 {
-            let band = Rect::new(vec2(rect.min.x, rect.min.y - 2.0), vec2(rect.max.x, rect.min.y + 17.0));
+            let band = Rect::new(
+                vec2(rect.min.x, rect.min.y - 2.0),
+                vec2(rect.max.x, rect.min.y + 17.0),
+            );
             let fc = if up { t.bone } else { t.blood_bright };
             draw::slanted(list, band, true, fade(fc, 0.55 * flash));
         }
         if rank >= TOP_RANK {
-            // VELOCIDE: speed streaks tearing off the block.
+            // VELOCIDE: speed streaks streaming off the rank name.
+            let name_left = rect.max.x - line_width(rank_name(rank), 2.0) - 6.0;
             for i in 0..5 {
-                let phase = ((now * 3.0 + i as f64 * 0.37).fract()) as f32;
-                let y = rect.min.y + 2.0 + i as f32 * 6.0;
-                let x1 = slab.min.x - 6.0 - phase * 50.0;
-                let len = 10.0 + (i % 3) as f32 * 8.0;
-                draw::hline(list, x1 - len, x1, y, fade(if i % 2 == 0 { t.bone } else { t.blood_bright }, 0.7 * (1.0 - phase)));
+                let phase = ((now * 2.5 + i as f64 * 0.37).fract()) as f32;
+                let y = (rect.min.y + 1.0 + i as f32 * 3.5).round();
+                let x1 = name_left - phase * 46.0;
+                let len = 8.0 + (i % 3) as f32 * 7.0;
+                let col = if i % 2 == 0 { t.bone } else { t.blood_bright };
+                draw::hline(list, x1 - len, x1, y, fade(col, 0.8 * (1.0 - phase)));
             }
         }
-        hud::style_meter(list, t, rect, rank as usize, rank_name(rank), self.shown, now);
+        hud::style_meter(
+            list,
+            t,
+            rect,
+            rank as usize,
+            rank_name(rank),
+            self.shown,
+            now,
+        );
 
         // STALE indicator + freshness of the held weapon (primary, alt A, alt B).
         let keys = StyleKey::weapon_keys(weapon);
         let active = [keys[0], keys[1 + (mode as usize).min(1)]];
         let stale = active.iter().find(|k| view.is_stale(**k, tuning));
         let pip_y = rect.max.y + 3.0;
-        let mut x = rect.min.x;
         for (i, key) in keys.iter().enumerate() {
             let f = view.freshness(*key, tuning);
             let selected = i == 0 || i == 1 + (mode as usize).min(1);
             let w = 12.0;
+            let x = rect.min.x + i as f32 * (w + 3.0);
             let r = Rect::new(vec2(x, pip_y), vec2(x + w, pip_y + 3.0));
             draw::fill(list, r.expand(1.0), fade(t.ink, 0.8));
             let fill = ((f - tuning.freshness_min) / (1.0 - tuning.freshness_min).max(1e-3))
@@ -270,16 +287,16 @@ impl StyleHud {
                 Rect::new(r.min, vec2(r.min.x + (w * fill).round().max(1.0), r.max.y)),
                 fade(col, if selected { 1.0 } else { 0.45 }),
             );
-            x += w + 3.0;
         }
         if let Some(key) = stale {
+            // Its own line under the pips (the rank pips sit on the right of the pip row).
             let blink = (now * 3.0).fract() < 0.65;
             let col = if blink { t.blood_bright } else { t.ash };
             let label = format!("STALE {}", key.label());
             list.text(
-                vec2(x + 3.0, pip_y - 2.0),
+                vec2(rect.max.x, pip_y + 6.0),
                 &label,
-                &TextStyle::new(col).outline(outline),
+                &TextStyle::new(col).right().outline(outline),
             );
         }
 
@@ -288,7 +305,7 @@ impl StyleHud {
         self.feed.draw(
             list,
             t,
-            vec2(right, rect.max.y + 14.0),
+            vec2(right, rect.max.y + 22.0),
             Align::Right,
             1.0,
             now,
@@ -355,7 +372,12 @@ mod tests {
         h.pending.push((StyleBonus::Kill, 0));
         h.pending.push((StyleBonus::Multikill, 4));
         h.flush(&t, 0, None, 1.3);
-        let multi = h.feed.entries.iter().find(|e| e.text == "+ MULTIKILL").unwrap();
+        let multi = h
+            .feed
+            .entries
+            .iter()
+            .find(|e| e.text == "+ MULTIKILL")
+            .unwrap();
         assert_eq!(multi.count, 4);
         assert_eq!(feed_text(StyleBonus::Stale), "- STALE");
     }

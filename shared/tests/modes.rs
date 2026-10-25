@@ -11,13 +11,13 @@ use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
 use shared::level::{Checkpoint, LevelDef, LevelKind, SpawnPoint, Volume};
+use shared::lobby::{GameMode, MatchSettings};
 use shared::protocol::{NetFrame, NetId, player_flags};
 use shared::sim::modes::{authored_enemies, grade_player};
 use shared::sim::{
-    Attack, Blocked, DamageInfo, EndReason, Grade, HitTarget, LifeState, MatchPhase,
-    MatchResults, ModeEvent, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
+    Attack, Blocked, DamageInfo, EndReason, Grade, HitTarget, LifeState, MatchPhase, MatchResults,
+    ModeEvent, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
 };
-use shared::lobby::{GameMode, MatchSettings};
 use shared::tuning::ModeTuning;
 
 fn vol(min: [f32; 3], max: [f32; 3]) -> Volume {
@@ -193,7 +193,10 @@ fn solo_death_restarts_at_the_last_checkpoint() {
     assert!(!pl.combat.dead);
     assert_eq!(pl.combat.health(&a.tuning.combat), 100.0);
     assert!(pl.combat.protection > 0);
-    assert!(a.world.projectiles.is_empty(), "level back to the checkpoint state");
+    assert!(
+        a.world.projectiles.is_empty(),
+        "level back to the checkpoint state"
+    );
     assert_eq!(a.world.mode.stats(p).deaths, 1);
 }
 
@@ -269,7 +272,10 @@ fn coop_death_downs_the_player_and_a_teammate_revives_them() {
     let pl = &a.world.players[&pa];
     assert!(!pl.combat.dead);
     assert_eq!(pl.combat.health(&a.tuning.combat), 40.0);
-    assert!(pl.movement.position.distance(spot) < 0.5, "revived where they lay");
+    assert!(
+        pl.movement.position.distance(spot) < 0.5,
+        "revived where they lay"
+    );
     assert_eq!(a.world.mode.stats(pb).revives, 1);
     // The revived player's client leaves its death view through the usual Respawned.
     assert!(respawned(&ev, pa).is_some());
@@ -282,7 +288,12 @@ fn reviving_needs_to_be_close() {
     place(&mut a, pb, spot + Vec3::new(3.5, 0.0, 0.0));
     a.set_buttons(pb, Buttons::USE);
     let ev = a.ticks(120);
-    assert!(mode_events(&ev).is_empty() || !mode_events(&ev).iter().any(|e| matches!(e, ModeEvent::Reviving { .. })));
+    assert!(
+        mode_events(&ev).is_empty()
+            || !mode_events(&ev)
+                .iter()
+                .any(|e| matches!(e, ModeEvent::Reviving { .. }))
+    );
     assert_eq!(life(&a, pa), LifeState::Downed);
 }
 
@@ -546,7 +557,10 @@ fn the_world_freezes_once_the_match_is_over() {
     let t = a.tuning.clone();
     a.world.end_match(&t, EndReason::Host);
     a.ticks(60);
-    assert!(a.world.enemies[&h].position.distance(start) < 0.01, "AI frozen");
+    assert!(
+        a.world.enemies[&h].position.distance(start) < 0.01,
+        "AI frozen"
+    );
     assert_eq!(a.health(p), 100.0);
     // Kill volumes put players back instead of killing them.
     place(&mut a, p, LAVA);
@@ -567,8 +581,10 @@ fn frags_count_kills_and_cost_suicides() {
     assert_eq!(a.world.mode.stats(p0).kills, 1);
     assert_eq!(a.world.mode.stats(p1).deaths, 1);
     // FRAG style for the killer.
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Style(shared::sim::StyleEvent::Bonus {
-        player, bonus: shared::sim::StyleBonus::Frag, .. }) if *player == p0)));
+    assert!(ev.iter().any(
+        |e| matches!(e, SimEvent::Style(shared::sim::StyleEvent::Bonus {
+        player, bonus: shared::sim::StyleBonus::Frag, .. }) if *player == p0)
+    ));
     // Own rocket: -1.
     a.ticks(200);
     let t = a.tuning.clone();

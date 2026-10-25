@@ -168,6 +168,8 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
   `docs/levels.md` (shipping levels, generator, tests), `docs/combat.md`
   (written by each area as it is built).
 - `docs/lobby.md` — lobby phases, messages, host rules, screens, how game modes plug in.
+- `docs/style_modes.md` — style meter / ranks / freshness, game modes (checkpoints, downed &
+  revive, exit, deathmatch), the death rule, scoreboard, results grading and screens.
 
 ## Running it
 - Single-player: `cargo run -p client --release -- --sp crucible_of_veins`

@@ -84,8 +84,7 @@ impl Server {
     /// results (grades, standings) are built and broadcast with the next tick.
     pub(crate) fn end_sim_match(&mut self) {
         let tuning = self.tuning.clone();
-        self.world
-            .end_match(&tuning, shared::sim::EndReason::Host);
+        self.world.end_match(&tuning, shared::sim::EndReason::Host);
     }
 }
 

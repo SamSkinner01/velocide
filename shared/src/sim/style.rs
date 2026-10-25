@@ -206,7 +206,11 @@ pub enum StyleEvent {
         count: u8,
     },
     /// The rank changed (possibly by several ranks at once).
-    Rank { player: PlayerId, rank: u8, up: bool },
+    Rank {
+        player: PlayerId,
+        rank: u8,
+        up: bool,
+    },
 }
 
 impl StyleEvent {
@@ -615,9 +619,7 @@ impl SimWorld {
                         && d.dealt > 0.0
                         && d.target != HitTarget::Player(shooter)
                     {
-                        let e = ricochets
-                            .entry(shooter)
-                            .or_insert((0, d.info.attack));
+                        let e = ricochets.entry(shooter).or_insert((0, d.info.attack));
                         e.0 = e.0.max(d.info.ricochets.max(1));
                     }
                 }

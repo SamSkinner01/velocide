@@ -19,6 +19,7 @@ the debug overlay.
 | `bot` | `--bot` auto-pilot for multi-client testing |
 | `menus::main_menu` | main menu: single player (level select), host (mode, level, port, max players), join, settings, notices |
 | `menus::lobby` | `LobbyScreen`: the lobby of hosted / joined games, `Handoff` (docs/lobby.md) |
+| `menus::results` | `ResultsScreen`: animated campaign / co-op / deathmatch results (docs/style_modes.md) |
 | `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay), reused by the pause menu |
 | `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
 | `ingame` (`mod.rs`) | `InGame`: one `net::Session` + everything while playing |
@@ -31,6 +32,7 @@ the debug overlay.
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
 | `ingame::match_flow` | lobby phase changes in game, results screen, scoreboard rows |
+| `ingame::style_hud`, `ingame::mode_hud` | style meter + style feed + rank banner; game-mode state and HUD (checkpoints, downed / revive, extraction, deathmatch clock), score cells, results glue (docs/style_modes.md) |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
 | `level_mesh` | `LevelRender`: level geometry for the renderer |

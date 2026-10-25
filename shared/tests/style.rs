@@ -62,7 +62,10 @@ fn bonuses(events: &[StyleEvent]) -> Vec<(StyleBonus, f32)> {
 fn every_kill_bonus_has_its_trigger() {
     let t = st();
     let plain = kill(DamageFlags::HITSCAN, Attack::Lancet);
-    assert_eq!(kill_bonuses(&plain, false, 1, &t), vec![(StyleBonus::Kill, 30.0, 0)]);
+    assert_eq!(
+        kill_bonuses(&plain, false, 1, &t),
+        vec![(StyleBonus::Kill, 30.0, 0)]
+    );
 
     let head = kill(DamageFlags::HITSCAN | DamageFlags::HEADSHOT, Attack::Lancet);
     assert_eq!(
@@ -93,7 +96,10 @@ fn every_kill_bonus_has_its_trigger() {
     rts.parried_projectile = true;
     assert_eq!(
         kill_bonuses(&rts, false, 1, &t),
-        vec![(StyleBonus::Kill, 30.0, 0), (StyleBonus::ReturnToSender, 80.0, 0)]
+        vec![
+            (StyleBonus::Kill, 30.0, 0),
+            (StyleBonus::ReturnToSender, 80.0, 0)
+        ]
     );
 
     let boom = kill(DamageFlags::EXPLOSIVE, Attack::Rocket);
@@ -114,7 +120,10 @@ fn every_kill_bonus_has_its_trigger() {
     let mut frag = plain;
     frag.victim = HitTarget::Player(PlayerId(1));
     frag.victim_kind = kind::PLAYER;
-    assert_eq!(kill_bonuses(&frag, false, 1, &t)[0], (StyleBonus::Frag, 100.0, 0));
+    assert_eq!(
+        kill_bonuses(&frag, false, 1, &t)[0],
+        (StyleBonus::Frag, 100.0, 0)
+    );
 
     // MULTIKILL: the n-th kill in the window adds 40 (n kills = 40 x (n - 1) in total).
     assert_eq!(
@@ -216,7 +225,15 @@ fn stale_gains_are_cut_and_reported() {
     assert_eq!(bonuses(&ev), [(StyleBonus::Kill, 30.0)]);
     // Spam the scattergun until it is stale.
     for tick in 2..8 {
-        s.award(&t, p, Some(StyleKey::Thresher), &items, false, tick, &mut ev);
+        s.award(
+            &t,
+            p,
+            Some(StyleKey::Thresher),
+            &items,
+            false,
+            tick,
+            &mut ev,
+        );
     }
     ev.clear();
     let f = s.freshness(StyleKey::Thresher);
@@ -224,7 +241,11 @@ fn stale_gains_are_cut_and_reported() {
     s.award(&t, p, Some(StyleKey::Thresher), &items, false, 10, &mut ev);
     let b = bonuses(&ev);
     assert!((b[0].1 - 30.0 * f).abs() < 1e-4, "gain x freshness");
-    assert_eq!(b.last().unwrap().0, StyleBonus::Stale, "- STALE in the feed");
+    assert_eq!(
+        b.last().unwrap().0,
+        StyleBonus::Stale,
+        "- STALE in the feed"
+    );
     assert!(s.view(&t).is_stale(StyleKey::Thresher, &t));
     assert!(!s.view(&t).is_stale(StyleKey::Lancet, &t));
 }
@@ -239,13 +260,26 @@ fn close_call_multiplies_the_kill() {
     let mut s = PlayerStyle::new();
     let mut ev = Vec::new();
     let items = kill_bonuses(&k, false, 1, &t);
-    s.award(&t, PlayerId(0), Some(StyleKey::Lancet), &items, true, 1, &mut ev);
+    s.award(
+        &t,
+        PlayerId(0),
+        Some(StyleKey::Lancet),
+        &items,
+        true,
+        1,
+        &mut ev,
+    );
     let b = bonuses(&ev);
-    assert_eq!(b.last().unwrap(), &(StyleBonus::CloseCall, 22.5), "(30 + 15) x 0.5");
+    assert_eq!(
+        b.last().unwrap(),
+        &(StyleBonus::CloseCall, 22.5),
+        "(30 + 15) x 0.5"
+    );
     assert!((s.total - 67.5).abs() < 1e-4, "x1.5 overall");
-    assert!(ev
-        .iter()
-        .all(|e| !matches!(e, StyleEvent::Rank { .. })), "67.5 < 100: no rank-up yet");
+    assert!(
+        ev.iter().all(|e| !matches!(e, StyleEvent::Rank { .. })),
+        "67.5 < 100: no rank-up yet"
+    );
 }
 
 #[test]
@@ -257,7 +291,10 @@ fn award_ranks_up_with_an_event() {
         &t,
         PlayerId(3),
         Some(StyleKey::Parry),
-        &[(StyleBonus::Parry, 60.0, 0), (StyleBonus::ReturnToSender, 80.0, 0)],
+        &[
+            (StyleBonus::Parry, 60.0, 0),
+            (StyleBonus::ReturnToSender, 80.0, 0),
+        ],
         false,
         1,
         &mut ev,
@@ -349,7 +386,14 @@ fn a_rocket_through_a_crowd_is_a_multikill() {
     assert!(b.iter().all(|x| x.1 >= 20.0), "{b:?}");
     // 3 x (30 + 20) + 2 x 40 = 230: two ranks up.
     assert_eq!(a.world.style.players[&p].rank, 2);
-    assert!(style.iter().any(|e| matches!(e, StyleEvent::Rank { rank: 2, up: true, .. })));
+    assert!(style.iter().any(|e| matches!(
+        e,
+        StyleEvent::Rank {
+            rank: 2,
+            up: true,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -389,7 +433,9 @@ fn a_ricochet_kill_scores_the_bounce() {
     let (mut a, p, _) = range(&[]);
     let husk = a.husk(Vec3::new(9.0, 0.0, -6.0), -PI / 2.0);
     let t = a.tuning.clone();
-    let prism = a.world.spawn_prism(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO);
+    let prism = a
+        .world
+        .spawn_prism(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO);
     {
         let pr = a.world.prisms.get_mut(&prism).unwrap();
         pr.position = Vec3::new(0.0, 1.6, -6.0);
@@ -415,10 +461,14 @@ fn dying_empties_the_meter() {
     let ev = a.tick();
     let _ = ev;
     assert_eq!(a.world.style.players[&p].rank, 0);
-    assert!(a
-        .events
-        .iter()
-        .any(|e| matches!(e, SimEvent::Style(StyleEvent::Rank { rank: 0, up: false, .. }))));
+    assert!(a.events.iter().any(|e| matches!(
+        e,
+        SimEvent::Style(StyleEvent::Rank {
+            rank: 0,
+            up: false,
+            ..
+        })
+    )));
 }
 
 #[test]
