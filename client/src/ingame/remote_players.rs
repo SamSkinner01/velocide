@@ -72,13 +72,13 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
         dashing: f(player_flags::DASHING),
         slamming: f(player_flags::SLAMMING),
         wall_cling: f(player_flags::WALL_CLING)
-            .then(|| look_dir(dequantize_yaw(e.aux as u16), 0.0)),
+            .then(|| look_dir(dequantize_yaw((e.aux >> 16) as u16), 0.0)),
         firing: v.firing,
         punching: v.punching,
         downed: v.downed,
         dead: v.dead,
         time,
-        weapon: (e.state & 0xff) as u8,
+        weapon: (e.state & 0xF) as u8,
         cycle: v.cycle,
     }
 }

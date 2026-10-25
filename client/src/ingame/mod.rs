@@ -363,6 +363,9 @@ impl InGame {
                 common.audio.play_2d(Sfx::ChatMessage);
             }
             NetEvent::Game(GameEvent::Respawned { .. }) => {}
+            // Combat events (damage, hit confirms, kills, parries) are presented by the combat
+            // client layer; see docs/combat.md "client presentation contract".
+            NetEvent::Game(_) => {}
             NetEvent::Disconnected { reason } => {
                 if !self.leaving {
                     let what = if self.spawned {

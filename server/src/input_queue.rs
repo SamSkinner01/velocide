@@ -61,6 +61,8 @@ pub struct InputQueue {
     newest_seq: u32,
     tokens: f32,
     primed: bool,
+    /// Ticks spent re-buffering (unprimed) while inputs were waiting.
+    unprimed_wait: usize,
     /// Smoothed arrival jitter in ticks (RFC 3550 style).
     jitter: f32,
     last_transit: Option<f64>,
@@ -80,6 +82,7 @@ impl InputQueue {
             newest_seq: 0,
             tokens: TOKEN_CAPACITY,
             primed: false,
+            unprimed_wait: 0,
             jitter: 0.0,
             last_transit: None,
         }
@@ -162,8 +165,15 @@ impl InputQueue {
         let target = self.target_buffer();
 
         if !self.primed {
-            if self.pending.len() > target {
+            // Re-buffer after running dry, but never hold inputs forever: if the client
+            // stopped sending (menu, pause, disconnect), its last inputs (a final shot or
+            // punch) still get simulated a few ticks later.
+            if !self.pending.is_empty() {
+                self.unprimed_wait += 1;
+            }
+            if self.pending.len() > target || self.unprimed_wait > MAX_BUFFER_TICKS + 2 {
                 self.primed = true;
+                self.unprimed_wait = 0;
             } else {
                 return stats;
             }
@@ -214,6 +224,31 @@ mod tests {
         let mut out = Vec::new();
         q.take_for_tick(&mut out);
         out.iter().map(|i| i.seq).collect()
+    }
+
+    #[test]
+    fn last_inputs_are_released_when_the_client_stops_sending() {
+        let mut q = InputQueue::new();
+        // Jittery arrival: the de-jitter target grows above 1.
+        for seq in 1..=40u32 {
+            let jitter = if seq % 2 == 0 { 2.0 } else { 0.0 };
+            q.receive(&[input(seq)], seq as f64 + jitter);
+            take(&mut q);
+        }
+        assert!(q.target_buffer() >= 1);
+        // Run dry (stall: re-buffering), then a single last input arrives and nothing after.
+        for _ in 0..10 {
+            take(&mut q);
+        }
+        q.receive(&[input(41)], 60.0);
+        let mut seen = Vec::new();
+        for _ in 0..(MAX_BUFFER_TICKS + 4) {
+            seen.extend(take(&mut q));
+        }
+        assert!(
+            seen.contains(&41),
+            "the final input is simulated, not held forever"
+        );
     }
 
     #[test]

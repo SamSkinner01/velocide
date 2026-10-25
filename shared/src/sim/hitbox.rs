@@ -2,21 +2,39 @@
 //! detection and recorded per tick by the server's lag compensation history.
 
 use glam::Vec3;
+use serde::{Deserialize, Serialize};
 
 use super::PlayerId;
 use crate::protocol::NetId;
 
 /// Who a hitbox belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HitTarget {
     Player(PlayerId),
     /// Any replicated gameplay entity (enemies, prisms...).
     Entity(NetId),
 }
 
+impl HitTarget {
+    pub fn player(self) -> Option<PlayerId> {
+        match self {
+            HitTarget::Player(p) => Some(p),
+            HitTarget::Entity(_) => None,
+        }
+    }
+
+    pub fn entity(self) -> Option<NetId> {
+        match self {
+            HitTarget::Entity(id) => Some(id),
+            HitTarget::Player(_) => None,
+        }
+    }
+}
+
 /// Which part of the target a shape covers (damage multipliers are applied per part).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HitPart {
+    #[default]
     Body,
     Head,
     /// Enemy weak point by index into its definition.
@@ -158,6 +176,50 @@ impl Hitbox {
             .iter()
             .filter_map(|s| s.ray_hit(origin, dir, max_dist).map(|t| (t, s.part)))
             .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// First contact of a sphere of `radius` moving from `origin` by `motion`: (fraction of
+    /// the motion in `0..=1`, part). A sphere already touching hits at 0.
+    pub fn sweep_sphere(&self, origin: Vec3, motion: Vec3, radius: f32) -> Option<(f32, HitPart)> {
+        let len = motion.length();
+        let dir = if len > 1e-6 { motion / len } else { Vec3::X };
+        self.shapes
+            .iter()
+            .filter_map(|s| {
+                let inflated = HitShape {
+                    radius: s.radius + radius,
+                    ..*s
+                };
+                inflated
+                    .ray_hit(origin, dir, len)
+                    .map(|t| (if len > 1e-6 { t / len } else { 0.0 }, s.part))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// Signed distance from `p` to the nearest shape surface and that shape's part.
+    pub fn distance_to_point(&self, p: Vec3) -> Option<(f32, HitPart)> {
+        self.shapes
+            .iter()
+            .map(|s| (s.distance_to_point(p), s.part))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// Centre of the first `Body` shape (or of the first shape): the point to aim at.
+    pub fn center(&self) -> Option<Vec3> {
+        self.shapes
+            .iter()
+            .find(|s| s.part == HitPart::Body)
+            .or(self.shapes.first())
+            .map(HitShape::center)
+    }
+
+    /// Centre of the shape covering `part`, if any.
+    pub fn part_center(&self, part: HitPart) -> Option<Vec3> {
+        self.shapes
+            .iter()
+            .find(|s| s.part == part)
+            .map(HitShape::center)
     }
 }
 

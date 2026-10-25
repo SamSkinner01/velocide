@@ -50,8 +50,13 @@ slot key again cycles its alt mode. Damage multipliers: head/weak point ×2 (per
 - **Network tolerance**: the server validates against the lag-compensated (rewound) projectile
   positions at the client's view time and accepts a parry up to `parry_tolerance_ms` (80 ms)
   after the server would otherwise have applied the hit. To make that possible, damage from a
-  parryable projectile is applied with a delay equal to that tolerance: if a valid parry for it
-  arrives in that window, the damage is cancelled.
+  parryable projectile is applied with a delay equal to that tolerance **plus the victim's view
+  lag** (RTT + interpolation delay, clamped to `lag_comp_max_ms`): if a valid parry for it
+  arrives in that window, the damage is cancelled. Without the view-lag term, parries made on
+  what the player saw fail at ~100 ms RTT (`combat.parry_compensate_view_lag = false` restores
+  the plain 80 ms window).
+- **Lag compensation** rewinds up to `net.lag_comp_max_ms` = 350 ms (rewind needed ≈ RTT +
+  interpolation delay, so this fully compensates players up to ~245 ms RTT).
 - **Telegraphed melee** (Bastion slam): punching inside the attack's parry window (last 0.35 s of
   its wind-up) within 4 m stuns it for 2.5 s and deals 150 damage.
 - **Reward**: heal to effective max (+ clears 50 % of hard damage), +PARRY style, client hitstop

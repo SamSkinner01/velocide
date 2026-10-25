@@ -133,6 +133,10 @@ errors and bad normals otherwise).
   pipeline: inputs → movement (`sim::player_move_step`, the single movement entry point used by
   server and prediction) → gameplay systems → world rules → events. `replicate()` fills a
   `NetFrame` of quantised `NetEntity`s (delta-compressed per client against its last ack).
+- Combat: one damage pipeline `SimWorld::apply_damage`; weapons are pure tick-based
+  (`step_weapons`) so clients can predict firing; enemies are data-driven (`assets/enemies/*.ron`).
+  Player entity packing: `state` = weapon | mode<<4 | charge<<8; `aux` = hard | prisms<<8 |
+  stickies<<12 | wall-yaw<<16; flags in `protocol::player_flags`. Details: `docs/combat.md`.
 - Server: `Server::new(ServerConfig)`, `ServerHandle::spawn(config)` (own thread, used for SP and
   listen servers), `velocide-server` binary. Lag compensation in `server::lagcomp`.
 - Client: `client::net::Session::{single_player, host, join}` → `NetClient` (`update(dt)` per
