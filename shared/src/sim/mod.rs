@@ -26,9 +26,11 @@
 
 pub mod blood;
 pub mod combat;
+pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
 mod hitbox;
 pub mod hitscan;
+pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
 pub mod prism;
 pub mod projectiles;
@@ -373,6 +375,24 @@ pub enum SimEvent {
         position: Vec3,
         radius: f32,
     },
+
+    // ---- arena encounters (sim::encounter, docs/enemies.md) ----
+    /// Encounter `index` locked its doors (`waves` waves to come).
+    EncounterStarted {
+        index: u32,
+        waves: u32,
+    },
+    /// Wave `wave` (1-based) of `waves` spawned `enemies` enemies (co-op scaled).
+    WaveStarted {
+        index: u32,
+        wave: u32,
+        waves: u32,
+        enemies: u32,
+    },
+    /// The last wave died: the exit doors are open.
+    EncounterCleared {
+        index: u32,
+    },
 }
 
 /// A player's shot (for remote tracers, muzzle flashes and sounds).
@@ -414,6 +434,10 @@ pub struct SimWorld {
     pub blood: BTreeMap<NetId, BloodBurst>,
     /// Parry-delayed enemy melee damage.
     pub pending_hits: Vec<parry::PendingHit>,
+    /// Enemy AI shared state: nav grid (lazy), A* buffers, stats (`enemy/steer.rs`).
+    pub ai: enemy::AiWorld,
+    /// Arena encounter states (`encounter.rs`); persist until `restart_level`.
+    pub encounters: encounter::Encounters,
     /// Events of the tick being simulated.
     pub(crate) events: Vec<SimEvent>,
     /// The projectile step of the current tick has run.
@@ -455,6 +479,8 @@ impl SimWorld {
             prisms: BTreeMap::new(),
             blood: BTreeMap::new(),
             pending_hits: Vec::new(),
+            ai: enemy::AiWorld::default(),
+            encounters: encounter::Encounters::default(),
             events: Vec::new(),
             projectiles_stepped: false,
             next_spawn: 0,
@@ -530,6 +556,8 @@ impl SimWorld {
         self.prisms.clear();
         self.blood.clear();
         self.pending_hits.clear();
+        // Encounters go back to idle (doors are reset just below).
+        self.reset_encounters();
         let level = Arc::clone(&self.level);
         for door in &level.doors {
             self.collision.set_door_open(door.id, door.starts_open);
@@ -646,8 +674,9 @@ impl SimWorld {
         self.step_blood(tuning);
         self.tick_vitals(tuning);
 
-        // 5. World rules.
+        // 5. World rules, then arena encounters (triggers, waves, doors).
         self.apply_world_rules(tuning);
+        self.step_encounters(tuning);
 
         std::mem::take(&mut self.events)
     }
@@ -756,6 +785,8 @@ impl SimWorld {
         for b in self.blood.values() {
             frame.insert(&b.entity_state());
         }
+        // Encounter state (HUD: wave, enemies left).
+        self.replicate_encounters(frame);
     }
 
     /// Applies replicated level state (door open/closed) received in a snapshot so client

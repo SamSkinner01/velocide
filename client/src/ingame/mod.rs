@@ -26,6 +26,7 @@ pub mod camera;
 pub mod chat;
 pub mod debug;
 pub mod effects;
+pub mod encounter_hud; // arena encounter banners / sounds / readout (docs/enemies.md)
 pub mod feedback;
 pub mod hud;
 pub mod pause;
@@ -363,6 +364,14 @@ impl InGame {
                 common.audio.play_2d(Sfx::ChatMessage);
             }
             NetEvent::Game(GameEvent::Respawned { .. }) => {}
+            // Arena encounters: banners + sounds (encounter_hud.rs).
+            NetEvent::Game(
+                ref ev @ (GameEvent::EncounterStarted { .. }
+                | GameEvent::WaveStarted { .. }
+                | GameEvent::EncounterCleared { .. }),
+            ) => {
+                encounter_hud::on_event(ev, &mut self.hud, &mut common.audio, t, now);
+            }
             // Combat events (damage, hit confirms, kills, parries) are presented by the combat
             // client layer; see docs/combat.md "client presentation contract".
             NetEvent::Game(_) => {}
@@ -901,6 +910,8 @@ impl InGame {
             time: now,
         };
         self.hud.draw(list, &common.theme, &info);
+        // Arena encounter readout ("WAVE 2/3 - 5 LEFT").
+        encounter_hud::draw(list, &common.theme, net.remote_entities());
     }
 
     fn draw_scoreboard(&self, common: &Common, list: &mut engine::gfx::UiDrawList, canvas: Rect) {

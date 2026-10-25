@@ -1,0 +1,76 @@
+// Gnat: flying enemy. Hovers 4-8 m above the ground (or above its target's level), circles and
+// strafes around its target, steering around walls with feeler sweeps (no nav grid). Wind-up:
+// the abdomen curls under and the emitters glow for 0.4 s, then a burst of 3 fast parryable
+// bolts. The exposed core under the abdomen is a weak point (x2.5).
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), docs/combat.md and docs/enemies.md.
+// A FLYING enemy's origin is the centre of its collision capsule (the model's hover centre):
+// local offsets below are from that centre, and hover heights are measured from it.
+(
+    name: "Gnat",
+    net_kind: 18,
+    model: "gnat",
+    health: 30.0,
+    speed: 14.0,
+    acceleration: 30.0,
+    turn_rate: 720.0,
+    radius: 0.45,
+    height: 0.9,
+    body_top: None,
+    eye_height: 0.1,
+    step_height: 0.0,
+    locomotion: Flying(min_height: 4.0, max_height: 8.0),
+    knockback_scale: 1.6,
+    weak_points: [
+        (name: "core", kind: Core, offset: (0.0, -0.3, 0.15), radius: 0.2, multiplier: 2.5),
+    ],
+    armour: None,
+    attacks: [
+        (
+            name: "bolts",
+            kind: Projectile,
+            range: 32.0,
+            min_range: 0.0,
+            damage: 10.0,
+            knockback: 0.0,
+            windup: 0.4,
+            strike: 0.1,
+            recover: 0.35,
+            cooldown: 1.6,
+            windup_move_scale: 0.25,
+            track_target: true,
+            parry_window: None,
+            projectile: Some((
+                kind: GnatBolt,
+                speed: 45.0,
+                count: 3,
+                interval: 0.12,
+                spread: 2.5,
+                // The head emitters.
+                muzzle: (0.0, 0.05, -0.5),
+                lead: 0.2,
+            )),
+        ),
+    ],
+    ai: (
+        sight_range: 60.0,
+        reaction_time: 0.25,
+        lose_target_time: 5.0,
+        // Orbit band around the target (horizontal distance).
+        preferred_range: Some((6.0, 13.0)),
+        strafe: true,
+        target_stickiness: 0.6,
+        aggro_switch_fraction: 0.3,
+        retarget_interval: 0.3,
+        repath_interval: 0.6,
+    ),
+    drops: (blood_pool: 15.0, blood_radius: 4.0),
+    colors: (
+        body: (0.3, 0.28, 0.35),
+        accent: (0.18, 0.15, 0.22),
+        glow: (1.0, 0.2, 0.8),
+        telegraph: (1.0, 0.25, 0.85),
+        parry: (1.0, 0.9, 0.1),
+    ),
+    death_time: 0.8,
+)

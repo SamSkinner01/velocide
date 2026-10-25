@@ -1,5 +1,6 @@
-// Husk: fodder melee enemy. Shambles straight at the nearest visible player, raises its arms
-// (wind-up telegraph: red glint) and swipes. Fragile; the head is a weak point.
+// Husk: fodder melee enemy. Runs at the nearest visible player along the nav grid, raises its
+// arms (wind-up telegraph: red glint) and swipes. Players who keep running away get lunged at
+// (longer wind-up, then a leap that rakes whoever it reaches). Fragile; the head is a weak point.
 //
 // Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md.
 // Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up, -Z forward, from the feet.
@@ -40,6 +41,25 @@
             track_target: true,
             parry_window: None,
         ),
+        // Gap closer: only against targets moving faster than 5 m/s (fleeing / strafing).
+        (
+            name: "lunge",
+            kind: Melee,
+            range: 6.5,
+            min_range: 2.8,
+            arc: 100.0,
+            damage: 15.0,
+            knockback: 9.0,
+            windup: 0.5,
+            strike: 0.4,
+            recover: 0.6,
+            cooldown: 2.5,
+            windup_move_scale: 0.0,
+            track_target: true,
+            parry_window: None,
+            lunge: 14.0,
+            min_target_speed: 5.0,
+        ),
     ],
     ai: (
         sight_range: 60.0,
@@ -50,6 +70,7 @@
         target_stickiness: 0.6,
         aggro_switch_fraction: 0.3,
         retarget_interval: 0.25,
+        repath_interval: 0.5,
     ),
     drops: (blood_pool: 25.0, blood_radius: 4.5),
     colors: (

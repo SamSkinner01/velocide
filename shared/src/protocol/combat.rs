@@ -164,6 +164,13 @@ pub enum Fx {
     },
     /// An enemy noticed a player (alert bark).
     EnemyAlert { enemy: NetId },
+    /// An enemy appeared (encounter wave or dev spawn): spawn flash + `Sfx::EnemySpawn` at
+    /// `position` (its origin; `kind` = enemy kind).
+    EnemySpawned {
+        enemy: NetId,
+        kind: u16,
+        position: QPos,
+    },
 }
 
 impl Fx {
@@ -176,6 +183,7 @@ impl Fx {
                 | Fx::SlamShockwave { .. }
                 | Fx::EnemyShockwave { .. }
                 | Fx::EnemyAttack { .. }
+                | Fx::EnemySpawned { .. }
         )
     }
 }

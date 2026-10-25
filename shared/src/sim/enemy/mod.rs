@@ -1,17 +1,22 @@
 //! Server-run enemies: data-driven definitions ([`EnemyDef`], `assets/enemies/*.ron`), the
 //! runtime [`Enemy`], damage (weak points, armour, knockback, aggro), death and replication.
-//! The AI state machine and movement live in `ai.rs`.
+//! The AI state machine lives in `ai.rs`, navigation / flight steering in `steer.rs` (on top of
+//! `sim::nav`). Overview: `docs/enemies.md`.
 //!
 //! Replicated as entity `kind = def.net_kind` (Husk 16, Spitter 17, Gnat 18, Bastion 19):
-//! `owner` = target player id (`OWNER_NONE` without a target), `position` = feet, `velocity`,
+//! `owner` = target player id (`OWNER_NONE` without a target), `position` = feet (flying
+//! enemies: the centre of their collision capsule = the model's hover centre), `velocity`,
 //! `yaw`, `flags` = [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16,
 //! `health` = current health (rounded up), `aux` = state progress (bits 0–7, 0..255 through
 //! timed states) | attack index (bits 8–15) | max health (bits 16–31).
 
 mod ai;
 mod def;
+mod steer;
 
+pub use ai::is_targetable;
 pub use def::*;
+pub use steer::{AiStats, AiWorld, NavAgent, PathMode};
 
 use std::sync::Arc;
 
@@ -20,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use super::combat::{Blocked, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner};
 use super::trail::Trail;
+use super::nav::NavClass;
 use super::{HitPart, HitShape, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
 use crate::input::look_dir;
 use crate::protocol::{EntityState, NetId, OWNER_NONE, enemy_flags};
@@ -106,6 +112,30 @@ pub struct Enemy {
     pub retarget_in: u32,
     /// Strafe direction (+1 / −1) for ranged enemies.
     pub strafe_sign: f32,
+
+    // ---- AI / navigation (docs/enemies.md) ----
+    /// Path following state (ground enemies).
+    pub nav: NavAgent,
+    /// Spawned by encounter `(index, wave index)`.
+    pub encounter: Option<(u16, u8)>,
+    /// Knows where the players are without seeing them (arena spawns): never idles while a
+    /// targetable player exists, never loses its target for lack of sight.
+    pub aware: bool,
+    /// Hurt by this player while it had no target (damage alerts).
+    pub alerted_by: Option<PlayerId>,
+    /// Ticks of reduced control after a heavy knockback.
+    pub stagger: u16,
+    /// Players already hit by the current lunging strike.
+    pub lunge_hits: Vec<PlayerId>,
+    /// Line of sight (eye → chest) to the target this tick.
+    pub has_los: bool,
+    /// Ticks since the target was last in sight (flyers circle in when it stays hidden).
+    pub unseen_ticks: u32,
+    /// Flyers: cached height of the ground below and ticks until it is re-measured.
+    pub ground_y: f32,
+    pub ground_check_in: u8,
+    /// Ticks until a strafing enemy may flip its strafe direction again.
+    pub strafe_flip_in: u16,
 }
 
 impl Enemy {
@@ -143,7 +173,47 @@ impl Enemy {
             spawn_tick: tick,
             retarget_in: (id.0 % 7),
             strafe_sign: if id.0.is_multiple_of(2) { 1.0 } else { -1.0 },
+            nav: NavAgent::default(),
+            encounter: None,
+            aware: false,
+            alerted_by: None,
+            stagger: 0,
+            lunge_hits: Vec::new(),
+            has_los: false,
+            unseen_ticks: 0,
+            ground_y: position.y,
+            ground_check_in: 0,
+            strafe_flip_in: 0,
         }
+    }
+
+    pub fn is_flying(&self) -> bool {
+        matches!(self.def.locomotion, Locomotion::Flying { .. })
+    }
+
+    /// Height of the origin above the bottom of the collision capsule: 0 for ground enemies
+    /// (origin = feet), half the height for flyers (origin = centre).
+    pub fn origin_lift(&self) -> f32 {
+        if self.is_flying() {
+            self.def.height.max(2.0 * self.def.radius) * 0.5
+        } else {
+            0.0
+        }
+    }
+
+    /// Bottom of the collision capsule.
+    pub fn feet(&self) -> Vec3 {
+        self.position - Vec3::Y * self.origin_lift()
+    }
+
+    /// Navigation size class (ground enemies).
+    pub fn nav_class(&self) -> NavClass {
+        NavClass::for_size(self.def.radius, self.def.height)
+    }
+
+    /// Relative weight when enemies push each other apart.
+    pub fn mass(&self) -> f32 {
+        self.def.radius * self.def.radius * self.def.height.max(0.1)
     }
 
     pub fn is_alive(&self) -> bool {
@@ -171,7 +241,7 @@ impl Enemy {
     }
 
     pub fn center(&self) -> Vec3 {
-        self.position + Vec3::Y * (self.def.height * 0.5)
+        self.feet() + Vec3::Y * (self.def.height * 0.5)
     }
 
     /// Local offset (+X right, +Y up, −Z forward) to world space.
@@ -183,10 +253,11 @@ impl Enemy {
     pub fn hitbox(&self) -> Hitbox {
         let r = self.def.radius;
         let h = self.def.body_top.unwrap_or(self.def.height).max(2.0 * r);
+        let feet = self.feet();
         let mut shapes = vec![HitShape::capsule(
             HitPart::Body,
-            self.position + Vec3::Y * r,
-            self.position + Vec3::Y * (h - r),
+            feet + Vec3::Y * r,
+            feet + Vec3::Y * (h - r),
             r,
         )];
         for (i, w) in self.def.weak_points.iter().enumerate() {
@@ -297,9 +368,22 @@ impl SimWorld {
 
     /// Spawns an enemy by definition name. `None` if the name is unknown.
     pub fn spawn_enemy(&mut self, name: &str, position: Vec3, yaw: f32) -> Option<NetId> {
+        let scale = self.enemy_health_scale();
+        self.spawn_enemy_scaled(name, position, yaw, scale)
+    }
+
+    /// Spawns an enemy with an explicit health multiplier (encounters scale by the player
+    /// count at wave start). `yaw` in radians. `None` if the name is unknown.
+    pub fn spawn_enemy_scaled(
+        &mut self,
+        name: &str,
+        position: Vec3,
+        yaw: f32,
+        health_scale: f32,
+    ) -> Option<NetId> {
         let def = self.enemy_defs.get(name)?;
         let id = self.alloc_net_id();
-        let health = def.health * self.enemy_health_scale();
+        let health = def.health * health_scale.max(0.01);
         let enemy = Enemy::new(id, def, position, yaw, health, self.tick);
         let kind = enemy.net_kind();
         self.enemies.insert(id, enemy);
@@ -349,8 +433,11 @@ impl SimWorld {
             }
             weak_name = Some(w.name.as_str());
         }
+        // A parry counter (telegraphed-melee parry) always lands in full.
+        let counter = info.flags.contains(DamageFlags::MELEE | DamageFlags::PARRIED);
         if let Some(armour) = &def.armour
             && (!explosive || armour.explosions)
+            && !counter
             && !weak_name.is_some_and(|n| armour.bypass.iter().any(|b| b == n))
         {
             // Damage travelling against the facing direction comes from the front.
@@ -366,12 +453,22 @@ impl SimWorld {
         let dealt = amount.min(e.health.max(0.0));
         e.health -= amount;
         if info.knockback.length_squared() > 0.0 {
-            e.velocity += info.knockback * def.knockback_scale;
+            let kb = info.knockback * def.knockback_scale;
+            e.velocity += kb;
             if e.velocity.y > 0.5 {
                 e.on_ground = false;
             }
+            // Heavy hits stagger (brief loss of control) so the knockback reads.
+            if kb.length() > ai::STAGGER_KNOCKBACK {
+                let ticks = super::combat::secs_to_ticks(ai::STAGGER_TIME, self.tick_rate, 1);
+                e.stagger = e.stagger.max(ticks);
+            }
         }
         if let Owner::Player(p) = info.source {
+            // Getting hurt alerts an enemy that had no target.
+            if e.target.is_none() {
+                e.alerted_by = Some(p);
+            }
             match e.aggro.iter_mut().find(|a| a.0 == p) {
                 Some(a) => {
                     a.1 += dealt;

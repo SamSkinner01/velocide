@@ -1,20 +1,55 @@
 //! Enemy AI (server only): **idle → alert → chase → wind-up (telegraph) → strike → recover →
-//! chase**, plus stunned and dying. Targets the nearest visible player with stickiness, and
-//! switches to a player who hurts it badly. Ground enemies chase directly with capsule sweeps
-//! against the level (collide-and-slide with step-up); navigation (A* on a nav grid) slots in
-//! where `chase_velocity` is computed. Flying enemies steer directly at hover height.
+//! chase**, plus stunned and dying.
+//!
+//! * **Alert**: a targetable player within sight range with line of sight, or getting hurt
+//!   (`EnemyAlerted` → alert bark fx). Arena spawns are `aware`: they always know where the
+//!   players are.
+//! * **Targeting** (every `retarget_interval`): a player who dealt ≥ `aggro_switch_fraction`
+//!   of max health in the last 2 s; else keep the current target unless another visible one is
+//!   much closer (`target_stickiness`); else the nearest visible (aware: nearest at all).
+//!   Targets that die / disconnect / become untargetable ([`is_targetable`]) are dropped at
+//!   once; lost from sight for `lose_target_time` → idle (not for aware enemies).
+//! * **Chase**: ground enemies follow the nav grid (`steer.rs`); ranged ones hold their range
+//!   band, strafe and look for line of sight; flyers circle at hover height.
+//! * **Attack**: the first usable attack in definition order (cooldown, range, target speed,
+//!   line of sight) starts a **wind-up** (telegraph: `EnemyAttack` windup fx + replicated
+//!   progress; parryable attacks open the parry window), then the **strike** (melee arc /
+//!   lunge / slam shockwave / projectile burst), then **recover**.
+//! * Movement: capsule collide-and-slide against the level ([`move_enemy`]), soft separation
+//!   while moving plus a hard push-apart pass, an edge guard against lava and ledges, knockback
+//!   with stagger; enemies whose feet enter a kill volume die.
 
 use engine::physics::{CollisionWorld, MASK_MOVEMENT, MASK_SHOTS};
 use glam::Vec3;
 
+use super::steer::{self, NavCtx};
 use super::{AiState, AttackKind, Enemy, Locomotion, ParryWindow};
 use crate::movement::SKIN;
 use crate::protocol::NetId;
 use crate::sim::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
+use crate::sim::nav::{MAX_DROP, STEP_UP};
 use crate::sim::parry::ParryKey;
 use crate::sim::weapons::{SpreadRng, spread_dir};
-use crate::sim::{HitTarget, PlayerId, SimEvent, SimWorld};
+use crate::sim::{HitTarget, PlayerId, SimEvent, SimPlayer, SimWorld};
 use crate::tuning::Tuning;
+
+/// Knockback (m/s, after `knockback_scale`) above which an enemy staggers.
+pub(crate) const STAGGER_KNOCKBACK: f32 = 4.0;
+/// Stagger duration (s): no steering, slow braking.
+pub(crate) const STAGGER_TIME: f32 = 0.3;
+/// Reach (between body surfaces) of a lunging strike while it travels.
+const LUNGE_REACH: f32 = 1.4;
+/// Push-apart relaxation passes per tick.
+const PUSH_PASSES: u32 = 3;
+/// Extra clearance kept beyond the sweep skin (see `move_enemy`).
+const NUDGE: f32 = SKIN * 0.2;
+
+/// Can enemies target / attack this player? Dead (and, once game modes add it, downed or
+/// spectating) players are not targets. **Hook for the game modes**: extend it when adding
+/// player states that enemies must ignore.
+pub fn is_targetable(p: &SimPlayer) -> bool {
+    !p.combat.dead && !p.notarget
+}
 
 /// What enemies know about a player this tick.
 #[derive(Clone, Copy, Debug)]
@@ -69,10 +104,33 @@ impl SimWorld {
                     chest: center + Vec3::Y * 0.3,
                     radius,
                     height: p.movement.height(&t.movement),
-                    targetable: !p.combat.dead && !p.notarget,
+                    targetable: is_targetable(p),
                 }
             })
             .collect()
+    }
+
+    /// Builds the level's nav grid now (the server calls this at level load so the first enemy
+    /// tick doesn't stall; otherwise it is built lazily). Returns the build time (ms).
+    pub fn build_nav(&mut self) -> f32 {
+        let grid = crate::sim::nav::NavGrid::build(&self.level, &self.collision.world);
+        let ms = grid.stats.build_ms;
+        let s = &grid.stats;
+        log::info!(
+            "nav grid for '{}': {}x{} columns, {} floors ({} walkable, {} large, {} hazard, {} deadly), {} links, {:.1} ms",
+            self.level_name,
+            grid.nx,
+            grid.nz,
+            s.floors,
+            s.small,
+            s.large,
+            s.hazard,
+            s.deadly,
+            s.links,
+            ms
+        );
+        self.ai.nav = Some(std::sync::Arc::new(grid));
+        ms
     }
 
     /// Runs every enemy's AI and movement for one tick.
@@ -80,40 +138,48 @@ impl SimWorld {
         if self.enemies.is_empty() {
             return;
         }
+        if self.ai.nav.is_none() {
+            self.build_nav();
+        }
+        let mut cx = self.ai.begin_tick(&self.collision, self.tick);
         let players = self.player_views(t);
-        let bodies: Vec<(NetId, Vec3, f32, f32)> = self
+        let bodies: Vec<(NetId, Vec3, f32)> = self
             .enemies
             .values()
             .filter(|e| e.is_alive())
-            .map(|e| (e.id, e.position, e.radius(), e.def.speed))
+            .map(|e| (e.id, e.feet(), e.radius()))
             .collect();
         let ids: Vec<NetId> = self.enemies.keys().copied().collect();
         for id in ids {
             let Some(mut e) = self.enemies.remove(&id) else {
                 continue;
             };
-            // Soft separation from other enemies (no stacking).
+            // Soft separation from other enemies while moving (no stacking).
             let mut separation = Vec3::ZERO;
             if e.is_alive() {
-                for (other, pos, r, _) in &bodies {
-                    if *other == id {
+                let feet = e.feet();
+                for (other, pos, r) in &bodies {
+                    if *other == id || (pos.y - feet.y).abs() > 2.5 {
                         continue;
                     }
-                    let d = horizontal(e.position - *pos);
-                    let min = e.radius() + r + 0.2;
+                    let d = horizontal(feet - *pos);
+                    let min = e.radius() + r + 0.3;
                     let len = d.length();
                     if len < min && len > 1e-4 {
                         separation += d / len * ((min - len) / min) * e.def.speed;
                     }
                 }
             }
-            let keep = self.step_enemy(t, &mut e, &players, separation);
+            let keep = self.step_enemy(t, &mut e, &players, separation, &mut cx);
             if keep {
                 self.enemies.insert(id, e);
             } else {
                 self.events.push(SimEvent::EnemyRemoved { id });
             }
         }
+        self.push_enemies_apart(cx.nav.as_deref());
+        self.enemy_world_rules(t);
+        self.ai.end_tick(cx);
         let tick = self.tick;
         for e in self.enemies.values_mut() {
             e.trail.record(tick, e.position);
@@ -127,6 +193,7 @@ impl SimWorld {
         e: &mut Enemy,
         players: &[PlayerView],
         separation: Vec3,
+        cx: &mut NavCtx,
     ) -> bool {
         let rate = self.tick_rate;
         let now = self.tick;
@@ -139,10 +206,22 @@ impl SimWorld {
         }
         let window = 2 * rate;
         e.aggro.retain(|a| now.saturating_sub(a.2) < window);
+        e.stagger = e.stagger.saturating_sub(1);
 
         if e.state == AiState::Dying {
             move_enemy(&self.collision.world, e, Vec3::ZERO, dt, gravity);
             return e.state_ticks < e.state_len;
+        }
+
+        // Getting hurt by someone while unaware: that's the target now.
+        if let Some(p) = e.alerted_by.take()
+            && e.target.is_none()
+            && let Some(v) = players.iter().find(|v| v.id == p && v.targetable)
+        {
+            e.target = Some(p);
+            e.last_seen_tick = now;
+            e.last_seen_pos = v.position;
+            e.retarget_in = secs_to_ticks(def.ai.retarget_interval, rate, 1) as u32;
         }
 
         // Target selection (periodic, or immediately when the target became invalid).
@@ -151,8 +230,11 @@ impl SimWorld {
             .is_some_and(|id| players.iter().any(|p| p.id == id && p.targetable));
         if e.retarget_in == 0 || !target_valid {
             let (target, visible) = self.select_target(e, players);
-            if target != e.target && target.is_some() {
-                e.last_seen_tick = now;
+            if target != e.target {
+                e.nav.reset();
+                if target.is_some() {
+                    e.last_seen_tick = now;
+                }
             }
             e.target = target;
             if visible && let Some(tp) = target.and_then(|id| players.iter().find(|p| p.id == id)) {
@@ -163,16 +245,33 @@ impl SimWorld {
         } else {
             e.retarget_in -= 1;
         }
-        let lose = secs_to_ticks(def.ai.lose_target_time, rate, 1) as u32;
-        if e.target.is_some() && now.saturating_sub(e.last_seen_tick) > lose {
-            e.target = None;
-        }
         let target = e
             .target
             .and_then(|id| players.iter().find(|p| p.id == id))
             .copied();
+        // Line of sight to the target (attacks, ranged positioning, losing interest).
+        e.has_los = target.is_some_and(|tp| {
+            tp.chest.distance(e.eye()) <= def.ai.sight_range
+                && !self.collision.world.line_blocked(e.eye(), tp.chest, MASK_SHOTS)
+        });
+        if let Some(tp) = &target
+            && e.has_los
+        {
+            e.last_seen_tick = now;
+            e.last_seen_pos = tp.position;
+            e.unseen_ticks = 0;
+        } else {
+            e.unseen_ticks = e.unseen_ticks.saturating_add(1);
+        }
+        let lose = secs_to_ticks(def.ai.lose_target_time, rate, 1) as u32;
+        if e.target.is_some() && !e.aware && now.saturating_sub(e.last_seen_tick) > lose {
+            e.target = None;
+            e.nav.reset();
+        }
+        let target = if e.target.is_some() { target } else { None };
 
         let mut desired = Vec3::ZERO;
+        let mut max_drop = STEP_UP + 0.1;
         let mut face: Option<Vec3> = None;
         match e.state {
             AiState::Idle => {
@@ -194,17 +293,13 @@ impl SimWorld {
                 }
             }
             AiState::Chase => match target {
-                None => {
-                    if e.target.is_none() {
-                        e.set_state(AiState::Idle, 0);
-                    }
-                }
+                None => e.set_state(AiState::Idle, 0),
                 Some(tp) => {
                     face = Some(tp.position);
-                    if let Some(i) = self.choose_attack(e, &tp) {
+                    if let Some(i) = self.choose_attack(e, &tp, cx) {
                         self.begin_windup(e, i);
                     } else {
-                        desired = self.chase_velocity(e, &tp);
+                        (desired, max_drop) = self.chase_velocity(e, &tp, cx, 1.0);
                     }
                 }
             },
@@ -216,9 +311,10 @@ impl SimWorld {
                 if a.track_target {
                     face = target.map(|p| p.position);
                 }
-                if let Some(tp) = &target {
-                    desired = horizontal(tp.position - e.position).normalize_or_zero()
-                        * (def.speed * a.windup_move_scale);
+                if let Some(tp) = &target
+                    && a.windup_move_scale > 0.0
+                {
+                    (desired, max_drop) = self.chase_velocity(e, tp, cx, a.windup_move_scale);
                 }
                 if e.state_ticks >= e.state_len {
                     self.strike(t, e, players, target.as_ref());
@@ -226,6 +322,14 @@ impl SimWorld {
             }
             AiState::Strike => {
                 self.continue_burst(t, e, target.as_ref());
+                if let Some(a) = def.attacks.get(e.attack)
+                    && a.lunge > 0.0
+                {
+                    // Keep leaping; rake whoever is reached.
+                    desired = e.forward() * a.lunge;
+                    max_drop = STEP_UP + 0.1;
+                    self.lunge_hits(t, e, players);
+                }
                 if e.state_ticks >= e.state_len {
                     let (cooldown, recover) = def
                         .attacks
@@ -251,12 +355,26 @@ impl SimWorld {
             e.yaw = turn_towards(e.yaw, yaw, def.turn_rate.to_radians() * dt);
         }
         let control = matches!(e.state, AiState::Chase | AiState::Windup | AiState::Strike);
-        let desired = if control {
+        let mut desired = if control {
             desired + separation
         } else {
             separation
         };
-        move_enemy(&self.collision.world, e, desired, dt, gravity);
+        if e.is_flying() && !control {
+            // Hover in place (no gravity while alive).
+            desired = horizontal(desired);
+        }
+        if e.stagger > 0 {
+            desired = Vec3::ZERO;
+        }
+        let lunging = e.state == AiState::Strike
+            && def.attacks.get(e.attack).is_some_and(|a| a.lunge > 0.0);
+        let guarded = steer::guard(cx.nav.as_deref(), e, desired, max_drop);
+        if lunging && guarded != desired {
+            // A lunge stops dead at a ledge / lava edge.
+            e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
+        }
+        move_enemy(&self.collision.world, e, guarded, dt, gravity);
         true
     }
 
@@ -296,90 +414,156 @@ impl SimWorld {
             },
             (Some(cur), None) => (Some(cur), false),
             (None, Some((best, _))) => (Some(best), true),
+            (None, None) if e.aware => {
+                // Arena spawns hunt the nearest player even without seeing them.
+                let nearest = players
+                    .iter()
+                    .filter(|p| p.targetable)
+                    .min_by(|a, b| {
+                        a.position
+                            .distance_squared(eye)
+                            .total_cmp(&b.position.distance_squared(eye))
+                    })
+                    .map(|p| p.id);
+                (nearest, false)
+            }
             (None, None) => (None, false),
         }
     }
 
     /// First usable attack (definition order = priority) against `tp`.
-    fn choose_attack(&self, e: &Enemy, tp: &PlayerView) -> Option<usize> {
+    fn choose_attack(&self, e: &Enemy, tp: &PlayerView, cx: &NavCtx) -> Option<usize> {
+        if !e.has_los {
+            return None;
+        }
         let world = &self.collision.world;
+        let feet = e.feet();
+        let speed = horizontal(tp.velocity).length();
         e.def.attacks.iter().enumerate().find_map(|(i, a)| {
-            if e.cooldowns.get(i).copied().unwrap_or(0) > 0 {
+            if e.cooldowns.get(i).copied().unwrap_or(0) > 0 || speed < a.min_target_speed {
                 return None;
             }
             let ok = match a.kind {
                 AttackKind::Melee | AttackKind::Slam => {
-                    let surface =
-                        horizontal(tp.position - e.position).length() - e.radius() - tp.radius;
-                    let vertical = tp.position.y < e.position.y + e.height()
-                        && tp.position.y + tp.height > e.position.y - 0.3;
-                    surface <= a.range && surface >= a.min_range - e.radius() && vertical
+                    let to = horizontal(tp.position - feet);
+                    let surface = to.length() - e.radius() - tp.radius;
+                    let vertical = tp.position.y < feet.y + e.height()
+                        && tp.position.y + tp.height > feet.y - 0.3;
+                    let far_enough = a.min_range <= 0.0 || surface >= a.min_range;
+                    let mut ok = surface <= a.range && far_enough && vertical;
+                    if ok && a.lunge > 0.0 {
+                        // Don't leap into lava or off a ledge.
+                        let dir = to.normalize_or_zero();
+                        let reach = (surface + e.radius()).min(a.lunge * a.strike);
+                        ok = cx.nav.as_deref().is_none_or(|n| {
+                            n.is_empty()
+                                || [0.5, 1.0].iter().all(|f| {
+                                    n.ground_ok(feet + dir * reach * f, feet.y, STEP_UP + 0.1)
+                                })
+                        });
+                    }
+                    ok && !world.line_blocked(e.center(), tp.chest, MASK_SHOTS)
                 }
                 AttackKind::Projectile => {
-                    let d = tp.chest.distance(e.eye());
-                    d <= a.range && d >= a.min_range
+                    let muzzle = a
+                        .projectile
+                        .as_ref()
+                        .map_or(e.eye(), |p| e.local_to_world(p.muzzle));
+                    let d = tp.chest.distance(muzzle);
+                    d <= a.range && d >= a.min_range && !world.line_blocked(muzzle, tp.chest, MASK_SHOTS)
                 }
             };
-            (ok && !world.line_blocked(e.eye(), tp.chest, MASK_SHOTS)).then_some(i)
+            ok.then_some(i)
         })
     }
 
-    /// Movement while chasing: straight at the target (ground: horizontally), stopping at
-    /// melee range; ranged enemies keep their preferred band and may strafe.
-    fn chase_velocity(&self, e: &Enemy, tp: &PlayerView) -> Vec3 {
-        let def = &e.def;
-        let to = tp.position - e.position;
-        let flat = horizontal(to);
-        let dist = flat.length();
-        let dir = flat.normalize_or_zero();
-        let melee_range = def
-            .attacks
-            .iter()
-            .filter(|a| a.kind != AttackKind::Projectile)
-            .map(|a| a.range)
-            .fold(f32::INFINITY, f32::min);
-        let surface = dist - e.radius() - tp.radius;
-        let mut v = match def.ai.preferred_range {
+    /// Movement while chasing (`scale` < 1 while winding up): ground enemies walk the nav grid
+    /// (melee stop at 60 % of their reach; ranged hold their band, strafe, and walk until they
+    /// see the target); flyers circle. Returns (velocity, drop the edge guard may allow).
+    fn chase_velocity(
+        &self,
+        e: &mut Enemy,
+        tp: &PlayerView,
+        cx: &mut NavCtx,
+        scale: f32,
+    ) -> (Vec3, f32) {
+        let def = e.def.clone();
+        let rate = self.tick_rate;
+        if let Locomotion::Flying { .. } = def.locomotion {
+            let v = steer::fly_velocity(&self.collision.world, e, tp, self.tick, scale);
+            return (v, MAX_DROP);
+        }
+        let speed = def.speed * scale;
+        let feet = e.feet();
+        let to = horizontal(tp.position - feet);
+        let dist = to.length();
+        let dir = to.normalize_or_zero();
+        match def.ai.preferred_range {
             Some((min, max)) => {
                 let d = tp.chest.distance(e.eye());
-                let mut v = if d > max {
-                    dir * def.speed
-                } else if d < min {
-                    -dir * def.speed
+                if !e.has_los || d > max {
+                    // Walk towards the target until it is in sight and in range.
+                    return steer::ground_velocity(e, tp.position, speed, cx, rate);
+                }
+                e.nav.reset();
+                let world = &self.collision.world;
+                let nav = cx.nav.as_deref();
+                let side = Vec3::new(-dir.z, 0.0, dir.x);
+                if e.strafe_flip_in > 0 {
+                    e.strafe_flip_in -= 1;
+                }
+                let mut strafe = Vec3::ZERO;
+                if def.ai.strafe {
+                    if !steer::can_step(world, nav, e, side * e.strafe_sign) && e.strafe_flip_in == 0
+                    {
+                        e.strafe_sign = -e.strafe_sign;
+                        e.strafe_flip_in = 45;
+                    } else if e.strafe_flip_in == 0 && (self.tick + e.id.0).is_multiple_of(150) {
+                        // Change direction now and then so it isn't predictable.
+                        e.strafe_sign = -e.strafe_sign;
+                        e.strafe_flip_in = 45;
+                    }
+                    strafe = side * e.strafe_sign;
+                    // Don't strafe behind cover: keep the line of sight.
+                    if e.strafe_flip_in == 0
+                        && world.line_blocked(e.eye() + strafe * 1.5, tp.chest, MASK_SHOTS)
+                    {
+                        e.strafe_sign = -e.strafe_sign;
+                        e.strafe_flip_in = 45;
+                        strafe = -strafe;
+                    }
+                    if !steer::can_step(world, nav, e, strafe) {
+                        strafe = Vec3::ZERO;
+                    }
+                }
+                let radial = if d < min {
+                    // Too close: back off (if there is room), else just strafe.
+                    if steer::can_step(world, nav, e, -dir) {
+                        -dir
+                    } else {
+                        Vec3::ZERO
+                    }
                 } else {
                     Vec3::ZERO
                 };
-                if def.ai.strafe {
-                    let side = Vec3::new(-dir.z, 0.0, dir.x);
-                    v += side * (def.speed * 0.6 * e.strafe_sign);
-                }
-                v
+                let v = (radial + strafe * 0.6).normalize_or_zero() * speed;
+                (v, STEP_UP + 0.1)
             }
-            None if melee_range.is_finite() && surface <= melee_range * 0.6 => Vec3::ZERO,
-            None => dir * def.speed,
-        };
-        if let Locomotion::Flying {
-            min_height,
-            max_height,
-        } = def.locomotion
-        {
-            let ground = self
-                .collision
-                .world
-                .cast_ray(e.position, Vec3::NEG_Y, 50.0, MASK_MOVEMENT)
-                .map_or(50.0, |h| h.distance);
-            let want = (min_height + max_height) * 0.5;
-            let target_y = tp.position.y + want;
-            let vy = if ground < min_height {
-                def.speed * 0.5
-            } else if ground > max_height {
-                -def.speed * 0.5
-            } else {
-                ((target_y - e.position.y) * 2.0).clamp(-def.speed * 0.5, def.speed * 0.5)
-            };
-            v.y = vy;
+            None => {
+                let reach = def
+                    .attacks
+                    .iter()
+                    .filter(|a| a.kind != AttackKind::Projectile && a.lunge <= 0.0)
+                    .map(|a| a.range)
+                    .fold(f32::INFINITY, f32::min);
+                let surface = dist - e.radius() - tp.radius;
+                let level = (tp.position.y - feet.y).abs() < 1.0;
+                if reach.is_finite() && surface <= reach * 0.6 && level {
+                    return (Vec3::ZERO, STEP_UP);
+                }
+                steer::ground_velocity(e, tp.position, speed, cx, rate)
+            }
         }
-        v
     }
 
     fn begin_windup(&mut self, e: &mut Enemy, attack: usize) {
@@ -393,6 +577,7 @@ impl SimWorld {
         e.attack = attack;
         e.attack_seq = e.attack_seq.wrapping_add(1);
         e.shots_fired = 0;
+        e.lunge_hits.clear();
         e.set_state(AiState::Windup, len);
         e.parry_window = parry.map(|w| {
             let wt = (secs_to_ticks(w, rate, 1) as u32).min(len);
@@ -410,7 +595,52 @@ impl SimWorld {
         });
     }
 
-    /// The strike moment: melee arc / slam radius damage, or the first projectile.
+    /// Melee hits of attack `a` from `e` right now (players in reach, in the arc, in sight).
+    fn melee_hits(
+        &self,
+        e: &Enemy,
+        a: &super::AttackDef,
+        attack: Attack,
+        players: &[PlayerView],
+        skip: &[PlayerId],
+    ) -> Vec<(PlayerId, DamageInfo)> {
+        let world = &self.collision.world;
+        let half_arc = (a.arc * 0.5).to_radians();
+        let fwd = e.forward();
+        let feet = e.feet();
+        let mut hits = Vec::new();
+        // A lunge's `range` is how far it leaps from; it rakes what is right in front.
+        let reach = if a.lunge > 0.0 { LUNGE_REACH } else { a.range };
+        for p in players.iter().filter(|p| p.targetable && !skip.contains(&p.id)) {
+            let to = horizontal(p.position - feet);
+            let dist = to.length();
+            if dist - e.radius() - p.radius > reach + 0.25 {
+                continue;
+            }
+            let vertical =
+                p.position.y < feet.y + e.height() && p.position.y + p.height > feet.y - 0.3;
+            if !vertical {
+                continue;
+            }
+            if dist > 0.3 && to.normalize_or_zero().angle_between(fwd) > half_arc {
+                continue;
+            }
+            if world.line_blocked(e.center(), p.chest, MASK_SHOTS) {
+                continue;
+            }
+            let dir = to.normalize_or(fwd);
+            let kb = (dir + Vec3::Y * 0.35).normalize_or(Vec3::Y) * a.knockback;
+            let info = DamageInfo::new(a.damage, Owner::Enemy(e.id), attack)
+                .at(p.chest, dir)
+                .knockback(kb)
+                .flags(DamageFlags::MELEE);
+            hits.push((p.id, info));
+        }
+        hits
+    }
+
+    /// The strike moment: melee arc / slam radius damage, the lunge leap, or the first
+    /// projectile.
     fn strike(
         &mut self,
         t: &Tuning,
@@ -431,40 +661,21 @@ impl SimWorld {
         };
         let source = Owner::Enemy(e.id);
         let parryable = a.parry_window.is_some();
-        let world = &self.collision.world;
         let mut hits: Vec<(PlayerId, DamageInfo)> = Vec::new();
         match a.kind {
-            AttackKind::Melee => {
-                let half_arc = (a.arc * 0.5).to_radians();
-                let fwd = e.forward();
-                for p in players.iter().filter(|p| p.targetable) {
-                    let to = horizontal(p.position - e.position);
-                    let dist = to.length();
-                    if dist - e.radius() - p.radius > a.range + 0.25 {
-                        continue;
-                    }
-                    let vertical = p.position.y < e.position.y + e.height()
-                        && p.position.y + p.height > e.position.y - 0.3;
-                    if !vertical {
-                        continue;
-                    }
-                    if dist > 0.3 && to.normalize_or_zero().angle_between(fwd) > half_arc {
-                        continue;
-                    }
-                    if world.line_blocked(e.center(), p.chest, MASK_SHOTS) {
-                        continue;
-                    }
-                    let dir = to.normalize_or(fwd);
-                    let kb = (dir + Vec3::Y * 0.35).normalize_or(Vec3::Y) * a.knockback;
-                    let info = DamageInfo::new(a.damage, source, attack)
-                        .at(p.chest, dir)
-                        .knockback(kb)
-                        .flags(DamageFlags::MELEE);
-                    hits.push((p.id, info));
+            AttackKind::Melee if a.lunge > 0.0 => {
+                // Leap at the target; hits are checked every tick of the strike.
+                let dir = target
+                    .map(|tp| horizontal(tp.position - e.feet()).normalize_or(e.forward()))
+                    .unwrap_or(e.forward());
+                if let Some(yaw) = yaw_towards(dir) {
+                    e.yaw = yaw;
                 }
+                e.velocity = Vec3::new(dir.x * a.lunge, e.velocity.y, dir.z * a.lunge);
             }
+            AttackKind::Melee => hits = self.melee_hits(e, a, attack, players, &[]),
             AttackKind::Slam => {
-                let center = e.position + e.forward() * (e.radius() + 0.5);
+                let center = e.feet() + e.forward() * (e.radius() + 0.5);
                 for p in players.iter().filter(|p| p.targetable) {
                     let to = p.position - center;
                     let d = horizontal(to).length();
@@ -488,13 +699,7 @@ impl SimWorld {
             }
             AttackKind::Projectile => {}
         }
-        for (victim, info) in hits {
-            if parryable {
-                self.queue_pending_hit(t, ParryKey::Melee(e.id, e.attack_seq), victim, info);
-            } else {
-                self.apply_damage(t, HitTarget::Player(victim), info);
-            }
-        }
+        self.deal_hits(t, e, parryable, hits);
         self.events.push(SimEvent::EnemyAttack {
             id: e.id,
             attack: idx.min(255) as u8,
@@ -511,6 +716,37 @@ impl SimWorld {
         if a.kind == AttackKind::Projectile {
             self.fire_enemy_projectile(t, e, target);
         }
+    }
+
+    fn deal_hits(
+        &mut self,
+        t: &Tuning,
+        e: &Enemy,
+        parryable: bool,
+        hits: Vec<(PlayerId, DamageInfo)>,
+    ) {
+        for (victim, info) in hits {
+            if parryable {
+                self.queue_pending_hit(t, ParryKey::Melee(e.id, e.attack_seq), victim, info);
+            } else {
+                self.apply_damage(t, HitTarget::Player(victim), info);
+            }
+        }
+    }
+
+    /// Active frames of a lunge: everyone reached (once each).
+    fn lunge_hits(&mut self, t: &Tuning, e: &mut Enemy, players: &[PlayerView]) {
+        let def = e.def.clone();
+        let Some(a) = def.attacks.get(e.attack) else {
+            return;
+        };
+        let attack = Attack::Enemy {
+            kind: def.net_kind,
+            attack: e.attack.min(255) as u8,
+        };
+        let hits = self.melee_hits(e, a, attack, players, &e.lunge_hits);
+        e.lunge_hits.extend(hits.iter().map(|h| h.0));
+        self.deal_hits(t, e, a.parry_window.is_some(), hits);
     }
 
     /// Fires the remaining projectiles of a burst at their intervals.
@@ -564,6 +800,109 @@ impl SimWorld {
             position: muzzle,
         });
     }
+
+    /// Hard separation: overlapping living enemies are pushed apart (heavier ones move less),
+    /// with a capsule sweep so nobody is pushed into a wall, and never over lava / a ledge.
+    /// A few relaxation passes so crowds settle too.
+    fn push_enemies_apart(&mut self, nav: Option<&crate::sim::nav::NavGrid>) {
+        for _ in 0..PUSH_PASSES {
+            if !self.push_pass(nav) {
+                break;
+            }
+        }
+    }
+
+    /// One push-apart pass; false when nothing overlapped.
+    fn push_pass(&mut self, nav: Option<&crate::sim::nav::NavGrid>) -> bool {
+        let bodies: Vec<(NetId, Vec3, f32, f32, f32)> = self
+            .enemies
+            .values()
+            .filter(|e| e.is_alive())
+            .map(|e| (e.id, e.feet(), e.radius(), e.height(), e.mass()))
+            .collect();
+        let mut pushes: Vec<(NetId, Vec3)> = Vec::new();
+        for (i, a) in bodies.iter().enumerate() {
+            for b in &bodies[i + 1..] {
+                let overlap_y = a.1.y < b.1.y + b.3 && b.1.y < a.1.y + a.3;
+                if !overlap_y {
+                    continue;
+                }
+                let d = horizontal(a.1 - b.1);
+                let min = a.2 + b.2;
+                let len = d.length();
+                if len >= min {
+                    continue;
+                }
+                let dir = if len > 1e-4 {
+                    d / len
+                } else {
+                    // Exactly stacked: split deterministically.
+                    let ang = (a.0.0 as f32) * 2.399;
+                    Vec3::new(ang.cos(), 0.0, ang.sin())
+                };
+                let overlap = (min - len).min(0.5);
+                let total = (a.4 + b.4).max(1e-3);
+                pushes.push((a.0, dir * overlap * (b.4 / total)));
+                pushes.push((b.0, -dir * overlap * (a.4 / total)));
+            }
+        }
+        if pushes.is_empty() {
+            return false;
+        }
+        let world = &self.collision.world;
+        for (id, push) in pushes {
+            let Some(e) = self.enemies.get_mut(&id) else {
+                continue;
+            };
+            let feet = e.feet();
+            if !e.is_flying()
+                && e.on_ground
+                && nav.is_some_and(|n| {
+                    !n.is_empty() && !n.ground_ok(feet + push.normalize_or_zero() * e.def.radius, feet.y, STEP_UP + 0.1)
+                })
+            {
+                continue;
+            }
+            let r = e.def.radius;
+            let h = e.def.height.max(2.0 * r);
+            let half = (h * 0.5 - r).max(0.0);
+            let center = feet + Vec3::Y * (h * 0.5);
+            let frac = world
+                .cast_capsule(center, half, r, push, SKIN, MASK_MOVEMENT)
+                .map_or(1.0, |hit| hit.fraction);
+            e.position += push * frac;
+        }
+        true
+    }
+
+    /// Enemies whose feet enter a kill volume (lava) or fall out of the level die; corpses
+    /// that fall out are removed.
+    fn enemy_world_rules(&mut self, t: &Tuning) {
+        let kill_floor = self.kill_floor;
+        let mut kill = Vec::new();
+        for e in self.enemies.values_mut() {
+            let feet = e.feet();
+            let out = !feet.is_finite() || feet.y < kill_floor;
+            if !e.is_alive() {
+                if out {
+                    e.state_ticks = e.state_len;
+                    e.velocity = Vec3::ZERO;
+                }
+                continue;
+            }
+            if out || self.level.kill_volumes.iter().any(|v| v.contains(feet)) {
+                kill.push(e.id);
+            }
+        }
+        for id in kill {
+            let Some(e) = self.enemies.get(&id) else {
+                continue;
+            };
+            let info = DamageInfo::new(e.health.max(1.0) * 10.0, Owner::World, Attack::World)
+                .at(e.center(), Vec3::NEG_Y);
+            self.apply_damage(t, HitTarget::Entity(id), info);
+        }
+    }
 }
 
 /// Kinematic enemy movement: accelerate towards `desired` (ground: horizontally, with
@@ -579,12 +918,19 @@ pub(crate) fn move_enemy(
     let r = def.radius;
     let h = def.height.max(2.0 * r);
     let half = (h * 0.5 - r).max(0.0);
-    let lift = Vec3::Y * (h * 0.5);
-    let flying = matches!(def.locomotion, Locomotion::Flying { .. });
+    // Origin → capsule centre.
+    let lift = Vec3::Y * (h * 0.5 - e.origin_lift());
+    let flying = e.is_flying();
     let alive = e.is_alive();
+    let staggered = e.stagger > 0;
 
     if flying && alive {
-        e.velocity = move_towards(e.velocity, desired, def.acceleration * dt);
+        let accel = if staggered {
+            def.acceleration * 0.3
+        } else {
+            def.acceleration
+        };
+        e.velocity = move_towards(e.velocity, desired, accel * dt);
         e.on_ground = false;
     } else {
         if e.on_ground && e.velocity.y > 0.5 {
@@ -592,10 +938,10 @@ pub(crate) fn move_enemy(
         }
         if e.on_ground {
             let target = horizontal(desired);
-            let accel = if alive {
+            let accel = if alive && !staggered {
                 def.acceleration
             } else {
-                def.acceleration * 0.5
+                def.acceleration * 0.35
             };
             e.velocity = move_towards(horizontal(e.velocity), target, accel * dt);
         } else {
@@ -604,13 +950,15 @@ pub(crate) fn move_enemy(
     }
 
     let mut center = e.position + lift;
-    // Depenetrate (spawned in a wall, pushed by a door...).
+    // Depenetrate (spawned in a wall, pushed by a door...) and keep the skin distance from
+    // every surface: resting inside the skin band would make sweeps along the floor report
+    // zero-distance hits and eat the motion (see `movement::collide`).
     for _ in 0..2 {
-        let contacts = world.capsule_contacts(center, half, r, 0.0, MASK_MOVEMENT);
+        let contacts = world.capsule_contacts(center, half, r, SKIN, MASK_MOVEMENT);
         let mut moved = false;
         for c in contacts {
-            if c.distance < 0.0 {
-                center += c.normal * (-c.distance + 1e-3);
+            if c.distance < SKIN {
+                center += c.normal * (SKIN + NUDGE - c.distance);
                 moved = true;
             }
         }
@@ -631,6 +979,15 @@ pub(crate) fn move_enemy(
         center += motion * hit.fraction;
         let mut remaining = motion * (1.0 - hit.fraction);
         let n = hit.normal;
+        if !flying && n.y > 0.7 && e.velocity.y <= 0.5 {
+            // Walkable ground (a ramp, a bump, a landing): follow it without losing speed.
+            e.velocity.y = 0.0;
+            e.on_ground = true;
+            remaining -= n * remaining.dot(n);
+            center += n * NUDGE;
+            motion = remaining;
+            continue;
+        }
         // Step up small ledges while walking.
         if e.on_ground && !flying && n.y.abs() < 0.3 && def.step_height > 0.0 {
             let up = Vec3::Y * def.step_height;
@@ -653,7 +1010,14 @@ pub(crate) fn move_enemy(
         if vn < 0.0 {
             e.velocity -= n * vn;
         }
+        // Step out of the skin band so sliding along this surface isn't a zero-distance hit.
+        center += n * NUDGE;
         motion = remaining;
+    }
+    // Sliding along the floor must not turn into tiny hops (which would cost a tick of ground
+    // control each time).
+    if e.on_ground && !flying && e.velocity.y > 0.0 && e.velocity.y < 0.5 {
+        e.velocity.y = 0.0;
     }
 
     if !flying || !alive {

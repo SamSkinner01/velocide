@@ -64,6 +64,11 @@ impl NetId {
         NetId(Self::STATIC_START.saturating_add(door_id))
     }
 
+    /// Arena encounter `index` of the level (static; see `kind::ENCOUNTER`).
+    pub fn encounter(index: u32) -> NetId {
+        NetId(Self::STATIC_START + 0x0010_0000 + index.min(0xFFFF))
+    }
+
     /// The player this id belongs to, if it is in the player range.
     pub fn as_player(self) -> Option<crate::sim::PlayerId> {
         (self.0 < 256).then_some(crate::sim::PlayerId(self.0 as u8))
@@ -80,6 +85,10 @@ pub mod kind {
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
+    /// An arena encounter (`NetId::encounter(index)`, docs/enemies.md): `position` = arena
+    /// centre, `flags` = [`super::encounter_flags`], `state` = current wave (1-based, 0 before
+    /// the first), `health` = enemies left in the wave, `aux` = waves | wave size << 16.
+    pub const ENCOUNTER: u16 = 2;
 
     // 16..64: enemies (`EnemyDef::net_kind`). `owner` = target player (OWNER_NONE), `state` =
     // `AiState`, `health` = health, `aux` = progress | attack << 8 | max health << 16.
@@ -201,6 +210,16 @@ pub mod prism_flags {
 /// Flag bits of door entities.
 pub mod door_flags {
     pub const OPEN: u32 = 1 << 0;
+}
+
+/// `flags` of `kind::ENCOUNTER` entities.
+pub mod encounter_flags {
+    /// Doors locked, waves in progress.
+    pub const ACTIVE: u32 = 1 << 0;
+    /// Won (doors open for good).
+    pub const CLEARED: u32 = 1 << 1;
+    /// Active, the next wave is about to spawn.
+    pub const BETWEEN_WAVES: u32 = 1 << 2;
 }
 
 /// Quantisation scales.

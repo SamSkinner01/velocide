@@ -243,6 +243,20 @@ pub enum GameEvent {
     /// A successful parry (hitstop + white flash for the parrier, `Sfx::Parry` for all).
     /// Everyone.
     Parried(ParryEvent),
+
+    // ---- arena encounters (docs/enemies.md); everyone ----
+    /// Encounter `index` locked its doors ("ARENA LOCKED", `Sfx::DoorLock`).
+    EncounterStarted { index: u32, waves: u32 },
+    /// Wave `wave` (1-based) of `waves` spawned `enemies` enemies ("WAVE 2/3",
+    /// `Sfx::WaveStart`).
+    WaveStarted {
+        index: u32,
+        wave: u32,
+        waves: u32,
+        enemies: u32,
+    },
+    /// The encounter was won; its doors open ("CLEARED", `Sfx::EncounterClear` + `DoorOpen`).
+    EncounterCleared { index: u32 },
 }
 
 /// Unreliable server -> client messages.

@@ -314,12 +314,41 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 None,
             ),
             SimEvent::EnemyAlerted { id, .. } => fx.push(tick, Fx::EnemyAlert { enemy: *id }, None),
+            SimEvent::EnemySpawned { id, kind, position } => fx.push(
+                tick,
+                Fx::EnemySpawned {
+                    enemy: *id,
+                    kind: *kind,
+                    position: (*position).into(),
+                },
+                None,
+            ),
+            // Arena encounters (docs/enemies.md): reliable, everyone.
+            SimEvent::EncounterStarted { index, waves } => {
+                routed.broadcast.push(GameEvent::EncounterStarted {
+                    index: *index,
+                    waves: *waves,
+                })
+            }
+            SimEvent::WaveStarted {
+                index,
+                wave,
+                waves,
+                enemies,
+            } => routed.broadcast.push(GameEvent::WaveStarted {
+                index: *index,
+                wave: *wave,
+                waves: *waves,
+                enemies: *enemies,
+            }),
+            SimEvent::EncounterCleared { index } => {
+                routed.broadcast.push(GameEvent::EncounterCleared { index: *index })
+            }
             // Visible through entities / other events, or server-internal.
             SimEvent::Jumped { .. }
             | SimEvent::Landed { .. }
             | SimEvent::Healed { .. }
             | SimEvent::PrismShattered { .. }
-            | SimEvent::EnemySpawned { .. }
             | SimEvent::EnemyRemoved { .. } => {}
         }
     }
