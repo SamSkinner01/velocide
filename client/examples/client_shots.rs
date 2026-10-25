@@ -83,7 +83,7 @@ impl Harness {
         };
         if self.common.settings_changed {
             self.common.settings_changed = false;
-            self.renderer.apply_settings(&self.common.settings.retro);
+            self.common.apply_display_settings(&mut self.renderer);
         }
         if let Err(e) = self.renderer.render(&self.buffers.desc(&out.scene), None) {
             eprintln!("render: {e:#}");
@@ -158,16 +158,21 @@ fn main() -> anyhow::Result<()> {
     h.shot("menu_join");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("settings_video");
-    for (i, name) in ["settings_audio", "settings_controls", "settings_gameplay"]
-        .iter()
-        .enumerate()
+    for (i, name) in [
+        "settings_audio",
+        "settings_controls",
+        "settings_gameplay",
+        "settings_accessibility",
+    ]
+    .iter()
+    .enumerate()
     {
         let _ = i;
         h.menu(&mut menu, &[&[Right]]);
         h.shot(name);
     }
     // Scroll the controls page down to the bindings.
-    h.menu(&mut menu, &[&[Left], &[Down; 6]]);
+    h.menu(&mut menu, &[&[Left], &[Left], &[Down; 6]]);
     h.shot("settings_controls_bindings");
     h.menu(&mut menu, &[&[Escape]]);
     menu.show_message(Some("Disconnected: connection timed out".into()));

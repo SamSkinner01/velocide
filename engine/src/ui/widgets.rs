@@ -1338,12 +1338,12 @@ impl<'a> Ui<'a> {
         }
         let before = *selected;
         *selected = (*selected).min(n - 1);
-        let gap = 2.0;
-        let w = ((rect.width() - gap * (n - 1) as f32) / n as f32).floor();
+        let widths = tab_widths(labels, rect.width());
         let tab_rect = |i: usize| {
+            let x: f32 = widths[..i].iter().map(|w| w + TAB_GAP).sum();
             Rect::from_min_size(
-                Vec2::new(rect.min.x + i as f32 * (w + gap), rect.min.y),
-                Vec2::new(w, rect.height() - 2.0),
+                Vec2::new(rect.min.x + x, rect.min.y),
+                Vec2::new(widths[i], rect.height() - 2.0),
             )
         };
         if resp.clicked
@@ -1385,7 +1385,7 @@ impl<'a> Ui<'a> {
             } else {
                 t.bone_dim
             };
-            let shown = text::truncate(label, w - 10.0, 1.0);
+            let shown = text::truncate(label, r.width() - 10.0, 1.0);
             let mut style = TextStyle::new(color).centered();
             if is_sel {
                 style = style.shadow(t.blood_dark);
@@ -1600,6 +1600,28 @@ fn st_has_focus(state: &UiState, id: Id) -> bool {
     state.scroll_focus.contains(&id)
 }
 
+/// Gap between two tabs of [`Ui::tabs`].
+const TAB_GAP: f32 = 2.0;
+
+/// Tab widths for a strip `total` units wide: equal, unless a label doesn't fit its share; then
+/// every tab gets its label's width plus an equal share of the rest (labels are only cut short
+/// if even that doesn't fit).
+fn tab_widths(labels: &[&str], total: f32) -> Vec<f32> {
+    let n = labels.len().max(1) as f32;
+    let avail = total - TAB_GAP * (n - 1.0);
+    let equal = (avail / n).floor();
+    let need: Vec<f32> = labels
+        .iter()
+        .map(|l| text::line_width(l, 1.0) + 12.0)
+        .collect();
+    let sum: f32 = need.iter().sum();
+    if need.iter().all(|&w| w <= equal) || sum > avail {
+        return vec![equal; labels.len()];
+    }
+    let extra = (avail - sum) / n;
+    need.iter().map(|w| (w + extra).floor()).collect()
+}
+
 impl Drop for Ui<'_> {
     fn drop(&mut self) {
         let st = &mut *self.state;
@@ -1736,4 +1758,33 @@ fn draw_panel_frame(list: &mut UiDrawList, rect: Rect, title: &str, t: &Theme) {
         draw_text(list, Vec2::new(bar.min.x + 8.0, y), title, &style);
     }
     draw::corner_brackets(list, rect.expand(2.0), 7.0, 1.0, fade(t.bone_dim, 0.8));
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn tab_widths_fit_long_labels() {
+        // Short labels: equal widths (the look every tab strip had before).
+        let short = tab_widths(&["VIDEO", "AUDIO", "CONTROLS"], 301.0);
+        assert_eq!(short, vec![99.0; 3]);
+        // One long label gets the room it needs from the short ones.
+        let labels = [
+            "VIDEO/RETRO",
+            "AUDIO",
+            "CONTROLS",
+            "GAMEPLAY",
+            "ACCESSIBILITY",
+        ];
+        let w = tab_widths(&labels, 436.0);
+        for (label, width) in labels.iter().zip(&w) {
+            let need = text::line_width(label, 1.0) + 10.0;
+            assert!(need <= *width, "{label}: {width}");
+        }
+        let used: f32 = w.iter().sum::<f32>() + TAB_GAP * 4.0;
+        assert!(used <= 436.0 && used > 430.0, "{used}");
+        // Hopeless: equal widths again (labels get cut short).
+        assert_eq!(tab_widths(&labels, 100.0), vec![(92.0f32 / 5.0).floor(); 5]);
+    }
 }

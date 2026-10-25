@@ -1,16 +1,31 @@
 //! Settings screen (used by the main menu and the pause menu): tabs for Video/Retro, Audio,
-//! Controls (sensitivity, invert, key rebinding) and Gameplay. Changes apply live (the caller
-//! sets `Common::settings_changed` when [`SettingsResponse::changed`]) and are saved when the
+//! Controls (sensitivity, invert, key rebinding), Gameplay and Accessibility (colour vision,
+//! shape cues, with a live palette preview). Changes apply live (the caller sets
+//! `Common::settings_changed` when [`SettingsResponse::changed`]) and are saved when the
 //! player leaves the screen.
 
+use engine::color_vision::ColorVisionMode;
 use engine::input::{Binding, InputState, Key};
+use engine::ui::draw::{self, fade};
+use engine::ui::hud::{self, BarStyle};
 use engine::ui::{Rect, TextFilter, TextStyle, Ui, UiDrawExt};
-use glam::vec2;
+use glam::{Vec2, Vec4, vec2};
 
 use crate::controls::{Action, Bindings, is_gamepad_binding};
-use crate::settings::{CROSSHAIRS, RESOLUTIONS, Settings};
+use crate::ingame::cues;
+use crate::palette::{Palette, marker_shape};
+use crate::settings::{CROSSHAIRS, CueMode, RESOLUTIONS, Settings};
 
-pub const TABS: [&str; 4] = ["VIDEO/RETRO", "AUDIO", "CONTROLS", "GAMEPLAY"];
+pub const TABS: [&str; 5] = [
+    "VIDEO/RETRO",
+    "AUDIO",
+    "CONTROLS",
+    "GAMEPLAY",
+    "ACCESSIBILITY",
+];
+
+/// Index of the ACCESSIBILITY tab in [`TABS`].
+pub const ACCESSIBILITY_TAB: usize = 4;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SettingsResponse {
@@ -61,7 +76,8 @@ impl SettingsMenu {
                 0 => video_tab(ui, s, &mut r),
                 1 => audio_tab(ui, s, &mut r),
                 2 => self.controls_tab(ui, s, input, &mut r),
-                _ => gameplay_tab(ui, s, &mut r),
+                3 => gameplay_tab(ui, s, &mut r),
+                _ => accessibility_tab(ui, s, &mut r),
             });
             ui.row(2, |ui| {
                 if ui.button("DEFAULTS##tab") {
@@ -255,7 +271,7 @@ fn reset_tab(tab: usize, s: &mut Settings) {
             s.gamepad_invert_y = d.gamepad_invert_y;
             s.bindings = d.bindings;
         }
-        _ => {
+        3 => {
             s.crosshair = d.crosshair;
             s.view_bob = d.view_bob;
             s.show_viewmodel = d.show_viewmodel;
@@ -264,7 +280,121 @@ fn reset_tab(tab: usize, s: &mut Settings) {
             s.show_fps = d.show_fps;
             s.show_ping = d.show_ping;
         }
+        _ => s.accessibility = d.accessibility,
     }
+}
+
+fn accessibility_tab(ui: &mut Ui, s: &mut Settings, r: &mut SettingsResponse) {
+    let a = &mut s.accessibility;
+    ui.heading("COLOUR VISION");
+    let modes = ColorVisionMode::ALL.map(ColorVisionMode::label);
+    let mut mode = a.color_vision.mode.index();
+    if ui.choice("COLOUR MODE", &mut mode, &modes) {
+        a.color_vision.mode = ColorVisionMode::from_index(mode);
+        r.changed = true;
+    }
+    ui.label_wrapped(a.color_vision.mode.description());
+    let active = a.color_vision.mode != ColorVisionMode::Off;
+    ui.enabled_scope(active, |ui| {
+        r.changed |= ui.slider(
+            "FILTER STRENGTH",
+            &mut a.color_vision.strength,
+            0.0,
+            1.0,
+            0.05,
+            "{%}%",
+        );
+    });
+    let mut cues = a.shape_cues.index();
+    if ui.choice("SHAPE CUES", &mut cues, &CueMode::LABELS) {
+        a.shape_cues = CueMode::ALL[cues];
+        r.changed = true;
+    }
+    ui.heading("PREVIEW");
+    palette_preview(
+        ui,
+        Palette::for_mode(a.color_vision.mode),
+        a.shape_cues_on(),
+    );
+    ui.separator();
+    ui.label_wrapped(
+        "The filter recolours the 3D view for your eyes (0% keeps only the palette swap). The \
+         HUD and menus switch to a matching palette: player colours, enemy wind-up vs parry \
+         window, hard damage, heals and style ranks. Shape cues add player marker shapes, a \
+         parry icon over enemies and +/- health popups (AUTO: on with any colour mode).",
+    );
+}
+
+/// Swatches of the palette's critical colours, the way the HUD will draw them.
+fn palette_preview(ui: &mut Ui, p: &Palette, shapes: bool) {
+    let theme = p.theme();
+    let t = ui.theme().clone();
+    let label_style = TextStyle::new(t.bone_dim);
+    let row_h = 15.0;
+    let row = |ui: &mut Ui, label: &str, draw: &mut dyn FnMut(&mut Ui, Rect)| {
+        let rect = ui.allocate(row_h);
+        let label_w = (rect.width() * t.label_fraction).round();
+        let text_y = (rect.center().y - 3.5).round();
+        ui.painter()
+            .text(vec2(rect.min.x + 6.0, text_y), label, &label_style);
+        let content = Rect::new(vec2(rect.min.x + label_w, rect.min.y), rect.max);
+        draw(ui, content);
+    };
+    let chip = |ui: &mut Ui, at: Vec2, text: &str, color: Vec4| -> f32 {
+        let w = engine::ui::text::line_width(text, 1.0) + 8.0;
+        let r = Rect::from_min_size(at, vec2(w, 11.0));
+        draw::fill(ui.painter(), r.expand(1.0), fade(t.ink, 0.9));
+        draw::fill(ui.painter(), r, color);
+        ui.painter().text(
+            vec2(r.min.x + 4.0, r.min.y + 2.0),
+            text,
+            &TextStyle::new(t.ink),
+        );
+        w + 5.0
+    };
+    row(ui, "PLAYERS", &mut |ui, c| {
+        for i in 0..p.team.len() {
+            let at = vec2(c.min.x + i as f32 * 11.0, c.min.y + 4.0);
+            let ink = fade(t.ink, 0.9);
+            if shapes {
+                cues::draw_marker(ui.painter(), at, marker_shape(i), 1.0, p.team[i], ink);
+            } else {
+                let r = Rect::from_min_size(at - vec2(0.0, 1.0), vec2(6.0, 7.0));
+                draw::fill(ui.painter(), r.expand(1.0), ink);
+                draw::fill(ui.painter(), r, p.team[i]);
+            }
+        }
+    });
+    row(ui, "ENEMY ATTACKS", &mut |ui, c| {
+        let mut x = c.min.x;
+        let y = c.min.y + 1.0;
+        x += chip(ui, vec2(x, y), "WIND-UP", p.telegraph);
+        x += chip(ui, vec2(x, y), "PARRY", p.parry_window);
+        if shapes {
+            let ink = t.ink;
+            cues::draw_parry_icon(ui.painter(), vec2(x + 4.0, y + 5.0), 1.0, 1.0, p, ink, 0.0);
+            x += 14.0;
+        }
+        chip(ui, vec2(x, y), "LASER", p.aim_laser);
+    });
+    row(ui, "HEALTH", &mut |ui, c| {
+        let bar = Rect::from_min_size(vec2(c.min.x, c.min.y + 3.0), vec2(80.0, 7.0));
+        let style = BarStyle::health(&theme);
+        hud::segmented_bar(ui.painter(), bar, 55.0, 100.0, 25.0, 10, &style);
+        let mut x = bar.max.x + 6.0;
+        x += chip(ui, vec2(x, c.min.y + 1.0), "+12", p.heal);
+        chip(ui, vec2(x, c.min.y + 1.0), "-8", p.damage);
+    });
+    row(ui, "STYLE RANKS", &mut |ui, c| {
+        for (i, color) in p.ranks.iter().enumerate() {
+            let r = Rect::from_min_size(
+                vec2(c.min.x + i as f32 * 11.0, c.min.y + 3.0),
+                vec2(8.0, 7.0),
+            );
+            draw::fill(ui.painter(), r.expand(1.0), fade(t.ink, 0.9));
+            draw::fill(ui.painter(), r, *color);
+        }
+    });
 }
 
 /// Dims the whole canvas (behind a modal panel).
