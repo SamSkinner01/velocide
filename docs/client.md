@@ -17,7 +17,8 @@ the debug overlay.
 | `controls` | `Action`, `Bindings`, `WeaponSelect`, `WEAPONS`, `Controls` (look + per-tick `PlayerInput`) |
 | `ui_input` | `UiInputMapper`: `InputState` → `ui::UiInput` (keyboard + gamepad navigation with repeat) |
 | `bot` | `--bot` auto-pilot for multi-client testing |
-| `menus::main_menu` | main menu: single player (level select), host, join, settings, notices |
+| `menus::main_menu` | main menu: single player (level select), host (mode, level, port, max players), join, settings, notices |
+| `menus::lobby` | `LobbyScreen`: the lobby of hosted / joined games, `Handoff` (docs/lobby.md) |
 | `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay), reused by the pause menu |
 | `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
 | `ingame` (`mod.rs`) | `InGame`: one `net::Session` + everything while playing |
@@ -28,7 +29,8 @@ the debug overlay.
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
-| `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard, pause menu |
+| `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
+| `ingame::match_flow` | lobby phase changes in game, results screen, scoreboard rows |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
 | `level_mesh` | `LevelRender`: level geometry for the renderer |
@@ -38,10 +40,17 @@ the debug overlay.
 ## Screens
 
 ```text
-  MainMenu ──Transition::Start(StartMode)──▶ InGame
-     ▲                                          │  connecting → loading → playing
-     └──────Transition::MainMenu{message}───────┘  (leave, disconnect reason, connect error)
+  MainMenu ──Start(single player)─────────────────────────▶ InGame
+     │  ▲                                                     ▲  │  connecting → loading → playing
+     │  └──── MainMenu{message} (leave, disconnect, error) ───┼──┤
+     └──Start(host / join)──▶ Lobby ──EnterMatch (Handoff)───┘  │
+                                ▲                               │
+                                └──ReturnToLobby (Handoff)──────┘
 ```
+
+Hosted and joined games go through the lobby screen, which owns the session between matches
+and hands it to `InGame` when a level arrives (and back when the server returns to its lobby).
+Details: `docs/lobby.md`.
 
 `VelocideApp::frame` each frame:
 
@@ -196,11 +205,10 @@ Music intensity: set it every frame from game state in `InGame::frame` (step 7).
   self, ui, panel, settings) -> Option<PageResult>` in `menus/main_menu.rs`.
 - A full screen of its own (results, lobby): add a `Screen` variant in `app.rs` with a
   `frame(&mut Common, &mut FrameIo, &mut FrameBuffers) -> ScreenOutput` and a `Transition`.
-- **Lobby**: `Transition::Start` currently goes straight to `InGame`, which owns the
-  `Session` from connect to leave. A lobby screen would create the session itself
-  (`InGame::start` shows how), show players / ready-up (`NetClient::set_ready`,
-  `PlayerInfo::ready`), mode and level selection (new `ClientMessage`s), and hand the running
-  session to `InGame` when the match starts (add an `InGame::from_session`).
+- **Lobby**: `menus::lobby::LobbyScreen` (docs/lobby.md) creates host / join sessions,
+  shows players / pings / ready-up, mode, level and host settings and chat, and hands the
+  running session to `InGame::from_handoff` when the match starts; `InGame::into_handoff`
+  gives it back. Results screen / scoreboard rows for game modes: `ingame::match_flow`.
 
 ## Controls
 
@@ -249,8 +257,8 @@ starts from the menu).
 ```text
 velocide                                   main menu
 velocide --sp [LEVEL]                      single-player (in-process server)
-velocide --host [PORT] [--level L] [--max-players N]
-velocide --connect IP:PORT [--name NAME]
+velocide --host [PORT] [--level L] [--max-players N] [--mode campaign|deathmatch] [--autostart]
+velocide --connect IP:PORT [--name NAME] [--ready]
 velocide --level L                         = --sp L
          --netsim LAT,JIT,LOSS             network simulator on this client (one-way ms)
          --windowed WxH | --fullscreen
@@ -258,6 +266,8 @@ velocide --level L                         = --sp L
          --capture PATH.png [--capture-after S]   screenshot, then keep running
          --quit-after S                    clean exit
          --no-audio  --debug (F3 overlay open)  --add-bots N (host: N standing server bots)
+         --ready                           ready up in the lobby automatically (--bot implies it)
+         --autostart                       host: start the match once everyone is ready
 ```
 
 ## Debug overlay (F3)
@@ -288,6 +298,7 @@ Press Esc to free the cursor and interact with the window. Without `debug-ui`
 ```text
 cargo test -p client                                   # unit + integration tests (GPU tests skip without an adapter)
 cargo run -p client --release --example client_shots -- out/   # headless PNGs of every screen
+cargo run -p client --release --example lobby_shots -- out/    # lobby (host / guest), countdown, match, results
 scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --debug \
     --quit-after 20 --capture-dir captures/mp --capture-after 15   # dedicated server + 2 clients
 velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-after 6
@@ -299,6 +310,8 @@ velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-af
 - `client_ingame` (GPU): a bot-driven single-player session renders, the pause menu freezes
   the server and the timer, restart returns to the start; the main menu renders.
 - `client_tuning_reload`: editor → file → server watcher → client prediction in sync.
+- `lobby` (headless network) / `lobby_screen` (GPU): lobby and match flow, see
+  `docs/lobby.md`.
 - unit tests: camera dip / slide eye height, feedback (hitstop, toggles, trauma decay),
   effects (decal ring, particle cap, blood splats), tuning file rewriting, UI repeat.
 
@@ -319,7 +332,6 @@ players drawn ≈200 ms behind the server tick; ≈7.8 KB/s down, 12 KB/s up per
 ## Known limitations
 
 - Health / hard damage / style are placeholders until combat replicates them (`HudInfo`).
-- Scoreboard ping is only known for the local player (the protocol has no per-player ping).
 - After a server-side teleport (restart, respawn) the `Spawned` event can arrive a snapshot
   before the corrected position, so the new view angle is shown at the old spot for a frame
   or two.

@@ -109,6 +109,16 @@ impl InputQueue {
         self.primed = false;
     }
 
+    /// Drops queued inputs (a new level started: they were meant for the old body) but keeps
+    /// the sequence position, so the client's next inputs are accepted.
+    pub fn discard_pending(&mut self) {
+        if let Some((&newest, _)) = self.pending.last_key_value() {
+            self.last_seq = self.last_seq.max(newest);
+        }
+        self.pending.clear();
+        self.reset_timing();
+    }
+
     /// Current de-jitter buffer target (inputs held back).
     pub fn target_buffer(&self) -> usize {
         ((self.jitter * 2.0).ceil() as usize).min(MAX_BUFFER_TICKS)

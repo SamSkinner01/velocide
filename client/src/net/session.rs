@@ -3,10 +3,12 @@
 //! | session                     | server                                   | client connects to   |
 //! |-----------------------------|------------------------------------------|----------------------|
 //! | [`Session::single_player`]  | in-process thread on `127.0.0.1:0`       | that loopback port   |
-//! | [`Session::host`]           | in-process thread on `0.0.0.0:<port>`    | loopback, same port  |
+//! | [`Session::host`]           | in-process thread on `0.0.0.0:<port>`, lobby | loopback, same port |
 //! | [`Session::join`]           | remote                                   | the given address    |
 //!
-//! Single-player is just a private listen server, so there is exactly one code path.
+//! Single-player is just a private listen server, so there is exactly one code path. Hosted
+//! servers start in the lobby (docs/lobby.md); the session gives the in-process server a
+//! random host token and the local client presents it, so only this player is the host.
 //!
 //! ## Plugging in Steam networking / matchmaking
 //!
@@ -70,7 +72,8 @@ impl Session {
         )
     }
 
-    /// Hosts a listen server on `port` (all interfaces) and connects to it.
+    /// Hosts a listen server on `port` (all interfaces, starting in the lobby) and connects to
+    /// it as the lobby host.
     pub fn host(port: u16, level: &str, max_players: usize, name: &str) -> anyhow::Result<Session> {
         Self::start(
             SessionSpec::Host {
@@ -102,7 +105,16 @@ impl Session {
                     client: net,
                 })
             }
-            SessionSpec::Host { server } => {
+            SessionSpec::Host { mut server } => {
+                let mut client = client;
+                if server.lobby.enabled {
+                    // Only our own client knows the token, so only we can be the host.
+                    let token = *server
+                        .lobby
+                        .host_token
+                        .get_or_insert_with(super::random_client_id);
+                    client.host_token = Some(token);
+                }
                 let server = ServerHandle::spawn(server)?;
                 let net = NetClient::connect(server.connect_addr(), client)?;
                 Ok(Session {
@@ -136,6 +148,18 @@ impl Session {
     /// The in-process server (single-player / host).
     pub fn server(&self) -> Option<&ServerHandle> {
         self.server.as_ref()
+    }
+
+    /// Address of the in-process server for others to join (host): the bound port.
+    pub fn hosted_port(&self) -> Option<u16> {
+        self.server.as_ref().map(|s| s.local_addr().port())
+    }
+
+    /// Sends a command to the in-process server (single-player / host).
+    pub fn command(&self, cmd: server::ServerCommand) {
+        if let Some(server) = &self.server {
+            server.send(cmd);
+        }
     }
 
     /// Disconnects and stops the in-process server, if any.

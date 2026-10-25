@@ -62,7 +62,8 @@ over-allocates (bincode's limit is checked before allocating containers).
 | message | channel | notes |
 |---|---|---|
 | `ClientMessage::Chat { text }` | C→S reliable | rate-limited (token bucket: burst 5, then 1/s), sanitised, >1 KB dropped |
-| `ClientMessage::SetReady { ready }` | C→S reliable | lobby ready-up |
+| `ClientMessage::SetReady { ready }` | C→S reliable | lobby ready-up (rate-limited) |
+| `ClientMessage::Lobby(LobbyRequest)` | C→S reliable | host commands: claim host, settings, start, cancel, return to lobby, kick (docs/lobby.md) |
 | `ClientUnreliable::Input(InputPacket { ack_tick, inputs })` | C→S unreliable | every client tick; newest input + up to 5 older unacked ones; `ack_tick` = newest snapshot received |
 | `ServerMessage::Welcome(Welcome)` | S→C reliable | player id, tick rate, snapshot rate, server tick, version |
 | `ServerMessage::Rejected { reason }` | S→C reliable | then disconnect |
@@ -71,12 +72,16 @@ over-allocates (bincode's limit is checked before allocating containers).
 | `PlayerList`, `PlayerJoined`, `PlayerLeft`, `PlayerUpdated` | S→C reliable | lobby / scoreboard state |
 | `ServerMessage::Chat { from, text }` | S→C reliable | `from: None` = server |
 | `ServerMessage::Game(GameEvent)` | S→C reliable | gameplay events that must arrive (now: `Respawned`; combat adds kills, damage, parries, style…) |
+| `ServerMessage::Lobby(LobbyUpdate)` | S→C reliable | lobby state (phase, settings, players with ping / ready / host) on change and at 1 Hz; level catalog on connect; notices (docs/lobby.md) |
 | `ServerUnreliable::Snapshot(SnapshotMessage)` | S→C unreliable | see below |
 
 Connection flow: netcode handshake → server `ClientConnected` → validate user data → assign
-`PlayerId` (lowest free, ≤ `max_players`) → spawn in `SimWorld` → send `Welcome`, `LoadLevel`,
-`Tuning`, `PlayerList`; broadcast `PlayerJoined` → snapshots start. The client is `Loading`
-until it has the welcome, the level and a snapshot containing its own state, then `InGame`.
+`PlayerId` (lowest free, ≤ the lobby's player limit) → if a match is running, spawn in
+`SimWorld` → send `Welcome`, `LoadLevel` (only while a level runs), `Tuning`, `PlayerList`,
+`Lobby(Levels)`; broadcast `PlayerJoined` and the lobby state → snapshots start (while a level
+runs). The client is `Loading` until it has the welcome, the level and a snapshot containing
+its own state, then `InGame`. Servers with a lobby (listen and dedicated) start without a
+level: clients wait in the lobby until the match starts (`docs/lobby.md`).
 
 ## Ticks and rates
 
@@ -248,7 +253,7 @@ seed. When packets are in flight the server host loop polls every 1 ms.
 | | server | client connects to |
 |---|---|---|
 | `Session::single_player(level, name)` | `ServerHandle::spawn(ServerConfig::single_player)` on `127.0.0.1:0` | the actual port |
-| `Session::host(port, level, max_players, name)` | listen server on `0.0.0.0:port` (thread) | loopback, same port |
+| `Session::host(port, level, max_players, name)` | listen server on `0.0.0.0:port` (thread), lobby, host token | loopback, same port |
 | `Session::join(addr, name)` | remote | `addr` |
 | `Session::start(SessionSpec, ClientConfig)` | general form (netsim etc.) | |
 
@@ -280,7 +285,8 @@ loop {
 
 `velocide` client flags (implemented by the game binary): `--connect <ip:port>`, `--host [port]`,
 `--name <name>`, `--netsim <l,j,loss>`; no flags = single-player.
-`velocide-server` flags: `--port`, `--bind`, `--level`, `--max-players`, `--tick-rate`,
+`velocide-server` flags: `--port`, `--bind`, `--level`, `--max-players`, `--mode`,
+`--frag-limit`, `--time-limit`, `--friendly-fire`, `--autostart`, `--no-lobby`, `--tick-rate`,
 `--snapshot-rate`, `--netsim`, `--tuning`, `--no-watch`, `--no-delta`, `--name`.
 `scripts/local_test.sh [--netsim 100,20,2] [--clients N] [--release]` builds and launches a
 dedicated server plus clients; Ctrl-C stops everything.

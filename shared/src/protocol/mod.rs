@@ -33,7 +33,7 @@ use crate::tuning::Tuning;
 /// netcode protocol id ("VELOCIDE"). Clients with a different id cannot even handshake.
 pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// Bumped on every incompatible protocol / simulation change. Checked on connect.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;
@@ -84,7 +84,9 @@ pub enum ClientMessage {
     SetReady {
         ready: bool,
     },
-    // Lobby / host commands (mode & level selection, kick...) go here.
+    /// Lobby / host commands: mode & level selection, start, return to lobby, kick
+    /// (`shared::lobby`, docs/lobby.md).
+    Lobby(crate::lobby::LobbyRequest),
 }
 
 /// Unreliable client -> server messages.
@@ -196,6 +198,9 @@ pub enum ServerMessage {
     },
     /// Gameplay events that must not be lost (kills, respawns, level complete...).
     Game(GameEvent),
+    /// Lobby state (phase, match settings, players with ping / ready / host), the server's
+    /// level catalog and notices (`shared::lobby`, docs/lobby.md).
+    Lobby(crate::lobby::LobbyUpdate),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

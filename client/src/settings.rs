@@ -51,6 +51,8 @@ pub struct Settings {
     pub last_join_address: String,
     pub host_port: u16,
     pub host_max_players: u32,
+    /// Game mode last picked in the host menu.
+    pub host_mode: shared::lobby::GameMode,
     /// Last level picked in single-player / host menus.
     pub last_level: String,
     pub show_fps: bool,
@@ -83,6 +85,7 @@ impl Default for Settings {
             last_join_address: format!("127.0.0.1:{}", shared::DEFAULT_PORT),
             host_port: shared::DEFAULT_PORT,
             host_max_players: 4,
+            host_mode: shared::lobby::GameMode::Campaign,
             last_level: shared::sim::BUILTIN_LEVEL.into(),
             show_fps: true,
             show_ping: true,

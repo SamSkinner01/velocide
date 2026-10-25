@@ -20,6 +20,10 @@
 //! Gameplay agents extend this by handling their events in `on_net_event` (e.g. a
 //! `GameEvent::Damaged` → `self.feedback.damage_flash(..)`, `self.effects.blood(..)`), drawing
 //! their entity kinds in `draw_world`, and adding HUD fields in `draw_hud`. See docs/client.md.
+//!
+//! Multiplayer sessions come from the lobby screen ([`InGame::from_handoff`]) and go back to
+//! it when the server returns to its lobby ([`InGame::into_handoff`]); the match-flow parts
+//! (results screen, scoreboard rows, lobby phase changes) live in [`match_flow`].
 
 pub mod audio_hooks;
 pub mod camera;
@@ -28,6 +32,7 @@ pub mod debug;
 pub mod effects;
 pub mod feedback;
 pub mod hud;
+pub mod match_flow;
 pub mod pause;
 pub mod remote_players;
 pub mod scoreboard;
@@ -54,6 +59,7 @@ use crate::bot::Bot;
 use crate::cli::StartMode;
 use crate::controls::{Action, Controls, WeaponChange};
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
+use crate::menus::lobby::Handoff;
 use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, resolve_address,
@@ -107,6 +113,8 @@ pub struct InGame {
     last_camera: Camera,
     last_snapshot_count: u64,
     last_snapshot_time: f64,
+    /// Results screen / lobby phase bookkeeping (`match_flow`).
+    match_ui: match_flow::MatchUi,
 }
 
 impl InGame {
@@ -164,9 +172,32 @@ impl InGame {
         common.load_models(renderer);
         let session = Session::start(spec, client)?;
         log::info!("session started: {target} as '{name}'");
+        let mut game = Self::from_handoff(
+            Handoff {
+                session,
+                target,
+                chat: Chat::new(),
+            },
+            common,
+            renderer,
+        );
+        game.pending_bots = common.launch.add_bots;
+        Ok(game)
+    }
+
+    /// The game screen around a running session (the lobby hands it over when the match
+    /// starts). A level the session already received is loaded right away.
+    pub fn from_handoff(handoff: Handoff, common: &mut Common, renderer: &mut Renderer) -> InGame {
+        let Handoff {
+            session,
+            target,
+            chat,
+        } = handoff;
+        let name = common.player_name();
+        common.load_models(renderer);
         let mut feedback = Feedback::new();
         feedback.apply_settings(&common.settings.retro);
-        Ok(InGame {
+        let mut game = InGame {
             kind: session.kind(),
             session: Some(session),
             target,
@@ -180,7 +211,7 @@ impl InGame {
             world: WorldRender::new(),
             remote: RemotePlayers::new(),
             hud: Hud::new(),
-            chat: Chat::new(),
+            chat,
             pause: PauseMenu::new(),
             remote_sounds: audio_hooks::RemoteSounds::new(),
             debug: DebugOverlay::default(),
@@ -190,12 +221,15 @@ impl InGame {
             sp_paused: false,
             restart_pending: false,
             leaving: false,
-            pending_bots: common.launch.add_bots,
+            pending_bots: 0,
             time: 0.0,
             last_camera: Camera::default(),
             last_snapshot_count: 0,
             last_snapshot_time: 0.0,
-        })
+            match_ui: match_flow::MatchUi::default(),
+        };
+        game.load_received_level(common, renderer);
+        game
     }
 
     pub fn net(&self) -> Option<&NetClient> {
@@ -235,6 +269,20 @@ impl InGame {
         common.audio.stop(Sfx::Slide);
         self.world.free(renderer);
         self.effects.free(renderer);
+    }
+
+    /// Back to the lobby: frees GPU resources but keeps the session (and the chat log).
+    pub fn into_handoff(mut self, renderer: &mut Renderer, common: &mut Common) -> Option<Handoff> {
+        common.audio.stop(Sfx::Slide);
+        self.world.free(renderer);
+        self.effects.free(renderer);
+        let session = self.session.take()?;
+        self.chat.close();
+        Some(Handoff {
+            session,
+            target: std::mem::take(&mut self.target),
+            chat: std::mem::take(&mut self.chat),
+        })
     }
 
     fn send_server(&self, cmd: ServerCommand) {
@@ -308,6 +356,8 @@ impl InGame {
                     self.world.load(renderer, &name, &level);
                 }
                 self.effects.clear();
+                // A new level (next match / restart): the timer restarts at the next spawn.
+                self.spawned = false;
                 common
                     .audio
                     .set_music(Common::game_music(self.world.kind()));
@@ -363,6 +413,12 @@ impl InGame {
                 common.audio.play_2d(Sfx::ChatMessage);
             }
             NetEvent::Game(GameEvent::Respawned { .. }) => {}
+            NetEvent::LobbyChanged { phase, previous } => {
+                return self.on_lobby_changed(phase, previous, common, now);
+            }
+            NetEvent::Notice { text } => {
+                self.chat.system(&text.to_uppercase(), t.blood_bright, now);
+            }
             NetEvent::Disconnected { reason } => {
                 if !self.leaving {
                     let what = if self.spawned {
@@ -434,18 +490,22 @@ impl InGame {
         self.time += dt as f64;
         let mut transition = None;
 
-        // 1. Network.
-        let events = match &mut self.session {
-            Some(s) => {
-                let net = s.client_mut();
-                net.update(Duration::from_secs_f32(dt));
-                net.drain_events()
-            }
-            None => Vec::new(),
-        };
-        for ev in events {
+        // 1. Network. Events are taken one at a time: after a hand-over to the lobby the rest
+        // stay queued for the lobby screen.
+        if let Some(s) = &mut self.session {
+            s.client_mut().update(Duration::from_secs_f32(dt));
+        }
+        while let Some(ev) = self
+            .session
+            .as_mut()
+            .and_then(|s| s.client_mut().poll_event())
+        {
             if let Some(t) = self.on_net_event(ev, common, io.renderer) {
+                let to_lobby = t == Transition::ReturnToLobby;
                 transition = Some(t);
+                if to_lobby {
+                    break;
+                }
             }
         }
         let in_game = self.is_playing();
@@ -460,7 +520,7 @@ impl InGame {
                 if pressed(Action::Pause) && !input.key_pressed(Key::Escape) {
                     self.resume();
                 }
-            } else if pressed(Action::Pause) {
+            } else if pressed(Action::Pause) && !self.results_open() {
                 self.open_pause();
                 common.ui_sound(Sfx::UiSelect);
             } else if pressed(Action::Chat) && self.bot.is_none() {
@@ -469,10 +529,12 @@ impl InGame {
                 self.restart();
             }
         }
-        let playing = in_game && !self.pause.is_open() && !self.chat.is_open();
+        let results = self.results_open();
+        let playing = in_game && !self.pause.is_open() && !self.chat.is_open() && !results;
         let scoreboard = in_game
             && !self.chat.is_open()
             && !self.pause.is_open()
+            && !results
             && common.settings.bindings.is_down(input, Action::Scoreboard);
 
         // 3. Look (every frame) + latch presses / weapon selection.
@@ -518,7 +580,7 @@ impl InGame {
             self.remote_sounds
                 .update(&mut common.audio, net.remote_players());
         }
-        if !in_game {
+        if !in_game || results {
             common.audio.set_music_intensity(0.0);
         }
         self.debug.editor.update(self.time);
@@ -772,7 +834,8 @@ impl InGame {
 
         // Interactive layers (only build a Ui when something needs input).
         let connecting = !in_game;
-        if !(connecting || self.pause.is_open() || self.chat.is_open()) {
+        let results = in_game && self.results_open();
+        if !(connecting || results || self.pause.is_open() || self.chat.is_open()) {
             return;
         }
         let theme = &common.theme;
@@ -783,12 +846,27 @@ impl InGame {
                 sound = Some(Sfx::UiBack);
                 *transition = Some(Transition::MainMenu { message: None });
             }
+        } else if results && !self.chat.is_open() {
+            let (s, t) = self.results_ui(&mut ui, now);
+            sound = s;
+            if t.is_some() {
+                *transition = t;
+            }
         } else if self.pause.is_open() {
             let subtitle = self.target.clone();
             let single = self.kind == SessionKind::SinglePlayer;
-            let r = self
-                .pause
-                .ui(&mut ui, &mut common.settings, io.input, single, &subtitle);
+            let lobby_host = !single
+                && self
+                    .net()
+                    .is_some_and(|n| n.is_host() && n.lobby().is_some_and(|l| l.lobby_enabled));
+            let r = self.pause.ui(
+                &mut ui,
+                &mut common.settings,
+                io.input,
+                single,
+                lobby_host,
+                &subtitle,
+            );
             sound = r.sound;
             if r.settings.changed {
                 common.settings_changed = true;
@@ -803,6 +881,12 @@ impl InGame {
                 PauseAction::None => {}
                 PauseAction::Resume => self.resume(),
                 PauseAction::Restart => self.restart(),
+                PauseAction::ReturnToLobby => {
+                    self.pause.close();
+                    if let Some(s) = &mut self.session {
+                        s.client_mut().return_to_lobby();
+                    }
+                }
                 PauseAction::Leave => {
                     *transition = Some(Transition::MainMenu { message: None });
                 }
@@ -900,38 +984,6 @@ impl InGame {
         self.hud.draw(list, &common.theme, &info);
     }
 
-    fn draw_scoreboard(&self, common: &Common, list: &mut engine::gfx::UiDrawList, canvas: Rect) {
-        let Some(net) = self.net() else {
-            return;
-        };
-        let local = net.local_player_id();
-        let rtt = net.stats().rtt_ms;
-        let rows: Vec<scoreboard::ScoreRow> = net
-            .players()
-            .values()
-            .map(|p| scoreboard::ScoreRow {
-                name: p.name.clone(),
-                color: player_color(p.id),
-                ping_ms: (Some(p.id) == local && self.kind != SessionKind::SinglePlayer)
-                    .then_some(rtt),
-                is_local: Some(p.id) == local,
-                status: if p.bot {
-                    "BOT"
-                } else if Some(p.id) == local && self.kind == SessionKind::Host {
-                    "HOST"
-                } else {
-                    "ALIVE"
-                },
-            })
-            .collect();
-        let title = format!(
-            "{}  //  {}",
-            self.world.name().to_uppercase(),
-            hud_mode_name(self.kind)
-        );
-        scoreboard::draw(list, &common.theme, canvas, &title, &rows);
-    }
-
     /// The egui debug window (feature `debug-ui`).
     #[cfg(feature = "debug-ui")]
     pub fn debug_window(
@@ -981,7 +1033,7 @@ impl InGame {
     }
 }
 
-fn hud_mode_name(kind: SessionKind) -> &'static str {
+pub(crate) fn hud_mode_name(kind: SessionKind) -> &'static str {
     match kind {
         SessionKind::SinglePlayer => "SOLO",
         SessionKind::Host => "HOSTING",

@@ -30,6 +30,7 @@ pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
 
 use crate::input::PlayerInput;
 use crate::level::{Brush, Door, JumpPad, LevelCollision, LevelDef, LevelKind, SpawnPoint, Volume};
+use crate::lobby::MatchSettings;
 use crate::movement::{self, MoveEnv, MoveEvents, MoveState};
 use crate::protocol::{EntityState, NetFrame, NetId, door_flags, kind, player_flags};
 use crate::tuning::{MovementTuning, Tuning};
@@ -197,6 +198,10 @@ pub struct SimWorld {
     pub level: Arc<LevelDef>,
     pub collision: LevelCollision,
     pub players: BTreeMap<PlayerId, SimPlayer>,
+    /// Mode, level and limits of the running match, set by the server at match start (the
+    /// lobby's settings; docs/lobby.md). Game-mode rules (frag / time limits, friendly fire,
+    /// respawns) read them here. Client prediction copies keep the default.
+    pub match_settings: MatchSettings,
     next_spawn: usize,
     next_dynamic_id: u32,
     /// Anything below this height is out of the level.
@@ -223,6 +228,7 @@ impl SimWorld {
             level,
             collision,
             players: BTreeMap::new(),
+            match_settings: MatchSettings::default(),
             next_spawn: 0,
             next_dynamic_id: NetId::DYNAMIC_START,
             kill_floor,

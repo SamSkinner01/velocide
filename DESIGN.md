@@ -142,6 +142,16 @@ errors and bad normals otherwise).
   network simulator (`NetSimConfig { latency_ms (one-way), jitter_ms, loss_percent }`) can sit
   between the socket and netcode. Full protocol notes: `docs/network.md`.
 
+### `shared::lobby` / `server::lobby` (match flow)
+`GameMode`, `MatchSettings` (`clamp`, `validate` against the server's `LevelInfo` catalog),
+`LobbyPhase { Lobby, Countdown, InMatch, Results }`, `LobbyState` (players with ready / ping /
+host), messages `ClientMessage::Lobby(LobbyRequest)` / `ServerMessage::Lobby(LobbyUpdate)`.
+The server owns the phase (`Server::start_match`, `end_match`, `return_to_lobby`; host-only
+requests validated and rate-limited); a fresh `SimWorld` is built per match with the settings
+in `SimWorld::match_settings` for the game-mode rules. Single-player has no lobby. Client:
+`menus::lobby::LobbyScreen` ⇄ `InGame` hand the session over (`Handoff`). Full notes:
+`docs/lobby.md`.
+
 ### `shared::level::LevelDef`
 RON brush levels in `assets/levels/`: brushes (boxes with rotation, material, tint), lights,
 spawns, checkpoints, doors, encounters (trigger, lock/unlock doors, waves of enemy spawns), exit,
@@ -151,3 +161,4 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 - `docs/gameplay.md` — combat, enemies, style and game-mode rules with default numbers.
 - `docs/render.md`, `docs/ui.md`, `docs/audio.md`, `docs/movement.md`, `docs/network.md`,
   `docs/models.md` (written by each area as it is built).
+- `docs/lobby.md` — lobby phases, messages, host rules, screens, how game modes plug in.
