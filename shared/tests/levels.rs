@@ -2,7 +2,7 @@
 //!
 //! - every level parses and its markup is consistent (materials, doors, enemy names);
 //! - campaign / arena structure (spawns, checkpoints, encounters, exit, enemy mix);
-//! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry, gnats
+//! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry, harriers
 //!   hover in open air;
 //! - jump pads land somewhere solid;
 //! - no z-fighting (coplanar overlapping faces of different materials);
@@ -29,7 +29,7 @@ const DT: f32 = 1.0 / 60.0;
 const CAMPAIGN: &str = "crucible_of_veins";
 const ARENA: &str = "cistern_nine";
 const SHIPPED: [&str; 2] = [CAMPAIGN, ARENA];
-const ENEMIES: [&str; 4] = ["husk", "spitter", "gnat", "bastion"];
+const ENEMIES: [&str; 4] = ["gnawer", "censer", "harrier", "gaoler"];
 const MATERIALS: [&str; 14] = [
     "concrete", "brick", "metal", "rust", "grate", "flesh", "bone", "lava", "tile", "wood",
     "hazard", "glass", "dirt", "panel",
@@ -123,9 +123,11 @@ fn capsule_at(feet: Vec3, height: f32, radius: f32) -> (Vec3, f32) {
 /// definitions, these are generous so spawns keep working if they grow a little.
 fn enemy_size(name: &str) -> (f32, f32) {
     match name {
-        "bastion" => (1.2, 3.4),
-        "gnat" => (0.9, 1.8),
-        _ => (0.55, 2.1),
+        "gaoler" => (1.45, 4.0),
+        "heron" => (0.6, 3.6),
+        "censer" => (0.7, 2.7),
+        "harrier" => (1.0, 1.6),
+        _ => (0.7, 2.2),
     }
 }
 
@@ -240,27 +242,27 @@ fn campaign_structure() {
         assert!(used.contains(&d.id), "door {} is not used by any encounter", d.id);
     }
 
-    // Enemy progression: husks first, spitters next, gnats in a tall room, a bastion
+    // Enemy progression: gnawers first, censers next, harriers in a tall room, a gaoler
     // mid-level, and a finale with every type over 3+ waves.
     let kinds = |e: &shared::level::Encounter| -> HashSet<String> {
         e.waves.iter().flat_map(|w| &w.spawns).map(|s| s.enemy.clone()).collect()
     };
     let first = kinds(&level.encounters[0]);
-    assert!(first.len() == 1 && first.contains("husk"), "arena 1 is husks only: {first:?}");
-    assert!(kinds(&level.encounters[1]).contains("spitter"), "arena 2 introduces spitters");
-    let gnat_room = level
+    assert!(first.len() == 1 && first.contains("gnawer"), "arena 1 is gnawers only: {first:?}");
+    assert!(kinds(&level.encounters[1]).contains("censer"), "arena 2 introduces censers");
+    let harrier_room = level
         .encounters
         .iter()
-        .position(|e| kinds(e).contains("gnat"))
-        .expect("gnats appear");
-    let t = &level.encounters[gnat_room].trigger;
-    assert!(t.max.y - t.min.y >= 25.0, "gnats are introduced in a tall room");
-    let bastion = level
+        .position(|e| kinds(e).contains("harrier"))
+        .expect("harriers appear");
+    let t = &level.encounters[harrier_room].trigger;
+    assert!(t.max.y - t.min.y >= 25.0, "harriers are introduced in a tall room");
+    let gaoler = level
         .encounters
         .iter()
-        .position(|e| kinds(e).contains("bastion"))
-        .expect("a bastion appears");
-    assert!(bastion < n - 1, "the first bastion comes before the finale");
+        .position(|e| kinds(e).contains("gaoler"))
+        .expect("a gaoler appears");
+    assert!(gaoler < n - 1, "the first gaoler comes before the finale");
     let last = level.encounters.last().expect("encounters");
     assert!(last.waves.len() >= 3, "finale has 3+ waves");
     for k in ENEMIES {
@@ -368,7 +370,7 @@ fn enemy_spawns_are_valid() {
                 assert!(!in_kill_volume(&level, p), "{what}: in a kill volume");
                 assert!(p.distance(cp) >= 8.0, "{what}: too close to the checkpoint");
                 let (r, h) = enemy_size(&s.enemy);
-                if s.enemy == "gnat" {
+                if s.enemy == "harrier" {
                     assert!(
                         !world.intersects_capsule(p, 0.0, r, MASK_MOVEMENT),
                         "{what}: not in open air"

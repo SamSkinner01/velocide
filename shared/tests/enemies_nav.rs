@@ -19,8 +19,8 @@ fn load(name: &str) -> (LevelDef, NavGrid, shared::level::LevelCollision) {
 
 fn class_of(enemy: &str) -> Option<NavClass> {
     match enemy {
-        "bastion" => Some(NavClass::Large),
-        "gnat" => None,
+        "gaoler" => Some(NavClass::Large),
+        "harrier" => None,
         _ => Some(NavClass::Small),
     }
 }
@@ -79,7 +79,7 @@ fn builds_on_every_shipped_level() {
         }
         if level.kind == LevelKind::Campaign {
             assert!(s.deadly > 50, "{name}: lava should be marked deadly");
-            assert!(s.large > 500, "{name}: room for bastions");
+            assert!(s.large > 500, "{name}: room for gaolers");
         }
     }
 }
@@ -108,8 +108,8 @@ fn crucible_encounters_are_connected_and_paths_avoid_lava() {
                 let to_centre = g.find_path(&mut s, start, goal, class, &[], 100_000);
                 let to_rally = g.find_path(&mut s, start, rally_node, NavClass::Small, &[], 100_000);
                 let from_rally = g.find_path(&mut s, rally_node, start, NavClass::Small, &[], 100_000);
-                if sp.enemy == "spitter" {
-                    // Spitters may sit on pad-only ledges (docs/levels.md): they only need to be
+                if sp.enemy == "censer" {
+                    // Censers may sit on pad-only ledges (docs/levels.md): they only need to be
                     // on the grid and able to come down.
                     if let PathResult::Found(p) = &to_rally {
                         assert_safe_path(&level, &g, p, NavClass::Small, &what);
@@ -152,7 +152,7 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
                 .encounters
                 .iter()
                 .flat_map(|e| e.waves.iter().flat_map(|w| w.spawns.iter()))
-                .filter(|s| s.enemy != "gnat")
+                .filter(|s| s.enemy != "harrier")
                 .map(|s| s.position),
         );
     for p in seeds {

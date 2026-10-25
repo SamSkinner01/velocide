@@ -700,7 +700,7 @@ fn crucible() -> Gen {
     g.light("C1 north", [0.0, 5.0, -19.5], L_BLOOD, 9.0);
 
     // ---------------------------------------------------------------- R1 Rendering Floor
-    g.section("R1 Rendering Floor (arena 1: husks)");
+    g.section("R1 Rendering Floor (arena 1: gnawers)");
     let r1_in = op(S, -2.5, 2.5, 0.0, 5.0);
     let r1_out = op(N, -2.5, 2.5, 0.0, 5.0);
     let r1 = Room::new("R1", [-20.0, 0.0, -63.0], [20.0, 12.0, -23.0], BRICK)
@@ -742,7 +742,7 @@ fn crucible() -> Gen {
         0.0,
     );
     g.encounter(
-        "encounter 1: Rendering Floor — husks",
+        "encounter 1: Rendering Floor — gnawers",
         &r1,
         Encounter {
             arena: None,
@@ -752,18 +752,18 @@ fn crucible() -> Gen {
             unlock_doors: vec![2],
             waves: vec![
                 wave(0.5, vec![
-                    enemy("husk", [-10.0, 0.0, -57.0], 180.0),
-                    enemy("husk", [10.0, 0.0, -57.0], 180.0),
-                    enemy("husk", [-4.0, 0.0, -52.0], 180.0),
-                    enemy("husk", [4.0, 0.0, -52.0], 180.0),
+                    enemy("gnawer", [-10.0, 0.0, -57.0], 180.0),
+                    enemy("gnawer", [10.0, 0.0, -57.0], 180.0),
+                    enemy("gnawer", [-4.0, 0.0, -52.0], 180.0),
+                    enemy("gnawer", [4.0, 0.0, -52.0], 180.0),
                 ]),
                 wave(1.5, vec![
-                    enemy("husk", [-17.0, 4.0, -52.0], 180.0),
-                    enemy("husk", [17.0, 4.0, -52.0], 180.0),
-                    enemy("husk", [-11.0, 0.0, -40.0], 180.0),
-                    enemy("husk", [11.0, 0.0, -40.0], 180.0),
-                    enemy("husk", [-5.0, 0.0, -60.0], 180.0),
-                    enemy("husk", [5.0, 0.0, -60.0], 180.0),
+                    enemy("gnawer", [-17.0, 4.0, -52.0], 180.0),
+                    enemy("gnawer", [17.0, 4.0, -52.0], 180.0),
+                    enemy("gnawer", [-11.0, 0.0, -40.0], 180.0),
+                    enemy("gnawer", [11.0, 0.0, -40.0], 180.0),
+                    enemy("gnawer", [-5.0, 0.0, -60.0], 180.0),
+                    enemy("gnawer", [5.0, 0.0, -60.0], 180.0),
                 ]),
             ],
         },
@@ -789,7 +789,7 @@ fn crucible() -> Gen {
     g.light("C2 north", [0.0, 5.5, -86.0], L_DIM, 9.0);
 
     // ---------------------------------------------------------------- R2 Bleeding Cloister
-    g.section("R2 Bleeding Cloister (arena 2: spitters)");
+    g.section("R2 Bleeding Cloister (arena 2: censers)");
     let r2_in = op(S, -2.5, 2.5, 0.0, 5.0);
     let r2_out = op(N, -25.0, -20.0, 5.0, 10.0);
     let r2 = Room::new("R2", [-30.0, 0.0, -141.0], [30.0, 14.0, -91.0], WALL_STONE)
@@ -851,7 +851,7 @@ fn crucible() -> Gen {
         0.0,
     );
     g.encounter(
-        "encounter 2: Bleeding Cloister — husks + spitters on the mezzanine",
+        "encounter 2: Bleeding Cloister — gnawers + censers on the mezzanine",
         &r2,
         Encounter {
             arena: None,
@@ -861,21 +861,21 @@ fn crucible() -> Gen {
             unlock_doors: vec![4],
             waves: vec![
                 wave(0.5, vec![
-                    enemy("husk", [-13.0, 0.0, -110.0], 180.0),
-                    enemy("husk", [13.0, 0.0, -110.0], 180.0),
-                    enemy("husk", [-6.0, 0.0, -127.0], 180.0),
-                    enemy("husk", [6.0, 0.0, -127.0], 180.0),
-                    enemy("spitter", [-15.0, 5.0, -137.0], 180.0),
-                    enemy("spitter", [15.0, 5.0, -137.0], 180.0),
+                    enemy("gnawer", [-13.0, 0.0, -110.0], 180.0),
+                    enemy("gnawer", [13.0, 0.0, -110.0], 180.0),
+                    enemy("gnawer", [-6.0, 0.0, -127.0], 180.0),
+                    enemy("gnawer", [6.0, 0.0, -127.0], 180.0),
+                    enemy("censer", [-15.0, 5.0, -137.0], 180.0),
+                    enemy("censer", [15.0, 5.0, -137.0], 180.0),
                 ]),
                 wave(1.5, vec![
-                    enemy("spitter", [-10.0, 5.0, -138.0], 180.0),
-                    enemy("spitter", [10.0, 5.0, -138.0], 180.0),
-                    enemy("spitter", [0.0, 0.0, -138.0], 180.0),
-                    enemy("husk", [-22.0, 0.0, -128.0], 180.0),
-                    enemy("husk", [22.0, 0.0, -128.0], 180.0),
-                    enemy("husk", [-6.0, 0.0, -104.0], 180.0),
-                    enemy("husk", [6.0, 0.0, -104.0], 180.0),
+                    enemy("censer", [-10.0, 5.0, -138.0], 180.0),
+                    enemy("censer", [10.0, 5.0, -138.0], 180.0),
+                    enemy("censer", [0.0, 0.0, -138.0], 180.0),
+                    enemy("gnawer", [-22.0, 0.0, -128.0], 180.0),
+                    enemy("gnawer", [22.0, 0.0, -128.0], 180.0),
+                    enemy("gnawer", [-6.0, 0.0, -104.0], 180.0),
+                    enemy("gnawer", [6.0, 0.0, -104.0], 180.0),
                 ]),
             ],
         },
@@ -900,7 +900,7 @@ fn crucible() -> Gen {
     g.light("C3 high", [-22.5, 14.0, -166.0], L_BLOOD, 12.0);
 
     // ---------------------------------------------------------------- R3 Bell Loft
-    g.section("R3 Bell Loft (arena 3: tall room, gnats)");
+    g.section("R3 Bell Loft (arena 3: tall room, harriers)");
     let r3_in = op(S, -25.0, -20.0, 10.0, 15.0);
     let r3_out = op(E, -211.0, -206.0, 22.0, 27.0);
     let r3 = Room::new("R3", [-44.0, 10.0, -215.0], [0.0, 46.0, -173.0], MACHINE)
@@ -980,7 +980,7 @@ fn crucible() -> Gen {
         0.0,
     );
     g.encounter(
-        "encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers",
+        "encounter 3: Bell Loft — harriers circling the bell, gnawers below, censers on the tiers",
         &r3,
         Encounter {
             arena: None,
@@ -990,22 +990,22 @@ fn crucible() -> Gen {
             unlock_doors: vec![6],
             waves: vec![
                 wave(0.5, vec![
-                    enemy("gnat", [-34.0, 16.0, -192.0], 180.0),
-                    enemy("gnat", [-11.0, 16.0, -194.0], 180.0),
-                    enemy("gnat", [-22.0, 17.0, -183.0], 180.0),
-                    enemy("husk", [-36.0, 10.0, -208.0], 180.0),
-                    enemy("husk", [-14.0, 10.0, -207.0], 180.0),
-                    enemy("husk", [-4.0, 10.0, -190.0], 180.0),
+                    enemy("harrier", [-34.0, 16.0, -192.0], 180.0),
+                    enemy("harrier", [-11.0, 16.0, -194.0], 180.0),
+                    enemy("harrier", [-22.0, 17.0, -183.0], 180.0),
+                    enemy("gnawer", [-36.0, 10.0, -208.0], 180.0),
+                    enemy("gnawer", [-14.0, 10.0, -207.0], 180.0),
+                    enemy("gnawer", [-4.0, 10.0, -190.0], 180.0),
                 ]),
                 wave(1.5, vec![
-                    enemy("gnat", [-22.0, 17.0, -207.0], 180.0),
-                    enemy("gnat", [-36.0, 23.0, -199.0], 180.0),
-                    enemy("gnat", [-4.0, 28.0, -203.0], 180.0),
-                    enemy("gnat", [-12.0, 16.0, -180.0], 180.0),
-                    enemy("spitter", [-40.0, 16.0, -200.0], 180.0),
-                    enemy("spitter", [-4.0, 22.0, -210.0], 180.0),
-                    enemy("husk", [-30.0, 10.0, -207.0], 180.0),
-                    enemy("husk", [-10.0, 10.0, -182.0], 180.0),
+                    enemy("harrier", [-22.0, 17.0, -207.0], 180.0),
+                    enemy("harrier", [-36.0, 23.0, -199.0], 180.0),
+                    enemy("harrier", [-4.0, 28.0, -203.0], 180.0),
+                    enemy("harrier", [-12.0, 16.0, -180.0], 180.0),
+                    enemy("censer", [-40.0, 16.0, -200.0], 180.0),
+                    enemy("censer", [-4.0, 22.0, -210.0], 180.0),
+                    enemy("gnawer", [-30.0, 10.0, -207.0], 180.0),
+                    enemy("gnawer", [-10.0, 10.0, -182.0], 180.0),
                 ]),
             ],
         },
@@ -1029,7 +1029,7 @@ fn crucible() -> Gen {
     g.light("C4 bottom", [60.0, 5.0, -208.5], L_WARM, 9.0);
 
     // ---------------------------------------------------------------- R4 Crucible Heart
-    g.section("R4 Crucible Heart (arena 4: bastion)");
+    g.section("R4 Crucible Heart (arena 4: gaoler)");
     let r4_in = op(W, -211.0, -206.0, 0.0, 5.0);
     let r4_out = op(N, 88.5, 93.5, 0.0, 5.0);
     let r4 = Room::new("R4", [66.0, 0.0, -233.0], [116.0, 18.0, -183.0], BRICK)
@@ -1094,7 +1094,7 @@ fn crucible() -> Gen {
         -90.0,
     );
     g.encounter(
-        "encounter 4: Crucible Heart — a bastion on the island, then a mixed wave",
+        "encounter 4: Crucible Heart — a gaoler on the island, then a mixed wave",
         &r4,
         Encounter {
             arena: None,
@@ -1104,21 +1104,21 @@ fn crucible() -> Gen {
             unlock_doors: vec![8],
             waves: vec![
                 wave(1.0, vec![
-                    enemy("bastion", [91.0, 1.0, -208.0], 90.0),
-                    enemy("husk", [78.0, 0.0, -189.0], -90.0),
-                    enemy("husk", [78.0, 0.0, -227.0], -90.0),
-                    enemy("husk", [104.0, 0.0, -201.0], 90.0),
-                    enemy("husk", [104.0, 0.0, -215.0], 90.0),
+                    enemy("gaoler", [91.0, 1.0, -208.0], 90.0),
+                    enemy("gnawer", [78.0, 0.0, -189.0], -90.0),
+                    enemy("gnawer", [78.0, 0.0, -227.0], -90.0),
+                    enemy("gnawer", [104.0, 0.0, -201.0], 90.0),
+                    enemy("gnawer", [104.0, 0.0, -215.0], 90.0),
                 ]),
                 wave(1.5, vec![
-                    enemy("spitter", [111.0, 4.0, -228.0], 90.0),
-                    enemy("spitter", [111.0, 4.0, -188.0], 90.0),
-                    enemy("gnat", [91.0, 7.0, -190.0], 90.0),
-                    enemy("gnat", [91.0, 7.0, -226.0], 90.0),
-                    enemy("gnat", [108.0, 7.0, -208.0], 90.0),
-                    enemy("husk", [76.0, 0.0, -200.0], -90.0),
-                    enemy("husk", [76.0, 0.0, -216.0], -90.0),
-                    enemy("husk", [108.0, 0.0, -200.0], 90.0),
+                    enemy("censer", [111.0, 4.0, -228.0], 90.0),
+                    enemy("censer", [111.0, 4.0, -188.0], 90.0),
+                    enemy("harrier", [91.0, 7.0, -190.0], 90.0),
+                    enemy("harrier", [91.0, 7.0, -226.0], 90.0),
+                    enemy("harrier", [108.0, 7.0, -208.0], 90.0),
+                    enemy("gnawer", [76.0, 0.0, -200.0], -90.0),
+                    enemy("gnawer", [76.0, 0.0, -216.0], -90.0),
+                    enemy("gnawer", [108.0, 0.0, -200.0], 90.0),
                 ]),
             ],
         },
@@ -1240,48 +1240,48 @@ fn crucible() -> Gen {
             unlock_doors: vec![10],
             waves: vec![
                 wave(0.5, vec![
-                    enemy("husk", [80.0, 0.0, -280.0], 180.0),
-                    enemy("husk", [102.0, 0.0, -280.0], 180.0),
-                    enemy("husk", [66.0, 0.0, -284.0], 180.0),
-                    enemy("husk", [116.0, 0.0, -284.0], 180.0),
-                    enemy("husk", [85.0, 0.0, -308.0], 180.0),
-                    enemy("husk", [97.0, 0.0, -308.0], 180.0),
-                    enemy("spitter", [86.0, 4.0, -319.0], 180.0),
-                    enemy("spitter", [96.0, 4.0, -319.0], 180.0),
+                    enemy("gnawer", [80.0, 0.0, -280.0], 180.0),
+                    enemy("gnawer", [102.0, 0.0, -280.0], 180.0),
+                    enemy("gnawer", [66.0, 0.0, -284.0], 180.0),
+                    enemy("gnawer", [116.0, 0.0, -284.0], 180.0),
+                    enemy("gnawer", [85.0, 0.0, -308.0], 180.0),
+                    enemy("gnawer", [97.0, 0.0, -308.0], 180.0),
+                    enemy("censer", [86.0, 4.0, -319.0], 180.0),
+                    enemy("censer", [96.0, 4.0, -319.0], 180.0),
                 ]),
                 wave(1.5, vec![
-                    enemy("gnat", [80.0, 6.0, -284.0], 180.0),
-                    enemy("gnat", [102.0, 6.0, -284.0], 180.0),
-                    enemy("gnat", [91.0, 7.0, -306.0], 180.0),
-                    enemy("gnat", [91.0, 7.0, -274.0], 180.0),
-                    enemy("spitter", [65.0, 8.0, -300.0], -90.0),
-                    enemy("spitter", [117.0, 8.0, -300.0], 90.0),
-                    enemy("husk", [76.0, 0.0, -310.0], 180.0),
-                    enemy("husk", [106.0, 0.0, -310.0], 180.0),
-                    enemy("husk", [91.0, 0.0, -310.0], 180.0),
+                    enemy("harrier", [80.0, 6.0, -284.0], 180.0),
+                    enemy("harrier", [102.0, 6.0, -284.0], 180.0),
+                    enemy("harrier", [91.0, 7.0, -306.0], 180.0),
+                    enemy("harrier", [91.0, 7.0, -274.0], 180.0),
+                    enemy("censer", [65.0, 8.0, -300.0], -90.0),
+                    enemy("censer", [117.0, 8.0, -300.0], 90.0),
+                    enemy("gnawer", [76.0, 0.0, -310.0], 180.0),
+                    enemy("gnawer", [106.0, 0.0, -310.0], 180.0),
+                    enemy("gnawer", [91.0, 0.0, -310.0], 180.0),
                 ]),
                 wave(2.0, vec![
-                    enemy("bastion", [91.0, 0.0, -305.0], 180.0),
-                    enemy("husk", [66.0, 0.0, -271.0], 180.0),
-                    enemy("husk", [116.0, 0.0, -271.0], 180.0),
-                    enemy("husk", [66.0, 0.0, -320.0], 180.0),
-                    enemy("husk", [116.0, 0.0, -320.0], 180.0),
-                    enemy("gnat", [91.0, 8.0, -295.0], 180.0),
-                    enemy("gnat", [84.0, 6.0, -274.0], 180.0),
-                    enemy("gnat", [98.0, 6.0, -274.0], 180.0),
+                    enemy("gaoler", [91.0, 0.0, -305.0], 180.0),
+                    enemy("gnawer", [66.0, 0.0, -271.0], 180.0),
+                    enemy("gnawer", [116.0, 0.0, -271.0], 180.0),
+                    enemy("gnawer", [66.0, 0.0, -320.0], 180.0),
+                    enemy("gnawer", [116.0, 0.0, -320.0], 180.0),
+                    enemy("harrier", [91.0, 8.0, -295.0], 180.0),
+                    enemy("harrier", [84.0, 6.0, -274.0], 180.0),
+                    enemy("harrier", [98.0, 6.0, -274.0], 180.0),
                 ]),
                 wave(2.0, vec![
-                    enemy("bastion", [91.0, 4.0, -321.0], 180.0),
-                    enemy("spitter", [65.0, 8.0, -275.0], -90.0),
-                    enemy("spitter", [117.0, 8.0, -275.0], 90.0),
-                    enemy("spitter", [65.0, 8.0, -316.0], -90.0),
-                    enemy("gnat", [78.0, 7.0, -303.0], 180.0),
-                    enemy("gnat", [104.0, 7.0, -303.0], 180.0),
-                    enemy("gnat", [91.0, 7.0, -287.0], 180.0),
-                    enemy("husk", [76.0, 0.0, -274.0], 180.0),
-                    enemy("husk", [106.0, 0.0, -274.0], 180.0),
-                    enemy("husk", [75.0, 0.0, -310.0], 180.0),
-                    enemy("husk", [107.0, 0.0, -310.0], 180.0),
+                    enemy("gaoler", [91.0, 4.0, -321.0], 180.0),
+                    enemy("censer", [65.0, 8.0, -275.0], -90.0),
+                    enemy("censer", [117.0, 8.0, -275.0], 90.0),
+                    enemy("censer", [65.0, 8.0, -316.0], -90.0),
+                    enemy("harrier", [78.0, 7.0, -303.0], 180.0),
+                    enemy("harrier", [104.0, 7.0, -303.0], 180.0),
+                    enemy("harrier", [91.0, 7.0, -287.0], 180.0),
+                    enemy("gnawer", [76.0, 0.0, -274.0], 180.0),
+                    enemy("gnawer", [106.0, 0.0, -274.0], 180.0),
+                    enemy("gnawer", [75.0, 0.0, -310.0], 180.0),
+                    enemy("gnawer", [107.0, 0.0, -310.0], 180.0),
                 ]),
             ],
         },

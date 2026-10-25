@@ -31,13 +31,13 @@ fn forty_eight_enemies_on_the_campaign_level() {
         p.movement = shared::movement::MoveState::spawn(*spot);
         p.combat.god = true;
     }
-    // Every spawn of arena 5's four waves, plus a copy of each husk 2 m to the side.
+    // Every spawn of arena 5's four waves, plus a copy of each gnawer 2 m to the side.
     let enc = &level.encounters[4];
     let mut n = 0;
     for wave in &enc.waves {
         for s in &wave.spawns {
             let mut spots = vec![s.position];
-            if s.enemy == "husk" {
+            if s.enemy == "gnawer" {
                 spots.push(s.position + Vec3::new(1.5, 0.0, 0.0));
             }
             for p in spots {

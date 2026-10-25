@@ -179,12 +179,12 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         "A was inside already"
     );
 
-    // Wave 1 after 0.5 s: 4 authored husks x 1.5 = 6, 60 HP each.
+    // Wave 1 after 0.5 s: 4 authored gnawers x 1.5 = 6, 67.5 HP each.
     assert!(n.run_until(1.0, |n| !n.living_enemies().is_empty()));
     n.run(0.1);
     let wave1 = n.living_enemies();
-    assert_eq!(wave1.len(), 6, "2 players: 1.5x the 4 authored husks");
-    assert!(wave1.iter().all(|(_, max)| *max == 60.0), "health x1.5: {wave1:?}");
+    assert_eq!(wave1.len(), 6, "2 players: 1.5x the 4 authored gnawers");
+    assert!(wave1.iter().all(|(_, max)| *max == 67.5), "health x1.5: {wave1:?}");
     // Every enemy stands somewhere sensible (inside the arena, not in lava).
     for e in n.server.world().enemies.values() {
         assert!(enc.arena.unwrap().contains(e.position), "enemy outside the arena at {}", e.position);
@@ -203,7 +203,7 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         assert_eq!((e.state, e.health, e.aux & 0xFFFF), (1, 6, 2), "wave 1/2, 6 left");
     }
 
-    // Kill wave 1 through the damage pipeline: wave 2 comes 1.5 s later with 9 husks.
+    // Kill wave 1 through the damage pipeline: wave 2 comes 1.5 s later with 9 gnawers.
     n.server.kill_all_enemies();
     n.run(0.5);
     assert_eq!(n.phase(0), EncounterPhase::Active);
@@ -296,11 +296,11 @@ fn checkpoint_reset_hooks_and_single_player_counts() {
     assert!(n.run_until(10.0, |n| n.clients.iter().all(|c| c.net.is_in_game())));
     let a = n.clients[0].id();
     n.server.world_mut().players.get_mut(&a).unwrap().combat.god = true;
-    // Arena 2 (Bleeding Cloister): husks + spitters on the mezzanine.
+    // Arena 2 (Bleeding Cloister): gnawers + censers on the mezzanine.
     n.place(a, Vec3::new(0.0, 0.0, -105.0));
     assert!(n.run_until(1.5, |n| n.living_enemies().len() == 6));
     assert_eq!(n.phase(1), EncounterPhase::Active);
-    assert!(n.living_enemies().iter().all(|(_, max)| *max == 40.0 || *max == 70.0));
+    assert!(n.living_enemies().iter().all(|(_, max)| *max == 45.0 || *max == 80.0));
     assert!(!n.door_open(3));
     // Some time in the fight, then the modes agent's checkpoint reset.
     n.run(2.0);
@@ -332,7 +332,7 @@ fn deathmatch_arena_has_no_encounters_but_dev_spawns_work() {
     .expect("server");
     let bot = server.add_bot("bot").unwrap();
     server.world_mut().players.get_mut(&bot).unwrap().combat.god = true;
-    let ids = server.spawn_enemies("spitter", Vec3::new(10.0, 0.0, 10.0), 0.0, 2);
+    let ids = server.spawn_enemies("censer", Vec3::new(10.0, 0.0, 10.0), 0.0, 2);
     assert_eq!(ids.len(), 2);
     for _ in 0..120 {
         server.update(Duration::from_secs_f64(1.0 / 60.0));

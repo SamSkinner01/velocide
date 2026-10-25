@@ -110,7 +110,7 @@
         (min: (-3.0, 1.2, -12.0), max: (-0.5, 6.0, -11.0), material: "hazard", tint: (1.0, 0.82, 0.4)),
         // C1 hurdle (jump over)
         (min: (0.5, 0.0, -12.0), max: (3.0, 1.0, -11.0), material: "rust", tint: (0.82, 0.64, 0.54)),
-        // ==== R1 Rendering Floor (arena 1: husks) ====
+        // ==== R1 Rendering Floor (arena 1: gnawers) ====
         // R1 floor
         (min: (-20.0, -1.0, -63.0), max: (20.0, 0.0, -23.0), material: "concrete", tint: (0.8, 0.72, 0.68)),
         // R1 ceiling
@@ -192,7 +192,7 @@
         (min: (-3.0, 5.6, -68.4), max: (3.0, 6.4, -67.6), material: "metal", tint: (1.0, 0.8, 0.46)),
         // C2 pipe
         (min: (-3.0, 5.6, -86.4), max: (3.0, 6.4, -85.6), material: "metal", tint: (1.0, 0.8, 0.46)),
-        // ==== R2 Bleeding Cloister (arena 2: spitters) ====
+        // ==== R2 Bleeding Cloister (arena 2: censers) ====
         // R2 ceiling
         (min: (-31.0, 14.0, -142.0), max: (31.0, 15.0, -90.0), material: "metal", tint: (0.56, 0.52, 0.52)),
         // R2 wall N 
@@ -314,7 +314,7 @@
         (min: (-19.4, 10.0, -170.4), max: (-19.0, 17.0, -169.6), material: "bone", tint: (0.92, 0.86, 0.78)),
         // C3 rib arch
         (min: (-26.0, 16.4, -170.4), max: (-19.0, 17.0, -169.6), material: "bone", tint: (0.92, 0.86, 0.78)),
-        // ==== R3 Bell Loft (arena 3: tall room, gnats) ====
+        // ==== R3 Bell Loft (arena 3: tall room, harriers) ====
         // R3 ceiling
         (min: (-45.0, 46.0, -216.0), max: (1.0, 47.0, -172.0), material: "metal", tint: (0.56, 0.52, 0.52)),
         // R3 wall N 
@@ -438,7 +438,7 @@
         (min: (2.3758, 18.267, -212.0), max: (56.6773, 19.267, -205.0), rotation: (0.0, 0.0, -24.6236), material: "metal", tint: (0.56, 0.52, 0.52)),
         // C4 ceiling bottom
         (min: (54.0, 7.0, -212.0), max: (65.0, 8.0, -205.0), material: "metal", tint: (0.56, 0.52, 0.52)),
-        // ==== R4 Crucible Heart (arena 4: bastion) ====
+        // ==== R4 Crucible Heart (arena 4: gaoler) ====
         // R4 ceiling
         (min: (65.0, 18.0, -234.0), max: (117.0, 19.0, -182.0), material: "metal", tint: (0.56, 0.52, 0.52)),
         // R4 wall N 
@@ -821,7 +821,7 @@
         (id: 10, brush: (min: (88.25, 4.0, -330.8), max: (93.75, 9.25, -330.2), material: "hazard", tint: (1.0, 0.7, 0.45)), starts_open: false),
     ],
     encounters: [
-        // encounter 1: Rendering Floor — husks
+        // encounter 1: Rendering Floor — gnawers
         (
             trigger: (min: (-20.0, -1.0, -63.0), max: (20.0, 12.0, -31.0)),
             arena: Some((min: (-20.0, -1.0, -63.0), max: (20.0, 12.0, -23.0))),
@@ -830,22 +830,22 @@
             unlock_doors: [2],
             waves: [
                 (delay: 0.5, spawns: [
-                    (enemy: "husk", position: (-10.0, 0.0, -57.0), yaw: 180.0),
-                    (enemy: "husk", position: (10.0, 0.0, -57.0), yaw: 180.0),
-                    (enemy: "husk", position: (-4.0, 0.0, -52.0), yaw: 180.0),
-                    (enemy: "husk", position: (4.0, 0.0, -52.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-10.0, 0.0, -57.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (10.0, 0.0, -57.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-4.0, 0.0, -52.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (4.0, 0.0, -52.0), yaw: 180.0),
                 ]),
                 (delay: 1.5, spawns: [
-                    (enemy: "husk", position: (-17.0, 4.0, -52.0), yaw: 180.0),
-                    (enemy: "husk", position: (17.0, 4.0, -52.0), yaw: 180.0),
-                    (enemy: "husk", position: (-11.0, 0.0, -40.0), yaw: 180.0),
-                    (enemy: "husk", position: (11.0, 0.0, -40.0), yaw: 180.0),
-                    (enemy: "husk", position: (-5.0, 0.0, -60.0), yaw: 180.0),
-                    (enemy: "husk", position: (5.0, 0.0, -60.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-17.0, 4.0, -52.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (17.0, 4.0, -52.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-11.0, 0.0, -40.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (11.0, 0.0, -40.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-5.0, 0.0, -60.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (5.0, 0.0, -60.0), yaw: 180.0),
                 ]),
             ],
         ),
-        // encounter 2: Bleeding Cloister — husks + spitters on the mezzanine
+        // encounter 2: Bleeding Cloister — gnawers + censers on the mezzanine
         (
             trigger: (min: (-30.0, -4.0, -141.0), max: (30.0, 14.0, -98.0)),
             arena: Some((min: (-30.0, -4.0, -141.0), max: (30.0, 14.0, -91.0))),
@@ -854,25 +854,25 @@
             unlock_doors: [4],
             waves: [
                 (delay: 0.5, spawns: [
-                    (enemy: "husk", position: (-13.0, 0.0, -110.0), yaw: 180.0),
-                    (enemy: "husk", position: (13.0, 0.0, -110.0), yaw: 180.0),
-                    (enemy: "husk", position: (-6.0, 0.0, -127.0), yaw: 180.0),
-                    (enemy: "husk", position: (6.0, 0.0, -127.0), yaw: 180.0),
-                    (enemy: "spitter", position: (-15.0, 5.0, -137.0), yaw: 180.0),
-                    (enemy: "spitter", position: (15.0, 5.0, -137.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-13.0, 0.0, -110.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (13.0, 0.0, -110.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-6.0, 0.0, -127.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (6.0, 0.0, -127.0), yaw: 180.0),
+                    (enemy: "censer", position: (-15.0, 5.0, -137.0), yaw: 180.0),
+                    (enemy: "censer", position: (15.0, 5.0, -137.0), yaw: 180.0),
                 ]),
                 (delay: 1.5, spawns: [
-                    (enemy: "spitter", position: (-10.0, 5.0, -138.0), yaw: 180.0),
-                    (enemy: "spitter", position: (10.0, 5.0, -138.0), yaw: 180.0),
-                    (enemy: "spitter", position: (0.0, 0.0, -138.0), yaw: 180.0),
-                    (enemy: "husk", position: (-22.0, 0.0, -128.0), yaw: 180.0),
-                    (enemy: "husk", position: (22.0, 0.0, -128.0), yaw: 180.0),
-                    (enemy: "husk", position: (-6.0, 0.0, -104.0), yaw: 180.0),
-                    (enemy: "husk", position: (6.0, 0.0, -104.0), yaw: 180.0),
+                    (enemy: "censer", position: (-10.0, 5.0, -138.0), yaw: 180.0),
+                    (enemy: "censer", position: (10.0, 5.0, -138.0), yaw: 180.0),
+                    (enemy: "censer", position: (0.0, 0.0, -138.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-22.0, 0.0, -128.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (22.0, 0.0, -128.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-6.0, 0.0, -104.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (6.0, 0.0, -104.0), yaw: 180.0),
                 ]),
             ],
         ),
-        // encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers
+        // encounter 3: Bell Loft — harriers circling the bell, gnawers below, censers on the tiers
         (
             trigger: (min: (-44.0, -5.0, -215.0), max: (0.0, 46.0, -180.0)),
             arena: Some((min: (-44.0, -5.0, -215.0), max: (0.0, 46.0, -173.0))),
@@ -881,26 +881,26 @@
             unlock_doors: [6],
             waves: [
                 (delay: 0.5, spawns: [
-                    (enemy: "gnat", position: (-34.0, 16.0, -192.0), yaw: 180.0),
-                    (enemy: "gnat", position: (-11.0, 16.0, -194.0), yaw: 180.0),
-                    (enemy: "gnat", position: (-22.0, 17.0, -183.0), yaw: 180.0),
-                    (enemy: "husk", position: (-36.0, 10.0, -208.0), yaw: 180.0),
-                    (enemy: "husk", position: (-14.0, 10.0, -207.0), yaw: 180.0),
-                    (enemy: "husk", position: (-4.0, 10.0, -190.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-34.0, 16.0, -192.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-11.0, 16.0, -194.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-22.0, 17.0, -183.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-36.0, 10.0, -208.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-14.0, 10.0, -207.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-4.0, 10.0, -190.0), yaw: 180.0),
                 ]),
                 (delay: 1.5, spawns: [
-                    (enemy: "gnat", position: (-22.0, 17.0, -207.0), yaw: 180.0),
-                    (enemy: "gnat", position: (-36.0, 23.0, -199.0), yaw: 180.0),
-                    (enemy: "gnat", position: (-4.0, 28.0, -203.0), yaw: 180.0),
-                    (enemy: "gnat", position: (-12.0, 16.0, -180.0), yaw: 180.0),
-                    (enemy: "spitter", position: (-40.0, 16.0, -200.0), yaw: 180.0),
-                    (enemy: "spitter", position: (-4.0, 22.0, -210.0), yaw: 180.0),
-                    (enemy: "husk", position: (-30.0, 10.0, -207.0), yaw: 180.0),
-                    (enemy: "husk", position: (-10.0, 10.0, -182.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-22.0, 17.0, -207.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-36.0, 23.0, -199.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-4.0, 28.0, -203.0), yaw: 180.0),
+                    (enemy: "harrier", position: (-12.0, 16.0, -180.0), yaw: 180.0),
+                    (enemy: "censer", position: (-40.0, 16.0, -200.0), yaw: 180.0),
+                    (enemy: "censer", position: (-4.0, 22.0, -210.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-30.0, 10.0, -207.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (-10.0, 10.0, -182.0), yaw: 180.0),
                 ]),
             ],
         ),
-        // encounter 4: Crucible Heart — a bastion on the island, then a mixed wave
+        // encounter 4: Crucible Heart — a gaoler on the island, then a mixed wave
         (
             trigger: (min: (73.0, -4.0, -233.0), max: (116.0, 18.0, -183.0)),
             arena: Some((min: (66.0, -4.0, -233.0), max: (116.0, 18.0, -183.0))),
@@ -909,21 +909,21 @@
             unlock_doors: [8],
             waves: [
                 (delay: 1.0, spawns: [
-                    (enemy: "bastion", position: (91.0, 1.0, -208.0), yaw: 90.0),
-                    (enemy: "husk", position: (78.0, 0.0, -189.0), yaw: -90.0),
-                    (enemy: "husk", position: (78.0, 0.0, -227.0), yaw: -90.0),
-                    (enemy: "husk", position: (104.0, 0.0, -201.0), yaw: 90.0),
-                    (enemy: "husk", position: (104.0, 0.0, -215.0), yaw: 90.0),
+                    (enemy: "gaoler", position: (91.0, 1.0, -208.0), yaw: 90.0),
+                    (enemy: "gnawer", position: (78.0, 0.0, -189.0), yaw: -90.0),
+                    (enemy: "gnawer", position: (78.0, 0.0, -227.0), yaw: -90.0),
+                    (enemy: "gnawer", position: (104.0, 0.0, -201.0), yaw: 90.0),
+                    (enemy: "gnawer", position: (104.0, 0.0, -215.0), yaw: 90.0),
                 ]),
                 (delay: 1.5, spawns: [
-                    (enemy: "spitter", position: (111.0, 4.0, -228.0), yaw: 90.0),
-                    (enemy: "spitter", position: (111.0, 4.0, -188.0), yaw: 90.0),
-                    (enemy: "gnat", position: (91.0, 7.0, -190.0), yaw: 90.0),
-                    (enemy: "gnat", position: (91.0, 7.0, -226.0), yaw: 90.0),
-                    (enemy: "gnat", position: (108.0, 7.0, -208.0), yaw: 90.0),
-                    (enemy: "husk", position: (76.0, 0.0, -200.0), yaw: -90.0),
-                    (enemy: "husk", position: (76.0, 0.0, -216.0), yaw: -90.0),
-                    (enemy: "husk", position: (108.0, 0.0, -200.0), yaw: 90.0),
+                    (enemy: "censer", position: (111.0, 4.0, -228.0), yaw: 90.0),
+                    (enemy: "censer", position: (111.0, 4.0, -188.0), yaw: 90.0),
+                    (enemy: "harrier", position: (91.0, 7.0, -190.0), yaw: 90.0),
+                    (enemy: "harrier", position: (91.0, 7.0, -226.0), yaw: 90.0),
+                    (enemy: "harrier", position: (108.0, 7.0, -208.0), yaw: 90.0),
+                    (enemy: "gnawer", position: (76.0, 0.0, -200.0), yaw: -90.0),
+                    (enemy: "gnawer", position: (76.0, 0.0, -216.0), yaw: -90.0),
+                    (enemy: "gnawer", position: (108.0, 0.0, -200.0), yaw: 90.0),
                 ]),
             ],
         ),
@@ -936,48 +936,48 @@
             unlock_doors: [10],
             waves: [
                 (delay: 0.5, spawns: [
-                    (enemy: "husk", position: (80.0, 0.0, -280.0), yaw: 180.0),
-                    (enemy: "husk", position: (102.0, 0.0, -280.0), yaw: 180.0),
-                    (enemy: "husk", position: (66.0, 0.0, -284.0), yaw: 180.0),
-                    (enemy: "husk", position: (116.0, 0.0, -284.0), yaw: 180.0),
-                    (enemy: "husk", position: (85.0, 0.0, -308.0), yaw: 180.0),
-                    (enemy: "husk", position: (97.0, 0.0, -308.0), yaw: 180.0),
-                    (enemy: "spitter", position: (86.0, 4.0, -319.0), yaw: 180.0),
-                    (enemy: "spitter", position: (96.0, 4.0, -319.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (80.0, 0.0, -280.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (102.0, 0.0, -280.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (66.0, 0.0, -284.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (116.0, 0.0, -284.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (85.0, 0.0, -308.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (97.0, 0.0, -308.0), yaw: 180.0),
+                    (enemy: "censer", position: (86.0, 4.0, -319.0), yaw: 180.0),
+                    (enemy: "censer", position: (96.0, 4.0, -319.0), yaw: 180.0),
                 ]),
                 (delay: 1.5, spawns: [
-                    (enemy: "gnat", position: (80.0, 6.0, -284.0), yaw: 180.0),
-                    (enemy: "gnat", position: (102.0, 6.0, -284.0), yaw: 180.0),
-                    (enemy: "gnat", position: (91.0, 7.0, -306.0), yaw: 180.0),
-                    (enemy: "gnat", position: (91.0, 7.0, -274.0), yaw: 180.0),
-                    (enemy: "spitter", position: (65.0, 8.0, -300.0), yaw: -90.0),
-                    (enemy: "spitter", position: (117.0, 8.0, -300.0), yaw: 90.0),
-                    (enemy: "husk", position: (76.0, 0.0, -310.0), yaw: 180.0),
-                    (enemy: "husk", position: (106.0, 0.0, -310.0), yaw: 180.0),
-                    (enemy: "husk", position: (91.0, 0.0, -310.0), yaw: 180.0),
+                    (enemy: "harrier", position: (80.0, 6.0, -284.0), yaw: 180.0),
+                    (enemy: "harrier", position: (102.0, 6.0, -284.0), yaw: 180.0),
+                    (enemy: "harrier", position: (91.0, 7.0, -306.0), yaw: 180.0),
+                    (enemy: "harrier", position: (91.0, 7.0, -274.0), yaw: 180.0),
+                    (enemy: "censer", position: (65.0, 8.0, -300.0), yaw: -90.0),
+                    (enemy: "censer", position: (117.0, 8.0, -300.0), yaw: 90.0),
+                    (enemy: "gnawer", position: (76.0, 0.0, -310.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (106.0, 0.0, -310.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (91.0, 0.0, -310.0), yaw: 180.0),
                 ]),
                 (delay: 2.0, spawns: [
-                    (enemy: "bastion", position: (91.0, 0.0, -305.0), yaw: 180.0),
-                    (enemy: "husk", position: (66.0, 0.0, -271.0), yaw: 180.0),
-                    (enemy: "husk", position: (116.0, 0.0, -271.0), yaw: 180.0),
-                    (enemy: "husk", position: (66.0, 0.0, -320.0), yaw: 180.0),
-                    (enemy: "husk", position: (116.0, 0.0, -320.0), yaw: 180.0),
-                    (enemy: "gnat", position: (91.0, 8.0, -295.0), yaw: 180.0),
-                    (enemy: "gnat", position: (84.0, 6.0, -274.0), yaw: 180.0),
-                    (enemy: "gnat", position: (98.0, 6.0, -274.0), yaw: 180.0),
+                    (enemy: "gaoler", position: (91.0, 0.0, -305.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (66.0, 0.0, -271.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (116.0, 0.0, -271.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (66.0, 0.0, -320.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (116.0, 0.0, -320.0), yaw: 180.0),
+                    (enemy: "harrier", position: (91.0, 8.0, -295.0), yaw: 180.0),
+                    (enemy: "harrier", position: (84.0, 6.0, -274.0), yaw: 180.0),
+                    (enemy: "harrier", position: (98.0, 6.0, -274.0), yaw: 180.0),
                 ]),
                 (delay: 2.0, spawns: [
-                    (enemy: "bastion", position: (91.0, 4.0, -321.0), yaw: 180.0),
-                    (enemy: "spitter", position: (65.0, 8.0, -275.0), yaw: -90.0),
-                    (enemy: "spitter", position: (117.0, 8.0, -275.0), yaw: 90.0),
-                    (enemy: "spitter", position: (65.0, 8.0, -316.0), yaw: -90.0),
-                    (enemy: "gnat", position: (78.0, 7.0, -303.0), yaw: 180.0),
-                    (enemy: "gnat", position: (104.0, 7.0, -303.0), yaw: 180.0),
-                    (enemy: "gnat", position: (91.0, 7.0, -287.0), yaw: 180.0),
-                    (enemy: "husk", position: (76.0, 0.0, -274.0), yaw: 180.0),
-                    (enemy: "husk", position: (106.0, 0.0, -274.0), yaw: 180.0),
-                    (enemy: "husk", position: (75.0, 0.0, -310.0), yaw: 180.0),
-                    (enemy: "husk", position: (107.0, 0.0, -310.0), yaw: 180.0),
+                    (enemy: "gaoler", position: (91.0, 4.0, -321.0), yaw: 180.0),
+                    (enemy: "censer", position: (65.0, 8.0, -275.0), yaw: -90.0),
+                    (enemy: "censer", position: (117.0, 8.0, -275.0), yaw: 90.0),
+                    (enemy: "censer", position: (65.0, 8.0, -316.0), yaw: -90.0),
+                    (enemy: "harrier", position: (78.0, 7.0, -303.0), yaw: 180.0),
+                    (enemy: "harrier", position: (104.0, 7.0, -303.0), yaw: 180.0),
+                    (enemy: "harrier", position: (91.0, 7.0, -287.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (76.0, 0.0, -274.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (106.0, 0.0, -274.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (75.0, 0.0, -310.0), yaw: 180.0),
+                    (enemy: "gnawer", position: (107.0, 0.0, -310.0), yaw: 180.0),
                 ]),
             ],
         ),

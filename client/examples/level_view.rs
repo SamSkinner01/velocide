@@ -17,7 +17,7 @@
 //!
 //! Overlay colours: encounter triggers orange, checkpoints green, exit white, kill volumes red,
 //! doors (closed red / open green), player spawns cyan (with facing), jump pads cyan with
-//! their ballistic arc, enemies: husk yellow, spitter magenta, gnat light blue, bastion red.
+//! their ballistic arc, enemies: gnawer yellow, censer magenta, harrier light blue, gaoler red, heron white.
 
 use std::path::{Path, PathBuf};
 
@@ -118,10 +118,11 @@ fn marker(out: &mut Vec<DebugLine>, p: Vec3, height: f32, size: f32, color: Vec4
 
 fn enemy_color(name: &str) -> Vec4 {
     match name {
-        "husk" => Vec4::new(1.0, 0.9, 0.2, 1.0),
-        "spitter" => Vec4::new(1.0, 0.3, 1.0, 1.0),
-        "gnat" => Vec4::new(0.5, 0.8, 1.0, 1.0),
-        "bastion" => Vec4::new(1.0, 0.15, 0.1, 1.0),
+        "gnawer" => Vec4::new(1.0, 0.9, 0.2, 1.0),
+        "censer" => Vec4::new(1.0, 0.3, 1.0, 1.0),
+        "harrier" => Vec4::new(0.5, 0.8, 1.0, 1.0),
+        "gaoler" => Vec4::new(1.0, 0.15, 0.1, 1.0),
+        "heron" => Vec4::new(1.0, 1.0, 1.0, 1.0),
         _ => Vec4::ONE,
     }
 }
@@ -138,9 +139,11 @@ fn overlay(level: &LevelDef) -> Vec<DebugLine> {
             for s in &w.spawns {
                 let c = enemy_color(&s.enemy);
                 let (h, r) = match s.enemy.as_str() {
-                    "bastion" => (3.2, 1.2),
-                    "gnat" => (0.8, 0.8),
-                    _ => (2.0, 0.5),
+                    "gaoler" => (3.7, 1.3),
+                    "heron" => (3.4, 0.5),
+                    "censer" => (2.5, 0.6),
+                    "harrier" => (1.3, 0.7),
+                    _ => (2.0, 0.6),
                 };
                 marker(&mut out, s.position, h, r, c);
                 line(&mut out, s.position + Vec3::Y, s.position + Vec3::Y + yaw_dir(s.yaw) * 1.5, c);
@@ -454,7 +457,7 @@ fn main() -> anyhow::Result<()> {
                 .waves
                 .iter()
                 .flat_map(|w| &w.spawns)
-                .filter(|s| s.enemy != "gnat")
+                .filter(|s| s.enemy != "harrier")
                 .map(|s| s.position.y)
                 .collect();
             ys.sort_by(f32::total_cmp);
