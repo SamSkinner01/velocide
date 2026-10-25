@@ -152,16 +152,18 @@ impl Beams {
         let dir = d / len;
         let side = dir.any_orthonormal_vector();
         let up = dir.cross(side);
-        let segments = ((len / 0.8) as usize).clamp(3, 14);
-        let jag = (0.08 + len * 0.035).min(0.6);
+        let segments = ((len / 0.7) as usize).clamp(3, 16);
+        let jag = (0.08 + len * 0.03).min(0.5);
         let mut prev = a;
         for i in 1..=segments {
             let t = i as f32 / segments as f32;
             let p = if i == segments {
                 b
             } else {
+                // Kinks fade out towards both ends (calm at the muzzle and the target).
+                let taper = (t * (1.0 - t) * 4.0).min(1.0);
                 let off = side * rng.range(-1.0, 1.0) + up * rng.range(-1.0, 1.0);
-                a + d * t + off * jag
+                a + d * t + off * jag * taper
             };
             self.beam(prev, p, width, color, life);
             self.beam(prev, p, width * 0.35, Vec4::new(2.5, 2.5, 2.6, color.w), life * 0.7);
@@ -200,32 +202,38 @@ impl Beams {
         });
     }
 
-    /// A brand sigil for this frame only: a turning six-point star (two triangles) of
-    /// `radius` facing `normal` at `center`.
+    /// A brand sigil for this frame only, facing `normal` at `center`: a diamond of `radius`
+    /// turning one way and a point-down triangle inside it turning the other (a brand mark,
+    /// not any real-world symbol).
     pub fn sigil(&mut self, center: Vec3, normal: Vec3, radius: f32, color: Vec4, angle: f32) {
-        if !center.is_finite() || self.frame.len() + 6 > MAX_FRAME_BEAMS {
+        if !center.is_finite() || self.frame.len() + 7 > MAX_FRAME_BEAMS {
             return;
         }
         let n = normal.normalize_or(Vec3::Y);
-        let u = n.any_orthonormal_vector();
-        let v = n.cross(u);
-        let corner = |k: f32| {
-            let a = angle + k * std::f32::consts::TAU / 6.0;
-            center + (u * a.cos() + v * a.sin()) * radius
+        // Keep "down" pointing down on screen: the in-plane axes follow world up.
+        let up = (Vec3::Y - n * n.dot(Vec3::Y)).normalize_or(n.any_orthonormal_vector());
+        let right = up.cross(n);
+        let point = |a: f32, r: f32| center + (right * a.sin() + up * a.cos()) * r;
+        let mut edge = |a: Vec3, b: Vec3, width: f32| {
+            self.frame.push(Beam {
+                a,
+                b,
+                width,
+                color,
+                life: 0.0,
+                max_life: 1.0,
+            });
         };
-        for tri in 0..2 {
-            for i in 0..3 {
-                let k0 = (tri + 2 * i) as f32;
-                let k1 = (tri + 2 * ((i + 1) % 3)) as f32;
-                self.frame.push(Beam {
-                    a: corner(k0),
-                    b: corner(k1),
-                    width: radius * 0.09,
-                    color,
-                    life: 0.0,
-                    max_life: 1.0,
-                });
-            }
+        let quarter = std::f32::consts::FRAC_PI_2;
+        for i in 0..4 {
+            let a = angle * 0.35 + i as f32 * quarter;
+            edge(point(a, radius), point(a + quarter, radius), radius * 0.1);
+        }
+        let third = std::f32::consts::TAU / 3.0;
+        let tilt = std::f32::consts::PI + (angle * 2.0).sin() * 0.25;
+        for i in 0..3 {
+            let a = tilt + i as f32 * third;
+            edge(point(a, radius * 0.6), point(a + third, radius * 0.6), radius * 0.08);
         }
     }
 
@@ -602,23 +610,29 @@ pub fn gust_puff(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, origin
             ..Default::default()
         });
     }
-    beams.ring(origin + aim * 1.5, aim, 0.4, 3.2, 0.05, hot(air, 1.3), 0.22);
-    beams.ring(origin + aim * 3.5, aim, 0.6, 4.0, 0.04, hot(air, 1.0), 0.28);
+    let ring = (air.truncate() * 1.1).extend(0.35);
+    beams.ring(origin + aim * 2.5, aim, 0.3, 1.6, 0.025, ring, 0.2);
+    beams.ring(origin + aim * 5.0, aim, 0.5, 2.6, 0.03, ring, 0.26);
 }
 
-/// Arclash Discharge nova around `center` (radius `radius`): rings rushing out, arcs, a flash.
+/// Arclash Discharge nova around `center` (the shooter's body centre, radius `radius`): rings
+/// rushing out along the floor from their feet, arcs to the edge, a flash.
 pub fn discharge_nova(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, center: Vec3, radius: f32) {
     let r = radius.max(1.0);
-    beams.ring(center, Vec3::Y, 0.5, r, 0.14, hot(ARC_COLOR, 1.2), 0.3);
-    beams.ring(center + Vec3::Y * 0.5, Vec3::Y, 0.3, r * 0.85, 0.08, Vec4::new(2.2, 2.3, 2.6, 0.9), 0.24);
-    beams.ring(center - Vec3::Y * 0.6, Vec3::Y, 0.4, r * 0.9, 0.08, hot(ARC_COLOR, 0.9), 0.36);
-    for _ in 0..8 {
+    let feet = center - Vec3::Y * 0.8;
+    let blue = Vec4::new(0.7, 1.1, 2.0, 0.9);
+    beams.ring(feet + Vec3::Y * 0.12, Vec3::Y, 1.2, r, 0.09, blue, 0.32);
+    beams.ring(feet + Vec3::Y * 0.4, Vec3::Y, 1.0, r * 0.8, 0.05, Vec4::new(1.6, 1.8, 2.4, 0.8), 0.26);
+    for _ in 0..9 {
         let a = rng.angle();
-        let to = center + Vec3::new(a.cos(), rng.range(-0.3, 0.4), a.sin()) * r * rng.range(0.6, 1.0);
-        beams.arc(center, to, 0.05, ARC_COLOR, 0.2, rng);
+        let from = feet + Vec3::new(a.cos(), 0.0, a.sin()) * 1.6 + Vec3::Y * 0.2;
+        let to = feet
+            + Vec3::new(a.cos(), 0.0, a.sin()) * r * rng.range(0.6, 1.0)
+            + Vec3::Y * rng.range(0.1, 1.2);
+        beams.arc(from, to, 0.04, ARC_COLOR, 0.2, rng);
     }
-    effects.glow(center, Vec4::new(0.7, 0.85, 1.0, 1.0), r * 0.7, 0.2);
-    effects.dust(center - Vec3::Y * 0.9, 18, r * 1.8);
+    effects.glow(center, Vec4::new(0.7, 0.85, 1.0, 0.8), 1.2, 0.18);
+    effects.dust(feet, 18, r * 1.8);
     beams.light(center, Vec3::new(1.2, 1.8, 3.0), r * 2.5, 0.3);
 }
 
@@ -865,8 +879,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         Fx::ArcChain { points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
             for (i, w) in pts.windows(2).enumerate() {
-                ctx.beams.arc(w[0], w[1], 0.05, ARC_COLOR, 0.14, ctx.rng);
-                ctx.effects.glow(w[1], ARC_COLOR, 0.6, 0.12);
+                ctx.beams.arc(w[0], w[1], 0.08, ARC_COLOR, 0.22, ctx.rng);
+                ctx.beams.arc(w[0], w[1], 0.04, ARC_COLOR, 0.16, ctx.rng);
+                ctx.effects.glow(w[0], ARC_COLOR, 0.8, 0.2);
+                ctx.effects.glow(w[1], ARC_COLOR, 0.9, 0.22);
+                ctx.effects.sparks(w[1], Vec3::Y, 5);
                 ctx.audio.play(
                     Sfx::ArcChain,
                     PlayParams::at(w[1]).with_pitch(1.0 + 0.12 * i as f32),
@@ -1118,7 +1135,7 @@ mod tests {
         assert!(n >= 6, "a zig-zag of segments (+ cores): {n}");
         b.ring(Vec3::ZERO, Vec3::Y, 0.5, 6.0, 0.1, ARC_COLOR, 0.3);
         b.sigil(Vec3::Y, Vec3::Y, 0.5, BRAND_COLOR, 0.0);
-        assert_eq!(b.frame.len(), 6, "two triangles");
+        assert_eq!(b.frame.len(), 7, "a diamond and a triangle");
         b.update(0.016);
         assert!(b.frame.is_empty(), "sigils last one frame");
         assert_eq!(b.rings.len(), 1);

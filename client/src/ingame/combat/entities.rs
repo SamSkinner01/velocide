@@ -243,12 +243,13 @@ impl EntityView {
         self.thorns.get(&id).map(|p| p.position)
     }
 
-    /// A turning brand sigil over every branded enemy and other player this frame (the local
-    /// player's own brand shows on the HUD).
+    /// A turning brand sigil over every branded enemy and other player this frame, facing the
+    /// camera (the local player's own brand shows on the HUD).
     pub fn brand_sigils(
         &self,
         entities: &[EntityState],
         local: Option<shared::sim::PlayerId>,
+        camera: Vec3,
         beams: &mut Beams,
     ) {
         let angle = (self.time * 1.8 % std::f64::consts::TAU) as f32;
@@ -270,9 +271,10 @@ impl EntityView {
                 continue;
             };
             let pulse = 0.85 + 0.15 * ((self.time * 7.0).sin() as f32);
-            let above = e.position + Vec3::Y * (height + 0.55);
-            beams.sigil(above, Vec3::Y, 0.42 * pulse, BRAND_COLOR, angle);
-            beams.sigil(above, Vec3::Y, 0.24, BRAND_COLOR * 1.2, -angle * 1.6);
+            let above = e.position + Vec3::Y * (height + 0.7);
+            let facing = (camera - above).normalize_or(Vec3::Z);
+            beams.sigil(above, facing, 0.5 * pulse, BRAND_COLOR, angle);
+            beams.sigil(above, facing, 0.28, BRAND_COLOR * 1.2, -angle * 1.6);
         }
     }
 
@@ -344,13 +346,29 @@ impl EntityView {
                 let v = self.thorns.entry(e.id).or_default();
                 v.seen = true;
                 v.position = pos;
+                let planted = e.flags & thorn_flags::PLANTED != 0;
+                // Planted thorns are lit relays you placed on purpose: a steady halo and a
+                // pulse ring so they read from across the arena.
+                if planted {
+                    effects.spawn(Particle {
+                        position: pos,
+                        max_life: dt.max(0.016) * 1.5,
+                        size: Vec2::splat(0.55),
+                        color: Vec4::new(0.6, 0.85, 1.0, 0.55),
+                        end_alpha: 1.0,
+                        texture: FxTex::Glow,
+                        additive: true,
+                        ..Default::default()
+                    });
+                }
                 v.glint -= dt;
                 if v.glint <= 0.0 {
-                    let planted = e.flags & thorn_flags::PLANTED != 0;
-                    // Planted thorns pulse steadily: lit relays you placed on purpose.
-                    v.glint = if planted { 0.45 } else { rng.range(0.15, 0.3) };
-                    let size = if planted { 0.55 } else { 0.3 };
-                    effects.glow(pos + rng.dir() * 0.05, THORN_COLOR, size, 0.35);
+                    v.glint = if planted { 0.6 } else { rng.range(0.15, 0.3) };
+                    if planted {
+                        let facing = e.velocity.normalize_or(Vec3::Y);
+                        beams.ring(pos, facing, 0.1, 0.7, 0.03, THORN_COLOR * 1.6, 0.4);
+                    }
+                    effects.glow(pos + rng.dir() * 0.05, THORN_COLOR, 0.35, 0.35);
                 }
             }
         }
@@ -617,9 +635,11 @@ impl EntityView {
                     glow: Vec4::splat(pulse),
                     ..Default::default()
                 };
+                // Planted / lying thorns are drawn a little larger so the relay reads.
+                let scale = if e.flags & thorn_flags::PLANTED != 0 { 1.5 } else { 1.2 };
                 lib.draw_model(
                     ModelId::Thorn,
-                    Mat4::from_rotation_translation(rot, pos),
+                    Mat4::from_scale_rotation_translation(Vec3::splat(scale), rot, pos),
                     &tint,
                     draws,
                 );

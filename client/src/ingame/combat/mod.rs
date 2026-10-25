@@ -128,7 +128,7 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::Arc => AttackStyle {
             jagged: true,
             flash: 0.0,
-            ..s(Sfx::ArcZap, 0.12, 0.04, crate::ingame::combat::fx::ARC_COLOR, 0.08, 0.015)
+            ..s(Sfx::ArcZap, 0.12, 0.03, crate::ingame::combat::fx::ARC_COLOR, 0.08, 0.015)
         },
         Attack::Wisp => s(Sfx::WispLaunch, 0.6, 0.0, Vec4::ONE, 0.0, 0.08),
         Attack::Discharge => s(Sfx::DischargeRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.45),
@@ -779,7 +779,7 @@ impl InGame {
         // Brand sigils (drawn this frame only, after the update).
         combat
             .entities
-            .brand_sigils(entities, local, &mut combat.beams);
+            .brand_sigils(entities, local, listener, &mut combat.beams);
 
         // Viewmodel: Discharge glow + charge whine.
         let charge = combat.predictor.charge(t, rate);

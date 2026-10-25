@@ -228,6 +228,8 @@ fn main() -> anyhow::Result<()> {
         hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
     });
     h.shot("combat_splinter");
+    h.frames(&mut game, 5, |g, _| hold(g, Buttons::NONE));
+    h.shot("combat_splinter_burst");
 
     // Bellows: pellets, then a Gust, then both barrels.
     spawn(&mut game, 3);
@@ -318,15 +320,8 @@ fn main() -> anyhow::Result<()> {
     }
     h.shot("combat_after_explosion");
     // Breach at the floor in front.
-    h.frames(&mut game, 60, |g, i| {
-        g.controls.pitch = -0.6;
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
-        if i == 2 {
-            g.controls.pitch = -0.3;
-        }
-    });
-    h.frames(&mut game, 3, |g, i| {
-        g.controls.pitch = -0.5;
+    h.frames(&mut game, 4, |g, i| {
+        g.controls.pitch = -0.55;
         hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
     });
     h.shot("combat_breach");
@@ -365,7 +360,7 @@ fn main() -> anyhow::Result<()> {
     select(&mut game, 0, 0);
     h.frames(&mut game, 50, |g, i| {
         g.controls.yaw = 0.3;
-        g.controls.pitch = 0.02;
+        g.controls.pitch = -0.12;
         hold(g, if i == 0 { Buttons::THROW } else { Buttons::NONE });
     });
     h.shot("combat_thorn_planted");
@@ -386,7 +381,7 @@ fn main() -> anyhow::Result<()> {
             break;
         }
     }
-    h.frames(&mut game, 6, |g, _| hold(g, Buttons::NONE));
+    h.frames(&mut game, 9, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_ricochet");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
 
