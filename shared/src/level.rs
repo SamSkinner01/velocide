@@ -201,7 +201,8 @@ pub struct JumpPad {
 /// A glTF model placed in the level (decoration; collision optional).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Prop {
-    /// Path relative to `assets/`.
+    /// Path relative to `assets/` (plain names only, `.gltf` / `.glb`, at most 16 MiB; the
+    /// client refuses anything else: `client::level_mesh::resolve_prop_model`).
     pub model: String,
     pub position: Vec3,
     #[serde(default)]
