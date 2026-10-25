@@ -120,6 +120,22 @@ impl SimPlayer {
         if self.movement.is_invulnerable() {
             flags |= player_flags::INVULNERABLE;
         }
+        let m = &self.movement;
+        for (on, bit) in [
+            (m.on_ground, player_flags::ON_GROUND),
+            (m.is_sliding(), player_flags::SLIDING),
+            (m.is_dashing(), player_flags::DASHING),
+            (m.is_slamming(), player_flags::SLAMMING),
+        ] {
+            if on {
+                flags |= bit;
+            }
+        }
+        let mut aux = 0;
+        if m.wall_clinging && m.wall_normal != Vec3::ZERO {
+            flags |= player_flags::WALL_CLING;
+            aux = crate::protocol::quantize_yaw((-m.wall_normal.x).atan2(-m.wall_normal.z)) as u32;
+        }
         EntityState {
             id: NetId::player(self.id),
             kind: kind::PLAYER,
@@ -129,6 +145,8 @@ impl SimPlayer {
             yaw: self.yaw,
             pitch: self.pitch,
             flags,
+            state: self.last_input.weapon as u16 | (self.last_input.weapon_mode as u16) << 8,
+            aux,
             ..Default::default()
         }
     }
@@ -254,6 +272,30 @@ impl SimWorld {
 
     pub fn remove_player(&mut self, id: PlayerId) -> Option<SimPlayer> {
         self.players.remove(&id)
+    }
+
+    /// Restarts the level: every player is put back at the level start (spawn points handed
+    /// out from the first one again, in player order) with fresh movement state. Returns a
+    /// `Respawned` event per player. Systems that keep level state (encounters, enemies,
+    /// pickups, doors) reset themselves here as they are added.
+    pub fn restart_level(&mut self) -> Vec<SimEvent> {
+        self.next_spawn = 0;
+        let ids: Vec<PlayerId> = self.players.keys().copied().collect();
+        let mut events = Vec::with_capacity(ids.len());
+        for id in ids {
+            let spawn = self.next_spawn_point();
+            if let Some(p) = self.players.get_mut(&id) {
+                p.movement = MoveState::spawn(spawn.position);
+                p.yaw = spawn.yaw.to_radians();
+                p.pitch = 0.0;
+                events.push(SimEvent::Respawned {
+                    player: id,
+                    position: spawn.position,
+                    yaw: p.yaw,
+                });
+            }
+        }
+        events
     }
 
     /// External impulse (explosions, knockback): changes velocity between movement steps.
@@ -596,6 +638,25 @@ mod tests {
         let events = w.step(&TickInputs::new(), &tuning, None);
         assert!(matches!(events[0], SimEvent::Respawned { .. }));
         assert!(w.players[&PlayerId(0)].movement.position.y > -1.0);
+    }
+
+    #[test]
+    fn restart_puts_players_back_at_the_start() {
+        let mut w = world();
+        w.add_player(PlayerId(0), "A").movement.position = Vec3::new(20.0, 3.0, 20.0);
+        w.add_player(PlayerId(1), "B").movement.velocity = Vec3::new(5.0, 0.0, 0.0);
+        let events = w.restart_level();
+        assert_eq!(events.len(), 2);
+        let spawns = &w.level.spawns;
+        assert_eq!(
+            w.players[&PlayerId(0)].movement.position,
+            spawns[0].position
+        );
+        assert_eq!(
+            w.players[&PlayerId(1)].movement.position,
+            spawns[1].position
+        );
+        assert_eq!(w.players[&PlayerId(1)].movement.velocity, Vec3::ZERO);
     }
 
     #[test]

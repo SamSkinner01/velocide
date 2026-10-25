@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Launches a local multiplayer test: one dedicated server plus N game clients (default 2).
 #
-#   scripts/local_test.sh [options]
+#   scripts/local_test.sh [options] [-- extra client args]
 #
 # Options:
 #   --release               build and run optimised binaries
@@ -12,13 +12,22 @@
 #                           loss % (e.g. 100,20,2 = 200 ms ping, +-20 ms jitter, 2% loss)
 #   --server-netsim <...>   network simulator on the server (applies to all clients)
 #   --no-clients            only start the server
+#   --bot                   clients play by themselves (auto-pilot; doesn't grab the mouse)
+#   --size <WxH>            client window size (default 960x540, so two fit side by side)
+#   --quit-after <SECONDS>  stop everything after this long
+#   --capture-dir <DIR>     each client saves DIR/client<N>.png ...
+#   --capture-after <SECS>  ... after this many seconds (default 10)
+#   --no-audio              clients don't open the audio device
+#   --debug                 clients start with the debug overlay (F3) open
 #
-# Game client flags (binary `velocide`, see docs/network.md):
-#   --connect <ip:port>     join a server
-#   --host [port]           host a listen server and play on it
-#   --name <name>           player name
-#   --netsim <l,j,loss>     simulate a bad network on this client
-#   (no flags)              single-player: in-process server on loopback
+# Game client flags (binary `velocide`, see docs/client.md):
+#   --connect <ip:port>  --host [port]  --sp [level]  --name <name>  --netsim <l,j,loss>
+#   --bot  --capture <png> --capture-after <s>  --quit-after <s>  --windowed WxH  --fullscreen
+#   (no flags)  main menu
+#
+# Example (the Milestone 4 online test, two bots at 200 ms ping, screenshots after 15 s):
+#   scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot \
+#       --quit-after 20 --capture-dir captures/mp --capture-after 15
 #
 # Ctrl-C stops everything. Logs go to the terminal (RUST_LOG=debug for more).
 
@@ -32,6 +41,14 @@ LEVEL=proving_ground
 CLIENTS=2
 NETSIM=""
 SERVER_NETSIM=""
+BOT=0
+SIZE=960x540
+QUIT_AFTER=""
+CAPTURE_DIR=""
+CAPTURE_AFTER=10
+NO_AUDIO=0
+EXTRA_DEBUG=0
+EXTRA=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -42,7 +59,15 @@ while [[ $# -gt 0 ]]; do
         --no-clients) CLIENTS=0 ;;
         --netsim) NETSIM="$2"; shift ;;
         --server-netsim) SERVER_NETSIM="$2"; shift ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        --bot) BOT=1 ;;
+        --size) SIZE="$2"; shift ;;
+        --quit-after) QUIT_AFTER="$2"; shift ;;
+        --capture-dir) CAPTURE_DIR="$2"; shift ;;
+        --capture-after) CAPTURE_AFTER="$2"; shift ;;
+        --no-audio) NO_AUDIO=1 ;;
+        --debug) EXTRA_DEBUG=1 ;;
+        --) shift; EXTRA=("$@"); break ;;
+        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -73,13 +98,32 @@ echo "== server: velocide-server ${server_args[*]}"
 pids+=($!)
 sleep 0.5
 
+[[ -n "$CAPTURE_DIR" ]] && mkdir -p "$CAPTURE_DIR"
+client_pids=()
 for i in $(seq 1 "$CLIENTS"); do
-    client_args=(--connect "127.0.0.1:$PORT" --name "P$i")
+    client_args=(--connect "127.0.0.1:$PORT" --name "P$i" --windowed "$SIZE")
     [[ -n "$NETSIM" ]] && client_args+=(--netsim "$NETSIM")
+    [[ "$BOT" == 1 ]] && client_args+=(--bot)
+    [[ "$NO_AUDIO" == 1 ]] && client_args+=(--no-audio)
+    [[ "$EXTRA_DEBUG" == 1 ]] && client_args+=(--debug)
+    [[ -n "$QUIT_AFTER" ]] && client_args+=(--quit-after "$QUIT_AFTER")
+    if [[ -n "$CAPTURE_DIR" ]]; then
+        client_args+=(--capture "$CAPTURE_DIR/client$i.png" --capture-after "$CAPTURE_AFTER")
+    fi
+    client_args+=("${EXTRA[@]}")
     echo "== client $i: velocide ${client_args[*]}"
-    "$BIN/velocide" "${client_args[@]}" &
+    # Each client gets its own settings file so test runs never touch the player's settings.
+    VELOCIDE_CONFIG="${TMPDIR:-/tmp}/velocide-local-test-p$i.ron" \
+        "$BIN/velocide" "${client_args[@]}" &
     pids+=($!)
+    client_pids+=($!)
+    sleep 0.3
 done
 
-echo "== running (server on udp/$PORT). Ctrl-C to stop."
-wait "${pids[0]}"
+if [[ -n "$QUIT_AFTER" && ${#client_pids[@]} -gt 0 ]]; then
+    echo "== running for ${QUIT_AFTER}s (server on udp/$PORT)"
+    wait "${client_pids[@]}" 2>/dev/null || true
+else
+    echo "== running (server on udp/$PORT). Ctrl-C to stop."
+    wait "${pids[0]}"
+fi

@@ -165,10 +165,24 @@ pub struct ServerStats {
 #[derive(Clone, Debug)]
 pub enum ServerCommand {
     SetTuning(Box<Tuning>),
-    ApplyImpulse { player: PlayerId, impulse: Vec3 },
-    Kick { player: PlayerId, reason: String },
-    AddBot { name: String },
-    Chat { text: String },
+    ApplyImpulse {
+        player: PlayerId,
+        impulse: Vec3,
+    },
+    Kick {
+        player: PlayerId,
+        reason: String,
+    },
+    AddBot {
+        name: String,
+    },
+    Chat {
+        text: String,
+    },
+    /// Freeze / resume the simulation (single-player pause menu). The connection stays alive.
+    SetPaused(bool),
+    /// Put every player back at the level start (single-player instant restart).
+    RestartLevel,
 }
 
 struct ClientConn {
@@ -233,6 +247,9 @@ pub struct Server {
     tick_time_count: u32,
     hitbox_scratch: Vec<Hitbox>,
     empty_frame: NetFrame,
+    /// Simulation frozen (single-player pause): no ticks run, no snapshots are sent, but the
+    /// transport keeps flushing so the connection stays alive.
+    paused: bool,
 }
 
 impl Server {
@@ -285,6 +302,7 @@ impl Server {
             tick_time_count: 0,
             hitbox_scratch: Vec::new(),
             empty_frame: NetFrame::default(),
+            paused: false,
             config,
         };
         server.config.tick_rate = tick_rate;
@@ -435,6 +453,46 @@ impl Server {
                 self.add_bot(&name);
             }
             ServerCommand::Chat { text } => self.say(&text),
+            ServerCommand::SetPaused(paused) => self.set_paused(paused),
+            ServerCommand::RestartLevel => self.restart_level(),
+        }
+    }
+
+    /// Freezes or resumes the simulation (single-player pause). While paused no ticks run and
+    /// no snapshots are sent; the transport keeps flushing so the connection stays alive.
+    pub fn set_paused(&mut self, paused: bool) {
+        if self.paused == paused {
+            return;
+        }
+        self.paused = paused;
+        if !paused {
+            // Inputs stopped while paused; don't count the gap as network jitter.
+            for conn in self.clients.values_mut() {
+                conn.inputs.reset_timing();
+            }
+        }
+        log::info!("simulation {}", if paused { "paused" } else { "resumed" });
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Puts every player back at the level start and tells the clients (`Respawned`).
+    pub fn restart_level(&mut self) {
+        for event in self.world.restart_level() {
+            if let SimEvent::Respawned {
+                player,
+                position,
+                yaw,
+            } = event
+            {
+                self.broadcast(&ServerMessage::Game(GameEvent::Respawned {
+                    player,
+                    position,
+                    yaw,
+                }));
+            }
         }
     }
 
@@ -452,8 +510,10 @@ impl Server {
         self.check_tuning_reload();
 
         let ticks = self.timestep.advance(real_dt.as_secs_f64());
-        for _ in 0..ticks {
-            self.run_tick();
+        if !self.paused {
+            for _ in 0..ticks {
+                self.run_tick();
+            }
         }
         // Flush renet once per tick at most: every flush also emits an ack packet, so flushing
         // on every (sub-millisecond) host loop iteration would flood clients with acks.
