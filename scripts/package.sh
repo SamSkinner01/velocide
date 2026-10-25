@@ -70,7 +70,9 @@ run_build() {
         "$image" bash -c "$command"
 }
 
-CARGO_BUILD='cargo build --release --locked --config "profile.release.strip=\"symbols\"" -p client -p server --bin velocide --bin velocide-server'
+# Client and server are built by separate cargo invocations: built together, cargo would unify
+# the engine's features and link the renderer/audio into the headless server too.
+CARGO_FLAGS='--release --locked --config "profile.release.strip=\"symbols\""'
 
 # Copies binaries + assets + PLAY.txt into a fresh staging folder. $1 = folder, $2.. = binaries.
 stage() {
@@ -86,7 +88,8 @@ stage() {
 if [ "$WHAT" = linux ] || [ "$WHAT" = all ]; then
     build_image "velocide-build-linux:$RUST_VERSION" ubuntu:20.04 "libasound2-dev libudev-dev libdbus-1-dev" ""
     echo "==> building Linux binaries"
-    run_build "$IMAGE" dist-linux "$CARGO_BUILD"
+    run_build "$IMAGE" dist-linux \
+        "cargo build $CARGO_FLAGS -p client --bin velocide && cargo build $CARGO_FLAGS -p server --bin velocide-server"
     out="target/dist-linux/release"
     name="velocide-$VERSION-linux-x86_64"
     stage "dist/$name" "$out/velocide" "$out/velocide-server"
@@ -100,8 +103,11 @@ if [ "$WHAT" = windows ] || [ "$WHAT" = all ]; then
     echo "==> building Windows binaries"
     # LLVM's linker: GNU ld prints a spurious "corrupt .drectve" warning for the import
     # stubs rustc generates for Windows API calls.
-    run_build "$IMAGE" dist-windows \
-        "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS='-C link-arg=-fuse-ld=lld' $CARGO_BUILD --target x86_64-pc-windows-gnu"
+    run_build "$IMAGE" dist-windows "
+        export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+        export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS='-C link-arg=-fuse-ld=lld'
+        cargo build $CARGO_FLAGS --target x86_64-pc-windows-gnu -p client --bin velocide &&
+        cargo build $CARGO_FLAGS --target x86_64-pc-windows-gnu -p server --bin velocide-server"
     out="target/dist-windows/x86_64-pc-windows-gnu/release"
     name="velocide-$VERSION-windows-x86_64"
     stage "dist/$name" "$out/velocide.exe" "$out/velocide-server.exe"
