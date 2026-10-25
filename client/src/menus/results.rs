@@ -580,22 +580,17 @@ impl ResultsScreen {
         if let Some(winner) = r.players.first() {
             let a = ((age - s.start) / 0.2).clamp(0.0, 1.0) as f32;
             let pop = (1.0 - ((age - s.stamp) / 0.2).clamp(0.0, 1.0)) as f32;
-            let me = Some(winner.player) == self.local;
-            let tied = r
-                .players
-                .get(1)
-                .is_some_and(|b| b.stats.frags == winner.stats.frags);
-            let head = if tied && !me {
-                "TOP OF THE TABLE"
-            } else if me {
-                "VICTORY"
-            } else {
-                "WINNER"
-            };
+            let head = winner_headline(r, self.local);
+            let me = head == "VICTORY";
             let y = 80.0;
             let band = Rect::new(vec2(cx - 200.0, y), vec2(cx + 200.0, y + 44.0));
             draw::slanted(list, band, true, fade(t.ink, 0.65 * a));
-            let col = player_color(winner.player);
+            let draw = head == "DRAW";
+            let col = if draw {
+                t.bone_dim
+            } else {
+                player_color(winner.player)
+            };
             draw::hline(
                 list,
                 band.min.x + 20.0,
@@ -617,7 +612,11 @@ impl ResultsScreen {
             );
             if age >= s.start {
                 let scale = (3.0 + 2.0 * pop).round();
-                let name = winner.name.to_uppercase();
+                let name = if draw {
+                    "DEAD EVEN".to_string()
+                } else {
+                    winner.name.to_uppercase()
+                };
                 let y_name = y + 18.0 - (scale - 3.0) * 3.5;
                 list.text(
                     vec2(cx, y_name.round()),
@@ -863,10 +862,51 @@ fn stamp(list: &mut UiDrawList, t: &Theme, rect: Rect, g: Grade, scale: f32, sin
     list.text_in(rect, g.letter(), &style);
 }
 
+/// Deathmatch banner over the top player: VICTORY (you), WINNER, TOP OF THE TABLE (level on
+/// frags, ahead on deaths / style), or DRAW when nothing separates the top two (the order then
+/// only follows player ids, so nobody should be told they won).
+fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
+    let Some(winner) = r.players.first() else {
+        return "DRAW";
+    };
+    let second = r.players.get(1);
+    let dead_even = second.is_some_and(|b| {
+        b.stats.frags == winner.stats.frags
+            && b.stats.deaths == winner.stats.deaths
+            && b.style_points == winner.style_points
+    });
+    let tied = second.is_some_and(|b| b.stats.frags == winner.stats.frags);
+    let me = Some(winner.player) == local;
+    if dead_even {
+        "DRAW"
+    } else if me {
+        "VICTORY"
+    } else if tied {
+        "TOP OF THE TABLE"
+    } else {
+        "WINNER"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use shared::sim::{Grades, ModeRules, PlayerStats};
+
+    #[test]
+    fn a_dead_even_deathmatch_is_a_draw() {
+        let mut r = results(GameMode::Deathmatch, 3);
+        let me = Some(PlayerId(0));
+        assert_eq!(winner_headline(&r, me), "DRAW", "0 frags each, same style");
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "DRAW");
+        r.players[0].stats.deaths = 0;
+        r.players[1].stats.deaths = 2;
+        r.players[2].stats.deaths = 2;
+        assert_eq!(winner_headline(&r, me), "VICTORY", "ahead on deaths");
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "TOP OF THE TABLE");
+        r.players[0].stats.frags = 5;
+        assert_eq!(winner_headline(&r, Some(PlayerId(2))), "WINNER");
+    }
 
     fn results(kind: GameMode, players: usize) -> MatchResults {
         MatchResults {

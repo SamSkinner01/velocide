@@ -232,7 +232,7 @@ Enter / Esc / click skips the reveal; the buttons appear when it's done.
 * **Co-op campaign**: team line (time, par, kills %), one row per player (kills, style, damage,
   deaths, revives, the four small grades T K S D, overall), LEFT BEHIND tags, TEAM RANK stamp.
 * **Deathmatch**: MATCH OVER + level and reason, winner banner in the winner's colour (VICTORY
-  for you), standings (#, frags — negative in red —, deaths, best rank in its colour, style),
+  for you; DRAW / DEAD EVEN when frags, deaths and style are all level), standings (#, frags — negative in red —, deaths, best rank in its colour, style),
   rows revealed one by one.
 
 `LevelComplete` (campaign) / `MatchEnd` (deathmatch) play when the results arrive and the music
