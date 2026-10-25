@@ -5,12 +5,16 @@
 //!                 [--mode campaign|deathmatch] [--frag-limit 20] [--time-limit 600]
 //!                 [--friendly-fire] [--autostart] [--no-lobby]
 //!                 [--tick-rate 60] [--snapshot-rate 30] [--netsim 100,20,2] [--tuning PATH]
-//!                 [--no-watch] [--no-delta] [--name NAME]
+//!                 [--no-watch] [--no-delta] [--name NAME] [--dev-commands]
 //! ```
 //!
 //! The server starts in the lobby (docs/lobby.md): the first player to join is the host and
 //! starts the match from their lobby screen (the role passes on when they leave). With
 //! `--autostart` the match starts by itself once every connected player is ready.
+//!
+//! Dev chat commands (`/god`, `/spawn`, `/tp`...) are off on dedicated servers unless
+//! `--dev-commands` is given; then only the lobby host may use them (everyone with
+//! `--no-lobby`).
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -44,11 +48,15 @@ OPTIONS:
     --no-watch               don't watch the tuning file
     --no-delta               disable snapshot delta compression (bandwidth testing)
     --name <NAME>            server name
+    --dev-commands           allow dev chat commands (/god, /spawn, /tp...) for the lobby
+                             host (for everyone with --no-lobby); off by default
     -h, --help               print this help";
 
 fn parse_args() -> Result<ServerConfig, String> {
     let mut config = ServerConfig {
         lobby: LobbyConfig::enabled(),
+        // Opt-in on dedicated servers (`--dev-commands`).
+        dev_commands: false,
         ..Default::default()
     };
     let mut mode: Option<GameMode> = None;
@@ -113,6 +121,7 @@ fn parse_args() -> Result<ServerConfig, String> {
             "--no-watch" => config.watch_tuning = false,
             "--no-delta" => config.delta_compression = false,
             "--name" => config.server_name = value("--name")?,
+            "--dev-commands" => config.dev_commands = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -163,6 +172,12 @@ fn main() {
         shared::GAME_NAME,
         config.server_name
     );
+    if config.dev_commands {
+        log::warn!(
+            "dev chat commands enabled ({})",
+            if config.lobby.enabled { "lobby host only" } else { "every player: no lobby" }
+        );
+    }
 
     let mut server = match Server::new(config) {
         Ok(s) => s,

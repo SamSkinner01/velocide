@@ -714,7 +714,10 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
 
 #[test]
 fn dev_chat_commands() {
-    let mut n = Net::new(config());
+    let mut n = Net::new(ServerConfig {
+        dev_commands: true,
+        ..config()
+    });
     let a = n.add("Dev", None);
     n.wait_in_game();
     let id = n.clients[a].id();
@@ -727,7 +730,8 @@ fn dev_chat_commands() {
         "/bogus",
     ] {
         n.clients[a].net.send_chat(cmd);
-        n.run(0.2, &mut |_, _| Some(idle(0.0)));
+        // Commands share chat's rate limit (burst 5, then 1/s).
+        n.run(0.5, &mut |_, _| Some(idle(0.0)));
     }
     let replies: Vec<String> = n.clients[a]
         .events

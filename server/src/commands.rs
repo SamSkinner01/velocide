@@ -1,5 +1,9 @@
 //! Dev chat commands (`ServerConfig::dev_commands`): any chat message starting with `/` is a
-//! command for the sender; the reply comes back as a server chat line to them only.
+//! command for the sender; the reply comes back as a server chat line to them only. Who may
+//! use them: single-player, the host of a listen server (never guests), and on dedicated
+//! servers started with `--dev-commands` the lobby host (everyone with `--no-lobby`). Each
+//! command costs a chat token (chat's rate limit). Elsewhere `/...` is answered with a
+//! refusal and never broadcast.
 //!
 //! | command | effect |
 //! |---|---|

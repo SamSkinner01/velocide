@@ -674,7 +674,10 @@ fn last_server_line(c: &TestClient) -> Option<String> {
 
 #[test]
 fn dev_commands_are_host_only_and_teleports_work() {
-    let mut h = Harness::new(lobby_config(Some(TOKEN)));
+    // A listen server (`ServerConfig::host` turns dev commands on).
+    let mut config = lobby_config(Some(TOKEN));
+    config.dev_commands = true;
+    let mut h = Harness::new(config);
     let host = h.add_client_with(host_client("Host"), script_idle);
     let guest = h.add_client("Guest", None, script_idle);
     wait_lobby(&mut h, 2);

@@ -52,7 +52,10 @@ cargo run -p server --release --bin velocide-server -- --mode campaign --level c
 ```
 
 On a dedicated server, the first player to join becomes the lobby host. With `--autostart`, the
-match starts as soon as everyone is ready. `--help` lists every flag.
+match starts as soon as everyone is ready. Dev chat commands (`/god`, `/spawn`, `/tp`...) are
+off on dedicated servers; `--dev-commands` turns them on for the lobby host only. In
+single-player they are always available, and on a listen server only the host can use them.
+`--help` lists every flag.
 
 ## Controls (rebindable in Settings → Controls)
 
