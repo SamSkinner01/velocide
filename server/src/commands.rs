@@ -16,7 +16,8 @@
 //! | `/kill` | kills you (respawn rule applies) |
 //! | `/ff [on/off]` | PvP damage between players |
 //! | `/hurt <amount>` | damages you (test hard damage / healing) |
-//! | `/orb [distance]` | a parryable Spitter orb flies at you from in front (parry practice) |
+//! | `/needle [distance]` (alias `/orb`) | a slow parryable Heron needle flies at you from in front (parry practice) |
+//! | `/ember [distance]` | a Censer ember bomb is lobbed onto you from in front (parry practice) |
 //! | `/encounter <n>` | starts arena encounter n (1-based; stragglers incl. you go to its rally point) |
 //! | `/encounters` | encounter states (docs/enemies.md) |
 //! | `/tp <x> <y> <z>` | teleports you to that point (feet) |
@@ -30,7 +31,7 @@ use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /orb [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>";
+const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>";
 
 impl Server {
     /// Runs one dev command for `player`; returns the reply.
@@ -111,7 +112,7 @@ impl Server {
                 }
                 None => "no body".into(),
             },
-            "orb" => {
+            "needle" | "orb" | "ember" => {
                 let dist = args
                     .first()
                     .and_then(|a| a.parse::<f32>().ok())
@@ -121,25 +122,38 @@ impl Server {
                     return "no body".into();
                 };
                 let eye = p.movement.eye_position(&tuning.movement);
-                let from = eye + look_dir(p.yaw, 0.0) * dist;
-                let speed = 22.0;
+                let feet = p.movement.position;
+                let ember = cmd == "ember";
+                let (kind, attack, from, velocity, damage) = if ember {
+                    // Lobbed from a Censer's height onto your feet.
+                    let from = feet + look_dir(p.yaw, 0.0) * dist + Vec3::Y * 3.0;
+                    let g = ProjectileKind::EmberBomb.gravity(&tuning.combat);
+                    let (v, _) = shared::sim::lob_velocity(from, feet + Vec3::Y * 0.3, g, 26.0);
+                    (ProjectileKind::EmberBomb, (kind::CENSER, 1), from, v, 18.0)
+                } else {
+                    // A needle slowed to 22 m/s so there is time to read it.
+                    let from = eye + look_dir(p.yaw, 0.0) * dist;
+                    let v = (eye - from).normalize_or(Vec3::Z) * 22.0;
+                    (ProjectileKind::Needle, (kind::HERON, 1), from, v, 20.0)
+                };
                 // A phantom enemy owns it (RETURN TO SENDER has nobody to hit).
                 let spawned = self.world.alloc_net_id().and_then(|owner| {
                     self.world.spawn_enemy_projectile(
                         &tuning,
-                        ProjectileKind::SpitterOrb,
+                        kind,
                         owner,
                         Attack::Enemy {
-                            kind: kind::SPITTER,
-                            attack: 0,
+                            kind: attack.0,
+                            attack: attack.1,
                         },
                         from,
-                        (eye - from).normalize_or(Vec3::Z) * speed,
-                        20.0,
+                        velocity,
+                        damage,
                     )
                 });
                 match spawned {
-                    Some(_) => format!("orb incoming from {dist:.0} m"),
+                    Some(_) if ember => format!("ember bomb incoming from {dist:.0} m"),
+                    Some(_) => format!("needle incoming from {dist:.0} m"),
                     None => "too many projectiles in flight".into(),
                 }
             }

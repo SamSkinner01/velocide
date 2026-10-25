@@ -27,7 +27,7 @@ fn st() -> StyleTuning {
 fn kill(flags: DamageFlags, attack: Attack) -> KillInfo {
     KillInfo {
         victim: HitTarget::Entity(shared::protocol::NetId(2000)),
-        victim_kind: kind::HUSK,
+        victim_kind: kind::GNAWER,
         killer: Owner::Player(PlayerId(0)),
         attack,
         flags,
@@ -89,7 +89,7 @@ fn every_kill_bonus_has_its_trigger() {
     let mut rts = kill(
         DamageFlags::PROJECTILE | DamageFlags::PARRIED,
         Attack::Enemy {
-            kind: kind::SPITTER,
+            kind: kind::CENSER,
             attack: 0,
         },
     );
@@ -404,10 +404,10 @@ fn parries_score_and_meter_decays_back_down() {
         .world
         .spawn_enemy_projectile(
             &t,
-            shared::sim::ProjectileKind::SpitterOrb,
+            shared::sim::ProjectileKind::Needle,
             h[0],
             Attack::Enemy {
-                kind: kind::HUSK,
+                kind: kind::HERON,
                 attack: 0,
             },
             Vec3::new(0.0, 1.4, -20.0),

@@ -1,6 +1,7 @@
-//! Combat replication: trajectory-replicated projectiles/prisms reproduce the server position,
-//! a crowded frame stays small in deltas, own state / events survive bincode, and
-//! `assets/tuning.ron` spells out every combat value equal to the defaults.
+//! Combat replication: trajectory-replicated projectiles/prisms (ember bombs and needles too)
+//! reproduce the server position, the Heron's aim laser survives the wire precisely, a crowded
+//! frame stays small in deltas, own state / events survive bincode, and `assets/tuning.ron`
+//! spells out every combat value equal to the defaults.
 
 mod combat_support;
 
@@ -82,6 +83,64 @@ fn trajectories_reproduce_server_positions() {
         }
     }
     assert!(max_err < 0.02, "trajectory error {max_err} m");
+}
+
+#[test]
+fn ember_bombs_and_needles_replicate_by_trajectory() {
+    let mut a = Arena::coop();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    a.world.players.get_mut(&p).unwrap().combat.god = true;
+    a.world.spawn_enemy("censer", Vec3::new(-4.0, 0.0, -24.0), 0.0).unwrap();
+    a.world.spawn_enemy("heron", Vec3::new(6.0, 0.0, -34.0), 0.0).unwrap();
+    let mut checked = std::collections::BTreeMap::new();
+    for _ in 0..(8 * 60) {
+        a.tick();
+        let now = a.world.tick as f64;
+        let ids: Vec<_> = a.world.projectiles.keys().copied().collect();
+        for id in ids {
+            let pr = &a.world.projectiles[&id];
+            if pr.pending.is_some() || pr.parried {
+                continue;
+            }
+            let (kind, pos) = (pr.kind, pr.position);
+            let e = frame_state(&a, id);
+            assert!(e.flags & projectile_flags::ENEMY != 0, "{kind:?} flagged as an enemy's");
+            let predicted = replicated_position(&e, now, 60, &a.tuning.combat);
+            let err = predicted.distance(pos);
+            assert!(err < 0.02, "{kind:?}: trajectory error {err} m");
+            *checked.entry(e.kind).or_insert(0) += 1;
+        }
+    }
+    println!("checked trajectory samples per kind: {checked:?}");
+    assert!(checked.get(&kind::EMBER_BOMB).is_some_and(|n| *n > 20), "ember bombs");
+    assert!(checked.contains_key(&kind::NEEDLE), "needles");
+}
+
+#[test]
+fn heron_aim_laser_survives_the_wire() {
+    let mut a = Arena::coop();
+    let p = a.player(0, Vec3::new(3.0, 0.0, 0.0), 0.0);
+    a.world.players.get_mut(&p).unwrap().combat.god = true;
+    let heron = a.world.spawn_enemy("heron", Vec3::new(0.0, 0.0, -36.0), 0.0).unwrap();
+    let mut samples = 0;
+    for _ in 0..(6 * 60) {
+        a.tick();
+        let mut frame = NetFrame::new();
+        a.world.replicate(&a.tuning, &mut frame);
+        let wire = shared::protocol::decode_delta(&NetFrame::new(), &encode_full(&frame))
+            .expect("decodes");
+        let e = wire.get(heron).expect("replicated");
+        let aiming = e.flags & protocol::enemy_flags::AIMING != 0;
+        assert_eq!(aiming, a.world.enemies[&heron].aiming());
+        if aiming {
+            let aim = a.world.enemies[&heron].aim;
+            let drawn = shared::input::look_dir(e.yaw, e.pitch);
+            let err = drawn.angle_between(aim);
+            assert!(err < 2e-4, "laser drawn {:.4} degrees off the aim", err.to_degrees());
+            samples += 1;
+        }
+    }
+    assert!(samples > 60, "{samples} aiming frames");
 }
 
 #[test]

@@ -12,8 +12,13 @@
 //!   guard never steps onto it;
 //! * a **hazard** when a kill volume is within ~1.25 m (sideways, or a short drop away): walkable
 //!   but expensive, so paths keep away from lava edges;
-//! * **large** ([`node_flags::LARGE`], Bastion-sized agents) when it and all 8 neighbours are
-//!   walkable at about the same height and the headroom is ≥ [`LARGE_HEADROOM`].
+//! * **large** ([`node_flags::LARGE`], wide agents: the Gaoler) when it and all 8 neighbours
+//!   are walkable at about the same height and the neighbours have ≥ [`WIDE_SHOULDER_HEADROOM`].
+//!
+//! Every floor also records its **headroom** (free height above it). An agent class
+//! ([`NavClass`]) is a footprint (narrow: the node itself; wide: the `LARGE` 3×3 block) plus
+//! the headroom it needs, so tall-but-thin agents (Censer 2.5 m, Heron 3.4 m) only refuse low
+//! ceilings while the 3.7 m Gaoler needs both room around it and above it.
 //!
 //! Neighbouring walkable nodes are **linked** (8 directions) when the step up is ≤ [`STEP_UP`]
 //! (or a continuous ramp up to ~50°), the drop is ≤ [`MAX_DROP`] (one-way: enemies can jump
@@ -46,11 +51,17 @@ pub const STEP_UP: f32 = 0.45;
 pub const MAX_DROP: f32 = 5.5;
 /// Steepest walkable floor: normal.y ≥ cos(50°).
 const MIN_FLOOR_NORMAL_Y: f32 = 0.64;
-/// Clearance capsule of "small" agents (Husk, Spitter).
+/// Clearance capsule every walkable floor fits (the narrow footprint). Agents up to
+/// [`NARROW_RADIUS`] use it: collide-and-slide copes with the extra 0.1–0.2 m on a 1 m grid.
 pub const SMALL_RADIUS: f32 = 0.5;
 pub const SMALL_HEIGHT: f32 = 2.0;
-/// Headroom "large" agents (Bastion) need.
-pub const LARGE_HEADROOM: f32 = 3.4;
+/// Widest agent that uses the narrow (single node) footprint (Gnawer, Censer: 0.6).
+pub const NARROW_RADIUS: f32 = 0.7;
+/// Headroom the 8 neighbours of a `LARGE` node need: a wide agent's shoulders (Gaoler: its
+/// r 1.3 capsule is 3.2 m tall 1 m from its axis).
+pub const WIDE_SHOULDER_HEADROOM: f32 = 3.3;
+/// Headroom a node's own column needs on top of the agent's height.
+pub const HEADROOM_MARGIN: f32 = 0.1;
 /// Kill volumes closer than this (sideways) make a node a hazard.
 const HAZARD_DISTANCE: f32 = 1.25;
 /// Extra path cost of a hazard node (metres).
@@ -82,9 +93,9 @@ fn dir_index(dx: i32, dz: i32) -> Option<usize> {
 
 /// [`NavNode::flags`].
 pub mod node_flags {
-    /// Walkable for small agents (r ≤ 0.6, h ≤ 2.1).
+    /// Walkable for the narrow footprint (an r 0.5 capsule up to 2 m fits).
     pub const SMALL: u8 = 1 << 0;
-    /// Walkable for large agents (Bastion).
+    /// Walkable for the wide footprint (the Gaoler): the 3×3 block around it is walkable.
     pub const LARGE: u8 = 1 << 1;
     /// Next to a kill volume (walkable, expensive).
     pub const HAZARD: u8 = 1 << 2;
@@ -92,28 +103,50 @@ pub mod node_flags {
     pub const DEADLY: u8 = 1 << 3;
 }
 
-/// Agent size class.
+/// Agent size class: a footprint plus the headroom it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NavClass {
-    Small,
-    Large,
+pub struct NavClass {
+    /// Needs the wide footprint ([`node_flags::LARGE`]) instead of a single node.
+    pub wide: bool,
+    /// Free height needed above the floor (decimetres); 0 = what the `SMALL` clearance
+    /// capsule guarantees (2 m) is enough.
+    pub headroom_dm: u8,
 }
 
 impl NavClass {
+    /// Up to r 0.7 × 2.1 m (the Gnawer).
+    pub const SMALL: NavClass = NavClass {
+        wide: false,
+        headroom_dm: 0,
+    };
+    /// The Gaoler (r 1.3 × 3.7 m).
+    pub const LARGE: NavClass = NavClass {
+        wide: true,
+        headroom_dm: 38,
+    };
+
     /// The class an enemy capsule of this size needs.
     pub fn for_size(radius: f32, height: f32) -> NavClass {
-        if radius <= SMALL_RADIUS + 0.1 && height <= SMALL_HEIGHT + 0.1 {
-            NavClass::Small
+        let wide = radius > NARROW_RADIUS;
+        let headroom_dm = if !wide && height <= SMALL_HEIGHT + HEADROOM_MARGIN {
+            0
         } else {
-            NavClass::Large
-        }
+            ((height + HEADROOM_MARGIN) * 10.0).ceil().clamp(0.0, 60.0) as u8
+        };
+        NavClass { wide, headroom_dm }
     }
 
     pub fn flag(self) -> u8 {
-        match self {
-            NavClass::Small => node_flags::SMALL,
-            NavClass::Large => node_flags::LARGE,
+        if self.wide {
+            node_flags::LARGE
+        } else {
+            node_flags::SMALL
         }
+    }
+
+    /// Headroom needed above a node (metres).
+    pub fn headroom(self) -> f32 {
+        self.headroom_dm as f32 * 0.1
     }
 }
 
@@ -486,16 +519,17 @@ impl NavGrid {
             }
         }
 
-        // 5. Large agents: walkable all around at about the same height, with headroom.
+        // 5. Wide footprint: walkable all around at about the same height, with shoulder room
+        //    (the class's own headroom is checked on the node itself, see `passable`).
         let mut large = Vec::new();
         for (n, node) in grid.nodes.iter().enumerate() {
-            if !node.is(node_flags::SMALL) || node.headroom < LARGE_HEADROOM {
+            if !node.is(node_flags::SMALL) || node.headroom < WIDE_SHOULDER_HEADROOM {
                 continue;
             }
             let ok = node.links.iter().all(|&m| {
                 m != NONE && {
                     let o = &grid.nodes[m as usize];
-                    (o.pos.y - node.pos.y).abs() <= 0.6 && o.headroom >= LARGE_HEADROOM - 0.4
+                    (o.pos.y - node.pos.y).abs() <= 0.6 && o.headroom >= WIDE_SHOULDER_HEADROOM
                 }
             });
             if ok {
@@ -626,10 +660,11 @@ impl NavGrid {
         self.column_index(i, j)
     }
 
-    /// Can `class` stand on node `n` with the doors as given?
+    /// Can `class` stand on node `n` (footprint and headroom) with the doors as given?
     pub fn passable(&self, n: u32, class: NavClass, doors_open: &[bool]) -> bool {
         let node = &self.nodes[n as usize];
         node.is(class.flag())
+            && (class.headroom_dm == 0 || node.headroom >= class.headroom())
             && (node.door == 0 || doors_open.get(node.door as usize - 1).copied().unwrap_or(true))
     }
 
@@ -931,11 +966,11 @@ mod tests {
         };
         let g = grid(&level);
         let open = [];
-        let a = g.node_at(Vec3::new(0.0, 0.0, -5.0), 1.0, NavClass::Small, &open).unwrap();
-        let b = g.node_at(Vec3::new(0.0, 0.0, 5.0), 1.0, NavClass::Small, &open).unwrap();
-        assert!(!g.walkable_line(a, b, NavClass::Small, &open), "the wall is in the way");
+        let a = g.node_at(Vec3::new(0.0, 0.0, -5.0), 1.0, NavClass::SMALL, &open).unwrap();
+        let b = g.node_at(Vec3::new(0.0, 0.0, 5.0), 1.0, NavClass::SMALL, &open).unwrap();
+        assert!(!g.walkable_line(a, b, NavClass::SMALL, &open), "the wall is in the way");
         let mut s = NavScratch::default();
-        let PathResult::Found(path) = g.find_path(&mut s, a, b, NavClass::Small, &open, 10_000)
+        let PathResult::Found(path) = g.find_path(&mut s, a, b, NavClass::SMALL, &open, 10_000)
         else {
             panic!("no path around the wall");
         };
@@ -943,14 +978,14 @@ mod tests {
             path.iter().any(|&n| g.nodes[n as usize].pos.x > 6.0),
             "goes through the gap"
         );
-        let smooth = g.smooth(&path, NavClass::Small, &open);
+        let smooth = g.smooth(&path, NavClass::SMALL, &open);
         assert!(smooth.len() < path.len() / 2, "{} waypoints", smooth.len());
         // Nothing walkable on top of the 3 m wall is linked to the floor.
-        let top = g.node_at(Vec3::new(0.0, 3.0, 0.0), 0.5, NavClass::Small, &open);
+        let top = g.node_at(Vec3::new(0.0, 3.0, 0.0), 0.5, NavClass::SMALL, &open);
         if let Some(top) = top {
             assert!(g.nodes[top as usize].pos.y > 2.9);
             assert!(!matches!(
-                g.find_path(&mut s, a, top, NavClass::Small, &open, 10_000),
+                g.find_path(&mut s, a, top, NavClass::SMALL, &open, 10_000),
                 PathResult::Found(_)
             ));
         }
@@ -976,11 +1011,11 @@ mod tests {
         };
         let g = grid(&level);
         let open = [];
-        let low = g.node_at(Vec3::new(8.0, 0.0, 10.0), 1.0, NavClass::Small, &open).unwrap();
-        let high = g.node_at(Vec3::new(0.0, 3.0, -10.0), 1.0, NavClass::Small, &open).unwrap();
+        let low = g.node_at(Vec3::new(8.0, 0.0, 10.0), 1.0, NavClass::SMALL, &open).unwrap();
+        let high = g.node_at(Vec3::new(0.0, 3.0, -10.0), 1.0, NavClass::SMALL, &open).unwrap();
         assert!((g.nodes[high as usize].pos.y - 3.0).abs() < 0.01);
         let mut s = NavScratch::default();
-        let PathResult::Found(up) = g.find_path(&mut s, low, high, NavClass::Small, &open, 20_000)
+        let PathResult::Found(up) = g.find_path(&mut s, low, high, NavClass::SMALL, &open, 20_000)
         else {
             panic!("platform reachable by the ramp");
         };
@@ -993,10 +1028,59 @@ mod tests {
         }
         // Coming down may drop off the 3 m edge (one-way link).
         let PathResult::Found(down) =
-            g.find_path(&mut s, high, low, NavClass::Small, &open, 20_000)
+            g.find_path(&mut s, high, low, NavClass::SMALL, &open, 20_000)
         else {
             panic!("can come down");
         };
         assert!(down.len() <= up.len());
+    }
+
+    #[test]
+    fn classes_need_their_headroom_and_footprint() {
+        // A 3 m high tunnel (2.95 m of headroom) through a wall, and a 6 m wide open gap.
+        let level = LevelDef {
+            brushes: vec![
+                brush([-20.0, -1.0, -20.0], [20.0, 0.0, 20.0]),
+                // Wall across z ~0.3 from x -20..-2 and 4..20 (gap 6 m wide at x -2..4)...
+                brush([-20.0, 0.0, -0.2], [-2.0, 6.0, 0.8]),
+                brush([4.0, 0.0, -0.2], [20.0, 6.0, 0.8]),
+                // ...with a 3 m high lintel over the gap's left half (x -2..1).
+                brush([-2.0, 2.95, -0.2], [1.0, 6.0, 0.8]),
+            ],
+            ..Default::default()
+        };
+        let g = grid(&level);
+        let open = [];
+        let gnawer = NavClass::for_size(0.6, 2.0);
+        let censer = NavClass::for_size(0.6, 2.5);
+        let heron = NavClass::for_size(0.5, 3.4);
+        let gaoler = NavClass::for_size(1.3, 3.7);
+        assert_eq!(gnawer, NavClass::SMALL);
+        assert_eq!(gaoler, NavClass::LARGE);
+        assert!(!censer.wide && censer.headroom_dm == 26);
+        assert!(!heron.wide && heron.headroom_dm == 35);
+        let under = g.node_at(Vec3::new(-0.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open).unwrap();
+        assert!(g.passable(under, gnawer, &open));
+        assert!(g.passable(under, censer, &open), "2.5 m fits under 2.95 m");
+        assert!(!g.passable(under, heron, &open), "3.4 m does not");
+        let open_gap = g.node_at(Vec3::new(2.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open).unwrap();
+        assert!(g.passable(open_gap, heron, &open));
+        // The Gaoler needs room around it too: the middle of a 6 m field is fine, a node next
+        // to the wall is not.
+        let field = g.node_at(Vec3::new(0.5, 0.0, 10.5), 0.5, NavClass::SMALL, &open).unwrap();
+        assert!(g.passable(field, gaoler, &open));
+        let by_wall = g.node_at(Vec3::new(10.5, 0.0, 1.5), 0.5, NavClass::SMALL, &open).unwrap();
+        assert!(g.passable(by_wall, gnawer, &open) && !g.passable(by_wall, gaoler, &open));
+        // Paths: a Heron goes through the open half of the gap, never under the lintel.
+        let mut s = NavScratch::default();
+        let a = g.node_at(Vec3::new(-0.5, 0.0, -8.0), 0.5, NavClass::SMALL, &open).unwrap();
+        let b = g.node_at(Vec3::new(-0.5, 0.0, 8.0), 0.5, NavClass::SMALL, &open).unwrap();
+        let PathResult::Found(p) = g.find_path(&mut s, a, b, heron, &open, 20_000) else {
+            panic!("heron path");
+        };
+        for n in &p {
+            let node = &g.nodes[*n as usize];
+            assert!(node.headroom >= 3.5, "heron under the lintel at {}", node.pos);
+        }
     }
 }

@@ -111,7 +111,7 @@ pub struct ServerConfig {
     /// `level` then runs immediately. `max_players` is the initial player limit (the lobby
     /// host can change it up to `shared::lobby::MAX_PLAYERS`).
     pub lobby: LobbyConfig,
-    /// Allow dev chat commands (`/spawn husk 3`, `/god`, `/give`...). See `docs/combat.md`.
+    /// Allow dev chat commands (`/spawn gnawer 3`, `/god`, `/give`...). See `docs/combat.md`.
     /// Off by default: on for single-player and listen servers ([`ServerConfig::single_player`],
     /// [`ServerConfig::host`]); dedicated servers opt in with `--dev-commands`. With the lobby
     /// enabled only its host may use them (on a listen server: the player whose client

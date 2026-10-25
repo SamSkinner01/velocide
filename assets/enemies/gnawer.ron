@@ -1,22 +1,28 @@
-// PLACEHOLDER (roster contract stub): final name, net kind, size and weak points from
-// docs/roster.md; attacks and model are borrowed from the old Husk until the enemies
-// work replaces this file.
+// Gnawer: fodder melee, a pack crawler (docs/roster.md). A hunched Mould that runs on its
+// oversized fists, grey wax-flesh over a caged ribcage, a huge under-slung jaw of brass teeth.
+// It knuckle-runs at the nearest player and bites (the jaw unhinges, the throat glows orange);
+// players who run from it get pounced on (a crouch, then a leaping arc that rakes whoever it
+// reaches). The big low head is the weak point.
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md.
+// Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up, -Z forward, from the feet.
+// This file is also compiled into the game as the built-in Gnawer (tests use that copy).
 (
     name: "Gnawer",
     net_kind: 20,
-    model: "husk",
+    model: "gnawer",
     health: 45.0,
     speed: 10.0,
     acceleration: 60.0,
     turn_rate: 600.0,
     radius: 0.6,
     height: 2.0,
-    // The body hitbox stops at the shoulders; the head sphere sits on top of it.
-    body_top: Some(1.45),
-    eye_height: 1.6,
+    // The body hitbox stops at the hunched shoulders; the head juts out in front of them.
+    body_top: Some(1.55),
+    eye_height: 1.65,
     step_height: 0.45,
     locomotion: Ground,
-    knockback_scale: 1.3,
+    knockback_scale: 1.25,
     weak_points: [
         (name: "head", kind: Head, offset: (0.0, 1.62, -0.38), radius: 0.38, multiplier: 2.0),
     ],
@@ -25,36 +31,37 @@
         (
             name: "bite",
             kind: Melee,
-            range: 2.2,
-            arc: 120.0,
-            damage: 15.0,
+            range: 2.6,
+            arc: 100.0,
+            damage: 14.0,
             knockback: 7.0,
-            windup: 0.45,
+            windup: 0.4,
             strike: 0.12,
-            recover: 0.45,
+            recover: 0.4,
             cooldown: 0.5,
-            windup_move_scale: 0.2,
+            windup_move_scale: 0.25,
             track_target: true,
-            parry_window: None,
         ),
-        // Gap closer: only against targets moving faster than 5 m/s (fleeing / strafing).
+        // Gap closer against targets moving faster than 4 m/s, 3-9 m away (centre to centre;
+        // ranges here are between body surfaces): crouch, then leap 13 m/s forward + 6 m/s up.
         (
             name: "pounce",
             kind: Melee,
-            range: 6.5,
-            min_range: 2.8,
-            arc: 100.0,
-            damage: 15.0,
+            range: 8.0,
+            min_range: 2.0,
+            arc: 110.0,
+            damage: 18.0,
             knockback: 9.0,
-            windup: 0.5,
-            strike: 0.4,
-            recover: 0.6,
-            cooldown: 2.5,
+            windup: 0.55,
+            // The leap and the follow-through run: ~9 m.
+            strike: 0.7,
+            recover: 0.7,
+            cooldown: 3.0,
             windup_move_scale: 0.0,
             track_target: true,
-            parry_window: None,
-            lunge: 14.0,
-            min_target_speed: 5.0,
+            lunge: 13.0,
+            lunge_up: 6.0,
+            min_target_speed: 4.0,
         ),
     ],
     ai: (
@@ -70,11 +77,11 @@
     ),
     drops: (blood_pool: 25.0, blood_radius: 4.5),
     colors: (
-        body: (0.55, 0.47, 0.42),
-        accent: (0.32, 0.08, 0.07),
-        glow: (1.0, 0.25, 0.12),
-        telegraph: (1.0, 0.08, 0.04),
+        body: (0.66, 0.63, 0.57),
+        accent: (0.7, 0.5, 0.2),
+        glow: (1.0, 0.5, 0.1),
+        telegraph: (1.0, 0.38, 0.04),
         parry: (1.0, 0.9, 0.1),
     ),
-    death_time: 0.6,
+    death_time: 0.9,
 )

@@ -1,73 +1,96 @@
-// PLACEHOLDER (roster contract stub): final name, net kind, size and weak points from
-// docs/roster.md; attacks and model are borrowed from the old Spitter until the enemies
-// work replaces this file.
+// Heron: the sniper (docs/roster.md). A 3.4 m stilt-legged wading-bird Mould: thin brass legs,
+// a narrow body, a long neck and a single lens-eye head that stands above most cover (the weak
+// point). It keeps 25-45 m from its target and repositions after every shot.
+//
+// * Needle: a 1.3 s wind-up with a red aim laser from the lens that every client draws from
+//   the replicated aim; the aim follows the target until the last 0.25 s, then locks (dash
+//   sideways now). One needle at 110 m/s, 30 damage, parryable. Needs line of sight.
+// * Kick (players inside ~4 m): a stilt kick that sends them back out.
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md.
+// Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up, -Z forward, from the feet.
+// This file is also compiled into the game as the built-in Heron (tests use that copy).
 (
     name: "Heron",
     net_kind: 24,
-    model: "spitter",
+    model: "heron",
     health: 60.0,
     speed: 7.0,
-    acceleration: 40.0,
-    turn_rate: 360.0,
+    acceleration: 35.0,
+    turn_rate: 300.0,
     radius: 0.5,
     height: 3.4,
-    // Body hitbox up to the shoulders; the head sphere sits on top.
-    body_top: Some(2.6),
-    eye_height: 3.1,
+    // The body hitbox covers the legs and body; neck and lens-head sit above it.
+    body_top: Some(2.75),
+    eye_height: 3.12,
     step_height: 0.45,
     locomotion: Ground,
-    knockback_scale: 1.1,
+    knockback_scale: 0.9,
     weak_points: [
         (name: "head", kind: Head, offset: (0.0, 3.12, -0.4), radius: 0.35, multiplier: 2.5),
     ],
     armour: None,
     attacks: [
         (
+            name: "kick",
+            kind: Melee,
+            range: 3.1,
+            arc: 120.0,
+            damage: 15.0,
+            knockback: 16.0,
+            knockback_up: 0.3,
+            windup: 0.4,
+            strike: 0.15,
+            recover: 0.45,
+            cooldown: 1.2,
+            windup_move_scale: 0.0,
+            track_target: true,
+        ),
+        (
             name: "needle",
             kind: Projectile,
-            // Centre-to-centre distance; it also spits at players who rush it.
-            range: 60.0,
+            range: 80.0,
             min_range: 0.0,
             damage: 30.0,
             knockback: 0.0,
             windup: 1.3,
-            strike: 0.15,
-            recover: 0.45,
+            strike: 0.1,
+            recover: 0.4,
             cooldown: 3.5,
             windup_move_scale: 0.0,
             track_target: true,
-            parry_window: None,
+            // Muzzle = the lens (the head weak point's centre, a little in front of it).
             projectile: Some((
-                kind: GnatBolt,
+                kind: Needle,
                 speed: 110.0,
                 count: 1,
                 interval: 0.1,
                 spread: 0.0,
-                // The maw.
-                muzzle: (0.0, 3.12, -0.6),
-                // "Leads the target slightly".
-                lead: 0.35,
+                muzzle: (0.0, 3.12, -0.62),
+                lead: 0.0,
             )),
+            laser: Some((lock: 0.25, track_rate: 120.0, lead: 0.0)),
         ),
     ],
     ai: (
         sight_range: 80.0,
-        reaction_time: 0.45,
-        lose_target_time: 5.0,
+        reaction_time: 0.5,
+        lose_target_time: 6.0,
         preferred_range: Some((25.0, 45.0)),
         strafe: true,
-        target_stickiness: 0.6,
+        target_stickiness: 0.7,
         aggro_switch_fraction: 0.3,
-        retarget_interval: 0.3,
+        retarget_interval: 0.4,
         repath_interval: 0.8,
+        reposition: true,
     ),
     drops: (blood_pool: 30.0, blood_radius: 4.5),
     colors: (
-        body: (0.42, 0.5, 0.3),
-        accent: (0.25, 0.3, 0.12),
-        glow: (0.6, 1.0, 0.2),
-        telegraph: (0.7, 1.0, 0.15),
+        body: (0.6, 0.58, 0.54),
+        accent: (0.72, 0.55, 0.25),
+        glow: (1.0, 0.2, 0.1),
+        telegraph: (1.0, 0.08, 0.06),
         parry: (1.0, 0.9, 0.1),
     ),
-    death_time: 0.7,
+    death_time: 1.1,
 )

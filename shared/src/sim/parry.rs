@@ -26,11 +26,14 @@
 //! when `combat.parry_compensate_view_lag`). A valid parry arriving inside that delay cancels
 //! the damage; after it the hit is applied and the parry is too late.
 //!
-//! **Melee parry hook** (telegraphed enemy attacks, e.g. the Bastion slam): an enemy attack
-//! with `parry_window` publishes the tick range of its parryable phase. A punch whose view time
-//! falls inside that range, with the enemy (rewound) within `melee_parry_range`, stuns it for
-//! the attack's `parry_stun` and deals its `parry_damage`; if the strike already landed, its
-//! damage is still pending (delayed like projectiles) and gets cancelled.
+//! **Melee parry hook** (telegraphed enemy attacks: the Gaoler's shield bash, a diving
+//! Harrier): an enemy attack with `parry_window` (the end of its wind-up) or `parry_strike`
+//! (the whole strike: the Harrier's Swat) publishes the tick range of its parryable phase. A
+//! punch whose view time falls inside that range, with the enemy (rewound) within the
+//! attack's `parry_reach` (default `melee_parry_range`) of the eye beyond its radius, stuns it
+//! for the attack's `parry_stun` and deals its `parry_damage`; a swatted flyer is knocked
+//! out of the air. If the strike already landed, its damage is still pending (delayed like
+//! projectiles) and gets cancelled.
 //!
 //! **Reward**: heal to the effective max after clearing `parry_hard_damage_clear` of the hard
 //! damage; [`SimEvent::Parried`] (client: hitstop, white flash, `Sfx::Parry`).
@@ -269,7 +272,12 @@ impl SimWorld {
             }
             let pos = e.trail.at(view_time).unwrap_or(e.position) + Vec3::Y * (e.height() * 0.5);
             let pos_now = e.position + Vec3::Y * (e.height() * 0.5);
-            let range = c.melee_parry_range + e.radius();
+            let reach = e
+                .current_attack()
+                .map(|a| a.parry_reach)
+                .filter(|r| *r > 0.0)
+                .unwrap_or(c.melee_parry_range);
+            let range = reach + e.radius();
             if pos.distance(eye) <= range || pos_now.distance(eye) <= range {
                 melee.push((e.id, now.saturating_sub(window.end)));
             }
@@ -412,11 +420,18 @@ impl SimWorld {
         let (stun, damage, seq) = e.parry_stun();
         let key_seq = e.parry_window.map(|w| w.seq).unwrap_or(seq);
         e.stun(secs_to_ticks(stun, self.tick_rate, 1));
-        self.pending_hits
-            .retain(|h| h.key != ParryKey::Melee(enemy, key_seq));
         let dir = self.players.get(&id).map_or(Vec3::Z, |p| {
             (position - p.movement.eye_position(&t.movement)).normalize_or(Vec3::Z)
         });
+        if e.is_flying() {
+            // Swatted out of the air: it tumbles away from the punch and falls (stunned
+            // flyers don't hover).
+            let away = Vec3::new(dir.x, 0.0, dir.z).normalize_or(-e.forward());
+            e.velocity = away * 6.0 + Vec3::NEG_Y * 5.0;
+            e.on_ground = false;
+        }
+        self.pending_hits
+            .retain(|h| h.key != ParryKey::Melee(enemy, key_seq));
         let info = DamageInfo::new(damage, Owner::Player(id), Attack::Fist)
             .at(position, dir)
             .flags(DamageFlags::MELEE | DamageFlags::PARRIED);

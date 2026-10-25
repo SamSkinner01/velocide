@@ -17,11 +17,6 @@ use crate::sim::projectiles::ProjectileKind;
 /// Built-in definitions (compiled in, so the server works without an assets directory and
 /// tests don't depend on edited files). Files in `assets/enemies/` override them by name.
 const BUILTIN: &[(&str, &str)] = &[
-    ("husk", include_str!("../../../../assets/enemies/husk.ron")),
-    ("spitter", include_str!("../../../../assets/enemies/spitter.ron")),
-    ("gnat", include_str!("../../../../assets/enemies/gnat.ron")),
-    ("bastion", include_str!("../../../../assets/enemies/bastion.ron")),
-    // Roster contract stubs (docs/roster.md).
     ("gnawer", include_str!("../../../../assets/enemies/gnawer.ron")),
     ("censer", include_str!("../../../../assets/enemies/censer.ron")),
     ("harrier", include_str!("../../../../assets/enemies/harrier.ron")),
@@ -102,13 +97,18 @@ impl Default for Armour {
 /// How an attack strikes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttackKind {
-    /// Hits players within `range` inside the `arc` in front.
+    /// Hits players within `range` inside the `arc` in front (with `lunge`: leaps and rakes
+    /// whoever it reaches during the strike).
     #[default]
     Melee,
     /// Fires `projectile`.
     Projectile,
     /// Ground slam: hits every player within `shockwave_radius`.
     Slam,
+    /// Flyers: a straight 3D dive at the target (`lunge` m/s for up to `strike` s, aimed with
+    /// `dive_lead` s of lead), raking every player it passes within reach once; hitting the
+    /// level ends it early. Recover climbs back towards hover height.
+    Dive,
 }
 
 /// Projectile parameters of a ranged attack.
@@ -127,17 +127,49 @@ pub struct ProjectileAttack {
     pub muzzle: Vec3,
     /// 0 = aim at the target, 1 = full linear lead.
     pub lead: f32,
+    /// Lobbed on a ballistic arc (the kind's gravity) that lands on the target's predicted
+    /// feet: the launch speed is solved for the arc and capped at `speed` (out of reach it
+    /// flies at `speed`, 45°). A burst is fanned evenly across `spread` (yaw) instead of
+    /// random spread.
+    pub lob: bool,
 }
 
 impl Default for ProjectileAttack {
     fn default() -> Self {
         Self {
-            kind: ProjectileKind::SpitterOrb,
+            kind: ProjectileKind::Needle,
             speed: 22.0,
             count: 1,
             interval: 0.15,
             spread: 0.0,
             muzzle: Vec3::new(0.0, 1.4, -0.4),
+            lead: 0.0,
+            lob: false,
+        }
+    }
+}
+
+/// A visible aim laser during the wind-up (snipers): the aim tracks the target, then locks
+/// for the last `lock` seconds so the target can dodge; the projectile flies along the locked
+/// aim. Replicated (`enemy_flags::AIMING` / `AIM_LOCKED`, exact yaw and pitch) so every
+/// client draws the laser.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AimLaser {
+    /// Seconds before the strike the aim stops tracking.
+    pub lock: f32,
+    /// Tracking speed while unlocked (degrees per second).
+    pub track_rate: f32,
+    /// Lead on the target's horizontal velocity while tracking (0 = none, 1 = full linear
+    /// lead for the projectile's flight time).
+    pub lead: f32,
+}
+
+impl Default for AimLaser {
+    fn default() -> Self {
+        Self {
+            lock: 0.25,
+            track_rate: 120.0,
             lead: 0.0,
         }
     }
@@ -159,6 +191,8 @@ pub struct AttackDef {
     pub damage: f32,
     /// Knockback speed given to players hit.
     pub knockback: f32,
+    /// Upward bias of the knockback direction (0 = flat along the hit).
+    pub knockback_up: f32,
     /// Telegraph duration (seconds).
     pub windup: f32,
     /// Duration of the strike phase (projectile bursts fire during it).
@@ -171,18 +205,34 @@ pub struct AttackDef {
     pub track_target: bool,
     /// Parryable: the last `parry_window` seconds of the wind-up (telegraphed melee parry).
     pub parry_window: Option<f32>,
+    /// Parryable during the whole strike instead (a punch mid-dive swats a Harrier).
+    pub parry_strike: bool,
     /// Stun duration and counter damage when parried.
     pub parry_stun: f32,
     pub parry_damage: f32,
+    /// How far from the puncher's eye a parry counts (metres beyond the enemy's radius, from
+    /// its centre); 0 = the tuning's `combat.melee_parry_range`.
+    pub parry_reach: f32,
     /// Slam radius.
     pub shockwave_radius: f32,
     pub projectile: Option<ProjectileAttack>,
     /// Melee lunge: forward speed (m/s) the enemy leaps at when the strike starts; 0 = none.
-    /// A lunging strike hits every player it reaches during the whole strike phase (once).
+    /// A lunging strike hits every player it reaches during the whole strike phase (once) and
+    /// ends early when a wall stops it. `Dive`: the dive speed.
     pub lunge: f32,
+    /// Upward launch speed of a lunge (m/s): a pounce on a ballistic arc. 0 = along the
+    /// ground.
+    pub lunge_up: f32,
+    /// `Dive`: seconds of lead on the target's velocity when the dive is aimed.
+    pub dive_lead: f32,
     /// Only chosen against a target moving at least this fast (m/s, horizontal): gap closers
     /// for fleeing players. 0 = always.
     pub min_target_speed: f32,
+    /// A low sweep: only hits targets whose feet are less than this many metres above the
+    /// attacker's feet (jump it). `None` = any height the attack reaches.
+    pub jumpable: Option<f32>,
+    /// Aim laser during the wind-up (projectile attacks).
+    pub laser: Option<AimLaser>,
 }
 
 impl Default for AttackDef {
@@ -195,6 +245,7 @@ impl Default for AttackDef {
             arc: 120.0,
             damage: 10.0,
             knockback: 5.0,
+            knockback_up: 0.35,
             windup: 0.5,
             strike: 0.1,
             recover: 0.5,
@@ -202,12 +253,18 @@ impl Default for AttackDef {
             windup_move_scale: 0.15,
             track_target: true,
             parry_window: None,
+            parry_strike: false,
             parry_stun: 2.5,
             parry_damage: 150.0,
+            parry_reach: 0.0,
             shockwave_radius: 5.0,
             projectile: None,
             lunge: 0.0,
+            lunge_up: 0.0,
+            dive_lead: 0.15,
             min_target_speed: 0.0,
+            jumpable: None,
+            laser: None,
         }
     }
 }
@@ -234,6 +291,9 @@ pub struct AiDef {
     pub retarget_interval: f32,
     /// Seconds between path re-plans while chasing (navigation, see `sim::nav`).
     pub repath_interval: f32,
+    /// Ranged enemies: after each ranged strike, flip the strafe direction (snipers don't
+    /// fire twice from the same spot).
+    pub reposition: bool,
 }
 
 impl Default for AiDef {
@@ -248,6 +308,7 @@ impl Default for AiDef {
             aggro_switch_fraction: 0.3,
             retarget_interval: 0.25,
             repath_interval: 0.6,
+            reposition: false,
         }
     }
 }
@@ -270,13 +331,16 @@ impl Default for Drops {
     }
 }
 
-/// Placeholder-art colours (sRGB 0..1).
+/// Presentation colours (sRGB 0..1); clients use them for hit sprays, telegraph glints and
+/// death bursts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnemyColors {
+    /// Wax-flesh.
     pub body: Vec3,
+    /// Slag / brass / chain.
     pub accent: Vec3,
-    /// Weak point glow.
+    /// Weak point glow (the heat collected inside).
     pub glow: Vec3,
     /// Wind-up telegraph flash.
     pub telegraph: Vec3,

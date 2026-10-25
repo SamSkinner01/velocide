@@ -419,17 +419,17 @@ fn net_parry(one_way_ms: f32, punch_at: Option<f32>, late_ms: f32) -> (bool, f32
     let owner = n
         .server
         .world_mut()
-        .spawn_enemy("husk", Vec3::new(0.0, 0.0, -50.0), 0.0)
+        .spawn_enemy("gnawer", Vec3::new(0.0, 0.0, -50.0), 0.0)
         .unwrap();
     let orb = n
         .server
         .world_mut()
         .spawn_enemy_projectile(
             &tuning,
-            ProjectileKind::SpitterOrb,
+            ProjectileKind::Needle,
             owner,
             Attack::Enemy {
-                kind: kind::HUSK,
+                kind: kind::HERON,
                 attack: 0,
             },
             Vec3::new(0.0, 1.4, -25.0),
@@ -502,26 +502,26 @@ fn parry_over_the_network() {
 }
 
 #[test]
-fn husk_chases_and_hits_a_client() {
+fn gnawer_chases_and_hits_a_client() {
     let mut n = Net::new(config());
     let a = n.add("Bait", latency(30.0, 7));
     n.wait_in_game();
     let id = n.clients[a].id();
     n.place(id, Vec3::ZERO);
-    let husk = n
+    let gnawer = n
         .server
-        .spawn_enemies("husk", Vec3::new(0.0, 0.0, -20.0), 0.0, 1)[0];
+        .spawn_enemies("gnawer", Vec3::new(0.0, 0.0, -20.0), 0.0, 1)[0];
     let mut saw_windup = false;
     let hit = n.run_until(6.0, &mut |_, _| Some(idle(0.0)), |n| {
         n.clients[a]
             .game_events()
-            .any(|e| matches!(e, GameEvent::Damaged(d) if d.source == Owner::Enemy(husk)))
+            .any(|e| matches!(e, GameEvent::Damaged(d) if d.source == Owner::Enemy(gnawer)))
     });
-    assert!(hit, "the husk reached and hit the player");
+    assert!(hit, "the gnawer reached and hit the player");
     // The client saw the telegraph (interpolated entity state) before the hit.
     n.run(1.5, &mut |i, c| {
         let _ = i;
-        if let Some(e) = c.net.remote_entity(husk)
+        if let Some(e) = c.net.remote_entity(gnawer)
             && e.state == AiState::Windup as u16
         {
             saw_windup = true;
@@ -531,12 +531,12 @@ fn husk_chases_and_hits_a_client() {
     assert!(saw_windup);
     let e = n.clients[a]
         .net
-        .remote_entity(husk)
+        .remote_entity(gnawer)
         .copied()
-        .expect("husk replicated");
-    assert_eq!(e.kind, kind::HUSK);
+        .expect("gnawer replicated");
+    assert_eq!(e.kind, kind::GNAWER);
     assert_eq!(e.owner, id.0 as u16, "targeting us");
-    assert!(n.health(id) <= 85.0);
+    assert!(n.health(id) <= 86.0, "bitten (14)");
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn every_weapon_mode_damages_husks_over_the_network() {
         n.run(1.0, &mut |_, _| Some(idle(0.0)));
         let husk =
             n.server
-                .spawn_enemies("husk", Vec3::new(0.0, 0.0, -dist), std::f32::consts::PI, 1)[0];
+                .spawn_enemies("gnawer", Vec3::new(0.0, 0.0, -dist), std::f32::consts::PI, 1)[0];
         n.run(0.5, &mut |_, _| Some(idle(0.0)));
         let start = n.clients[a].ticks;
         let sticky = name == "sticky";
@@ -603,7 +603,7 @@ fn every_weapon_mode_damages_husks_over_the_network() {
             matches!(e, GameEvent::HitConfirm(h) if h.target == HitTarget::Entity(husk) && h.damage > 0.0)
         });
         println!("{name}: husk health {health:.0}, hit confirmed {confirmed}");
-        assert!(health < 40.0, "{name} damaged the husk");
+        assert!(health < 45.0, "{name} damaged the gnawer");
         assert!(confirmed, "{name}: client got a hit confirm");
     }
     let kills = n.clients[a]
@@ -631,7 +631,7 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
     for i in 0..50 {
         let x = (i % 10) as f32 * 4.0 - 18.0;
         let z = -20.0 - (i / 10) as f32 * 4.0;
-        n.server.spawn_enemies("husk", Vec3::new(x, 0.0, z), 0.0, 1);
+        n.server.spawn_enemies("gnawer", Vec3::new(x, 0.0, z), 0.0, 1);
     }
     // Clients run around firing rivets into the sky; the server keeps ~150 projectiles alive.
     let tuning = n.tuning();
@@ -722,7 +722,7 @@ fn dev_chat_commands() {
     n.wait_in_game();
     let id = n.clients[a].id();
     for cmd in [
-        "/spawn husk 3",
+        "/spawn gnawer 3",
         "/god",
         "/notarget",
         "/hurt 30",
@@ -748,7 +748,7 @@ fn dev_chat_commands() {
     let p = &n.server.world().players[&id];
     assert!(p.combat.god && p.notarget);
     assert!(!n.server.world().rules.friendly_fire);
-    assert!(replies.iter().any(|r| r.starts_with("spawned 3 husk")));
+    assert!(replies.iter().any(|r| r.starts_with("spawned 3 gnawer")));
     assert!(
         replies.iter().any(|r| r.starts_with("took 0")),
         "god mode blocks /hurt"

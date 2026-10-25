@@ -40,7 +40,9 @@ pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// 3: lobby / match flow (ClientMessage::Lobby, ServerMessage::Lobby, docs/lobby.md).
 /// 4: enemies + arena encounters (encounter GameEvents, kind::ENCOUNTER, Fx::EnemySpawned).
 /// 5: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
-pub const PROTOCOL_VERSION: u32 = 5;
+/// 6: second-generation roster (docs/roster.md): enemy kinds 20–24, enemy projectiles 80–81,
+///    enemy aim flags, new weapons / projectiles / brand flag.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;

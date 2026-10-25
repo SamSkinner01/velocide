@@ -1,6 +1,6 @@
 //! Parry: projectile deflection at 0 and ~200 ms of view lag (≈100 ms RTT + interpolation),
-//! the delayed-damage tolerance window, too-late failures, the flak punch combo and the
-//! telegraphed melee parry hook.
+//! the delayed-damage tolerance window, too-late failures, the flak punch combo, the
+//! telegraphed melee parry hook and the Harrier swat (a parry during its dive) under lag.
 
 mod combat_support;
 
@@ -9,15 +9,15 @@ use std::f32::consts::PI;
 use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
-use shared::protocol::NetId;
+use shared::protocol::{NetId, kind};
 use shared::sim::enemy::{AttackDef, AttackKind, EnemyDef};
 use shared::sim::{
     Attack, DamageFlags, DamageInfo, HitTarget, Owner, ParryTarget, PlayerId, ProjectileKind,
     SimEvent,
 };
 
-/// Player at the origin facing -Z, a (passive) husk 60 m away owning an orb that flies at the
-/// player from 20 m at 22 m/s.
+/// Player at the origin facing -Z, a (passive) target dummy 60 m away owning a Heron needle
+/// slowed to 22 m/s (20 damage) that flies at the player from 20 m.
 fn incoming_orb(view_lag: f64) -> (Arena, PlayerId, NetId, NetId) {
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
@@ -30,17 +30,17 @@ fn incoming_orb(view_lag: f64) -> (Arena, PlayerId, NetId, NetId) {
         .world
         .spawn_enemy_projectile(
             &t,
-            ProjectileKind::SpitterOrb,
+            ProjectileKind::Needle,
             husk,
             Attack::Enemy {
-                kind: 16,
-                attack: 0,
+                kind: kind::HERON,
+                attack: 1,
             },
             Vec3::new(0.0, 1.4, -20.0),
             Vec3::new(0.0, 0.0, 22.0),
             20.0,
         )
-        .expect("orb");
+        .expect("needle");
     (a, p, husk, orb)
 }
 
@@ -98,7 +98,7 @@ fn parry_at_zero_latency_returns_to_sender() {
     assert!(matches!(
         parried[0].target,
         ParryTarget::Projectile {
-            kind: ProjectileKind::SpitterOrb,
+            kind: ProjectileKind::Needle,
             ..
         }
     ));
@@ -108,8 +108,8 @@ fn parry_at_zero_latency_returns_to_sender() {
         "healed {}",
         parried[0].healed
     );
-    // No damage to the player; the orb flew back (auto-aimed) and killed its owner:
-    // 20 x 2 = 40 = a husk's health. RETURN TO SENDER.
+    // No damage to the player; the needle flew back (auto-aimed) and killed its owner:
+    // 20 x 2 = 40 = the target dummy's health. RETURN TO SENDER.
     assert_eq!(damage_to(&ev, HitTarget::Player(p)), 0.0);
     let k = kills(&ev);
     assert_eq!(k.len(), 1, "{ev:?}");
@@ -249,11 +249,12 @@ fn pvp_players_parry_each_others_rockets() {
     assert!(damage_to(&ev, HitTarget::Player(p1)) > 70.0);
 }
 
-/// A Bastion-like brute with a telegraphed, parryable overhead slam.
+/// A test brute with a telegraphed, parryable slam (the hook in general; the Gaoler's bash is
+/// tested in `enemies_ai.rs`).
 fn brute() -> EnemyDef {
     EnemyDef {
         name: "Brute".into(),
-        net_kind: 19,
+        net_kind: 62,
         health: 450.0,
         speed: 5.0,
         radius: 0.7,
@@ -327,6 +328,49 @@ fn telegraphed_melee_parry_stuns_and_counters() {
     let (mut a, p, _b) = brute_arena(1.0);
     a.ticks(200);
     assert!(a.health(p) <= 55.0, "{}", a.health(p));
+}
+
+/// A Harrier diving at a player who sees the world `lag` ticks late: the player punches when
+/// the Harrier they see is `distance` m from their eye. Returns the events from the punch on.
+fn swat_when_seen(lag: f64, distance: f32) -> (Arena, PlayerId, NetId, Vec<SimEvent>) {
+    let mut a = Arena::coop();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    a.view_lag.insert(p, lag);
+    let h = a.world.spawn_enemy("harrier", Vec3::new(0.0, 7.0, -12.0), 0.0).unwrap();
+    a.world.enemies.get_mut(&h).unwrap().health = 500.0;
+    let mut dive_from = None;
+    for _ in 0..600 {
+        let e = &a.world.enemies[&h];
+        if e.state == shared::sim::AiState::Strike {
+            dive_from.get_or_insert(a.world.tick);
+        }
+        // What the player sees: the harrier `lag` ticks ago, diving once that view reaches the
+        // dive's start.
+        let view = a.world.tick as f64 + 1.0 - lag;
+        let half = Vec3::Y * (e.height() * 0.5);
+        let seen = e.trail.at(view).unwrap_or(e.position) + half;
+        let seen_diving = dive_from.is_some_and(|t| view >= t as f64);
+        if seen_diving && seen.distance(a.eye(p)) <= distance {
+            a.aim(p, seen);
+            let ev = a.tap(p, Buttons::PUNCH, 30);
+            return (a, p, h, ev);
+        }
+        a.tick();
+    }
+    panic!("the harrier never dived");
+}
+
+#[test]
+fn swatting_a_diving_harrier_works_at_200ms_view_lag() {
+    for lag in [1.0, 12.0] {
+        let (a, p, h, ev) = swat_when_seen(lag, 3.5);
+        let parried = parries(&ev);
+        assert_eq!(parried.len(), 1, "lag {lag}: swatted");
+        assert_eq!(parried[0].target, ParryTarget::Melee { enemy: h });
+        println!("swat at {lag} ticks of view lag: {} ticks late", parried[0].late_ticks);
+        assert_eq!(a.health(p), 100.0, "lag {lag}: the dive never landed");
+        assert_ne!(a.world.enemies[&h].state, shared::sim::AiState::Strike);
+    }
 }
 
 #[test]

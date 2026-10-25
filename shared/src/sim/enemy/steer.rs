@@ -419,11 +419,17 @@ pub(crate) fn fly_velocity(
     {
         let n = hit.normal;
         let into = v.dot(n);
+        // Flying (nearly) straight into it: sliding along won't get round it.
+        let head_on = into < -0.7 * v.length();
         if into < 0.0 {
             v -= n * into;
         }
         v += n * speed * (1.0 - hit.fraction) * 0.8;
-        if hit.fraction < 0.4 && e.strafe_flip_in == 0 {
+        // Walls turn the orbit round (when close, or when it heads straight at one: a pillar
+        // on its circle would otherwise hold it in place); a ceiling or floor just deflects it
+        // (flipping under a roof made flyers dither in place).
+        let wall = n.y.abs() < 0.5;
+        if wall && (hit.fraction < 0.4 || head_on) && e.strafe_flip_in == 0 {
             e.strafe_sign = -e.strafe_sign;
             e.strafe_flip_in = 40;
         }

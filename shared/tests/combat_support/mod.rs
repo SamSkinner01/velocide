@@ -1,6 +1,7 @@
 //! Helpers for the SimWorld-level combat tests: a flat test level, players placed and aimed
-//! precisely, inputs carrying a simulated view lag, and a hitbox history like the server's
-//! lag compensation (so shots are tested against what a lagging player saw).
+//! precisely, inputs carrying a simulated view lag, a hitbox history like the server's lag
+//! compensation (so shots are tested against what a lagging player saw), and a fixed target
+//! dummy so weapon numbers don't depend on the enemy roster.
 
 #![allow(dead_code)]
 
@@ -11,8 +12,43 @@ use glam::Vec3;
 use shared::input::{Buttons, PlayerInput};
 use shared::level::{Brush, LevelDef, LevelKind, SpawnPoint};
 use shared::protocol::NetId;
-use shared::sim::{HitTarget, Hitbox, HitboxHistory, PlayerId, SimEvent, SimWorld, TickInputs};
+use shared::sim::{
+    EnemyDef, HitTarget, Hitbox, HitboxHistory, PlayerId, SimEvent, SimWorld, TickInputs,
+};
 use shared::tuning::Tuning;
+
+/// Name of the [`target_dummy`] definition in every test arena.
+pub const DUMMY: &str = "husk";
+
+/// The weapon tests' target: a 40 HP, r 0.45 x 1.9 m walker with a r 0.26 head weak point
+/// (x2) 1.66 m up and a telegraphed 15 damage swipe (the first roster's fodder numbers, which
+/// the weapon tests were written against). Registered as [`DUMMY`] ("husk") in every
+/// [`Arena`]; it is not a game enemy (net kind 63 is unused by the roster).
+pub fn target_dummy() -> EnemyDef {
+    EnemyDef::parse(
+        r#"(
+            name: "Target dummy",
+            net_kind: 63,
+            health: 40.0,
+            speed: 9.0,
+            acceleration: 60.0,
+            turn_rate: 600.0,
+            radius: 0.45,
+            height: 1.9,
+            body_top: Some(1.45),
+            eye_height: 1.65,
+            knockback_scale: 1.3,
+            weak_points: [
+                (name: "head", kind: Head, offset: (0.0, 1.66, -0.05), radius: 0.26, multiplier: 2.0),
+            ],
+            attacks: [
+                (name: "swipe", kind: Melee, range: 2.2, arc: 120.0, damage: 15.0, knockback: 7.0,
+                 windup: 0.45, strike: 0.12, recover: 0.45, cooldown: 0.5, windup_move_scale: 0.2),
+            ],
+        )"#,
+    )
+    .expect("the target dummy parses")
+}
 
 pub fn brush(min: [f32; 3], max: [f32; 3]) -> Brush {
     Brush {
@@ -100,7 +136,8 @@ pub struct Arena {
 
 impl Arena {
     pub fn new(level: LevelDef) -> Self {
-        let world = SimWorld::new("combat_test", Arc::new(level), 60);
+        let mut world = SimWorld::new("combat_test", Arc::new(level), 60);
+        world.enemy_defs.insert(DUMMY, target_dummy());
         Self {
             world,
             tuning: Tuning::default(),
@@ -143,10 +180,11 @@ impl Arena {
         id
     }
 
+    /// Spawns a [`target_dummy`].
     pub fn husk(&mut self, pos: Vec3, yaw: f32) -> NetId {
         self.world
-            .spawn_enemy("husk", pos, yaw)
-            .expect("husk exists")
+            .spawn_enemy(DUMMY, pos, yaw)
+            .expect("the target dummy exists")
     }
 
     pub fn eye(&self, id: PlayerId) -> Vec3 {

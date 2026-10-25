@@ -1,11 +1,15 @@
-//! Nav grid on the shipped levels: builds everywhere (timed), encounter spawns and arena
-//! centres are connected, paths never touch kill volumes (lava), stacked floors are separate
-//! nodes, the edge guard refuses lava. Run with `-- --nocapture` for the measurements.
+//! Nav grid on the shipped levels: builds everywhere (timed), every enemy class has room
+//! (headroom / footprint per docs/roster.md sizes), encounter spawns and arena centres are
+//! connected for the spawned type's class, paths never touch kill volumes (lava), stacked
+//! floors are separate nodes, the edge guard refuses lava. Run with `-- --nocapture` for the
+//! measurements.
 
 use std::time::Instant;
 
 use glam::Vec3;
 use shared::level::{LevelDef, LevelKind};
+use shared::sim::EnemyRegistry;
+use shared::sim::enemy::Locomotion;
 use shared::sim::nav::{
     MAX_DROP, NavClass, NavGrid, NavScratch, PathResult, STEP_UP, node_flags,
 };
@@ -17,11 +21,12 @@ fn load(name: &str) -> (LevelDef, NavGrid, shared::level::LevelCollision) {
     (level, grid, col)
 }
 
+/// The nav class of a definition (flyers have none).
 fn class_of(enemy: &str) -> Option<NavClass> {
-    match enemy {
-        "gaoler" => Some(NavClass::Large),
-        "harrier" => None,
-        _ => Some(NavClass::Small),
+    let def = EnemyRegistry::builtin().get(enemy).unwrap_or_else(|| panic!("no enemy '{enemy}'"));
+    match def.locomotion {
+        Locomotion::Flying { .. } => None,
+        Locomotion::Ground => Some(NavClass::for_size(def.radius, def.height)),
     }
 }
 
@@ -69,10 +74,21 @@ fn builds_on_every_shipped_level() {
         );
         assert!(s.small > 1000, "{name}: only {} walkable nodes", s.small);
         assert!(s.links > s.small, "{name}: barely linked");
+        // Room per enemy class (narrow + headroom, or the wide footprint).
+        let mut per_class = Vec::new();
+        for enemy in ["gnawer", "censer", "heron", "gaoler"] {
+            let class = class_of(enemy).expect("ground enemy");
+            let n = (0..g.nodes.len() as u32).filter(|&n| g.passable(n, class, &[])).count();
+            per_class.push(format!("{enemy} {n}"));
+            if level.kind == LevelKind::Campaign || enemy != "gaoler" {
+                assert!(n > s.small / 3, "{name}: only {n} nodes for the {enemy}");
+            }
+        }
+        println!("{:20} passable per class: {}", "", per_class.join(", "));
         // Every player spawn stands on a walkable node.
         for sp in &level.spawns {
             assert!(
-                g.node_at(sp.position, 0.5, NavClass::Small, &[]).is_some(),
+                g.node_at(sp.position, 0.5, NavClass::SMALL, &[]).is_some(),
                 "{name}: spawn {} not on the grid",
                 sp.position
             );
@@ -104,15 +120,15 @@ fn crucible_encounters_are_connected_and_paths_avoid_lava() {
                     .node_at(sp.position, 0.6, class, &[])
                     .unwrap_or_else(|| panic!("{what}: spawn not on the grid for {class:?}"));
                 let goal = g.nearest_node(centre, 12, class, &[]).expect("arena centre on the grid");
-                let rally_node = g.node_at(rally, 0.6, NavClass::Small, &[]).expect("rally on the grid");
+                let rally_node = g.node_at(rally, 0.6, NavClass::SMALL, &[]).expect("rally on the grid");
                 let to_centre = g.find_path(&mut s, start, goal, class, &[], 100_000);
-                let to_rally = g.find_path(&mut s, start, rally_node, NavClass::Small, &[], 100_000);
-                let from_rally = g.find_path(&mut s, rally_node, start, NavClass::Small, &[], 100_000);
+                let to_rally = g.find_path(&mut s, start, rally_node, NavClass::SMALL, &[], 100_000);
+                let from_rally = g.find_path(&mut s, rally_node, start, NavClass::SMALL, &[], 100_000);
                 if sp.enemy == "censer" {
                     // Censers may sit on pad-only ledges (docs/levels.md): they only need to be
                     // on the grid and able to come down.
                     if let PathResult::Found(p) = &to_rally {
-                        assert_safe_path(&level, &g, p, NavClass::Small, &what);
+                        assert_safe_path(&level, &g, p, NavClass::SMALL, &what);
                     }
                     continue;
                 }
@@ -123,11 +139,11 @@ fn crucible_encounters_are_connected_and_paths_avoid_lava() {
                 let PathResult::Found(p) = to_rally else {
                     panic!("{what}: can't reach the rally point");
                 };
-                assert_safe_path(&level, &g, &p, NavClass::Small, &format!("{what} -> rally"));
+                assert_safe_path(&level, &g, &p, NavClass::SMALL, &format!("{what} -> rally"));
                 let PathResult::Found(p) = from_rally else {
                     panic!("{what}: unreachable from the rally point");
                 };
-                assert_safe_path(&level, &g, &p, NavClass::Small, &format!("rally -> {what}"));
+                assert_safe_path(&level, &g, &p, NavClass::SMALL, &format!("rally -> {what}"));
                 checked += 1;
             }
         }
@@ -156,7 +172,7 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
                 .map(|s| s.position),
         );
     for p in seeds {
-        if let Some(n) = g.node_at(p, 0.6, NavClass::Small, &[]) {
+        if let Some(n) = g.node_at(p, 0.6, NavClass::SMALL, &[]) {
             queue.push(n);
         }
     }
@@ -239,10 +255,10 @@ fn arena_level_grid_and_queries_are_fast() {
     let (_, g, _) = load("crucible_of_veins");
     let mut s = NavScratch::default();
     // A long query across the whole campaign (start to exit), doors open.
-    let start = g.node_at(Vec3::new(0.0, 0.0, 25.0), 0.5, NavClass::Small, &[]).unwrap();
-    let exit = g.nearest_node(Vec3::new(91.0, 4.0, -362.0), 6, NavClass::Small, &[]).unwrap();
+    let start = g.node_at(Vec3::new(0.0, 0.0, 25.0), 0.5, NavClass::SMALL, &[]).unwrap();
+    let exit = g.nearest_node(Vec3::new(91.0, 4.0, -362.0), 6, NavClass::SMALL, &[]).unwrap();
     let t = Instant::now();
-    let r = g.find_path(&mut s, start, exit, NavClass::Small, &[], 1_000_000);
+    let r = g.find_path(&mut s, start, exit, NavClass::SMALL, &[], 1_000_000);
     let ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("start -> exit: {:?} nodes, {} expanded, {ms:.2} ms", match &r {
         PathResult::Found(p) | PathResult::Partial(p) => p.len(),
@@ -252,12 +268,12 @@ fn arena_level_grid_and_queries_are_fast() {
     // whole level; it must at least get far.
     assert!(!matches!(r, PathResult::NotFound));
     // Typical in-arena query (budgeted search).
-    let a = g.node_at(Vec3::new(-10.0, 0.0, -57.0), 0.6, NavClass::Small, &[]).unwrap();
-    let b = g.node_at(Vec3::new(0.0, 0.0, -25.5), 0.6, NavClass::Small, &[]).unwrap();
+    let a = g.node_at(Vec3::new(-10.0, 0.0, -57.0), 0.6, NavClass::SMALL, &[]).unwrap();
+    let b = g.node_at(Vec3::new(0.0, 0.0, -25.5), 0.6, NavClass::SMALL, &[]).unwrap();
     let t = Instant::now();
     let mut n = 0;
     for _ in 0..100 {
-        if let PathResult::Found(p) = g.find_path(&mut s, a, b, NavClass::Small, &[], 3000) {
+        if let PathResult::Found(p) = g.find_path(&mut s, a, b, NavClass::SMALL, &[], 3000) {
             n = p.len();
         }
     }

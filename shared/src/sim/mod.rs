@@ -54,7 +54,7 @@ pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
     PlayerCombat,
 };
-pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry};
+pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, lob_velocity};
 pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules,
@@ -1247,7 +1247,7 @@ mod tests {
         let start = NetId::DYNAMIC_START;
         // One live entity of every kind at the start of the dynamic range.
         let projectile = rivet(&mut w, &t).unwrap();
-        let enemy = w.spawn_enemy("husk", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
+        let enemy = w.spawn_enemy("gnawer", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
         let blood = w
             .spawn_blood(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
             .unwrap();
@@ -1287,9 +1287,9 @@ mod tests {
         assert_eq!(w.projectiles.len(), MAX_PROJECTILES);
         for i in 0..MAX_ENEMIES {
             let at = Vec3::new((i % 16) as f32 * 3.0 - 24.0, 0.0, (i / 16) as f32 * 3.0 - 24.0);
-            assert!(w.spawn_enemy("husk", at, 0.0).is_some(), "enemy {i}");
+            assert!(w.spawn_enemy("gnawer", at, 0.0).is_some(), "enemy {i}");
         }
-        assert!(w.spawn_enemy("husk", Vec3::ZERO, 0.0).is_none());
+        assert!(w.spawn_enemy("gnawer", Vec3::ZERO, 0.0).is_none());
         assert_eq!(w.enemies.len(), MAX_ENEMIES);
         // A crowded world keeps ticking.
         w.step(&TickInputs::new(), &t, None);
@@ -1301,8 +1301,8 @@ mod tests {
         let t = Tuning::default();
         let mut level = builtin_level(BUILTIN_LEVEL).unwrap();
         level.kind = LevelKind::Campaign;
-        let husk = EnemySpawn {
-            enemy: "husk".into(),
+        let gnawer = EnemySpawn {
+            enemy: "gnawer".into(),
             position: Vec3::new(10.0, 0.0, 10.0),
             yaw: 0.0,
         };
@@ -1317,7 +1317,7 @@ mod tests {
             unlock_doors: vec![],
             waves: vec![Wave {
                 delay: 0.0,
-                spawns: vec![husk; 3],
+                spawns: vec![gnawer; 3],
             }],
         });
         let mut w = SimWorld::new("capped", Arc::new(level), DEFAULT_TICK_RATE);
@@ -1326,7 +1326,7 @@ mod tests {
         let filler: Vec<NetId> = (0..MAX_ENEMIES - 2)
             .map(|i| {
                 let at = Vec3::new((i % 16) as f32 * 3.0 - 50.0, 0.0, (i / 16) as f32 * 3.0 - 50.0);
-                w.spawn_enemy("husk", at, 0.0).unwrap()
+                w.spawn_enemy("gnawer", at, 0.0).unwrap()
             })
             .collect();
         w.start_encounter(0);

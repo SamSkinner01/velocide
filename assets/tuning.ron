@@ -227,12 +227,14 @@
         ),
         // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
         enemy_projectiles: (
-            orb_radius: 0.35,
-            orb_gravity: 0.0,
-            orb_lifetime: 6.0,
-            bolt_radius: 0.15,
-            bolt_gravity: 0.0,
-            bolt_lifetime: 3.0,
+            ember_radius: 0.3,
+            ember_gravity: 20.0,
+            ember_lifetime: 6.0,
+            ember_explosion_radius: 2.5,
+            ember_knockback: 9.0,
+            needle_radius: 0.12,
+            needle_gravity: 0.0,
+            needle_lifetime: 2.0,
         ),
     ),
     // Style meter (shared/src/sim/style.rs, docs/gameplay.md "Style", docs/style_modes.md).

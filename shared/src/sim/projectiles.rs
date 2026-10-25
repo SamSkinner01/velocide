@@ -3,12 +3,12 @@
 //! Every projectile is a swept sphere: each tick it moves along its (ballistic) trajectory,
 //! sweeping against the level (`MASK_SHOTS`) and against the current hitboxes of everything
 //! its owner may hurt (the owner itself and co-op teammates are never hit). What happens on
-//! contact depends on the [`ProjectileKind`]: rivets and enemy orbs deal direct damage,
-//! sawblades pierce (damage per contact interval) and bounce off walls, explosives explode,
-//! stickies stick to the world or to whatever they hit.
+//! contact depends on the [`ProjectileKind`]: rivets and needles deal direct damage,
+//! sawblades pierce (damage per contact interval) and bounce off walls, explosives (ember
+//! bombs included) explode, stickies stick to the world or to whatever they hit.
 //!
 //! **Parryable hits are delayed**: when a parryable projectile (rocket, flak, mortar, enemy
-//! orbs/bolts) touches a player it freezes in a *pending impact* for
+//! ember bombs / needles) touches a player it freezes in a *pending impact* for
 //! [`SimWorld::parry_delay_ticks`] (`net.parry_tolerance_ms`, plus the victim's view lag when
 //! `combat.parry_compensate_view_lag`), so a parry that the victim made on what they saw — and
 //! that reaches the server a little later — still cancels it. See `parry.rs`.
@@ -44,10 +44,10 @@ pub enum ProjectileKind {
     Sticky,
     /// Cinderbox alt B lob.
     Mortar,
-    /// Spitter's slow orb (enemy, parryable).
-    SpitterOrb,
-    /// Gnat's bolt (enemy, parryable).
-    GnatBolt,
+    /// The Censer's lobbed ember bomb (enemy, ballistic, explodes on impact, parryable).
+    EmberBomb,
+    /// The Heron's needle (enemy, fast and straight, parryable).
+    Needle,
 }
 
 impl ProjectileKind {
@@ -58,8 +58,8 @@ impl ProjectileKind {
         ProjectileKind::Flak,
         ProjectileKind::Sticky,
         ProjectileKind::Mortar,
-        ProjectileKind::SpitterOrb,
-        ProjectileKind::GnatBolt,
+        ProjectileKind::EmberBomb,
+        ProjectileKind::Needle,
     ];
 
     pub fn net_kind(self) -> u16 {
@@ -70,8 +70,8 @@ impl ProjectileKind {
             ProjectileKind::Flak => kind::FLAK,
             ProjectileKind::Sticky => kind::STICKY,
             ProjectileKind::Mortar => kind::MORTAR,
-            ProjectileKind::SpitterOrb => kind::SPITTER_ORB,
-            ProjectileKind::GnatBolt => kind::GNAT_BOLT,
+            ProjectileKind::EmberBomb => kind::EMBER_BOMB,
+            ProjectileKind::Needle => kind::NEEDLE,
         }
     }
 
@@ -86,8 +86,8 @@ impl ProjectileKind {
             ProjectileKind::Flak => t.thresher.flak_gravity,
             ProjectileKind::Sticky => t.cinderbox.sticky_gravity,
             ProjectileKind::Mortar => t.cinderbox.mortar_gravity,
-            ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_gravity,
-            ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_gravity,
+            ProjectileKind::EmberBomb => t.enemy_projectiles.ember_gravity,
+            ProjectileKind::Needle => t.enemy_projectiles.needle_gravity,
         }
     }
 
@@ -100,8 +100,8 @@ impl ProjectileKind {
             ProjectileKind::Flak => t.thresher.flak_projectile_radius,
             ProjectileKind::Sticky => 0.15,
             ProjectileKind::Mortar => 0.25,
-            ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_radius,
-            ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_radius,
+            ProjectileKind::EmberBomb => t.enemy_projectiles.ember_radius,
+            ProjectileKind::Needle => t.enemy_projectiles.needle_radius,
         }
     }
 
@@ -114,8 +114,8 @@ impl ProjectileKind {
             ProjectileKind::Flak => t.thresher.flak_fuse,
             ProjectileKind::Sticky => t.cinderbox.sticky_lifetime,
             ProjectileKind::Mortar => 10.0,
-            ProjectileKind::SpitterOrb => t.enemy_projectiles.orb_lifetime,
-            ProjectileKind::GnatBolt => t.enemy_projectiles.bolt_lifetime,
+            ProjectileKind::EmberBomb => t.enemy_projectiles.ember_lifetime,
+            ProjectileKind::Needle => t.enemy_projectiles.needle_lifetime,
         }
     }
 
@@ -126,8 +126,8 @@ impl ProjectileKind {
             ProjectileKind::Rocket
                 | ProjectileKind::Flak
                 | ProjectileKind::Mortar
-                | ProjectileKind::SpitterOrb
-                | ProjectileKind::GnatBolt
+                | ProjectileKind::EmberBomb
+                | ProjectileKind::Needle
         )
     }
 
@@ -144,7 +144,7 @@ impl ProjectileKind {
             ProjectileKind::Flak => Attack::Flak,
             ProjectileKind::Sticky => Attack::Sticky,
             ProjectileKind::Mortar => Attack::Mortar,
-            ProjectileKind::SpitterOrb | ProjectileKind::GnatBolt => {
+            ProjectileKind::EmberBomb | ProjectileKind::Needle => {
                 Attack::Enemy { kind: 0, attack: 0 }
             }
         }
@@ -172,6 +172,12 @@ impl ProjectileKind {
                 t.cinderbox.mortar_radius,
                 t.cinderbox.mortar_damage,
                 t.cinderbox.mortar_knockback,
+            ),
+            // Damage comes from the enemy's attack (`spawn_enemy_projectile`).
+            ProjectileKind::EmberBomb => (
+                t.enemy_projectiles.ember_explosion_radius,
+                0.0,
+                t.enemy_projectiles.ember_knockback,
             ),
             _ => return None,
         };
@@ -760,8 +766,9 @@ impl SimWorld {
         }
     }
 
-    /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit. `None` when
-    /// the projectile limit is reached.
+    /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit, or at the
+    /// centre of its explosion for explosive kinds (ember bombs). `None` when the projectile
+    /// limit is reached.
     #[allow(clippy::too_many_arguments)]
     pub fn spawn_enemy_projectile(
         &mut self,
@@ -777,6 +784,9 @@ impl SimWorld {
         if let Some(p) = self.projectiles.get_mut(&id) {
             p.damage = damage;
             p.attack = attack;
+            if let Some(e) = &mut p.explosion {
+                e.damage = damage;
+            }
         }
         Some(id)
     }

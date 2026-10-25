@@ -3,18 +3,19 @@
 //! The AI state machine lives in `ai.rs`, navigation / flight steering in `steer.rs` (on top of
 //! `sim::nav`). Overview: `docs/enemies.md`.
 //!
-//! Replicated as entity `kind = def.net_kind` (Husk 16, Spitter 17, Gnat 18, Bastion 19):
-//! `owner` = target player id (`OWNER_NONE` without a target), `position` = feet (bottom of
-//! the collision capsule; a Gnat's hover centre is half its height above), `velocity`,
-//! `yaw`, `flags` = [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16,
-//! `health` = current health (rounded up), `aux` = state progress (bits 0–7, 0..255 through
-//! timed states) | attack index (bits 8–15) | max health (bits 16–31).
+//! Replicated as entity `kind = def.net_kind` (Gnawer 20, Censer 21, Harrier 22, Gaoler 23,
+//! Heron 24; docs/roster.md): `owner` = target player id (`OWNER_NONE` without a target),
+//! `position` = feet (bottom of the collision capsule; a Harrier's hover centre is half its
+//! height above), `velocity`, `yaw` (+ `pitch` and exact yaw while `AIMING` a laser),
+//! `flags` = [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16, `health` =
+//! current health (rounded up), `aux` = state progress (bits 0–7, 0..255 through timed states)
+//! | attack index (bits 8–15) | max health (bits 16–31).
 
 mod ai;
 mod def;
 mod steer;
 
-pub use ai::is_targetable;
+pub use ai::{is_targetable, lob_velocity};
 pub use def::*;
 pub use steer::{AiStats, AiWorld, NavAgent, PathMode};
 
@@ -136,6 +137,11 @@ pub struct Enemy {
     pub ground_check_in: u8,
     /// Ticks until a strafing enemy may flip its strafe direction again.
     pub strafe_flip_in: u16,
+    /// Aim of the current attack (unit): an aim laser's direction from the muzzle (wind-up),
+    /// a dive's direction (strike).
+    pub aim: Vec3,
+    /// The aim laser stopped tracking (the last moments of the wind-up).
+    pub aim_locked: bool,
 }
 
 impl Enemy {
@@ -184,6 +190,8 @@ impl Enemy {
             ground_y: position.y,
             ground_check_in: 0,
             strafe_flip_in: 0,
+            aim: look_dir(yaw, 0.0),
+            aim_locked: false,
         }
     }
 
@@ -191,8 +199,24 @@ impl Enemy {
         matches!(self.def.locomotion, Locomotion::Flying { .. })
     }
 
+    /// Holding itself up right now: a living flyer that isn't stunned (a swatted Harrier
+    /// falls).
+    pub fn hovering(&self) -> bool {
+        self.is_flying() && self.is_alive() && self.state != AiState::Stunned
+    }
+
+    /// The current attack, if any.
+    pub fn current_attack(&self) -> Option<&AttackDef> {
+        self.def.attacks.get(self.attack)
+    }
+
+    /// Showing an aim laser (a laser attack's wind-up).
+    pub fn aiming(&self) -> bool {
+        self.state == AiState::Windup && self.current_attack().is_some_and(|a| a.laser.is_some())
+    }
+
     /// Bottom of the collision capsule (= `position` for every enemy, flyers included; a
-    /// Gnat's hover centre is `center()`).
+    /// Harrier's hover centre is `center()`).
     pub fn feet(&self) -> Vec3 {
         self.position
     }
@@ -318,6 +342,13 @@ impl Enemy {
         if self.def.armour.is_some() {
             flags |= enemy_flags::ARMOURED;
         }
+        let aiming = self.aiming();
+        if aiming {
+            flags |= enemy_flags::AIMING;
+            if self.aim_locked {
+                flags |= enemy_flags::AIM_LOCKED;
+            }
+        }
         let progress = if self.state_len > 0 {
             ((self.state_ticks as f32 / self.state_len as f32).clamp(0.0, 1.0) * 255.0) as u32
         } else {
@@ -328,8 +359,13 @@ impl Enemy {
         // Velocity only drives client extrapolation and animation speed: 1/4 m/s steps keep
         // steering jitter out of the deltas (positions stay exact).
         let velocity = (self.velocity * 4.0).round() / 4.0;
-        // Yaw in ~0.7° steps for the same reason.
-        let yaw = (self.yaw * 80.0).round() / 80.0;
+        // Yaw in ~0.7° steps for the same reason, except while aiming a laser: every client
+        // draws it from the exact aim (yaw + pitch).
+        let (yaw, pitch) = if aiming {
+            (self.yaw, self.aim.y.clamp(-1.0, 1.0).asin())
+        } else {
+            ((self.yaw * 80.0).round() / 80.0, 0.0)
+        };
         EntityState {
             id: self.id,
             kind: self.def.net_kind,
@@ -337,7 +373,7 @@ impl Enemy {
             position: self.position,
             velocity,
             yaw,
-            pitch: 0.0,
+            pitch,
             flags,
             state: self.state as u16,
             health: self.health.max(0.0).ceil().min(65535.0) as u16,
@@ -530,21 +566,51 @@ impl SimWorld {
 mod tests {
     use super::*;
 
+    /// The roster contract (docs/roster.md): names, net kinds, capsule sizes, health, speed
+    /// and weak points of the built-in definitions.
     #[test]
-    fn builtin_husk_parses_with_doc_numbers() {
+    fn builtin_roster_matches_the_contract() {
+        use crate::protocol::kind;
         let r = EnemyRegistry::builtin();
-        let husk = r.get("husk").expect("husk is built in");
-        assert_eq!(husk.health, 40.0);
-        assert_eq!(husk.speed, 9.0);
-        assert_eq!(husk.net_kind, crate::protocol::kind::HUSK);
-        assert_eq!(husk.attacks[0].range, 2.2);
-        assert_eq!(husk.attacks[0].damage, 15.0);
-        assert_eq!(husk.attacks[0].windup, 0.45);
-        assert_eq!(husk.weak_points[0].multiplier, 2.0);
-        assert_eq!(
-            r.by_kind(16).map(|d| d.name.clone()),
-            Some("Husk".to_string())
-        );
+        assert_eq!(r.len(), 5, "{:?}", r.names().collect::<Vec<_>>());
+        // (file, name, kind, radius, height, health, speed, weak points (name, offset, r, x)).
+        type Weak = (&'static str, [f32; 3], f32, f32);
+        let table: [(&str, &str, u16, f32, f32, f32, f32, &[Weak]); 5] = [
+            ("gnawer", "Gnawer", kind::GNAWER, 0.6, 2.0, 45.0, 10.0,
+                &[("head", [0.0, 1.62, -0.38], 0.38, 2.0)]),
+            ("censer", "Censer", kind::CENSER, 0.6, 2.5, 80.0, 5.0,
+                &[("lantern", [0.0, 2.22, -0.1], 0.42, 2.0)]),
+            ("harrier", "Harrier", kind::HARRIER, 0.7, 1.3, 40.0, 15.0,
+                &[("heart", [0.0, 0.35, -0.15], 0.35, 2.5)]),
+            ("gaoler", "Gaoler", kind::GAOLER, 1.3, 3.7, 520.0, 4.5,
+                &[("head", [0.0, 3.32, -0.35], 0.45, 1.5), ("lantern", [0.0, 2.2, 0.95], 0.55, 2.5)]),
+            ("heron", "Heron", kind::HERON, 0.5, 3.4, 60.0, 7.0,
+                &[("head", [0.0, 3.12, -0.4], 0.35, 2.5)]),
+        ];
+        for (file, name, net_kind, radius, height, health, speed, weak) in table {
+            let d = r.get(file).unwrap_or_else(|| panic!("{file} is built in"));
+            assert_eq!(d.name, name);
+            assert_eq!(d.net_kind, net_kind, "{name}");
+            assert_eq!(r.by_kind(net_kind).map(|d| d.name.clone()), Some(name.to_string()));
+            assert_eq!((d.radius, d.height), (radius, height), "{name} capsule");
+            assert_eq!((d.health, d.speed), (health, speed), "{name}");
+            assert_eq!(d.weak_points.len(), weak.len(), "{name} weak points");
+            for (w, (wn, off, wr, mult)) in d.weak_points.iter().zip(weak) {
+                assert_eq!(w.name, *wn);
+                assert_eq!(w.offset, Vec3::from(*off), "{name} {wn}");
+                assert_eq!((w.radius, w.multiplier), (*wr, *mult), "{name} {wn}");
+            }
+            assert!(!d.attacks.is_empty());
+            for a in &d.attacks {
+                assert!(a.windup > 0.0, "{name} {}: every attack telegraphs", a.name);
+            }
+            // Biggest dimension at least ~2 m (docs/roster.md "big and readable").
+            assert!(height.max(radius * 2.0) >= 1.3, "{name}");
+        }
+        assert!(r.get("husk").is_none() && r.by_kind(16).is_none(), "the first roster is retired");
+        let gaoler = r.get("gaoler").unwrap();
+        let armour = gaoler.armour.as_ref().unwrap();
+        assert_eq!((armour.front_multiplier, armour.front_arc), (0.15, 120.0));
     }
 
     #[test]

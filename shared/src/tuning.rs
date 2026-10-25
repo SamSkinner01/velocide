@@ -603,23 +603,30 @@ impl Default for CinderboxTuning {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnemyProjectileTuning {
-    pub orb_radius: f32,
-    pub orb_gravity: f32,
-    pub orb_lifetime: f32,
-    pub bolt_radius: f32,
-    pub bolt_gravity: f32,
-    pub bolt_lifetime: f32,
+    /// Censer ember bomb: collision radius, gravity (the lob is solved for it), fuse.
+    pub ember_radius: f32,
+    pub ember_gravity: f32,
+    pub ember_lifetime: f32,
+    /// Ember bomb explosion (damage comes from the attack; falloff as every explosion).
+    pub ember_explosion_radius: f32,
+    pub ember_knockback: f32,
+    /// Heron needle.
+    pub needle_radius: f32,
+    pub needle_gravity: f32,
+    pub needle_lifetime: f32,
 }
 
 impl Default for EnemyProjectileTuning {
     fn default() -> Self {
         Self {
-            orb_radius: 0.35,
-            orb_gravity: 0.0,
-            orb_lifetime: 6.0,
-            bolt_radius: 0.15,
-            bolt_gravity: 0.0,
-            bolt_lifetime: 3.0,
+            ember_radius: 0.3,
+            ember_gravity: 20.0,
+            ember_lifetime: 6.0,
+            ember_explosion_radius: 2.5,
+            ember_knockback: 9.0,
+            needle_radius: 0.12,
+            needle_gravity: 0.0,
+            needle_lifetime: 2.0,
         }
     }
 }
@@ -1009,9 +1016,11 @@ impl CinderboxTuning {
 impl EnemyProjectileTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, 10.0; orb_radius, bolt_radius);
-        clamp!(self, d, 0.0, MAX_ACCEL; orb_gravity, bolt_gravity);
-        clamp!(self, d, 0.0, MAX_TIME; orb_lifetime, bolt_lifetime);
+        clamp!(self, d, 0.0, 10.0; ember_radius, needle_radius);
+        clamp!(self, d, 0.0, MAX_ACCEL; ember_gravity, needle_gravity);
+        clamp!(self, d, 0.0, MAX_TIME; ember_lifetime, needle_lifetime);
+        clamp!(self, d, 0.0, MAX_DIST; ember_explosion_radius);
+        clamp!(self, d, 0.0, MAX_SPEED; ember_knockback);
     }
 }
 

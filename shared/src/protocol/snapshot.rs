@@ -94,10 +94,12 @@ pub mod kind {
     // `AiState`, `health` = health, `aux` = progress | attack << 8 | max health << 16.
     pub const ENEMY_FIRST: u16 = 16;
     pub const ENEMY_LAST: u16 = 63;
-    pub const HUSK: u16 = 16;
-    pub const SPITTER: u16 = 17;
-    pub const GNAT: u16 = 18;
-    pub const BASTION: u16 = 19;
+    // 16..=19: retired (the first roster). docs/roster.md.
+    pub const GNAWER: u16 = 20;
+    pub const CENSER: u16 = 21;
+    pub const HARRIER: u16 = 22;
+    pub const GAOLER: u16 = 23;
+    pub const HERON: u16 = 24;
 
     // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
     // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left.
@@ -109,8 +111,11 @@ pub mod kind {
     pub const FLAK: u16 = 67;
     pub const STICKY: u16 = 68;
     pub const MORTAR: u16 = 69;
-    pub const SPITTER_ORB: u16 = 70;
-    pub const GNAT_BOLT: u16 = 71;
+    // 70, 71: retired enemy projectiles. 80..: enemy projectiles.
+    /// The Censer's lobbed ember bomb (explodes on impact, parryable).
+    pub const EMBER_BOMB: u16 = 80;
+    /// The Heron's needle (fast, straight, parryable).
+    pub const NEEDLE: u16 = 81;
 
     // 128..160: pickups / blood.
     /// Heal pool: `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
@@ -181,6 +186,12 @@ pub mod enemy_flags {
     pub const AIRBORNE: u32 = 1 << 4;
     /// Has directional armour.
     pub const ARMOURED: u32 = 1 << 5;
+    // Bits 6..=14: per-type presentation state (enemies area); bit 15 is `BRANDED`.
+    /// Aim laser on (a laser wind-up): `yaw` / `pitch` are the exact aim from the attack's
+    /// muzzle (unquantised while this is set).
+    pub const AIMING: u32 = 1 << 6;
+    /// The aim laser has locked (the last moments before the shot: dodge now).
+    pub const AIM_LOCKED: u32 = 1 << 7;
 }
 
 /// Flag bits of projectile entities.
