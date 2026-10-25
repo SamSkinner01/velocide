@@ -44,7 +44,7 @@ velocide --connect 203.0.113.7:47420 --name Alex # join
 - Alternatively, everyone can join a virtual LAN tool (any mesh VPN). Then use the host's VPN IP
   and no port forwarding is needed.
 
-**Dedicated server** (headless, no player needed on the host machine):
+**Dedicated server** (step-by-step for a VPS such as a DigitalOcean droplet: `docs/hosting.md`) (headless, no player needed on the host machine):
 
 ```sh
 cargo run -p server --release --bin velocide-server -- --port 47420 --mode deathmatch --level cistern_nine
