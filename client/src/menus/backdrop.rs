@@ -18,7 +18,7 @@ pub struct Backdrop {
 }
 
 /// Preferred backdrop levels, first one found wins.
-const LEVELS: [&str; 2] = ["movement_test", shared::sim::BUILTIN_LEVEL];
+const LEVELS: [&str; 3] = ["cistern_nine", "movement_test", shared::sim::BUILTIN_LEVEL];
 
 impl Backdrop {
     pub fn new(renderer: &mut Renderer) -> Option<Self> {
