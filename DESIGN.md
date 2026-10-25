@@ -182,3 +182,35 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
   ready)
 - Server + two clients locally in one command: `scripts/local_test.sh --netsim 100,20,2`
   (server `--autostart`, clients `--ready`: they reach the match after ~5 s)
+
+## Milestone status
+All 14 milestones of `PROMPT.txt` are implemented. Each milestone was built by one area owner,
+then merged and checked against the whole test suite with zero clippy warnings.
+
+| # | Milestone | Where |
+|---|---|---|
+| 1 | Workspace, window, render loop, fixed timestep, input, debug overlay | `engine/` (app, input, render, time, debug_ui) |
+| 2 | 3D scene, camera, glTF loading, low-res target, nearest upscale, fog | `engine::render`, `engine::assets::gltf`, `client::models` |
+| 3 | Networked character controller, prediction/reconciliation, interpolation, net simulator | `shared::movement`, `server`, `client::net` |
+| 4 | Advanced movement, tuning hot-reload, 2 clients at 100 ms | `shared::movement`, `assets/tuning.ron`, `scripts/local_test.sh` |
+| 5 | Retro post-processing, viewmodel pass | `engine::render` (shaders in `assets/shaders/`) |
+| 6 | First weapon, lag-compensated hits, server enemy, hitstop/shake | `shared::sim::{weapons,hitscan,enemy}`, `server::lagcomp`, `client::ingame::{feedback,combat}` |
+| 7 | Parry with network tolerance, proximity healing, hard damage, explosions | `shared::sim::{parry,blood,combat,projectiles}` |
+| 8 | Full weapon set with alt-fires, ricochet prisms | `shared::sim::{weapons,prism}` |
+| 9 | Style meter, ranks, results with scoreboard | `shared::sim::style`, `client::ingame::{style_hud,match_flow}` |
+| 10 | All enemy types, navigation, wave encounters, co-op scaling | `shared::sim::{enemy,nav,encounter}`, `assets/enemies/` |
+| 11 | PvP deathmatch, respawns | `shared::sim::modes` |
+| 12 | Lobby, host/join, chat, scoreboard, name tags | `shared::lobby`, `server::lobby`, `client::menus::lobby` |
+| 13 | Audio and dynamic music | `engine::audio`, `client::ingame::audio_hooks` |
+| 14 | Menus, settings, rebinding, campaign level, PvP arena | `client::menus`, `client::settings`, `assets/levels/` |
+
+### Deliberate deviations from the spec
+- **Netcode transport.** Connection authentication uses `renet_netcode`'s types
+  (`ServerAuthentication`, `ClientAuthentication`, `ServerConfig`). The netcode.io state machine
+  (`renetcode`, which `renet_netcode` wraps) is driven by about 100 lines of our own socket glue
+  instead of `renet_netcode`'s transports. Those transports own the UDP socket and offer no hook
+  where the network simulator could inject latency, jitter and loss for every packet, including
+  handshakes and acks. The protocol on the wire is identical.
+- **Lag compensation** rewinds up to 350 ms instead of ~250 ms. The rewind a shot needs is about
+  RTT plus the interpolation delay, so 250 ms would only cover players up to ~140 ms RTT. The
+  history buffer holds 1 s.
