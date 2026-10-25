@@ -4,8 +4,8 @@
 //! ```ignore
 //! game.feedback.shake(0.4);                      // add trauma (0..1), decays by itself
 //! game.feedback.hitstop(0.12);                   // freeze what is drawn for 120 ms
-//! game.feedback.flash(Feedback::PARRY_WHITE, 0.6);
-//! game.feedback.damage_flash(damage / max_hp);   // red, scaled
+//! game.feedback.parry_flash();                   // colours follow palette::palette()
+//! game.feedback.damage_flash(damage / max_hp);   // red, scaled (also shield_ / death_flash)
 //! ```
 //!
 //! Hitstop only slows what is *drawn* (camera shake, the viewmodel, particles and decal fades):
@@ -15,6 +15,8 @@
 
 use engine::gfx::RetroSettings;
 use glam::{Vec3, Vec4};
+
+use crate::palette::palette;
 
 /// Trauma lost per second.
 const TRAUMA_DECAY: f32 = 1.4;
@@ -76,8 +78,10 @@ fn wobble(t: f64, seed: f64) -> f32 {
 }
 
 impl Feedback {
-    pub const DAMAGE_RED: Vec3 = Vec3::new(0.9, 0.05, 0.04);
-    pub const PARRY_WHITE: Vec3 = Vec3::new(1.0, 0.97, 0.9);
+    /// The standard palette's flash colours; the helpers below follow the colour-vision
+    /// palette (`palette::palette().flash_*`).
+    pub const DAMAGE_RED: Vec3 = crate::palette::STANDARD.flash_damage;
+    pub const PARRY_WHITE: Vec3 = crate::palette::STANDARD.flash_parry;
 
     pub fn new() -> Self {
         Self::default()
@@ -136,14 +140,26 @@ impl Feedback {
         self.flash = self.flash.max(strength);
     }
 
-    /// Red flash scaled by how much of the player's health a hit took (0..1).
+    /// Damage flash (red; orange-red for red-blind palettes) scaled by how much of the
+    /// player's health a hit took (0..1).
     pub fn damage_flash(&mut self, fraction: f32) {
-        self.flash(Self::DAMAGE_RED, (0.18 + fraction * 0.9).clamp(0.0, 0.55));
+        let color = palette().flash_damage;
+        self.flash(color, (0.18 + fraction * 0.9).clamp(0.0, 0.55));
     }
 
     /// White parry flash.
     pub fn parry_flash(&mut self) {
-        self.flash(Self::PARRY_WHITE, 0.6);
+        self.flash(palette().flash_parry, 0.6);
+    }
+
+    /// Faint pale-blue flash: a hit blocked by spawn protection.
+    pub fn shield_flash(&mut self) {
+        self.flash(palette().flash_shield, 0.12);
+    }
+
+    /// Dark red flash when the local player dies.
+    pub fn death_flash(&mut self) {
+        self.flash(palette().flash_death, 0.5);
     }
 
     /// Advances by a real frame and returns the *visual* frame time (0 during hitstop).

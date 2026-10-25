@@ -2,7 +2,8 @@
 
 use client::cli::{self, Cli, StartMode};
 use client::controls::Action;
-use client::settings::Settings;
+use client::settings::{Accessibility, CueMode, Settings};
+use engine::color_vision::{ColorVision, ColorVisionMode};
 use engine::input::{Binding, Key};
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -66,6 +67,78 @@ fn partial_and_hostile_files_are_repaired() {
         s.bindings.get(Action::Jump),
         Settings::default().bindings.get(Action::Jump)
     );
+}
+
+#[test]
+fn accessibility_round_trips_in_its_own_section() {
+    let path = scratch("accessibility");
+    let mut s = Settings::default();
+    s.accessibility.color_vision = ColorVision::new(ColorVisionMode::Deuteranopia, 0.65);
+    s.accessibility.shape_cues = CueMode::Off;
+    s.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("accessibility:"), "{text}");
+    assert!(text.contains("Deuteranopia"), "{text}");
+    assert_eq!(
+        text.matches("color_vision").count(),
+        1,
+        "not duplicated under retro: {text}"
+    );
+    let back = Settings::load(&path);
+    assert_eq!(back, s);
+    assert!(!back.accessibility.shape_cues_on());
+    // The renderer gets the correction through `render_settings`, never through `retro`.
+    assert_eq!(back.retro.color_vision, ColorVision::default());
+    assert_eq!(
+        back.render_settings().color_vision,
+        s.accessibility.color_vision
+    );
+    assert_eq!(
+        back.render_settings().dithering,
+        back.retro.dithering,
+        "the rest of retro is kept"
+    );
+}
+
+#[test]
+fn settings_files_from_before_accessibility_still_load() {
+    // A file written before the ACCESSIBILITY page existed: no `accessibility` section.
+    let old = r#"(
+        retro: (internal_height: 240, vertex_snap: true, vertex_snap_strength: 1.0,
+            affine_textures: false, dithering: false, color_bits: 5, fog: true,
+            vertex_lighting: true, vsync: true, screen_shake: true, screen_flashes: true,
+            hitstop: true),
+        fov: 100.0,
+        player_name: "OLD SHRIKE",
+        crosshair: 2,
+    )"#;
+    let s = Settings::from_ron(old).unwrap();
+    assert_eq!(s.fov, 100.0);
+    assert_eq!(s.retro.internal_height, 240);
+    assert!(!s.retro.dithering);
+    assert_eq!(s.accessibility, Accessibility::default());
+    assert_eq!(s.accessibility.color_vision.mode, ColorVisionMode::Off);
+    assert!(!s.accessibility.shape_cues_on());
+}
+
+#[test]
+fn accessibility_values_are_repaired_and_cues_follow_the_mode() {
+    let s = Settings::from_ron(
+        "(accessibility: (color_vision: (mode: Protanopia, strength: 7.5), future: 1))",
+    )
+    .unwrap();
+    assert_eq!(s.accessibility.color_vision.mode, ColorVisionMode::Protanopia);
+    assert_eq!(s.accessibility.color_vision.strength, 1.0);
+    // AUTO turns the shape cues on with any colour mode.
+    assert_eq!(s.accessibility.shape_cues, CueMode::Auto);
+    assert!(s.accessibility.shape_cues_on());
+    let s = Settings::from_ron("(accessibility: (color_vision: (strength: -1.0)))").unwrap();
+    assert_eq!(s.accessibility.color_vision.strength, 0.0);
+    let on = Accessibility {
+        shape_cues: CueMode::On,
+        ..Default::default()
+    };
+    assert!(on.shape_cues_on());
 }
 
 #[test]
