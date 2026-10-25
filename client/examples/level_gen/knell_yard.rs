@@ -9,16 +9,16 @@ use super::*;
 
 mod mat {
     use super::Mat;
-    pub const WALL: Mat = Mat("brick", [0.78, 0.56, 0.48]);
-    pub const WALL_DARK: Mat = Mat("brick", [0.6, 0.44, 0.4]);
-    pub const KILN: Mat = Mat("brick", [0.68, 0.46, 0.4]);
-    pub const COPING: Mat = Mat("concrete", [0.7, 0.62, 0.58]);
-    pub const YARD: Mat = Mat("dirt", [0.66, 0.58, 0.52]);
-    pub const STONE: Mat = Mat("concrete", [0.84, 0.76, 0.68]);
-    pub const STONE_DARK: Mat = Mat("concrete", [0.62, 0.56, 0.52]);
-    pub const FLAGS: Mat = Mat("tile", [0.74, 0.64, 0.58]);
-    pub const WOOD: Mat = Mat("wood", [0.92, 0.72, 0.52]);
-    pub const WOOD_DARK: Mat = Mat("wood", [0.64, 0.48, 0.38]);
+    pub const WALL: Mat = Mat("brick", [0.62, 0.5, 0.52]);
+    pub const WALL_DARK: Mat = Mat("brick", [0.48, 0.4, 0.44]);
+    pub const KILN: Mat = Mat("brick", [0.78, 0.52, 0.42]);
+    pub const COPING: Mat = Mat("concrete", [0.72, 0.66, 0.66]);
+    pub const YARD: Mat = Mat("concrete", [0.6, 0.58, 0.6]);
+    pub const STONE: Mat = Mat("concrete", [0.88, 0.82, 0.74]);
+    pub const STONE_DARK: Mat = Mat("concrete", [0.6, 0.56, 0.56]);
+    pub const FLAGS: Mat = Mat("tile", [0.74, 0.66, 0.6]);
+    pub const WOOD: Mat = Mat("wood", [0.74, 0.6, 0.5]);
+    pub const WOOD_DARK: Mat = Mat("wood", [0.5, 0.42, 0.38]);
     pub const BRONZE: Mat = Mat("metal", [1.0, 0.76, 0.44]);
     pub const VERDIGRIS: Mat = Mat("metal", [0.52, 0.82, 0.7]);
     pub const IRON: Mat = Mat("metal", [0.46, 0.44, 0.48]);
@@ -31,7 +31,15 @@ mod mat {
 const L_LANTERN: [f32; 3] = [1.25, 0.82, 0.45];
 const L_MELT: [f32; 3] = [1.3, 0.92, 0.38];
 const L_KILN: [f32; 3] = [1.3, 0.5, 0.18];
-const L_DUSK: [f32; 3] = [0.7, 0.55, 0.85];
+
+/// Each quarter has its own colour (painted shed doors, banners, fill light) so players can
+/// tell the four identical quarters apart: verdigris N, cinnabar W, cobalt S, saffron E.
+const QUARTERS: [(&str, [f32; 3]); 4] = [
+    ("verdigris", [0.42, 0.84, 0.64]),
+    ("cinnabar", [0.95, 0.42, 0.3]),
+    ("cobalt", [0.4, 0.55, 0.98]),
+    ("saffron", [1.0, 0.8, 0.32]),
+];
 
 /// Interior half size (48 × 48 m).
 const H: f32 = 24.0;
@@ -141,13 +149,13 @@ pub(super) fn knell_yard() -> Gen {
         "Knell Yard",
         LevelKind::Arena,
         Environment {
-            sky_color: Vec3::new(0.17, 0.09, 0.16),
-            fog_color: Vec3::new(0.22, 0.12, 0.17),
+            sky_color: Vec3::new(0.22, 0.12, 0.22),
+            fog_color: Vec3::new(0.25, 0.15, 0.24),
             fog_start: 20.0,
             fog_end: 100.0,
-            ambient: Vec3::new(0.42, 0.34, 0.36),
+            ambient: Vec3::new(0.46, 0.42, 0.52),
             light_dir: Vec3::new(-0.75, -0.55, 0.35),
-            light_color: Vec3::new(0.85, 0.55, 0.38),
+            light_color: Vec3::new(0.95, 0.62, 0.44),
             music: "arena".into(),
         },
     );
@@ -161,9 +169,11 @@ pub(super) fn knell_yard() -> Gen {
     g.clip("sky clip wall E", [H, TOP, -H], [H + 1.0, SKY, H]);
     g.clip("sky clip ceiling", [-H - 1.0, SKY, -H - 1.0], [H + 1.0, SKY + 1.0, H + 1.0]);
 
-    for k in 0..4 {
+    for (k, &(colour, tint)) in QUARTERS.iter().enumerate() {
         let mut q = Quarter { g: &mut g, k };
-        q.g.section(&format!("Quarter {} (pinwheel, turned {}°)", k + 1, k * 90));
+        let paint = Mat("panel", tint);
+        let shed = Mat("panel", tint.map(|c| c * 0.78));
+        q.g.section(&format!("Quarter {} ({colour}; pinwheel, turned {}°)", k + 1, k * 90));
 
         // Floors: the yard band of this quarter, the moat strip (bed, molten bronze, lining,
         // lip). The four quarters tile the ring like a pinwheel.
@@ -208,12 +218,15 @@ pub(super) fn knell_yard() -> Gen {
 
         // Pattern shed along the north wall: its roof is the gantry (y 5); a ramp down the
         // wall to the east.
-        q.bx("pattern shed", [-10.0, 0.0, -H], [6.0, 4.6, -20.0], WOOD_DARK);
+        q.bx("pattern shed (painted sheet)", [-10.0, 0.0, -H], [6.0, 4.6, -20.0], shed);
         q.bx("pattern shed roof (gantry)", [-10.2, 4.6, -H], [6.0, DECK, -19.8], WOOD);
         q.bx("pattern shed door", [-7.5, 0.0, -20.0], [-3.5, 3.4, -19.85], WOOD);
         q.bx("pattern shed door rail", [-8.2, 3.4, -20.0], [-2.8, 3.7, -19.75], IRON);
         q.bx("pattern shed post", [-10.3, 0.0, -20.0], [-9.8, 4.6, -19.7], STONE_DARK);
         q.bx("pattern shed post", [0.75, 0.0, -20.0], [1.25, 4.6, -19.7], STONE_DARK);
+        q.bx("pattern shed fascia", [-10.25, 4.3, -19.85], [5.95, 4.95, -19.6], WOOD_DARK);
+        q.bx("banner (painted)", [-6.0, 6.2, -H], [-2.0, 11.2, -H + 0.1], paint);
+        q.bx("banner rod", [-6.3, 11.2, -H], [-1.7, 11.4, -H + 0.25], BRONZE);
         q.ramp("shed ramp", true, (-H, -20.0), (16.5, 0.0), (6.0, DECK), 8.0, STONE_DARK);
         q.lantern("shed lantern", [3.5, 3.6, -19.7], None);
         q.light("shed", [3.5, 3.0, -18.0], L_LANTERN, 9.0);
@@ -244,7 +257,7 @@ pub(super) fn knell_yard() -> Gen {
         q.lantern("post lantern", [14.5, 3.6, -10.8], None);
         q.light("moat post", [14.5, 4.2, -10.8], L_LANTERN, 9.0);
         q.light("molten bronze", [1.5, -0.6, -8.0], L_MELT, 7.0);
-        q.light("dusk", [-15.0, 8.0, -15.0], L_DUSK, 12.0);
+        q.light(&format!("{colour} fill"), [-15.0, 8.0, -15.0], tint.map(|c| c * 0.7), 12.0);
 
         // Spawns: yard, shed roof (y 5), kiln roof (y 7.5).
         q.spawn([4.5, 0.0, -15.5]);

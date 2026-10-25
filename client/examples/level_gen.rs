@@ -1533,12 +1533,12 @@ fn main() -> anyhow::Result<()> {
         (
             "knell_yard.ron",
             knell_yard::knell_yard(),
-            "Knell Yard — compact PvP deathmatch arena (2-5 players, up to 8). See docs/levels.md.",
+            "Knell Yard — compact PvP deathmatch arena (2-5 players, up to 8). See docs/levels.md.\nGenerator module: client/examples/level_gen/knell_yard.rs.",
         ),
         (
             "ingot_run.ron",
             ingot_run::ingot_run(),
-            "Ingot Run — long lane-based PvP deathmatch arena (4-8 players). See docs/levels.md.",
+            "Ingot Run — long lane-based PvP deathmatch arena (4-8 players). See docs/levels.md.\nGenerator module: client/examples/level_gen/ingot_run.rs.",
         ),
     ] {
         let text = emit(&g, header);

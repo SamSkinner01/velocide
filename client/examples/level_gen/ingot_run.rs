@@ -20,6 +20,7 @@ mod mat {
     pub const GRATE: Mat = Mat("grate", [0.72, 0.78, 0.86]);
     pub const BRICK: Mat = Mat("brick", [0.62, 0.5, 0.48]);
     pub const RUST: Mat = Mat("rust", [0.78, 0.66, 0.6]);
+    pub const COAL: Mat = Mat("rust", [0.45, 0.4, 0.42]);
     pub const HAZARD: Mat = Mat("hazard", [1.0, 0.86, 0.45]);
     pub const INGOT: Mat = Mat("metal", [0.86, 0.66, 0.5]);
     /// Molten slag (always has a kill volume, or sits behind a grate).
@@ -156,7 +157,7 @@ pub(super) fn ingot_run() -> Gen {
 
     g.section("Crane gantry along the north wall (y 7)");
     g.bx("crane gantry", [-WX0, HIGH - 0.4, -HZ], [WX0, HIGH, GZ], GRATE);
-    g.bx("crane gantry girder", [-WX0, HIGH - 1.0, GZ - 0.4], [WX0, HIGH - 0.4, GZ], STEEL_DARK);
+    g.bx("crane gantry girder (striped edge)", [-WX0, HIGH - 1.0, GZ - 0.4], [WX0, HIGH - 0.4, GZ], HAZARD);
 
     for (s, name) in [(1.0f32, "E"), (-1.0, "W")] {
         let mut h = Half { g: &mut g, s, name };
@@ -183,7 +184,7 @@ pub(super) fn ingot_run() -> Gen {
 
         // End walkway (y 7) from the gantry to the south ramp, the furnace behind it.
         h.bx("end walkway", [WX0, HIGH - 0.4, -HZ], [WX1, HIGH, 14.0], GRATE);
-        h.bx("end walkway girder", [WX0, HIGH - 1.0, GZ], [WX0 + 0.4, HIGH - 0.4, 9.0], STEEL_DARK);
+        h.bx("end walkway girder (striped edge)", [WX0, HIGH - 1.0, GZ], [WX0 + 0.4, HIGH - 0.4, 9.0], HAZARD);
         for z in [-10.0, -1.0] {
             h.bx("end walkway post", [WX0, 0.0, z - 0.3], [WX0 + 0.6, HIGH - 1.0, z + 0.3], STEEL_DARK);
         }
@@ -200,11 +201,13 @@ pub(super) fn ingot_run() -> Gen {
         // North-east corner: a wall-jump shaft between the furnace and a buttress up to the
         // walkway, a coal bunker behind it.
         h.bx("buttress (wall-jump shaft)", [WX1, 0.0, -11.5], [HX, 7.6, -10.5], WALL_PANEL);
-        h.bx("coal bunker", [WX1, 0.0, -HZ], [HX, 4.0, -11.5], RUST);
+        h.bx("coal bunker", [WX1, 0.0, -HZ], [HX, 4.0, -11.5], COAL);
 
-        // Wall-jump racks under the gantry (3.5 m shaft up to y 7).
-        h.bx("ingot rack (wall-jump shaft)", [19.0, 0.0, GZ], [20.0, 7.6, -11.0], RUST);
-        h.bx("ingot rack (wall-jump shaft)", [23.5, 0.0, GZ], [24.5, 7.6, -11.0], RUST);
+        // Wall-jump racks under the gantry (3.5 m shaft up to y 7), ingots stacked on top.
+        for x in [19.0, 23.5] {
+            h.bx("ingot rack (wall-jump shaft)", [x, 0.0, GZ], [x + 1.0, 7.6, -11.0], STEEL_DARK);
+            h.bx("rack ingots", [x + 0.1, 7.6, -15.0], [x + 0.9, 7.9, -12.0], INGOT);
+        }
         for x in [10.0, 32.0] {
             h.bx("gantry post", [x - 0.3, 0.0, GZ - 0.6], [x + 0.3, HIGH - 1.0, GZ], STEEL_DARK);
         }
@@ -216,22 +219,34 @@ pub(super) fn ingot_run() -> Gen {
         // Pad from the casting floor onto the gantry.
         h.pad("floor -> gantry", [9.0, 0.0, -10.2], [11.4, 1.0, -7.8], [0.0, 30.0, -7.4]);
 
-        // Ladle stand (y 3, step crate) and cover on the casting floor.
-        h.bx("ladle stand", [15.0, 0.0, 3.0], [21.0, 3.0, 9.0], BRICK);
-        h.bx("ladle stand step", [13.5, 0.0, 5.0], [15.0, 1.2, 7.0], RUST);
+        // Two platforms (y 3, each with an ingot-pile step), staggered across the casting
+        // floor: the pouring platform on the north side, the ladle stand on the south side.
+        h.bx("pouring platform", [26.0, 0.0, -10.0], [32.0, 2.9, -4.0], STEEL_DARK);
+        h.bx("pouring platform plate", [26.0, 2.9, -10.0], [32.0, 3.0, -4.0], STEEL);
+        h.bx("pouring platform step (ingot pile)", [32.0, 0.0, -8.0], [33.5, 1.2, -6.0], INGOT);
+        h.bx("ladle stand", [15.0, 0.0, 3.0], [21.0, 2.9, 9.0], STEEL_DARK);
+        h.bx("ladle stand plate", [15.0, 2.9, 3.0], [21.0, 3.0, 9.0], STEEL);
+        h.bx("ladle stand step (ingot pile)", [13.5, 0.0, 5.0], [15.0, 1.2, 7.0], INGOT);
         h.bx("ladle on the stand", [18.5, 3.0, 6.5], [20.5, 4.3, 8.5], RUST);
-        h.bx("ingot stack", [27.0, 0.0, -6.0], [30.0, 1.2, -4.0], INGOT);
+        // Low and tall cover on the casting floor.
+        h.bx("ingot cart", [13.0, 0.0, -5.0], [17.0, 1.2, -3.0], INGOT);
         h.bx("mould box", [29.0, 0.0, 2.0], [32.0, 2.6, 5.0], STEEL_DARK);
         h.bx("ingot stack", [12.0, 0.0, 12.5], [15.0, 1.2, 14.5], INGOT);
+        // Wall panels above the lanes (scale and rhythm along the 96 m walls).
+        for x in [7.0, 21.0, 35.0] {
+            h.bx("north wall panel", [x, 9.5, -HZ], [x + 9.0, 12.5, -HZ + 0.1], WALL_PANEL);
+            h.bx("south wall panel", [x, 9.5, HZ - 0.1], [x + 9.0, 12.5, HZ], WALL_PANEL);
+        }
         h.light("casting floor", [24.0, 6.0, 0.0], L_COLD, 14.0);
         h.light("ladle stand", [18.0, 5.0, 6.0], L_INGOT, 7.0);
+        h.light("pouring platform", [29.0, 5.0, -7.0], L_INGOT, 7.0);
         h.light("trough", [12.0, 0.5, 18.0], L_COLD, 7.0);
 
         // Spawns: walkway (y 7), gantry (y 7), ladle stand (y 3), tapping floor, casting floor.
         h.spawn([41.0, HIGH, -8.0]);
         h.spawn([24.0, HIGH, -18.0]);
         h.spawn([17.0, 3.0, 5.0]);
-        h.spawn([36.0, 0.0, 3.0]);
+        h.spawn([36.0, 0.0, 0.0]);
         h.spawn([10.0, 0.0, 13.0]);
     }
 
