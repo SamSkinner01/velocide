@@ -312,13 +312,14 @@ impl ModeHud {
             );
         }
 
-        // Team wipe.
+        // Team wipe. Everyone is dead now, so the death view right above counts down
+        // ("RESPAWNING IN 2.5"); a second, rounded countdown here disagreed with it.
         if let Some(at) = self.wipe
-            && let Some(left) = secs_until(at)
+            && secs_until(at).is_some()
         {
             list.text(
                 vec2(c.center().x, c.center().y + 40.0),
-                &format!("REGROUPING AT THE CHECKPOINT  {:.0}", left.ceil()),
+                "REGROUPING AT THE CHECKPOINT",
                 &TextStyle::new(t.bone).centered().outline(outline),
             );
         }

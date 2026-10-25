@@ -1,8 +1,9 @@
 //! In-game HUD, drawn with `engine::ui::hud` into the frame's UI list.
 //!
-//! Layout (canvas 360 units tall): level timer top centre, status line under it; ping / FPS
-//! top right with the event feed below; health + stamina bottom left; speedometer bottom
-//! centre; weapon + fire modes bottom right; crosshair in the middle; name tags over players.
+//! Layout (canvas 360 units tall): level timer top centre, status line below the mode /
+//! encounter readouts under it; ping / FPS top right with the event feed below; health +
+//! stamina bottom left; speedometer bottom centre; weapon + fire modes bottom right; crosshair
+//! in the middle; name tags over players.
 //!
 //! Adding an element: add a field to [`HudInfo`] (filled in `InGame::draw_hud`) and draw it in
 //! [`Hud::draw`]; for stateful elements (feeds, banners) add the state to [`Hud`].
@@ -87,6 +88,11 @@ impl Hud {
         });
     }
 
+    /// Drops the current banner (the death view takes the middle of the screen).
+    pub fn clear_banner(&mut self) {
+        self.banner = None;
+    }
+
     pub fn draw(&mut self, list: &mut UiDrawList, t: &Theme, info: &HudInfo) {
         let c = Rect::from_min_size(Vec2::ZERO, list.canvas_size);
         let now = info.time;
@@ -110,7 +116,10 @@ impl Hud {
             let style = TextStyle::new(fade(color, if blink { 1.0 } else { 0.6 }))
                 .centered()
                 .outline(outline);
-            list.text(vec2(c.center().x, y + 2.0), status, &style);
+            // Under the timer the slots are taken: deathmatch TIME LEFT (30), the encounter
+            // readout (40) and the extraction countdown (46..60) sit there.
+            let status_y = if y > 8.0 { 64.0 } else { y + 2.0 };
+            list.text(vec2(c.center().x, status_y), status, &style);
         }
 
         // Top right: ping, FPS, then the event feed.

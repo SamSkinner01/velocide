@@ -702,7 +702,11 @@ impl InGame {
         let mut scene = self.world.scene();
         let net = self.session.as_ref().map(Session::client);
         let local = net.and_then(|n| Some((n.local_state()?, n.local_render_position(alpha)?, n)));
-        let downed = self.local_downed();
+        // Downed (co-op) or dead (death view): the view sinks to the floor.
+        let downed = self.local_downed()
+            || net
+                .and_then(NetClient::own_combat)
+                .is_some_and(|c| c.combat.dead);
         if let Some((state, feet, net)) = local {
             let tuning = &net.tuning().movement;
             self.last_camera = self.camera.update(&CameraFrame {
@@ -765,12 +769,13 @@ impl InGame {
         self.effects.update(vdt, world.map(|w| &w.collision.world));
         self.effects.draw(&mut out.sprites, &mut out.decals);
 
-        // No weapon in front of the results screen.
+        // No weapon in front of the results screen, nor in a dead / downed player's hands.
         let results = self.results_open();
         if let Some(net) = self.session.as_ref().map(Session::client)
             && net.local_state().is_some()
         {
-            if common.settings.show_viewmodel && !results {
+            let dead = net.own_combat().is_some_and(|c| c.combat.dead);
+            if common.settings.show_viewmodel && !results && !dead {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);

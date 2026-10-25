@@ -53,7 +53,7 @@ pub struct CameraFrame<'a> {
     pub pitch: f32,
     pub settings: &'a Settings,
     pub shake: ShakeOffset,
-    /// Downed (co-op): the view drops to [`DOWNED_EYE_HEIGHT`].
+    /// Downed (co-op) or dead: the view drops to [`DOWNED_EYE_HEIGHT`].
     pub downed: bool,
     /// Real frame time.
     pub dt: f32,

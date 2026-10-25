@@ -450,6 +450,8 @@ impl InGame {
                         ),
                     };
                     self.combat.killed_by = Some(by);
+                    // "ARENA LOCKED" / "CHECKPOINT" would sit on top of "YOU DIED".
+                    self.hud.clear_banner();
                     common.audio.play_2d(Sfx::Death);
                     self.feedback.flash(Vec3::new(0.6, 0.0, 0.0), 0.5);
                 }

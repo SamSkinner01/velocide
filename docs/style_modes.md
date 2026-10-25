@@ -138,7 +138,8 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
 * **Downed** players have `combat.dead` set (no hitboxes, no input, AI ignores them, prediction
   uses `neutral_input`) and replicate `player_flags::DOWNED` *instead of* `DEAD`, so teammates
   draw the downed pose and the revive marker. They can look around (their view sinks to 0.6 m,
-  `camera::DOWNED_EYE_HEIGHT`, and rises again on revive / respawn); they can't move or shoot.
+  `camera::DOWNED_EYE_HEIGHT`, as it does in the death view, and rises again on revive /
+  respawn; no weapon in hand); they can't move or shoot.
 * **Revive**: a living, non-downed teammate holding `USE` within `revive_range` (2.5 m, feet to
   feet) for `revive_time` (1.5 s). The nearest helper takes it; letting go or stepping out of range
   cancels (`ModeEvent::Reviving { reviver: None }`). Success: back up where they lie with
@@ -281,7 +282,7 @@ player) to everyone.
   over downed teammates a pulsing cross with "NAME DOWN 12", the revive progress bar or
   "HOLD [E] TO REVIVE" (within reach) / the distance; the local downed panel (YOU ARE DOWN,
   checkpoint countdown, "NAME IS REVIVING YOU" + bar); the reviver's bar under the crosshair;
-  TEAM WIPED banner + "REGROUPING AT THE CHECKPOINT 2"; EXTRACTION countdown (urgent red in the
+  TEAM WIPED banner + "REGROUPING AT THE CHECKPOINT" (the death view counts down); EXTRACTION countdown (urgent red in the
   last seconds, `Countdown` beeps); solo death: "BACK TO THE CHECKPOINT".
 * **Deathmatch**: frags / limit and place (top left), TIME LEFT (top centre).
 
