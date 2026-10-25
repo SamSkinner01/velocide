@@ -200,6 +200,8 @@ impl Client {
 
 struct Rig {
     renderer: Renderer,
+    /// Window size in pixels (the headless target).
+    size: (u32, u32),
     buffers: FrameBuffers,
     out: PathBuf,
     fails: Vec<String>,
@@ -258,7 +260,8 @@ impl Rig {
             ..Default::default()
         };
         let started = Instant::now();
-        self.buffers.clear(UiDrawList::canvas_for_window(W, H));
+        self.buffers
+            .clear(UiDrawList::canvas_for_window(self.size.0, self.size.1));
         let out = {
             let mut io = FrameIo {
                 renderer: &mut self.renderer,
@@ -266,7 +269,7 @@ impl Rig {
                 ui_input: &ui,
                 dt: DT,
                 time: c.time,
-                window_size: (W, H),
+                window_size: self.size,
             };
             match &mut c.screen {
                 Screen::Menu(m) => m.frame(&mut c.common, &mut io, &mut self.buffers),
@@ -1273,6 +1276,209 @@ fn settings(rig: &mut Rig) {
     rig.leave(&mut c);
 }
 
+// ---- performance -------------------------------------------------------------------------------------
+
+fn percentile(v: &mut [f32], p: f32) -> f32 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort_by(f32::total_cmp);
+    v[((v.len() - 1) as f32 * p).round() as usize]
+}
+
+fn performance(rig: &mut Rig) {
+    println!("\n== performance (release) ==");
+    // Client: the Furnace Cathedral (arena 5) full of enemies, Cinderbox explosions.
+    let mut c = rig.client("Bench", LaunchOptions::default());
+    rig.transition(
+        &mut c,
+        Transition::Start(StartMode::SinglePlayer {
+            level: Some("crucible_of_veins".into()),
+        }),
+    );
+    wait_playing(rig, &mut [&mut c], 20.0);
+    rig.run(&mut [&mut c], 30);
+    c.chat("/god");
+    walk_into_encounter(&mut c, 4);
+    rig.run(&mut [&mut c], 150);
+    c.chat("/spawn husk 14");
+    c.chat("/spawn spitter 6");
+    c.chat("/spawn gnat 6");
+    c.chat("/spawn bastion 2");
+    rig.run(&mut [&mut c], 120);
+    let enemies = c.server_stats().map_or(0, |s| s.enemies);
+    println!("      enemies alive on the server: {enemies}");
+    c.pad(GamepadButton::DPadRight, true); // 2 Thresher
+    rig.run(&mut [&mut c], 1);
+    c.pad(GamepadButton::DPadRight, false);
+    rig.run(&mut [&mut c], 1);
+    c.pad(GamepadButton::DPadRight, true); // 3 Riveter
+    rig.run(&mut [&mut c], 1);
+    c.pad(GamepadButton::DPadRight, false);
+    rig.run(&mut [&mut c], 1);
+    c.pad(GamepadButton::DPadRight, true); // 4 Cinderbox
+    rig.run(&mut [&mut c], 1);
+    c.pad(GamepadButton::DPadRight, false);
+    c_fire(&mut c, true);
+    let mut cpu = Vec::new();
+    let mut with_gpu = Vec::new();
+    for i in 0..600 {
+        let me = c.feet().unwrap_or_default();
+        if let Some(e) = c
+            .enemies()
+            .into_iter()
+            .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
+        {
+            c.aim(e + Vec3::Y * 0.5);
+        }
+        std::thread::sleep(Duration::from_secs_f32(DT));
+        let t0 = Instant::now();
+        rig.frame(&mut c);
+        cpu.push(t0.elapsed().as_secs_f32() * 1000.0);
+        // Reading the frame back waits for the GPU: an upper bound of the full frame cost.
+        let _ = rig.renderer.read_pixels();
+        with_gpu.push(t0.elapsed().as_secs_f32() * 1000.0);
+        if i == 300 {
+            rig.shot(&mut c, "perf_arena5_crowd");
+            println!(
+                "      mid-fight: {} enemies, {} projectiles, {} particles",
+                c.server_stats().map_or(0, |s| s.enemies),
+                c.server_stats().map_or(0, |s| s.projectiles),
+                c.game_ref().map_or(0, |g| g.effects.particle_count())
+            );
+        }
+    }
+    c_fire(&mut c, false);
+    let tick_us = c.server_stats().map_or(0.0, |s| s.tick_time_us);
+    println!(
+        "      client frame (CPU, 1280x720): median {:.2} ms, p99 {:.2} ms, max {:.2} ms",
+        percentile(&mut cpu, 0.5),
+        percentile(&mut cpu, 0.99),
+        percentile(&mut cpu, 1.0)
+    );
+    println!(
+        "      client frame incl. GPU readback: median {:.2} ms, p99 {:.2} ms, max {:.2} ms",
+        percentile(&mut with_gpu, 0.5),
+        percentile(&mut with_gpu, 0.99),
+        percentile(&mut with_gpu, 1.0)
+    );
+    println!("      in-process server avg tick: {tick_us:.0} us");
+    rig.check(
+        percentile(&mut with_gpu, 0.99) < 16.0,
+        "perf: ~40 enemies + explosions under 16 ms per frame (p99)",
+    );
+    rig.leave(&mut c);
+
+    // Server: 8 players running, jumping and firing rockets in Cistern Nine.
+    let server = match server::ServerHandle::spawn(server::ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("addr"),
+        level: "cistern_nine".into(),
+        max_players: 8,
+        watch_tuning: false,
+        ..Default::default()
+    }) {
+        Ok(s) => s,
+        Err(e) => {
+            rig.check(false, &format!("perf: server starts ({e:#})"));
+            return;
+        }
+    };
+    let addr = server.connect_addr();
+    let mut clients: Vec<client::net::NetClient> = (0..8)
+        .filter_map(|i| {
+            client::net::NetClient::connect(addr, client::net::ClientConfig::new(&format!("P{i}")))
+                .ok()
+        })
+        .collect();
+    let mut ticks_us = Vec::new();
+    let mut seq = 0u32;
+    for frame in 0..(60 * 25) {
+        std::thread::sleep(Duration::from_secs_f32(DT));
+        seq += 1;
+        for (i, n) in clients.iter_mut().enumerate() {
+            n.update(Duration::from_secs_f32(DT));
+            let t = frame as f32 * DT;
+            let mut buttons = shared::input::Buttons::FIRE;
+            if (frame + i * 7) % 50 == 0 {
+                buttons.set(shared::input::Buttons::JUMP, true);
+            }
+            if (frame + i * 13) % 140 == 0 {
+                buttons.set(shared::input::Buttons::DASH, true);
+            }
+            let input = shared::input::PlayerInput {
+                seq,
+                forward: 127,
+                right: if (frame / 90 + i) % 2 == 0 { 60 } else { -60 },
+                yaw: t * (0.6 + i as f32 * 0.1) + i as f32,
+                pitch: -0.1,
+                buttons,
+                weapon: ((frame / 300 + i) % 4) as u8,
+                weapon_mode: 0,
+                ..Default::default()
+            };
+            let _ = n.tick(input);
+            let _ = n.drain_events();
+        }
+        if frame > 300 && frame % 60 == 0 {
+            ticks_us.push(server.stats().tick_time_us);
+        }
+    }
+    let stats = server.stats();
+    println!(
+        "      dedicated-style server, {} players: avg tick {:.0} us (samples: median {:.0}, max {:.0}), {} projectiles live",
+        stats.players,
+        stats.tick_time_us,
+        percentile(&mut ticks_us, 0.5),
+        percentile(&mut ticks_us, 1.0),
+        stats.projectiles
+    );
+    rig.check(
+        stats.players == 8 && stats.tick_time_us < 4000.0,
+        "perf: 8-player server tick well under the 16.7 ms budget",
+    );
+    for n in &mut clients {
+        n.disconnect();
+    }
+    server.stop();
+}
+
+// ---- window sizes ------------------------------------------------------------------------------------
+
+fn window_sizes(rig: &mut Rig) {
+    println!("\n== window sizes: resize, minimise, other aspect ratios ==");
+    let mut c = rig.client("Resizer", LaunchOptions::default());
+    rig.transition(
+        &mut c,
+        Transition::Start(StartMode::SinglePlayer {
+            level: Some("crucible_of_veins".into()),
+        }),
+    );
+    wait_playing(rig, &mut [&mut c], 20.0);
+    c.chat("/spawn husk 3");
+    rig.run(&mut [&mut c], 90);
+    // A long kill-feed line to see where it lands at every size.
+    c.chat("/killall");
+    for (w, h, name) in [
+        (800, 600, "4x3"),
+        (2560, 1080, "ultrawide"),
+        (640, 480, "small"),
+        (0, 0, "minimised"),
+        (1920, 1080, "1080p"),
+    ] {
+        rig.size = (w, h);
+        rig.renderer.resize(w, h);
+        rig.run(&mut [&mut c], 30);
+        if w > 0 {
+            rig.shot(&mut c, &format!("window_{name}"));
+        }
+        rig.check(c.playing(), &format!("window: {name} ({w}x{h}) keeps the game running"));
+    }
+    rig.size = (W, H);
+    rig.renderer.resize(W, H);
+    rig.run(&mut [&mut c], 10);
+    rig.leave(&mut c);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -1283,6 +1489,7 @@ fn main() -> anyhow::Result<()> {
     let renderer = Renderer::new_headless(W, H, &RetroSettings::default())?;
     let mut rig = Rig {
         renderer,
+        size: (W, H),
         buffers: FrameBuffers::default(),
         out,
         fails: Vec::new(),
@@ -1305,6 +1512,12 @@ fn main() -> anyhow::Result<()> {
     }
     if want("settings") {
         settings(&mut rig);
+    }
+    if want("perf") {
+        performance(&mut rig);
+    }
+    if want("window") {
+        window_sizes(&mut rig);
     }
     let mut ms = rig.frame_ms.clone();
     ms.sort_by(f32::total_cmp);
