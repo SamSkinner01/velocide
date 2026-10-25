@@ -1,27 +1,30 @@
 //! Checks for the shipped levels in `assets/levels/`:
 //!
 //! - every level parses and its markup is consistent (materials, doors, enemy names);
-//! - campaign / arena structure (spawns, checkpoints, encounters, exit, enemy mix); every
-//!   `Arena` level in `assets/levels/` gets the arena checks;
-//! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry, harriers
-//!   hover in open air;
+//! - campaign / arena structure (spawns, checkpoints, encounters, exit, enemy mix and how the
+//!   roster is introduced) — every `Campaign` level in [`CAMPAIGNS`] gets the same checks, and
+//!   every `Arena` level in `assets/levels/` gets the arena checks;
+//! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry (with the
+//!   roster's sizes), harriers hover in open air, censers sit on deep ledges, gaolers have
+//!   room to be circled, herons have long sightlines;
 //! - jump pads land somewhere solid;
 //! - no z-fighting (coplanar overlapping faces of different materials);
 //! - sealing: a flood fill through free space with every door closed never leaves the level
 //!   and never connects two arenas (locked rooms really lock);
 //! - chaotic players never leave the level;
 //! - traversability: waypoint-following bots driven through the real movement code
-//!   (`shared::movement::step`) walk the whole critical path from every spawn and every
-//!   checkpoint to the exit with doors open, using only running, jumping, sliding and pads;
-//!   every arena has a full lap through its ramps, pads, tunnels and catwalks, and scripted
-//!   checks for its movement-tech spots (wall-jump shafts, slide routes).
+//!   (`shared::movement::step`) walk the whole critical path of every campaign level from
+//!   every spawn and every checkpoint to the exit with doors open, using only running,
+//!   jumping, sliding and pads; plus each level's alternate routes and scripted tech; every
+//!   arena has a full lap through its ramps, pads, tunnels and catwalks, and scripted checks
+//!   for its movement-tech spots (wall-jump shafts, slide routes).
 //!
 //! `cargo test -p shared --test levels -- --nocapture` prints route times (par suggestions).
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use engine::physics::{CollisionWorld, MASK_MOVEMENT};
+use engine::physics::{CollisionWorld, MASK_MOVEMENT, MASK_SHOTS};
 use glam::{IVec3, Vec2, Vec3};
 use shared::input::{Buttons, PlayerInput};
 use shared::level::{Brush, LevelCollision, LevelDef, LevelKind, Volume};
@@ -29,16 +32,21 @@ use shared::movement::{self, MoveEnv, MoveEvents, MoveState};
 use shared::tuning::MovementTuning;
 
 const DT: f32 = 1.0 / 60.0;
-const CAMPAIGN: &str = "crucible_of_veins";
+const CRUCIBLE: &str = "crucible_of_veins";
+const SPIRE: &str = "spire_of_wicks";
+/// Every shipped `Campaign` level: each gets the structure, spawn, sealing and bot checks
+/// (its routes live in [`campaign_route`] / [`alternate_routes`]).
+const CAMPAIGNS: [&str; 2] = [CRUCIBLE, SPIRE];
 const ARENA: &str = "cistern_nine";
 const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
-const SHIPPED: [&str; 4] = [CAMPAIGN, ARENA, KNELL, INGOT];
+const SHIPPED: [&str; 5] = [CRUCIBLE, SPIRE, ARENA, KNELL, INGOT];
 /// Test levels that aren't held to the shipping standards.
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
-const ENEMIES: [&str; 4] = ["gnawer", "censer", "harrier", "gaoler"];
+/// The roster (docs/roster.md); a campaign finale uses all of it.
+const ENEMIES: [&str; 5] = ["gnawer", "censer", "harrier", "gaoler", "heron"];
 const MATERIALS: [&str; 14] = [
     "concrete", "brick", "metal", "rust", "grate", "flesh", "bone", "lava", "tile", "wood",
     "hazard", "glass", "dirt", "panel",
@@ -233,69 +241,96 @@ fn shipped_levels_fit_the_budget_and_have_a_safety_net() {
     }
 }
 
+fn kinds(e: &shared::level::Encounter) -> HashSet<String> {
+    e.waves.iter().flat_map(|w| &w.spawns).map(|s| s.enemy.clone()).collect()
+}
+
+/// Index of the first encounter that spawns `enemy`.
+fn first_encounter_with(level: &LevelDef, enemy: &str) -> Option<usize> {
+    level.encounters.iter().position(|e| kinds(e).contains(enemy))
+}
+
 #[test]
 fn campaign_structure() {
-    let level = load(CAMPAIGN);
-    assert_eq!(level.kind, LevelKind::Campaign);
-    assert_eq!(level.spawns.len(), 4, "4 co-op player spawns");
-    assert!(level.exit.is_some(), "campaign needs an exit");
-    let n = level.encounters.len();
-    assert!((4..=5).contains(&n), "4-5 arenas, got {n}");
-    assert_eq!(level.checkpoints.len(), n, "one checkpoint per encounter");
+    for name in CAMPAIGNS {
+        let level = load(name);
+        assert_eq!(level.kind, LevelKind::Campaign, "{name}");
+        assert_eq!(level.spawns.len(), 4, "{name}: 4 co-op player spawns");
+        assert!(level.exit.is_some(), "{name}: campaign needs an exit");
+        let n = level.encounters.len();
+        assert!((4..=5).contains(&n), "{name}: 4-5 arenas, got {n}");
+        assert_eq!(level.checkpoints.len(), n, "{name}: one checkpoint per encounter");
 
-    let door = |id: u32| level.doors.iter().find(|d| d.id == id).expect("door exists");
-    let mut used = HashSet::new();
-    for (i, (e, cp)) in level.encounters.iter().zip(&level.checkpoints).enumerate() {
-        assert!(!e.lock_doors.is_empty() && !e.unlock_doors.is_empty(), "encounter {i} locks and unlocks");
-        for &id in &e.lock_doors {
-            assert!(door(id).starts_open, "encounter {i}: lock door {id} must start open");
-            used.insert(id);
+        let door = |id: u32| level.doors.iter().find(|d| d.id == id).expect("door exists");
+        let mut used = HashSet::new();
+        for (i, (e, cp)) in level.encounters.iter().zip(&level.checkpoints).enumerate() {
+            assert!(
+                !e.lock_doors.is_empty() && !e.unlock_doors.is_empty(),
+                "{name}: encounter {i} locks and unlocks"
+            );
+            for &id in &e.lock_doors {
+                assert!(door(id).starts_open, "{name}: encounter {i}: lock door {id} must start open");
+                used.insert(id);
+            }
+            for &id in &e.unlock_doors {
+                assert!(!door(id).starts_open, "{name}: encounter {i}: exit door {id} must start closed");
+                used.insert(id);
+            }
+            // The checkpoint is touched before the fight starts: its spawn is outside the
+            // encounter trigger, and its trigger is next to it.
+            assert!(
+                !e.trigger.contains(cp.spawn.position),
+                "{name}: checkpoint {i} spawn inside encounter trigger"
+            );
+            assert!(
+                cp.trigger.contains(cp.spawn.position + Vec3::Y * 0.1),
+                "{name}: checkpoint {i} spawn outside its trigger"
+            );
+            assert!(
+                cp.trigger.center().distance(e.trigger.center()) < 60.0,
+                "{name}: checkpoint {i} is far from encounter {i}"
+            );
         }
-        for &id in &e.unlock_doors {
-            assert!(!door(id).starts_open, "encounter {i}: exit door {id} must start closed");
-            used.insert(id);
+        for d in &level.doors {
+            assert!(used.contains(&d.id), "{name}: door {} is not used by any encounter", d.id);
         }
-        // The checkpoint is touched before the fight starts: its spawn is outside the
-        // encounter trigger, and its trigger is next to it.
-        assert!(!e.trigger.contains(cp.spawn.position), "checkpoint {i} spawn inside encounter trigger");
-        assert!(cp.trigger.contains(cp.spawn.position + Vec3::Y * 0.1), "checkpoint {i} spawn outside its trigger");
+
+        // Introduction curve: fodder first; harriers first in a tall room; the first gaoler
+        // before the finale, in a room big enough to circle it; every type introduced before
+        // the finale, which has all of them over 3+ waves. (Heron sightlines are checked
+        // with the spawns.)
+        let opener: HashSet<&str> =
+            level.encounters[0].waves[0].spawns.iter().map(|s| s.enemy.as_str()).collect();
+        assert_eq!(opener, HashSet::from(["gnawer"]), "{name}: the first wave is gnawers only");
+        let arena = |i: usize| level.encounters[i].arena.unwrap_or(level.encounters[i].trigger);
+        let harriers = first_encounter_with(&level, "harrier").expect("harriers appear");
+        let a = arena(harriers);
+        assert!(a.max.y - a.min.y >= 25.0, "{name}: harriers are introduced in a tall room");
+        let gaoler = first_encounter_with(&level, "gaoler").expect("a gaoler appears");
+        let a = arena(gaoler);
         assert!(
-            cp.trigger.center().distance(e.trigger.center()) < 60.0,
-            "checkpoint {i} is far from encounter {i}"
+            a.max.x - a.min.x >= 30.0 && a.max.z - a.min.z >= 30.0,
+            "{name}: the first gaoler gets a room of 30 x 30 m or more"
         );
-    }
-    for d in &level.doors {
-        assert!(used.contains(&d.id), "door {} is not used by any encounter", d.id);
+        for k in ENEMIES {
+            let first = first_encounter_with(&level, k).unwrap_or_else(|| panic!("{name}: no {k}"));
+            assert!(first < n - 1, "{name}: {k} is introduced before the finale");
+        }
+        let last = level.encounters.last().expect("encounters");
+        assert!(last.waves.len() >= 3, "{name}: finale has 3+ waves");
+        for k in ENEMIES {
+            assert!(kinds(last).contains(k), "{name}: finale includes {k}");
+        }
+        let total: usize = level.encounters.iter().flat_map(|e| &e.waves).map(|w| w.spawns.len()).sum();
+        println!("{name}: {n} encounters, {total} enemies (single player)");
     }
 
-    // Enemy progression: gnawers first, censers next, harriers in a tall room, a gaoler
-    // mid-level, and a finale with every type over 3+ waves.
-    let kinds = |e: &shared::level::Encounter| -> HashSet<String> {
-        e.waves.iter().flat_map(|w| &w.spawns).map(|s| s.enemy.clone()).collect()
-    };
+    // Crucible of Veins is the first campaign level: its whole first arena is gnawers and its
+    // second introduces censers.
+    let level = load(CRUCIBLE);
     let first = kinds(&level.encounters[0]);
     assert!(first.len() == 1 && first.contains("gnawer"), "arena 1 is gnawers only: {first:?}");
     assert!(kinds(&level.encounters[1]).contains("censer"), "arena 2 introduces censers");
-    let harrier_room = level
-        .encounters
-        .iter()
-        .position(|e| kinds(e).contains("harrier"))
-        .expect("harriers appear");
-    let t = &level.encounters[harrier_room].trigger;
-    assert!(t.max.y - t.min.y >= 25.0, "harriers are introduced in a tall room");
-    let gaoler = level
-        .encounters
-        .iter()
-        .position(|e| kinds(e).contains("gaoler"))
-        .expect("a gaoler appears");
-    assert!(gaoler < n - 1, "the first gaoler comes before the finale");
-    let last = level.encounters.last().expect("encounters");
-    assert!(last.waves.len() >= 3, "finale has 3+ waves");
-    for k in ENEMIES {
-        assert!(kinds(last).contains(k), "finale includes {k}");
-    }
-    let total: usize = level.encounters.iter().flat_map(|e| &e.waves).map(|w| w.spawns.len()).sum();
-    println!("{CAMPAIGN}: {n} encounters, {total} enemies (single player)");
 }
 
 #[test]
@@ -418,56 +453,106 @@ fn player_and_checkpoint_spawns_are_valid() {
     }
 }
 
+/// Whether there is floor at `p`'s height (within `dy`) `dist` metres away in each of the
+/// eight compass directions.
+fn floor_all_around(world: &CollisionWorld, p: Vec3, dist: f32, dy: f32) -> Result<(), Vec3> {
+    for i in 0..8 {
+        let a = i as f32 * std::f32::consts::FRAC_PI_4;
+        let q = p + Vec3::new(a.cos(), 0.0, a.sin()) * dist;
+        if !ground_below(world, q, dy + 0.3).is_some_and(|g| g.abs() <= dy) {
+            return Err(q);
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn enemy_spawns_are_valid() {
-    let level = load(CAMPAIGN);
-    let col = collision(&level, Some(false));
-    let world = &col.world;
-    for (ei, e) in level.encounters.iter().enumerate() {
-        let cp = level.checkpoints[ei].spawn.position;
-        for (wi, w) in e.waves.iter().enumerate() {
-            for (si, s) in w.spawns.iter().enumerate() {
-                let what = format!("encounter {} wave {} {} #{si} at {}", ei + 1, wi + 1, s.enemy, s.position);
-                let p = s.position;
-                assert!(e.trigger.contains(p + Vec3::Y * 0.1), "{what}: outside the locked room trigger");
-                assert!(!in_kill_volume(&level, p), "{what}: in a kill volume");
-                assert!(p.distance(cp) >= 8.0, "{what}: too close to the checkpoint");
-                let (r, h) = enemy_size(&s.enemy);
-                if s.enemy == "harrier" {
-                    assert!(
-                        !world.intersects_capsule(p, 0.0, r, MASK_MOVEMENT),
-                        "{what}: not in open air"
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(false));
+        let world = &col.world;
+        for (ei, e) in level.encounters.iter().enumerate() {
+            let cp = level.checkpoints[ei].spawn.position;
+            let rally = e.rally.map_or(cp, |r| r.position);
+            for (wi, w) in e.waves.iter().enumerate() {
+                for (si, s) in w.spawns.iter().enumerate() {
+                    let what = format!(
+                        "{name}: encounter {} wave {} {} #{si} at {}",
+                        ei + 1,
+                        wi + 1,
+                        s.enemy,
+                        s.position
                     );
-                    let below = ground_below(world, p, 20.0);
-                    assert!(
-                        below.is_some_and(|d| (3.5..=9.0).contains(&d)),
-                        "{what}: should hover 4-8 m above solid ground, ground is {below:?} below"
-                    );
-                    let above = world.cast_ray(p, Vec3::Y, 3.0, MASK_MOVEMENT);
-                    assert!(above.is_none(), "{what}: ceiling too close");
-                } else {
-                    let ground = ground_below(world, p, 0.6);
-                    assert!(
-                        ground.is_some_and(|d| d.abs() < 0.3),
-                        "{what}: no ground right below ({ground:?})"
-                    );
-                    let (c, hh) = capsule_at(p + Vec3::Y * 0.05, h, r);
-                    assert!(!world.intersects_capsule(c, hh, r, MASK_MOVEMENT), "{what}: overlaps geometry");
-                    // Standing on solid floor all around (not hanging over a ledge).
-                    for d in [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z] {
-                        let edge = ground_below(world, p + d * r * 0.8, 0.6);
-                        assert!(edge.is_some_and(|g| g.abs() < 0.3), "{what}: overhangs a ledge");
+                    let p = s.position;
+                    assert!(e.trigger.contains(p + Vec3::Y * 0.1), "{what}: outside the locked room trigger");
+                    assert!(!in_kill_volume(&level, p), "{what}: in a kill volume");
+                    assert!(p.distance(cp) >= 8.0, "{what}: too close to the checkpoint");
+                    let (r, h) = enemy_size(&s.enemy);
+                    if s.enemy == "harrier" {
+                        // Authored at the hover centre: open air, 4-11 m above solid ground
+                        // (they hover 5-10 m up), room to climb.
+                        assert!(
+                            !world.intersects_capsule(p, 0.0, r, MASK_MOVEMENT),
+                            "{what}: not in open air"
+                        );
+                        let below = ground_below(world, p, 20.0);
+                        assert!(
+                            below.is_some_and(|d| (4.0..=11.0).contains(&d)),
+                            "{what}: should hover 4-11 m above solid ground, ground is {below:?} below"
+                        );
+                        let above = world.cast_ray(p, Vec3::Y, 3.0, MASK_MOVEMENT);
+                        assert!(above.is_none(), "{what}: ceiling too close");
+                    } else {
+                        let ground = ground_below(world, p, 0.6);
+                        assert!(
+                            ground.is_some_and(|d| d.abs() < 0.3),
+                            "{what}: no ground right below ({ground:?})"
+                        );
+                        let (c, hh) = capsule_at(p + Vec3::Y * 0.05, h, r);
+                        assert!(!world.intersects_capsule(c, hh, r, MASK_MOVEMENT), "{what}: overlaps geometry");
+                        // Standing on solid floor all around (not hanging over a ledge).
+                        for d in [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z] {
+                            let edge = ground_below(world, p + d * r * 0.8, 0.6);
+                            assert!(edge.is_some_and(|g| g.abs() < 0.3), "{what}: overhangs a ledge");
+                        }
                     }
-                }
-                // Spread out within the wave.
-                for o in &w.spawns[si + 1..] {
-                    let (r2, _) = enemy_size(&o.enemy);
-                    assert!(
-                        p.distance(o.position) >= r + r2 + 1.0,
-                        "{what}: crowded with the {} at {}",
-                        o.enemy,
-                        o.position
-                    );
+                    match s.enemy.as_str() {
+                        // Ledges deep enough that co-op copies placed around them stay on it.
+                        "censer" => {
+                            if let Err(q) = floor_all_around(world, p, 3.0, 0.3) {
+                                panic!("{what}: ledge too shallow for a censer (no floor at {q})");
+                            }
+                        }
+                        // Room to circle a 1.3 m heavy: level floor 4 m around it.
+                        "gaoler" => {
+                            if let Err(q) = floor_all_around(world, p, 4.0, 0.6) {
+                                panic!("{what}: no room to circle the gaoler (no floor at {q})");
+                            }
+                        }
+                        // Snipers get a long sightline: ≥ 20 m from the rally point, which
+                        // they can see from their lens.
+                        "heron" => {
+                            let eye = p + Vec3::Y * 3.1;
+                            let target = rally + Vec3::Y * 1.6;
+                            let d = Vec2::new(target.x - eye.x, target.z - eye.z).length();
+                            assert!(d >= 20.0, "{what}: only {d:.1} m from the rally point");
+                            let to = target - eye;
+                            let hit = world.cast_ray(eye, to.normalize(), to.length(), MASK_SHOTS);
+                            assert!(hit.is_none(), "{what}: can't see the rally point (blocked at {:?})", hit.map(|h| h.point));
+                        }
+                        _ => {}
+                    }
+                    // Spread out within the wave.
+                    for o in &w.spawns[si + 1..] {
+                        let (r2, _) = enemy_size(&o.enemy);
+                        assert!(
+                            p.distance(o.position) >= r + r2 + 1.0,
+                            "{what}: crowded with the {} at {}",
+                            o.enemy,
+                            o.position
+                        );
+                    }
                 }
             }
         }
@@ -620,60 +705,81 @@ fn volume_inside(inner: &Volume, outer: &Volume) -> bool {
 
 #[test]
 fn encounter_arenas_and_rally_points() {
-    let level = load(CAMPAIGN);
-    let closed = collision(&level, Some(false));
-    let open = collision(&level, Some(true));
-    let arenas: Vec<Volume> = level
-        .encounters
-        .iter()
-        .enumerate()
-        .map(|(i, e)| e.arena.unwrap_or_else(|| panic!("encounter {} has no arena volume", i + 1)))
-        .collect();
-    for (i, e) in level.encounters.iter().enumerate() {
-        let n = i + 1;
-        let arena = arenas[i];
-        let rally = e.rally.unwrap_or_else(|| panic!("encounter {n} has no rally point"));
-        assert!(volume_inside(&e.trigger, &arena), "encounter {n}: trigger not inside the arena");
-        // The rally point is the checkpoint just inside the entry door: a valid standing spot
-        // inside the locked room, whether the doors are open or closed.
-        assert!(arena.contains(rally.position + Vec3::Y * 0.1), "encounter {n}: rally outside the arena");
-        assert_eq!(rally, level.checkpoints[i].spawn, "encounter {n}: rally should be its checkpoint");
-        for col in [&closed, &open] {
-            check_player_spot(&level, &col.world, rally.position, &format!("encounter {n} rally"));
-        }
-        // The arena is the room, not the corridors: the far side of its doors, other rooms'
-        // checkpoints, the player spawns and the exit are all outside it; every enemy is in it.
-        for &id in e.lock_doors.iter().chain(&e.unlock_doors) {
-            let p = outside_door(&level, id, e.trigger.center());
-            assert!(!arena.contains(p), "encounter {n}: arena reaches past door {id} ({p})");
-        }
-        for (j, c) in level.checkpoints.iter().enumerate() {
-            assert_eq!(arena.contains(c.spawn.position + Vec3::Y * 0.1), i == j, "encounter {n} vs checkpoint {}", j + 1);
-        }
-        for s in &level.spawns {
-            assert!(!arena.contains(s.position + Vec3::Y * 0.1), "encounter {n}: arena contains a player spawn");
-        }
-        if let Some(x) = level.exit {
-            assert!(!arena.contains(x.center()), "encounter {n}: arena contains the exit");
-        }
-        for s in e.waves.iter().flat_map(|w| &w.spawns) {
-            assert!(arena.contains(s.position), "encounter {n}: {} at {} outside the arena", s.enemy, s.position);
-        }
-        for (j, other) in arenas.iter().enumerate().skip(i + 1) {
-            let overlap = arena.min.cmplt(other.max).all() && other.min.cmplt(arena.max).all();
-            assert!(!overlap, "arenas {n} and {} overlap", j + 1);
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let closed = collision(&level, Some(false));
+        let open = collision(&level, Some(true));
+        let arenas: Vec<Volume> = level
+            .encounters
+            .iter()
+            .enumerate()
+            .map(|(i, e)| e.arena.unwrap_or_else(|| panic!("{name}: encounter {} has no arena volume", i + 1)))
+            .collect();
+        for (i, e) in level.encounters.iter().enumerate() {
+            let n = i + 1;
+            let arena = arenas[i];
+            let rally = e.rally.unwrap_or_else(|| panic!("{name}: encounter {n} has no rally point"));
+            assert!(volume_inside(&e.trigger, &arena), "{name}: encounter {n}: trigger not inside the arena");
+            // The rally point is the checkpoint just inside the entry door: a valid standing
+            // spot inside the locked room, whether the doors are open or closed.
+            assert!(
+                arena.contains(rally.position + Vec3::Y * 0.1),
+                "{name}: encounter {n}: rally outside the arena"
+            );
+            assert_eq!(rally, level.checkpoints[i].spawn, "{name}: encounter {n}: rally should be its checkpoint");
+            for col in [&closed, &open] {
+                check_player_spot(&level, &col.world, rally.position, &format!("encounter {n} rally"));
+            }
+            // The arena is the room, not the corridors: the far side of its doors, other
+            // rooms' checkpoints, the player spawns and the exit are all outside it; every
+            // enemy is in it.
+            for &id in e.lock_doors.iter().chain(&e.unlock_doors) {
+                let p = outside_door(&level, id, e.trigger.center());
+                assert!(!arena.contains(p), "{name}: encounter {n}: arena reaches past door {id} ({p})");
+            }
+            for (j, c) in level.checkpoints.iter().enumerate() {
+                assert_eq!(
+                    arena.contains(c.spawn.position + Vec3::Y * 0.1),
+                    i == j,
+                    "{name}: encounter {n} vs checkpoint {}",
+                    j + 1
+                );
+            }
+            for s in &level.spawns {
+                assert!(
+                    !arena.contains(s.position + Vec3::Y * 0.1),
+                    "{name}: encounter {n}: arena contains a player spawn"
+                );
+            }
+            if let Some(x) = level.exit {
+                assert!(!arena.contains(x.center()), "{name}: encounter {n}: arena contains the exit");
+            }
+            for s in e.waves.iter().flat_map(|w| &w.spawns) {
+                assert!(
+                    arena.contains(s.position),
+                    "{name}: encounter {n}: {} at {} outside the arena",
+                    s.enemy,
+                    s.position
+                );
+            }
+            for (j, other) in arenas.iter().enumerate().skip(i + 1) {
+                let overlap = arena.min.cmplt(other.max).all() && other.min.cmplt(arena.max).all();
+                assert!(!overlap, "{name}: arenas {n} and {} overlap", j + 1);
+            }
         }
     }
 }
 
 #[test]
 fn par_times() {
-    let campaign = load(CAMPAIGN);
-    assert!(
-        (180.0..=900.0).contains(&campaign.par_time),
-        "campaign par time {} s",
-        campaign.par_time
-    );
+    for name in CAMPAIGNS {
+        let campaign = load(name);
+        assert!(
+            (180.0..=900.0).contains(&campaign.par_time),
+            "{name}: campaign par time {} s",
+            campaign.par_time
+        );
+    }
     for (name, level) in arenas() {
         assert_eq!(level.par_time, 0.0, "{name}: deathmatch arenas have no par time");
     }
@@ -681,48 +787,50 @@ fn par_times() {
 
 #[test]
 fn campaign_compartments_are_sealed_when_doors_close() {
-    let level = load(CAMPAIGN);
-    let col = collision(&level, Some(false));
-    let (lo, hi) = level_bounds(&level);
-    let bounds = (lo - Vec3::ONE, hi + Vec3::ONE);
-    // Compartments with all doors closed: the start area, each arena (its checkpoint is just
-    // inside the entry door), and the exit hall.
-    let mut points: Vec<(usize, Vec3, String)> = level
-        .spawns
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (0, s.position + Vec3::Y, format!("player spawn {i}")))
-        .collect();
-    for (i, c) in level.checkpoints.iter().enumerate() {
-        points.push((i + 1, c.spawn.position + Vec3::Y, format!("checkpoint {}", i + 1)));
-    }
-    let exit = level.exit.expect("exit");
-    let exit_point = Vec3::new(exit.center().x, exit.min.y + 1.0, exit.center().z);
-    points.push((level.checkpoints.len() + 1, exit_point, "the exit".into()));
-    let outside_door = |id: u32, inside: Vec3| outside_door(&level, id, inside);
-    for compartment in 0..=level.checkpoints.len() + 1 {
-        let start = points.iter().find(|p| p.0 == compartment).expect("point").1;
-        let mut forbidden: Vec<(Vec3, String)> = points
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(false));
+        let (lo, hi) = level_bounds(&level);
+        let bounds = (lo - Vec3::ONE, hi + Vec3::ONE);
+        // Compartments with all doors closed: the start area, each arena (its checkpoint is
+        // just inside the entry door), and the exit hall.
+        let mut points: Vec<(usize, Vec3, String)> = level
+            .spawns
             .iter()
-            .filter(|p| p.0 != compartment)
-            .map(|p| (p.1, p.2.clone()))
+            .enumerate()
+            .map(|(i, s)| (0, s.position + Vec3::Y, format!("player spawn {i}")))
             .collect();
-        // An arena must also be closed towards both of its corridors.
-        if let Some(e) = compartment.checked_sub(1).and_then(|i| level.encounters.get(i)) {
-            for &id in e.lock_doors.iter().chain(&e.unlock_doors) {
-                forbidden.push((outside_door(id, e.trigger.center()), format!("the far side of door {id}")));
-            }
+        for (i, c) in level.checkpoints.iter().enumerate() {
+            points.push((i + 1, c.spawn.position + Vec3::Y, format!("checkpoint {}", i + 1)));
         }
-        let cells = flood(&col.world, start, bounds, &forbidden)
-            .unwrap_or_else(|e| panic!("compartment {compartment} (from {start}) leaks: {e}"));
-        println!("compartment {compartment}: {cells} free cells");
+        let exit = level.exit.expect("exit");
+        let exit_point = Vec3::new(exit.center().x, exit.min.y + 1.0, exit.center().z);
+        points.push((level.checkpoints.len() + 1, exit_point, "the exit".into()));
+        let outside_door = |id: u32, inside: Vec3| outside_door(&level, id, inside);
+        for compartment in 0..=level.checkpoints.len() + 1 {
+            let start = points.iter().find(|p| p.0 == compartment).expect("point").1;
+            let mut forbidden: Vec<(Vec3, String)> = points
+                .iter()
+                .filter(|p| p.0 != compartment)
+                .map(|p| (p.1, p.2.clone()))
+                .collect();
+            // An arena must also be closed towards both of its corridors.
+            if let Some(e) = compartment.checked_sub(1).and_then(|i| level.encounters.get(i)) {
+                for &id in e.lock_doors.iter().chain(&e.unlock_doors) {
+                    forbidden.push((outside_door(id, e.trigger.center()), format!("the far side of door {id}")));
+                }
+            }
+            let cells = flood(&col.world, start, bounds, &forbidden)
+                .unwrap_or_else(|e| panic!("{name}: compartment {compartment} (from {start}) leaks: {e}"));
+            println!("{name}: compartment {compartment}: {cells} free cells");
+        }
+        // With the doors open everything is one connected space.
+        let open = collision(&level, Some(true));
+        let all: Vec<(Vec3, String)> = vec![(exit_point, "the exit".into())];
+        let err = flood(&open.world, level.spawns[0].position + Vec3::Y, bounds, &all)
+            .expect_err("with open doors the exit is reachable from the start");
+        assert!(err.contains("the exit"), "{name}: {err}");
     }
-    // With the doors open everything is one connected space.
-    let open = collision(&level, Some(true));
-    let all: Vec<(Vec3, String)> = vec![(exit_point, "the exit".into())];
-    let err = flood(&open.world, level.spawns[0].position + Vec3::Y, bounds, &all)
-        .expect_err("with open doors the exit is reachable from the start");
-    assert!(err.contains("the exit"), "{err}");
 }
 
 #[test]
@@ -938,14 +1046,79 @@ impl<'a> Bot<'a> {
     }
 }
 
-/// The campaign's critical path, one segment per checkpoint: segment 0 leads from the
+/// A campaign level's critical path, one segment per checkpoint: segment 0 leads from the
 /// player spawns into arena 1; segment i from checkpoint i through arena i into arena i+1
 /// (the last one to the exit).
-fn campaign_route() -> Vec<Vec<Wp>> {
+fn campaign_route(name: &str) -> Vec<Vec<Wp>> {
+    match name {
+        CRUCIBLE => crucible_route(),
+        SPIRE => spire_route(),
+        _ => panic!("{name}: every campaign level needs a bot route in levels.rs"),
+    }
+}
+
+/// Spire of Wicks: no tech needed (one jump over the fallen bell's crown, ramps all the way).
+fn spire_route() -> Vec<Vec<Wp>> {
     vec![
-        // Receiving Nave -> Split Gullet (hurdle lane) -> Rendering Floor vestibule.
+        // Wax Crypt -> Fallen Bell (hop the crown in the east lane) -> Casting Floor vestibule.
+        vec![run(0.0, 0.0, 63.0), run(2.25, 0.0, 56.0), run(2.25, 0.0, 46.0), run(0.0, 0.0, 39.0)],
+        // Casting Floor, west of the moulds -> Wick Gate -> Hoist vestibule.
+        vec![
+            run(-14.5, 0.0, 33.0),
+            run(-14.5, 0.0, 20.0),
+            run(-21.0, 0.0, 17.0),
+            run(-27.0, 0.0, 17.0),
+            run(-33.0, 0.0, 17.0),
+        ],
+        // Hoist: one turn of ramps (W, S, E, N walls) to the top exit -> Rope Walk -> Rood.
+        vec![
+            run(-45.0, 0.0, 4.0),
+            run(-57.5, 0.0, -11.0),
+            run(-57.5, 0.0, -6.0),
+            run(-57.5, 6.5, 19.0),
+            run(-38.0, 13.0, 19.5),
+            run(-33.0, 13.0, 17.0),
+            run(-32.5, 19.5, -10.0),
+            run(-35.0, 19.5, -11.5),
+            run(-55.0, 26.0, -11.5),
+            run(-57.0, 26.0, -16.0),
+            run(-57.0, 26.0, -36.0),
+            run(-57.0, 26.0, -42.0),
+        ],
+        // Rood: down the wax run, south bridge, far floor, loft ramp, exit -> Wick Stair ->
+        // Belfry vestibule.
+        vec![
+            run(-50.0, 26.0, -45.0),
+            run(-28.0, 14.0, -45.0),
+            run(-6.0, 14.0, -45.0),
+            run(5.0, 14.0, -60.0),
+            run(13.5, 14.0, -67.0),
+            run(13.5, 24.0, -48.0),
+            run(13.0, 24.0, -41.0),
+            run(13.0, 24.0, -35.0),
+            run(13.0, 24.0, -31.5),
+            run(-21.0, 36.0, -31.5),
+            run(-21.0, 36.0, -27.0),
+            run(-21.0, 36.0, -21.5),
+        ],
+        // Belfry: west ramp to the south gallery, exit door -> the Lantern.
+        vec![
+            run(-21.5, 36.0, -3.0),
+            run(-21.5, 44.0, 17.5),
+            run(-10.0, 44.0, 20.0),
+            run(0.0, 44.0, 20.0),
+            run(0.0, 44.0, 28.0),
+            run(0.0, 44.3, 37.0),
+        ],
+    ]
+}
+
+/// Crucible of Veins.
+fn crucible_route() -> Vec<Vec<Wp>> {
+    vec![
+        // Receiving Nave -> Split Flue (hurdle lane) -> Smelting Floor vestibule.
         vec![run(1.75, 0.0, -3.0), run(1.75, 0.0, -15.0), run(0.0, 0.0, -26.0)],
-        // Rendering Floor (around the vat) -> Sluice (jump the lava trench) -> Cloister.
+        // Smelting Floor (around the vat) -> Sluice (jump the slag trench) -> Cloister.
         vec![
             run(0.0, 0.0, -36.0),
             run(-6.0, 0.0, -43.0),
@@ -999,54 +1172,135 @@ fn campaign_route() -> Vec<Vec<Wp>> {
 
 #[test]
 fn campaign_critical_path_is_traversable() {
-    let level = load(CAMPAIGN);
-    let col = collision(&level, Some(true));
-    let route = campaign_route();
-    assert_eq!(route.len(), level.checkpoints.len() + 1);
-    let exit = level.exit.expect("exit");
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(true));
+        let route = campaign_route(name);
+        assert_eq!(route.len(), level.checkpoints.len() + 1, "{name}: one route segment per checkpoint + 1");
+        let exit = level.exit.expect("exit");
 
-    // Whole route from every player spawn.
-    for (si, s) in level.spawns.iter().enumerate() {
-        let mut bot = Bot::new(&level, &col, s.position);
-        let mut splits = Vec::new();
-        for (i, seg) in route.iter().enumerate() {
-            bot.follow(seg, 15.0)
-                .unwrap_or_else(|e| panic!("spawn {si}, segment {i}: {e}"));
-            splits.push(format!("{:.1}", bot.seconds()));
+        // Whole route from every player spawn.
+        for (si, s) in level.spawns.iter().enumerate() {
+            let mut bot = Bot::new(&level, &col, s.position);
+            let mut splits = Vec::new();
+            for (i, seg) in route.iter().enumerate() {
+                bot.follow(seg, 15.0)
+                    .unwrap_or_else(|e| panic!("{name}: spawn {si}, segment {i}: {e}"));
+                splits.push(format!("{:.1}", bot.seconds()));
+            }
+            assert!(exit.contains(bot.s.position + Vec3::Y * 0.1), "{name}: spawn {si}: route ends outside the exit");
+            let mut expected = Vec::new();
+            for i in 1..=level.checkpoints.len() {
+                expected.push(format!("checkpoint {i}"));
+                expected.push(format!("encounter {i}"));
+            }
+            expected.push("exit".into());
+            assert_eq!(bot.entered, expected, "{name}: spawn {si}: triggers entered out of order");
+            println!(
+                "{name}: spawn {si}: exit reached in {:.1} s of pure traversal (splits {})",
+                bot.seconds(),
+                splits.join(", ")
+            );
         }
-        assert!(exit.contains(bot.s.position + Vec3::Y * 0.1), "spawn {si}: route ends outside the exit");
-        let mut expected = Vec::new();
-        for i in 1..=level.checkpoints.len() {
-            expected.push(format!("checkpoint {i}"));
-            expected.push(format!("encounter {i}"));
+
+        // Each checkpoint respawn can make progress on its own.
+        for (i, c) in level.checkpoints.iter().enumerate() {
+            let mut bot = Bot::new(&level, &col, c.spawn.position);
+            for seg in &route[i + 1..] {
+                bot.follow(seg, 15.0)
+                    .unwrap_or_else(|e| panic!("{name}: from checkpoint {}: {e}", i + 1));
+            }
+            assert!(
+                exit.contains(bot.s.position + Vec3::Y * 0.1),
+                "{name}: checkpoint {}: route ends outside the exit",
+                i + 1
+            );
         }
-        expected.push("exit".into());
-        assert_eq!(bot.entered, expected, "spawn {si}: triggers entered out of order");
-        println!(
-            "spawn {si}: exit reached in {:.1} s of pure traversal (splits {})",
-            bot.seconds(),
-            splits.join(", ")
-        );
     }
+}
 
-    // Each checkpoint respawn can make progress on its own.
-    for (i, c) in level.checkpoints.iter().enumerate() {
-        let mut bot = Bot::new(&level, &col, c.spawn.position);
-        for seg in &route[i + 1..] {
-            bot.follow(seg, 15.0)
-                .unwrap_or_else(|e| panic!("from checkpoint {}: {e}", i + 1));
-        }
-        assert!(exit.contains(bot.s.position + Vec3::Y * 0.1), "checkpoint {}: route ends outside the exit", i + 1);
+/// A campaign level's optional routes: (description, start, waypoints).
+fn alternate_routes(name: &str, level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
+    match name {
+        CRUCIBLE => crucible_alternate_routes(level),
+        SPIRE => spire_alternate_routes(level),
+        _ => panic!("{name}: every campaign level needs alternate routes in levels.rs"),
     }
 }
 
 #[test]
 fn campaign_alternate_routes_are_traversable() {
-    let level = load(CAMPAIGN);
-    let col = collision(&level, Some(true));
-    let routes: Vec<(&str, Vec3, Vec<Wp>)> = vec![
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(true));
+        let routes = alternate_routes(name, &level);
+        assert!(routes.len() >= 4, "{name}: alternate routes");
+        for (route, start, wps) in routes {
+            let mut bot = Bot::new(&level, &col, start);
+            bot.follow(&wps, 12.0).unwrap_or_else(|e| panic!("{name}: {route}: {e}"));
+            println!("{name}: alternate route '{route}': {:.1} s", bot.seconds());
+        }
+    }
+}
+
+fn spire_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
+    vec![
         (
-            "slide slot (west lane of the Split Gullet)",
+            "slide under the fallen bell (west lane)",
+            level.spawns[0].position,
+            vec![run(-1.75, 0.0, 63.0), run(-1.75, 0.0, 57.0), slide(-1.75, 0.0, 45.0), run(0.0, 0.0, 39.0)],
+        ),
+        (
+            "Casting Floor east balcony via its ramp",
+            level.checkpoints[0].spawn.position,
+            vec![run(21.5, 0.0, 39.0), run(21.5, 7.0, 24.0), run(20.0, 7.0, 13.0)],
+        ),
+        (
+            "Hoist pad line: floor pad, cage A, cage B, NW landing",
+            level.checkpoints[1].spawn.position,
+            vec![
+                pad(-46.0, 0.0, 12.0),
+                pad(-49.0, 9.0, 5.5),
+                pad(-51.0, 17.5, -2.5),
+                run(-57.0, 26.0, -11.0),
+                run(-57.0, 26.0, -20.0),
+            ],
+        ),
+        (
+            "Rood north bridge",
+            level.checkpoints[2].spawn.position,
+            vec![
+                run(-50.0, 26.0, -65.0),
+                run(-28.0, 14.0, -65.0),
+                run(-6.0, 14.0, -65.0),
+                run(5.0, 14.0, -60.0),
+                run(13.5, 14.0, -67.0),
+                run(13.5, 24.0, -48.0),
+            ],
+        ),
+        (
+            "Belfry pads to the east and south galleries, round the gallery loop",
+            level.checkpoints[3].spawn.position,
+            vec![
+                run(-12.0, 36.0, -14.0),
+                run(10.75, 36.0, -13.0),
+                pad(10.75, 36.0, 0.0),
+                run(20.0, 44.0, 0.0),
+                run(20.0, 44.0, 20.0),
+                run(-21.5, 44.0, 20.0),
+                run(-21.5, 36.0, -3.0),
+                run(-14.0, 36.0, 4.0),
+                pad(-11.0, 36.0, 10.75),
+                run(-11.0, 44.0, 20.0),
+            ],
+        ),
+    ]
+}
+
+fn crucible_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
+    vec![
+        (
+            "slide slot (west lane of the Split Flue)",
             level.spawns[0].position,
             vec![run(-1.75, 0.0, -4.0), slide(-1.75, 0.0, -15.0), run(0.0, 0.0, -26.0)],
         ),
@@ -1087,7 +1341,7 @@ fn campaign_alternate_routes_are_traversable() {
             ],
         ),
         (
-            "Cathedral east aisle beside the lava pool, east pad to the gallery",
+            "Cathedral east aisle beside the slag pool, east pad to the gallery",
             level.checkpoints[4].spawn.position,
             vec![
                 run(115.0, 0.0, -270.0),
@@ -1099,12 +1353,7 @@ fn campaign_alternate_routes_are_traversable() {
                 run(116.0, 8.0, -318.0),
             ],
         ),
-    ];
-    for (name, start, wps) in routes {
-        let mut bot = Bot::new(&level, &col, start);
-        bot.follow(&wps, 12.0).unwrap_or_else(|e| panic!("{name}: {e}"));
-        println!("alternate route '{name}': {:.1} s", bot.seconds());
-    }
+    ]
 }
 
 /// A full lap of every arena: (level, start spawn, waypoints, distinct pads it must take).
@@ -1314,11 +1563,11 @@ fn climb_shaft(level: &LevelDef, col: &LevelCollision, start: Vec3, exit: Vec3, 
 #[test]
 fn advanced_shortcuts_work() {
     let t = MovementTuning::default();
-    let level = load(CAMPAIGN);
+    let level = load(CRUCIBLE);
     let col = collision(&level, Some(true));
     let env = MoveEnv { world: &col.world, jump_pads: &level.jump_pads };
 
-    // Rendering Floor: dash-jump from the west terrace onto the perch above the lava vat.
+    // Smelting Floor: dash-jump from the west terrace onto the perch above the slag vat.
     let mut s = MoveState::spawn(Vec3::new(-18.0, 4.0, -43.0));
     let east = Vec3::X;
     let mut seq = 0;
@@ -1511,6 +1760,146 @@ fn ingot_run_tech() {
     assert!(slowest >= 23.9, "the trough slide slowed to {slowest:.1} m/s");
     assert!(secs < 4.5, "the end-to-end slide took {secs:.2} s");
     println!("ingot run: end-to-end trough slide {secs:.2} s (slowest {slowest:.1} m/s)");
+}
+
+/// Scripted input on a level: one tick at a time towards a direction with some buttons.
+struct Script<'a> {
+    s: MoveState,
+    env: MoveEnv<'a>,
+    t: MovementTuning,
+    seq: u32,
+    level: &'a LevelDef,
+}
+
+impl<'a> Script<'a> {
+    fn new(level: &'a LevelDef, col: &'a LevelCollision, start: Vec3) -> Self {
+        Self {
+            s: MoveState::spawn(start),
+            env: MoveEnv { world: &col.world, jump_pads: &level.jump_pads },
+            t: MovementTuning::default(),
+            seq: 0,
+            level,
+        }
+    }
+
+    fn tick(&mut self, dir: Vec3, buttons: Buttons) -> MoveEvents {
+        self.seq += 1;
+        let mut input = input_towards(dir, buttons);
+        input.seq = self.seq;
+        let ev = movement::step(&mut self.s, &input, &self.env, &self.t, DT);
+        assert!(!in_kill_volume(self.level, self.s.position), "scripted move fell into a kill volume at {}", self.s.position);
+        ev
+    }
+
+    /// Ticks until landing (at most `max` ticks); true if it landed.
+    fn until_landed(&mut self, dir: Vec3, buttons: Buttons, max: u32) -> bool {
+        (0..max).any(|_| self.tick(dir, buttons).landed.is_some())
+    }
+}
+
+#[test]
+fn spire_tech_shortcuts_work() {
+    let level = load(SPIRE);
+    let col = collision(&level, Some(true));
+
+    // Casting Floor: wall-jump up the 3.5 m chimney between the north wall and the mould
+    // rack, then step west onto the balcony (7 m up).
+    let s = climb_shaft(&level, &col, Vec3::new(-11.5, 0.0, 11.5), Vec3::NEG_X, 7.0);
+    assert!(
+        s.on_ground && (s.position.y - 7.0).abs() < 0.05 && s.position.x < -16.0,
+        "the chimney should reach the west balcony, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // Casting Floor: jump, slam, bounce off the floor and land on top of a bell mould (5.5 m).
+    let mut b = Script::new(&level, &col, Vec3::new(-11.0, 0.0, 30.0));
+    let north = Vec3::NEG_Z;
+    for _ in 0..5 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    b.tick(Vec3::ZERO, Buttons::JUMP);
+    while b.s.velocity.y > 0.0 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    assert!(b.tick(Vec3::ZERO, Buttons::CROUCH).slam_started, "slam from the jump's apex");
+    let mut bounced = false;
+    for _ in 0..60 {
+        // Jump held from just before the impact: buffered into the bounce.
+        if b.tick(Vec3::ZERO, Buttons::JUMP).slam_bounced {
+            bounced = true;
+            break;
+        }
+    }
+    assert!(bounced, "slam bounce off the floor");
+    let mut landed = false;
+    for _ in 0..120 {
+        let dir = if b.s.position.y > 5.8 { north } else { Vec3::ZERO };
+        if b.tick(dir, Buttons::NONE).landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (b.s.position.y - 5.5).abs() < 0.05 && b.s.position.z < 29.0,
+        "slam bounce should land on the mould, got {}",
+        b.s.position
+    );
+
+    // The Rood: slide down the wax run and slide-jump the chasm from its lip, straight onto
+    // the far floor (no bridge).
+    let east = Vec3::X;
+    let mut r = Script::new(&level, &col, Vec3::new(-51.0, 26.0, -58.0));
+    let mut top_speed: f32 = 0.0;
+    let mut jumped = false;
+    for _ in 0..600 {
+        let at_lip = r.s.position.x > -24.6;
+        let ev = r.tick(east, if at_lip && !jumped { Buttons::CROUCH | Buttons::JUMP } else { Buttons::CROUCH });
+        top_speed = top_speed.max(r.s.horizontal_speed());
+        jumped |= ev.slide_jumped;
+        if jumped && ev.landed.is_some() {
+            break;
+        }
+    }
+    assert!(jumped, "slide-jump off the chasm lip");
+    assert!(
+        r.s.on_ground && (r.s.position.y - 14.0).abs() < 0.05 && r.s.position.x > -9.0,
+        "slide-jump should clear the chasm, landed at {}",
+        r.s.position
+    );
+    assert!(top_speed > 33.0, "the wax run built only {top_speed:.1} m/s");
+    println!("wax run slide: {top_speed:.1} m/s, landed at x {:.1}", r.s.position.x);
+
+    // Wick Stair: sliding climbs the long ramp at slide speed, well ahead of running.
+    let west = Vec3::NEG_X;
+    let time_up = |buttons: Buttons| {
+        let mut w = Script::new(&level, &col, Vec3::new(15.0, 24.0, -31.5));
+        for tick in 1..=600u32 {
+            w.tick(west, if tick > 2 { buttons } else { Buttons::NONE });
+            if w.s.position.x < -19.0 {
+                assert!((w.s.position.y - 36.0).abs() < 0.1, "reached the top landing: {}", w.s.position);
+                return tick as f32 * DT;
+            }
+        }
+        panic!("never reached the top of the Wick Stair ({buttons:?}): {}", w.s.position);
+    };
+    let (slid, ran) = (time_up(Buttons::CROUCH), time_up(Buttons::NONE));
+    assert!(slid < ran * 0.8, "slide-climb {slid:.2} s vs running {ran:.2} s");
+    println!("Wick Stair: slide {slid:.2} s, run {ran:.2} s");
+
+    // Belfry: dash-jump from the east gallery onto the great bell's rim (over the shaft).
+    let mut d = Script::new(&level, &col, Vec3::new(17.5, 44.0, 0.0));
+    for _ in 0..5 {
+        d.tick(west, Buttons::NONE);
+    }
+    d.tick(west, Buttons::DASH);
+    assert!(d.tick(west, Buttons::JUMP).dash_jumped, "dash-jump off the gallery");
+    assert!(d.until_landed(west, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        (d.s.position.y - 46.0).abs() < 0.05 && d.s.position.x.abs() <= 7.5 && d.s.position.x >= 6.0,
+        "dash-jump should land on the bell's rim, got {}",
+        d.s.position
+    );
 }
 
 // ------------------------------------------------------------------------------------------
