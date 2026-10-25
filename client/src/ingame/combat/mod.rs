@@ -240,12 +240,25 @@ fn victim_name(net: &NetClient, k: &KillInfo) -> String {
     }
 }
 
+/// "LANCET", or the enemy's own attack ("SWIPE", "SLAM") instead of a generic "ENEMY".
+fn attack_name(net: &NetClient, attack: Attack) -> String {
+    if let Attack::Enemy { kind, attack: index } = attack
+        && let Some(name) = net
+            .world()
+            .and_then(|w| w.enemy_defs.by_kind(kind))
+            .and_then(|d| d.attacks.get(index as usize).map(|a| a.name.to_uppercase()))
+    {
+        return name;
+    }
+    attack.name().to_uppercase()
+}
+
 /// "YOU [LANCET] HUSK  HEADSHOT" style kill feed line.
 fn kill_line(net: &NetClient, k: &KillInfo) -> String {
     let mut s = format!(
         "{} [{}] {}",
         owner_name(net, k.killer, k.attack),
-        k.attack.name().to_uppercase(),
+        attack_name(net, k.attack),
         victim_name(net, k)
     );
     if k.flags.contains(DamageFlags::HEADSHOT) {
@@ -446,7 +459,7 @@ impl InGame {
                         other => format!(
                             "KILLED BY {} [{}]",
                             owner_name(net, other, k.attack),
-                            k.attack.name().to_uppercase()
+                            attack_name(net, k.attack)
                         ),
                     };
                     self.combat.killed_by = Some(by);
