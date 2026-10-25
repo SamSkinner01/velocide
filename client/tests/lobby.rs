@@ -594,3 +594,70 @@ fn servers_without_a_lobby_start_in_the_match() {
     });
     assert_eq!(h.server.world().players.len(), 1);
 }
+
+#[test]
+fn combat_follows_the_match_settings() {
+    let mut h = Harness::new(lobby_config(Some(TOKEN)));
+    let host = h.add_client_with(host_client("Host"), script_idle);
+    wait_lobby(&mut h, 1);
+    let defs: Vec<String> = h
+        .server
+        .world()
+        .enemy_defs
+        .names()
+        .map(str::to_owned)
+        .collect();
+    assert!(!defs.is_empty());
+
+    // No combat in the lobby: nothing to spawn into, dev commands refuse.
+    assert!(
+        h.server
+            .spawn_enemies("husk", glam::Vec3::ZERO, 0.0, 2)
+            .is_empty()
+    );
+    h.clients[host].net.send_chat("/spawn husk");
+    wait(&mut h, 2.0, "dev command refused", |h| {
+        h.clients[host].events.iter().any(
+            |e| matches!(e, NetEvent::Chat { from: None, text, .. } if text.contains("no match")),
+        )
+    });
+
+    // Co-op with friendly fire on: the combat rules follow the lobby settings.
+    let mut coop = MatchSettings::new(GameMode::Campaign, "movement_test");
+    coop.friendly_fire = true;
+    h.server.set_match_settings(coop).unwrap();
+    h.server.start_match().unwrap();
+    wait(&mut h, 5.0, "co-op match", all_in_game);
+    let w = h.server.world();
+    assert!(w.rules.friendly_fire && w.rules.coop_enemy_scaling);
+    let carried: Vec<String> = w.enemy_defs.names().map(str::to_owned).collect();
+    assert_eq!(
+        carried, defs,
+        "enemy definitions carry over to the match world"
+    );
+    let spawned = h
+        .server
+        .spawn_enemies("husk", glam::Vec3::new(0.0, 0.0, -10.0), 0.0, 2);
+    assert_eq!(spawned.len(), 2);
+    assert_eq!(h.server.world().enemies.len(), 2);
+
+    // Back in the lobby the enemies are gone; deathmatch on the same sandbox level is PvP.
+    h.server.return_to_lobby();
+    assert!(h.server.world().enemies.is_empty());
+    h.server
+        .set_match_settings(MatchSettings::new(GameMode::Deathmatch, "movement_test"))
+        .unwrap();
+    h.server.start_match().unwrap();
+    wait(&mut h, 5.0, "deathmatch", all_in_game);
+    let w = h.server.world();
+    assert!(w.rules.friendly_fire && !w.rules.coop_enemy_scaling);
+    assert!(w.enemies.is_empty());
+
+    // Without a lobby the level kind decides, as before the lobby existed.
+    let solo = Harness::new(server_config());
+    assert_eq!(solo.server.match_settings().mode, GameMode::Deathmatch);
+    assert!(
+        solo.server.world().rules.friendly_fire,
+        "proving ground is an arena"
+    );
+}

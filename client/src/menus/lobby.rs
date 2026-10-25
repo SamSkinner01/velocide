@@ -136,7 +136,9 @@ impl LobbyScreen {
                 server.lobby.autostart = common.launch.autostart;
                 server.lobby.settings.mode = common.launch.mode.unwrap_or(s.host_mode);
                 (
-                    SessionSpec::Host { server },
+                    SessionSpec::Host {
+                        server: Box::new(server),
+                    },
                     format!("HOSTING ON PORT {port}"),
                 )
             }

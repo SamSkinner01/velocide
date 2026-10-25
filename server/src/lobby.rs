@@ -131,7 +131,9 @@ impl MatchFlow {
         let mut settings = lobby.settings.clone();
         settings.level = config.level.clone();
         let info = LevelInfo::from_def(&config.level, level);
-        if !settings.mode.accepts(&info) {
+        // Without a lobby (single-player, tests) the level's kind decides the mode, so arenas
+        // keep PvP rules; with one, the configured mode wins if the level allows it.
+        if !lobby.enabled || !settings.mode.accepts(&info) {
             settings.mode = GameMode::for_level_kind(info.kind);
         }
         settings.max_players = config.max_players.clamp(1, u8::MAX as usize) as u8;
@@ -324,15 +326,13 @@ impl Server {
             LobbyPhase::InMatch | LobbyPhase::Results => {}
         }
         log::info!("returning to the lobby");
-        let mut world = SimWorld::new(
+        let world = SimWorld::new(
             &self.world.level_name,
             self.world.level.clone(),
             self.config.tick_rate,
         );
-        world.tick = self.world.tick;
-        world.match_settings = self.flow.settings.clone();
-        self.world = world;
-        self.reset_connections_for_new_world();
+        let settings = self.flow.settings.clone();
+        self.replace_world(world, settings);
         self.flow.phase = LobbyPhase::Lobby;
         self.flow.results_end = None;
         self.flow.countdown_end = None;
@@ -371,7 +371,7 @@ impl Server {
 
     /// Applies the initial settings to the world (end of `Server::with_transport`).
     pub(crate) fn init_match_flow(&mut self) {
-        self.world.match_settings = self.flow.settings.clone();
+        self.world.apply_match_settings(self.flow.settings.clone());
         if self.flow.enabled {
             log::info!(
                 "lobby open: {} ({} levels){}",
@@ -571,10 +571,8 @@ impl Server {
     /// Replaces the world with a fresh copy of `level`, gives everyone a body and tells the
     /// clients (`LoadLevel`, then the `InMatch` lobby state).
     fn load_match_world(&mut self, name: &str, level: Arc<LevelDef>, settings: MatchSettings) {
-        let mut world = SimWorld::new(name, level, self.config.tick_rate);
-        // Ticks continue across worlds so client snapshot ordering and clocks stay monotonic.
-        world.tick = self.world.tick;
-        world.match_settings = settings;
+        let world = SimWorld::new(name, level, self.config.tick_rate);
+        self.replace_world(world, settings);
         let mut members: Vec<(PlayerId, String)> = self
             .clients
             .values()
@@ -583,10 +581,8 @@ impl Server {
             .collect();
         members.sort_by_key(|(id, _)| *id);
         for (id, name) in &members {
-            world.add_player(*id, name);
+            self.world.add_player(*id, name);
         }
-        self.world = world;
-        self.reset_connections_for_new_world();
         self.flow.phase = LobbyPhase::InMatch;
         self.flow.countdown_end = None;
         self.flow.results_end = None;
@@ -603,8 +599,17 @@ impl Server {
         self.broadcast_lobby_state();
     }
 
-    /// New world: old snapshots / hitboxes / queued inputs don't apply to it.
-    fn reset_connections_for_new_world(&mut self) {
+    /// Swaps in a fresh world (match start / back to the lobby). Server-side configuration
+    /// carries over (enemy definitions; the tick counter, so client snapshot ordering and
+    /// clocks stay monotonic); the match settings set the combat rules; dev toggles (god,
+    /// `/ff`) reset with the world. Old snapshots, hitboxes, queued inputs and pending FX
+    /// don't apply to the new world.
+    fn replace_world(&mut self, mut world: SimWorld, settings: MatchSettings) {
+        world.tick = self.world.tick;
+        world.enemy_defs = std::mem::take(&mut self.world.enemy_defs);
+        world.apply_match_settings(settings);
+        self.world = world;
+        self.fx.prune(self.world.tick);
         self.lagcomp = LagCompHistory::new(self.config.tick_rate, LAG_COMP_HISTORY_MS);
         for conn in self.clients.values_mut() {
             conn.ack_tick = None;

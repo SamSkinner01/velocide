@@ -27,3 +27,7 @@ ctrlc = "3"
 log.workspace = true
 env_logger.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+# Integration tests (tests/combat_net.rs) drive real clients against a real server.
+client = { path = "../client" }

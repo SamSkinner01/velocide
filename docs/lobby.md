@@ -89,7 +89,7 @@ a joining client doesn't have installed (`LoadLevel` carries the whole level any
 
 ## Messages
 
-All on the reliable channel, inside one new variant each (`PROTOCOL_VERSION` 2):
+All on the reliable channel, inside one new variant each (`PROTOCOL_VERSION` 3):
 
 | message | direction | who | notes |
 |---|---|---|---|
@@ -254,7 +254,14 @@ saved (`Settings::host_mode`).
 ## How game-mode rules plug in
 
 - **Read the rules** from `world.match_settings` (`mode`, `frag_limit`, `time_limit_secs`,
-  `friendly_fire`) inside `SimWorld::step` / your systems. It is set before any player spawns.
+  `friendly_fire`) inside `SimWorld::step` / your systems. It is set before any player spawns,
+  by `SimWorld::apply_match_settings`, which also sets the combat `rules` (deathmatch → PvP;
+  co-op → enemy scaling, friendly fire from the lobby toggle).
+- **Fresh world per match**: `Server::replace_world` carries server configuration over (the
+  enemy registry loaded from `assets/enemies/`, the tick counter), purges pending FX, resets lag
+  compensation, delta baselines and queued inputs. Per-world dev toggles (`/god`, `/ff`) reset.
+  No ticks (so no combat, AI or FX) run in the lobby; dev chat commands answer "no match is
+  running" there and `spawn_enemies` returns nothing.
 - **Match clock**: a new `SimWorld` is built for every match (`SimWorld::new` → your mode
   state starts fresh), but `world.tick` continues from the previous world. Count elapsed match
   time in your own state (e.g. ticks stepped since creation), not from `tick == 0`.

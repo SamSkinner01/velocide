@@ -153,7 +153,7 @@ impl InGame {
                     .clamp(1, 8);
                 (
                     SessionSpec::Host {
-                        server: ServerConfig::host(port, &level, max as usize),
+                        server: Box::new(ServerConfig::host(port, &level, max as usize)),
                     },
                     format!("HOSTING ON PORT {port}"),
                 )
@@ -419,6 +419,9 @@ impl InGame {
             NetEvent::Notice { text } => {
                 self.chat.system(&text.to_uppercase(), t.blood_bright, now);
             }
+            // Combat events (damage, hit confirms, kills, parries) are presented by the combat
+            // client layer; see docs/combat.md "client presentation contract".
+            NetEvent::Game(_) => {}
             NetEvent::Disconnected { reason } => {
                 if !self.leaving {
                     let what = if self.spawned {

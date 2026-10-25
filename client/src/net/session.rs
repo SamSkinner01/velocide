@@ -50,7 +50,7 @@ pub enum JoinTarget {
 #[derive(Clone, Debug)]
 pub enum SessionSpec {
     SinglePlayer { level: String },
-    Host { server: ServerConfig },
+    Host { server: Box<ServerConfig> },
     Join { target: JoinTarget },
 }
 
@@ -77,7 +77,7 @@ impl Session {
     pub fn host(port: u16, level: &str, max_players: usize, name: &str) -> anyhow::Result<Session> {
         Self::start(
             SessionSpec::Host {
-                server: ServerConfig::host(port, level, max_players),
+                server: Box::new(ServerConfig::host(port, level, max_players)),
             },
             ClientConfig::new(name),
         )
@@ -115,7 +115,7 @@ impl Session {
                         .get_or_insert_with(super::random_client_id);
                     client.host_token = Some(token);
                 }
-                let server = ServerHandle::spawn(server)?;
+                let server = ServerHandle::spawn(*server)?;
                 let net = NetClient::connect(server.connect_addr(), client)?;
                 Ok(Session {
                     kind: SessionKind::Host,

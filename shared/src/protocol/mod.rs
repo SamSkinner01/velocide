@@ -16,24 +16,29 @@
 //! The client's protocol version and player name travel in the netcode connect token's user
 //! data ([`ConnectRequest`]), so the server can reject incompatible clients right away.
 
+mod combat;
 mod snapshot;
 
 use glam::Vec3;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+pub use combat::*;
 pub use snapshot::*;
 
 use crate::input::PlayerInput;
 use crate::level::LevelDef;
 use crate::movement::MoveState;
 pub use crate::sim::PlayerId;
+use crate::sim::{KillInfo, ParryEvent, PlayerCombat};
 use crate::tuning::Tuning;
 
 /// netcode protocol id ("VELOCIDE"). Clients with a different id cannot even handshake.
 pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// Bumped on every incompatible protocol / simulation change. Checked on connect.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 2: combat (OwnState::combat, SnapshotMessage::fx, combat GameEvents, entity kinds).
+/// 3: lobby / match flow (ClientMessage::Lobby, ServerMessage::Lobby, docs/lobby.md).
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;
@@ -223,16 +228,27 @@ pub struct PlayerInfo {
     pub bot: bool,
 }
 
-/// Reliable gameplay events. Combat adds kills, damage, parries, style events... here.
+/// Reliable gameplay events (`ServerMessage::Game`). Who receives each one and what the client
+/// shows for it: `docs/combat.md` ("client presentation contract").
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum GameEvent {
     /// A player was (re)spawned / teleported by the server. For the local player the client
-    /// should adopt `yaw` as its view angle.
+    /// should adopt `yaw` as its view angle. Everyone.
     Respawned {
         player: PlayerId,
         position: Vec3,
         yaw: f32,
     },
+    /// The recipient was hurt (or a hit was blocked by i-frames / spawn protection). Victim
+    /// only.
+    Damaged(DamageReport),
+    /// The recipient's attacks hit something (merged per target per tick). Attacker only.
+    HitConfirm(HitReport),
+    /// A player or an enemy died (kill feed, gibs, death cam, style). Everyone.
+    Killed(KillInfo),
+    /// A successful parry (hitstop + white flash for the parrier, `Sfx::Parry` for all).
+    /// Everyone.
+    Parried(ParryEvent),
 }
 
 /// Unreliable server -> client messages.
@@ -255,13 +271,19 @@ pub struct SnapshotMessage {
     pub own: Option<OwnState>,
     /// Delta-encoded entity block, see [`encode_delta`].
     pub entities: Vec<u8>,
+    /// Cosmetic events since the previous snapshot to this client (unreliable; see
+    /// [`FxEvent`]).
+    pub fx: Vec<FxEvent>,
 }
 
-/// Owner-only state, sent unquantised so reconciliation is exact. Combat adds health, hard
-/// damage, weapon cooldowns, style meter... here.
+/// Owner-only state, sent unquantised so reconciliation is exact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OwnState {
     pub movement: MoveState,
+    /// Health, hard damage, death/respawn timer, spawn protection, weapon cooldowns and
+    /// charges, parry window, prisms, stickies — after `last_input_seq` (the weapon state is
+    /// predictable: compare it like the movement state).
+    pub combat: PlayerCombat,
 }
 
 // ---------------------------------------------------------------------------------------------
