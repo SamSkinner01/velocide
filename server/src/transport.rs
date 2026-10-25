@@ -32,6 +32,11 @@ use crate::netsim::{NetSim, NetSimConfig};
 
 const _: () = assert!(CONNECT_USER_DATA_BYTES == NETCODE_USER_DATA_BYTES);
 
+/// Datagrams [`UdpLink::receive`] reads per call (per server / client update); the rest wait
+/// in the socket buffer for the next update, so a packet flood can't stall the update loop
+/// (and anything beyond the OS buffer is dropped by the OS, not queued by us).
+pub const MAX_DATAGRAMS_PER_RECEIVE: usize = 4096;
+
 /// renet channel layout shared by client and server (see `shared::protocol`).
 pub fn connection_config() -> ConnectionConfig {
     let resend_time = Duration::from_millis(250);
@@ -152,6 +157,8 @@ pub struct UdpLink {
     sent_rate: RateMeter,
     recv_rate: RateMeter,
     buffer: Box<[u8; NETCODE_MAX_PACKET_BYTES]>,
+    /// The last receive stopped at its datagram limit.
+    backlog: bool,
 }
 
 impl UdpLink {
@@ -181,6 +188,7 @@ impl UdpLink {
             sent_rate: RateMeter::default(),
             recv_rate: RateMeter::default(),
             buffer: Box::new([0; NETCODE_MAX_PACKET_BYTES]),
+            backlog: false,
         })
     }
 
@@ -243,10 +251,29 @@ impl UdpLink {
         }
     }
 
-    /// Reads every datagram available on the socket and appends those that are due (after
+    /// Reads the datagrams available on the socket (at most [`MAX_DATAGRAMS_PER_RECEIVE`];
+    /// the rest stay queued for the next call) and appends those that are due (after
     /// simulation) to `out`.
     pub fn receive(&mut self, out: &mut Vec<(SocketAddr, Vec<u8>)>) -> io::Result<()> {
+        self.receive_at_most(out, MAX_DATAGRAMS_PER_RECEIVE)
+    }
+
+    /// [`UdpLink::receive`] reading at most `max` datagrams from the socket: a flood can't
+    /// keep the caller (the server's update) from returning.
+    pub fn receive_at_most(
+        &mut self,
+        out: &mut Vec<(SocketAddr, Vec<u8>)>,
+        max: usize,
+    ) -> io::Result<()> {
+        self.backlog = false;
+        let mut read = 0;
         loop {
+            if read >= max {
+                // More may be waiting: the host loop should come back soon.
+                self.backlog = true;
+                break;
+            }
+            read += 1;
             match self.socket.recv_from(&mut self.buffer[..]) {
                 Ok((len, addr)) => {
                     self.stats.bytes_received += len as u64;
@@ -272,9 +299,11 @@ impl UdpLink {
         Ok(())
     }
 
-    /// True while simulated packets are in flight (callers should poll more often).
+    /// True while simulated packets are in flight or the last receive stopped at its limit
+    /// (callers should poll more often).
     pub fn has_pending(&self) -> bool {
-        self.outgoing.as_ref().is_some_and(|s| s.pending() > 0)
+        self.backlog
+            || self.outgoing.as_ref().is_some_and(|s| s.pending() > 0)
             || self.incoming.as_ref().is_some_and(|s| s.pending() > 0)
     }
 
@@ -467,5 +496,34 @@ mod tests {
         assert!((1000.0..=1100.0).contains(&r), "{r}");
         m.advance(Duration::from_secs(5));
         assert_eq!(m.per_second(), 0.0);
+    }
+
+    #[test]
+    fn receive_reads_a_bounded_number_of_datagrams() {
+        // A flood used to be drained in one go, so `Server::update` might never return.
+        let mut link = UdpLink::bind("127.0.0.1:0".parse().unwrap(), None).unwrap();
+        let addr = link.local_addr().unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for i in 0..20u8 {
+            sender.send_to(&[i], addr).unwrap();
+        }
+        let mut out = Vec::new();
+        let mut calls = Vec::new();
+        let start = std::time::Instant::now();
+        while out.len() < 20 && start.elapsed() < Duration::from_secs(2) {
+            let before = out.len();
+            link.receive_at_most(&mut out, 8).unwrap();
+            if out.len() > before {
+                calls.push((out.len() - before, link.has_pending()));
+            }
+        }
+        // 8 + 8 + 4 (on loopback everything is there at once; allow slower delivery).
+        assert_eq!(out.len(), 20);
+        assert!(calls.iter().all(|&(n, _)| n <= 8), "{calls:?}");
+        assert_eq!(calls[0], (8, true), "stopped at the limit, more pending");
+        let data: Vec<u8> = out.iter().map(|(_, d)| d[0]).collect();
+        assert_eq!(data, (0..20).collect::<Vec<u8>>(), "nothing lost or reordered");
+        link.receive(&mut out).unwrap();
+        assert!(!link.has_pending());
     }
 }
