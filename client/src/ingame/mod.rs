@@ -31,6 +31,7 @@ pub mod chat;
 pub mod combat;
 pub mod debug;
 pub mod effects;
+pub mod encounter_hud; // arena encounter banners / sounds / readout (docs/enemies.md)
 pub mod feedback;
 pub mod hud;
 // Game-mode HUD / scoreboard state / results, and the style meter (docs/style_modes.md).
@@ -449,6 +450,14 @@ impl InGame {
             // Style (owner only) and game modes: style_hud.rs / mode_hud.rs.
             NetEvent::Game(GameEvent::Style(e)) => self.style.on_event(&e, &mut common.audio, now),
             NetEvent::Game(GameEvent::Mode(e)) => self.on_mode_event(&e, common),
+            // Arena encounters: banners + sounds (encounter_hud.rs).
+            NetEvent::Game(
+                ref ev @ (GameEvent::EncounterStarted { .. }
+                | GameEvent::WaveStarted { .. }
+                | GameEvent::EncounterCleared { .. }),
+            ) => {
+                encounter_hud::on_event(ev, &mut self.hud, &mut common.audio, t, now);
+            }
             NetEvent::LobbyChanged { phase, previous } => {
                 return self.on_lobby_changed(phase, previous, common, now);
             }
@@ -1042,6 +1051,8 @@ impl InGame {
             time: now,
         };
         self.hud.draw(list, &common.theme, &info);
+        // Arena encounter readout ("WAVE 2/3 - 5 LEFT").
+        encounter_hud::draw(list, &common.theme, net.remote_entities());
         self.combat_hud(common, list, now);
     }
 

@@ -38,8 +38,9 @@ pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// Bumped on every incompatible protocol / simulation change. Checked on connect.
 /// 2: combat (OwnState::combat, SnapshotMessage::fx, combat GameEvents, entity kinds).
 /// 3: lobby / match flow (ClientMessage::Lobby, ServerMessage::Lobby, docs/lobby.md).
-/// 4: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
-pub const PROTOCOL_VERSION: u32 = 4;
+/// 4: enemies + arena encounters (encounter GameEvents, kind::ENCOUNTER, Fx::EnemySpawned).
+/// 5: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;
@@ -256,6 +257,20 @@ pub enum GameEvent {
     /// Game mode: checkpoint, downed / revive, team wipe, exit countdown, scoreboard, match end
     /// with results. Everyone. `docs/style_modes.md`.
     Mode(ModeEvent),
+
+    // ---- arena encounters (docs/enemies.md); everyone ----
+    /// Encounter `index` locked its doors ("ARENA LOCKED", `Sfx::DoorLock`).
+    EncounterStarted { index: u32, waves: u32 },
+    /// Wave `wave` (1-based) of `waves` spawned `enemies` enemies ("WAVE 2/3",
+    /// `Sfx::WaveStart`).
+    WaveStarted {
+        index: u32,
+        wave: u32,
+        waves: u32,
+        enemies: u32,
+    },
+    /// The encounter was won; its doors open ("CLEARED", `Sfx::EncounterClear` + `DoorOpen`).
+    EncounterCleared { index: u32 },
 }
 
 /// Unreliable server -> client messages.

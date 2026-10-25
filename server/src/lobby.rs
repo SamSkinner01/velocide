@@ -301,6 +301,8 @@ impl Server {
         // Game modes: make sure the sim's match is over too (results, frozen world; modes.rs).
         self.end_sim_match();
         self.flow.phase = LobbyPhase::Results;
+        // Enemies stop attacking on the results screen (docs/enemies.md).
+        self.world.frozen = true;
         // Lobby servers return by themselves; single-player waits for the player.
         self.flow.results_end = self
             .flow
@@ -609,6 +611,14 @@ impl Server {
     fn replace_world(&mut self, mut world: SimWorld, settings: MatchSettings) {
         world.tick = self.world.tick;
         world.enemy_defs = std::mem::take(&mut self.world.enemy_defs);
+        // Enemy navigation: reuse the nav grid for the same level, else build it now rather
+        // than on the first enemy tick (docs/enemies.md).
+        match self.world.ai.nav.take() {
+            Some(nav) if *world.level == *self.world.level => world.ai.nav = Some(nav),
+            _ => {
+                world.build_nav();
+            }
+        }
         world.apply_match_settings(settings);
         self.world = world;
         self.fx.prune(self.world.tick);

@@ -28,12 +28,14 @@
 
 pub mod blood;
 pub mod combat;
+pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
 mod hitbox;
 pub mod hitscan;
 // Game modes (death rule, checkpoints, downed/revive, deathmatch, results) and the style
 // meter: docs/style_modes.md.
 pub mod modes;
+pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
 pub mod prism;
 pub mod projectiles;
@@ -391,6 +393,23 @@ pub enum SimEvent {
     Style(StyleEvent),
     /// Checkpoints, downed / revive, exit countdown, scoreboard, match end (everyone).
     Mode(ModeEvent),
+    // ---- arena encounters (sim::encounter, docs/enemies.md) ----
+    /// Encounter `index` locked its doors (`waves` waves to come).
+    EncounterStarted {
+        index: u32,
+        waves: u32,
+    },
+    /// Wave `wave` (1-based) of `waves` spawned `enemies` enemies (co-op scaled).
+    WaveStarted {
+        index: u32,
+        wave: u32,
+        waves: u32,
+        enemies: u32,
+    },
+    /// The last wave died: the exit doors are open.
+    EncounterCleared {
+        index: u32,
+    },
 }
 
 /// A player's shot (for remote tracers, muzzle flashes and sounds).
@@ -427,6 +446,10 @@ pub struct SimWorld {
     /// them here; `rules.friendly_fire` follows `match_settings` (see
     /// [`SimWorld::apply_match_settings`]). Client prediction copies keep the default.
     pub match_settings: MatchSettings,
+    /// The match is over (results screen): enemies stop thinking and attacking and encounters
+    /// don't trigger; players can still move. Set by the server's `end_match`; game modes may
+    /// set it too (one shared flag). A fresh world starts unfrozen.
+    pub frozen: bool,
     /// Game-mode combat rules (PvP friendly fire, co-op scaling). From the level kind; the
     /// server applies the lobby's match settings on top.
     pub rules: CombatRules,
@@ -442,6 +465,10 @@ pub struct SimWorld {
     pub mode: ModeState,
     /// Every player's style meter (`style.rs`).
     pub style: StyleSystem,
+    /// Enemy AI shared state: nav grid (lazy), A* buffers, stats (`enemy/steer.rs`).
+    pub ai: enemy::AiWorld,
+    /// Arena encounter states (`encounter.rs`); persist until `restart_level`.
+    pub encounters: encounter::Encounters,
     /// Events of the tick being simulated.
     pub(crate) events: Vec<SimEvent>,
     /// The projectile step of the current tick has run.
@@ -478,6 +505,7 @@ impl SimWorld {
             collision,
             players: BTreeMap::new(),
             match_settings: MatchSettings::default(),
+            frozen: false,
             rules,
             enemy_defs: EnemyRegistry::builtin(),
             enemies: BTreeMap::new(),
@@ -487,6 +515,8 @@ impl SimWorld {
             pending_hits: Vec::new(),
             mode,
             style: StyleSystem::default(),
+            ai: enemy::AiWorld::default(),
+            encounters: encounter::Encounters::default(),
             events: Vec::new(),
             projectiles_stepped: false,
             next_spawn: 0,
@@ -579,6 +609,8 @@ impl SimWorld {
         self.prisms.clear();
         self.blood.clear();
         self.pending_hits.clear();
+        // Encounters go back to idle (doors are reset just below).
+        self.reset_encounters();
         let level = Arc::clone(&self.level);
         for door in &level.doors {
             self.collision.set_door_open(door.id, door.starts_open);
@@ -688,9 +720,9 @@ impl SimWorld {
         self.projectiles_stepped = true;
         self.tick_parry_windows(tuning);
 
-        // 3. Enemies and their parry-delayed hits (frozen once the match is over: modes.rs).
-        if !self.mode.is_over() {
-            self.step_enemies(tuning);
+        // 3. Enemies and their parry-delayed hits (none land once the match is over).
+        self.step_enemies(tuning);
+        if !self.frozen {
             self.apply_due_pending_hits(tuning);
         }
 
@@ -699,8 +731,9 @@ impl SimWorld {
         self.step_blood(tuning);
         self.tick_vitals(tuning);
 
-        // 5. World rules.
+        // 5. World rules, then arena encounters (triggers, waves, doors).
         self.apply_world_rules(tuning);
+        self.step_encounters(tuning);
 
         // 6. Game mode + style: scores this tick's events, checkpoints, revives, exit,
         //    deathmatch limits, scoreboard (modes.rs / style.rs).
@@ -777,7 +810,7 @@ impl SimWorld {
             self.respawn_player(t, id);
         }
         for id in kill {
-            if self.mode.is_over() {
+            if self.frozen {
                 // Nobody dies on the results screen: back to a spawn instead.
                 self.respawn_player(t, id);
             } else {
@@ -821,6 +854,8 @@ impl SimWorld {
         for b in self.blood.values() {
             frame.insert(&b.entity_state());
         }
+        // Encounter state (HUD: wave, enemies left).
+        self.replicate_encounters(frame);
     }
 
     /// Applies replicated level state (door open/closed) received in a snapshot so client

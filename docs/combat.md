@@ -343,7 +343,8 @@ The server loads `assets/enemies/*.ron` over the compiled-in built-ins
 logged and skipped. Adding the Spitter/Gnat/Bastion is a RON file each: Spitter =
 `Projectile` attack with `kind: SpitterOrb` + `preferred_range: Some((12, 25))`; Gnat =
 `Flying(4, 8)` + `Projectile` burst of 3 `GnatBolt` + `strafe`; Bastion = `armour` + `Slam`
-with `parry_window: Some(0.35)`. Navigation plugs in at `chase_velocity` (`ai.rs`).
+with `parry_window: Some(0.35)`. All four ship now; navigation, the AI per type and arena
+encounters are documented in `docs/enemies.md`.
 
 ### AI (`ai.rs`)
 
@@ -522,7 +523,7 @@ Run: `cargo test -p shared --test combat_weapons --test combat_parry --test comb
 
 * No interest management: every client gets every enemy (~10 B per moving enemy per
   snapshot). Distance-based update rates would cut the crowded-scene 28 KB/s a lot.
-* Enemies chase directly (no navigation yet); players and enemies don't collide.
+* Players and enemies don't collide (enemy navigation: `docs/enemies.md`).
 * Client: the predicted sticky count can be off by one for a snapshot when a sticky explodes
   server-side (re-based right after); hitscan tracers of your own pellets use client-side
   spread (the server's spread decides damage); the Bastion / Spitter / Gnat visuals are wired

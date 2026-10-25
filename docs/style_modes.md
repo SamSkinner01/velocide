@@ -146,18 +146,25 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
 * **Team wipe**: when every player is dead / downed (two or more players, or a lone downed player
   whose teammates left) → `ModeEvent::TeamWiped { respawn_tick }`; downed players become dead (no
   more revives) and everyone respawns together at the checkpoint.
-* **Level reset** (solo death, team wipe): `SimWorld::reset_to_checkpoint` clears projectiles,
-  parry-delayed hits and a pending exit countdown. **HOOK(enemies)**: the encounter system's
-  reset of uncleared encounters belongs there (despawn their enemies, reopen entry doors, re-arm
-  triggers); it isn't on `main` yet.
+* **Level reset** (solo death, team wipe): `SimWorld::reset_to_checkpoint` puts every encounter
+  in progress back to idle through the enemies' hook `SimWorld::reset_uncleared` (its enemies
+  removed, its doors back to their level-start state, its trigger re-armed — the checkpoint sits
+  just before the trigger, so walking in restarts the fight), takes back the kills and spawns of
+  those encounters (they'll be fought again, so nothing counts twice), and clears projectiles,
+  parry-delayed hits and a pending exit countdown.
+* **Enemy hooks** (`docs/enemies.md`): downed players have `combat.dead` set, so
+  `enemy::is_targetable` (enemies never target or hit them) and
+  `encounter::counts_for_encounters` (they don't trigger encounters or get rallied) already
+  exclude them.
 * **Exit**: solo — reaching the `exit` volume ends the level. Co-op — the first living player in
   starts an **extraction countdown** (`exit_countdown`, 10 s, `ModeEvent::ExitCountdown`, beeps
   for the last 5 s); the level ends early as soon as every living player is inside, otherwise when
   it runs out. Downed players don't hold the team up. Anyone not inside when it ends is **LEFT
   BEHIND** on the results. Why: no deadlock waiting for a straggler or an AFK player, a reason to
   sprint the last corridor together, and a little drama for whoever dawdles.
-* **Late joiners** start at the reached checkpoint; total enemies = the level's authored count
-  (`authored_enemies`) or the number actually spawned if larger (co-op scaling).
+* **Late joiners** start at the reached checkpoint. Total enemies for the results =
+  `SimWorld::expected_enemies` (the encounters' waves scaled for `coop_player_count` like the
+  encounter system does) or the number actually spawned if larger.
 
 ### Deathmatch
 
@@ -175,9 +182,11 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
 ### Match end
 
 `SimWorld::end_match(t, reason)` (exit, frag limit, time limit, or `EndReason::Host`) builds the
-`MatchResults`, emits `ModeEvent::Ended(results)` and switches to `Ended`: nothing scores, enemy
-AI and parry-delayed enemy hits are frozen, players are protected, kill volumes put players back
-instead of killing them. On the server the event goes to every client and then
+`MatchResults`, emits `ModeEvent::Ended(results)`, switches to `Ended` and sets the shared
+results freeze **`SimWorld::frozen`** (also set by `Server::end_match`; a world frozen from
+outside ends its match at the next tick): nothing scores, enemies idle where they stand and
+encounters don't trigger (enemies code), parry-delayed enemy hits don't land, players are
+protected, kill volumes put players back instead of killing them. `restart_level` unfreezes. On the server the event goes to every client and then
 `Server::end_match()` moves the lobby flow to its **Results** phase (lobby servers return to the
 lobby by themselves after 30 s, single-player waits for RESTART / MAIN MENU). Ending a match
 from the lobby side (`LobbyCommand::EndMatch`, `Server::end_match`) also ends the sim's match
@@ -238,7 +247,7 @@ KILLS, DEATHS, RANK, STYLE; campaign KILLS, DEATHS, RANK, STYLE; then the lobby'
 (`fill_score_row`, rank in its colour, negative frags red) and sorts deathmatch rows by frags.
 Adding a column: an entry in `columns_for` and a match arm in `fill_score_row`.
 
-## Protocol (version 4)
+## Protocol (version 5)
 
 | message | to | notes |
 |---|---|---|
@@ -294,7 +303,7 @@ player) to everyone.
 
 ```text
 cargo test -p shared --test style      # style math + scoring real combat in the sim (15)
-cargo test -p shared --test modes      # checkpoints, solo / co-op deaths, revive, wipe, exit, DM, grades (24)
+cargo test -p shared --test modes      # checkpoints, solo / co-op deaths, revive, wipe, exit, DM, grades (25)
 cargo test -p server --test modes_net  # over UDP with real clients (5)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive
 ```
@@ -317,7 +326,8 @@ cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD 
   friendly fire); frags +1 / −1 suicide / −1 kill volume, knock-off credit and its window; respawn
   after 2 s at the farthest spawn, spawn protection then damage; frag limit → standings; time
   limit; the scoreboard broadcast; late joiners at the checkpoint; restart resets the match; AI
-  and kill volumes frozen after the end.
+  and kill volumes frozen after the end (`SimWorld::frozen`); a solo death in the middle of
+  Crucible's first arena resets that encounter (idle, enemies gone) and takes its kill back.
 * `modes_net.rs`: style events reach only the killer, `OwnState` carries the meter, everyone's
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
@@ -330,8 +340,6 @@ cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD 
 
 ## Known limitations / next steps
 
-* **HOOK(enemies)**: `SimWorld::reset_to_checkpoint` doesn't reset encounters yet (needs the
-  encounter system's reset of uncleared encounters).
 * Downed players can look around but don't crawl (crawling would need predicted downed movement
   on the client); the third-person downed pose comes from the models.
 * Players who leave mid-match drop off the results.

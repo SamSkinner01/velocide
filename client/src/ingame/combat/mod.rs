@@ -484,6 +484,10 @@ impl InGame {
             }
             // Style and game-mode events are handled in `on_net_event` (style_hud / mode_hud).
             GameEvent::Style(_) | GameEvent::Mode(_) => {}
+            // Arena encounters: banners / sounds in `encounter_hud` (ingame/mod.rs).
+            GameEvent::EncounterStarted { .. }
+            | GameEvent::WaveStarted { .. }
+            | GameEvent::EncounterCleared { .. } => {}
         }
     }
 

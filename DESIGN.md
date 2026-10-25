@@ -170,6 +170,8 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 - `docs/lobby.md` — lobby phases, messages, host rules, screens, how game modes plug in.
 - `docs/style_modes.md` — style meter / ranks / freshness, game modes (checkpoints, downed &
   revive, exit, deathmatch), the death rule, scoreboard, results grading and screens.
+- `docs/enemies.md` — the four enemy types, AI states and telegraphs, nav grid, arena
+  encounters, co-op scaling, hooks for game modes, measurements.
 
 ## Running it
 - Single-player: `cargo run -p client --release -- --sp crucible_of_veins`

@@ -1,0 +1,77 @@
+// Bastion: heavy armoured enemy. Slow, barely knocked back; front armour plates take 35 % of
+// damage from the front (not the head, not the furnace on its back, explosions included).
+// Overhead slam: 1.0 s wind-up (fists overhead, yellow flash), the last 0.35 s of which is the
+// PARRYABLE window: punching it then stuns the Bastion for 2.5 s and deals 150 damage
+// (the counter ignores the armour). Otherwise the slam hits everything within 5 m
+// (45 damage falling off to 50 % at the edge, big upward knockback).
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), docs/combat.md and docs/enemies.md.
+// Local offsets: +X right, +Y up, -Z forward, from the feet.
+(
+    name: "Bastion",
+    net_kind: 19,
+    model: "bastion",
+    health: 450.0,
+    speed: 5.0,
+    acceleration: 25.0,
+    turn_rate: 150.0,
+    radius: 1.1,
+    height: 3.1,
+    body_top: Some(2.55),
+    eye_height: 2.7,
+    step_height: 0.45,
+    locomotion: Ground,
+    knockback_scale: 0.12,
+    weak_points: [
+        (name: "head", kind: Head, offset: (0.0, 2.78, -0.3), radius: 0.36, multiplier: 2.0),
+        // The furnace on its back: the unarmoured side.
+        (name: "furnace", kind: Core, offset: (0.0, 1.9, 0.8), radius: 0.5, multiplier: 2.0),
+    ],
+    armour: Some((
+        front_multiplier: 0.35,
+        front_arc: 140.0,
+        bypass: ["head", "furnace"],
+        explosions: true,
+    )),
+    attacks: [
+        (
+            name: "slam",
+            kind: Slam,
+            range: 2.6,
+            min_range: 0.0,
+            arc: 120.0,
+            damage: 45.0,
+            knockback: 16.0,
+            windup: 1.0,
+            strike: 0.3,
+            recover: 1.0,
+            cooldown: 1.2,
+            windup_move_scale: 0.0,
+            track_target: true,
+            parry_window: Some(0.35),
+            parry_stun: 2.5,
+            parry_damage: 150.0,
+            shockwave_radius: 5.0,
+        ),
+    ],
+    ai: (
+        sight_range: 60.0,
+        reaction_time: 0.6,
+        lose_target_time: 6.0,
+        preferred_range: None,
+        strafe: false,
+        target_stickiness: 0.7,
+        aggro_switch_fraction: 0.15,
+        retarget_interval: 0.4,
+        repath_interval: 0.8,
+    ),
+    drops: (blood_pool: 60.0, blood_radius: 6.0),
+    colors: (
+        body: (0.35, 0.33, 0.32),
+        accent: (0.55, 0.42, 0.18),
+        glow: (1.0, 0.75, 0.2),
+        telegraph: (1.0, 0.85, 0.1),
+        parry: (1.0, 0.95, 0.2),
+    ),
+    death_time: 1.2,
+)

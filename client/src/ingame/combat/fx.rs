@@ -576,6 +576,22 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             let d = p.distance(ctx.listener);
             ctx.feedback.shake(shake_at(d, r * 3.0, 0.6));
         }
+        // An enemy appeared (encounter wave / dev spawn): flash + `EnemySpawn`.
+        Fx::EnemySpawned {
+            kind: k, position, ..
+        } => {
+            let feet = q(*position);
+            let (lift, size) = match *k {
+                kind::GNAT => (0.45, 1.8),
+                kind::BASTION => (1.6, 4.0),
+                _ => (1.0, 2.4),
+            };
+            let center = feet + Vec3::Y * lift;
+            ctx.effects
+                .glow(center, glam::Vec4::new(1.0, 0.25, 0.12, 1.0), size, 0.35);
+            ctx.effects.smoke(feet, 6);
+            ctx.audio.play(Sfx::EnemySpawn, PlayParams::at(center));
+        }
         Fx::EnemyAlert { enemy } => {
             if let Some(e) = ctx.entities.iter().find(|e| e.id == *enemy) {
                 let sfx = match e.kind {

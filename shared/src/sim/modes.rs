@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use super::combat::{
     Attack, CombatRules, DamageFlags, KillInfo, Owner, PlayerCombat, secs_to_ticks,
 };
+use super::encounter::EncounterPhase;
 use super::style::{StyleBonus, StyleEvent};
 use super::{HitTarget, PlayerId, SimEvent, SimWorld, WeaponState};
 use crate::input::Buttons;
@@ -393,6 +394,10 @@ pub struct ModeState {
     pub wipe: Option<u32>,
     pub team_kills: u32,
     pub enemies_spawned: u32,
+    /// Killers of each encounter's enemies and how many it spawned (a checkpoint restart that
+    /// resets an encounter takes them back, so re-fighting it doesn't count twice).
+    encounter_kills: BTreeMap<u16, Vec<PlayerId>>,
+    encounter_spawns: BTreeMap<u16, u32>,
     pub results: Option<MatchResults>,
     scoreboard_dirty: bool,
     last_scoreboard: Option<u32>,
@@ -411,6 +416,8 @@ impl ModeState {
             wipe: None,
             team_kills: 0,
             enemies_spawned: 0,
+            encounter_kills: BTreeMap::new(),
+            encounter_spawns: BTreeMap::new(),
             results: None,
             scoreboard_dirty: true,
             last_scoreboard: None,
@@ -446,6 +453,22 @@ impl ModeState {
     }
 }
 
+impl SimWorld {
+    /// Enemies this level's encounters spawn for the current player count (co-op scaling).
+    pub fn expected_enemies(&self) -> u32 {
+        if !self.rules.coop_enemy_scaling {
+            return authored_enemies(&self.level);
+        }
+        let players = self.coop_player_count();
+        self.level
+            .encounters
+            .iter()
+            .flat_map(|e| &e.waves)
+            .map(|w| super::encounter::scaled_count(w.spawns.len(), players) as u32)
+            .sum()
+    }
+}
+
 /// Number of enemies the level's encounters spawn (before co-op scaling).
 pub fn authored_enemies(level: &LevelDef) -> u32 {
     level
@@ -467,6 +490,7 @@ impl SimWorld {
 
     /// Back to the start of the match (level restart): stats, style, checkpoint, clock.
     pub(crate) fn reset_modes(&mut self) {
+        self.frozen = false;
         self.mode = ModeState::new(self.mode.rules);
         self.style.clear();
         self.sync_mode_players(None);
@@ -483,6 +507,10 @@ impl SimWorld {
         // This tick's events so far; everything emitted below is appended after them.
         let events = std::mem::take(&mut self.events);
         self.sync_mode_players(Some(t));
+        if self.frozen && self.mode.is_playing() {
+            // Frozen from outside (the server's results phase): the match is over.
+            self.end_match(t, EndReason::Host);
+        }
         if self.mode.is_playing() {
             self.account_events(t, &events);
             for e in self.score_style(t, &events) {
@@ -500,7 +528,8 @@ impl SimWorld {
                 }
                 GameMode::Deathmatch => self.tick_deathmatch(t),
             }
-        } else if self.mode.phase == MatchPhase::Ended {
+        }
+        if self.mode.is_over() || self.frozen {
             // Nothing can hurt anyone on the results screen.
             for p in self.players.values_mut() {
                 p.combat.protection = p.combat.protection.max(2);
@@ -590,7 +619,12 @@ impl SimWorld {
                     }
                 }
                 SimEvent::Killed(k) => self.account_kill(t, k, dm, credit_ticks),
-                SimEvent::EnemySpawned { .. } => self.mode.enemies_spawned += 1,
+                SimEvent::EnemySpawned { id, .. } => {
+                    self.mode.enemies_spawned += 1;
+                    if let Some((enc, _)) = self.enemies.get(id).and_then(|e| e.encounter) {
+                        *self.mode.encounter_spawns.entry(enc).or_default() += 1;
+                    }
+                }
                 _ => {}
             }
         }
@@ -598,11 +632,14 @@ impl SimWorld {
 
     fn account_kill(&mut self, t: &Tuning, k: &KillInfo, dm: bool, credit_ticks: u32) {
         match k.victim {
-            HitTarget::Entity(_) => {
+            HitTarget::Entity(id) => {
                 if let Owner::Player(killer) = k.killer {
                     self.mode.player(killer).stats.kills += 1;
                     self.mode.team_kills += 1;
                     self.mode.touch();
+                    if let Some((enc, _)) = self.enemies.get(&id).and_then(|e| e.encounter) {
+                        self.mode.encounter_kills.entry(enc).or_default().push(killer);
+                    }
                 }
             }
             HitTarget::Player(victim) => {
@@ -794,13 +831,31 @@ impl SimWorld {
         best.1
     }
 
-    /// Puts the level back to the state of the last checkpoint (solo death, team wipe).
-    ///
-    /// HOOK(enemies): the encounter system's `reset_uncleared` / `reset_encounter` belongs here
-    /// (despawn the enemies of every encounter that isn't cleared, reopen its entry doors,
-    /// re-arm its trigger). Until it lands this only clears what would kill a respawning
-    /// player: projectiles, parry-delayed hits, enemy melee in flight.
+    /// Puts the level back to the state of the last checkpoint (solo death, team wipe): every
+    /// encounter in progress goes back to idle (its enemies removed, its doors back to their
+    /// level-start state, its trigger re-armed: `SimWorld::reset_uncleared`), and nothing left
+    /// in flight (projectiles, parry-delayed hits) greets the respawning players.
     pub fn reset_to_checkpoint(&mut self, _t: &Tuning) {
+        // Kills and spawns of the encounters about to reset don't count: they'll be fought again.
+        let active: Vec<u16> = self
+            .encounters
+            .states
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.phase == EncounterPhase::Active)
+            .map(|(i, _)| i.min(u16::MAX as usize) as u16)
+            .collect();
+        for enc in active {
+            for killer in self.mode.encounter_kills.remove(&enc).unwrap_or_default() {
+                let s = &mut self.mode.player(killer).stats;
+                s.kills = s.kills.saturating_sub(1);
+                self.mode.team_kills = self.mode.team_kills.saturating_sub(1);
+            }
+            let spawned = self.mode.encounter_spawns.remove(&enc).unwrap_or(0);
+            self.mode.enemies_spawned = self.mode.enemies_spawned.saturating_sub(spawned);
+            self.mode.touch();
+        }
+        self.reset_uncleared();
         self.projectiles.clear();
         self.pending_hits.clear();
         self.mode.exit = None;
@@ -1025,6 +1080,9 @@ impl SimWorld {
         }
         self.mode.phase = MatchPhase::Ended;
         self.mode.end_tick = Some(self.tick);
+        // The shared results freeze: enemies stand still, encounters don't trigger, no enemy
+        // hits land, kill volumes don't kill (docs/enemies.md).
+        self.frozen = true;
         let results = self.build_results(t, reason);
         self.mode.results = Some(results.clone());
         self.mode.touch();
@@ -1037,7 +1095,7 @@ impl SimWorld {
         let end = self.mode.end_tick.unwrap_or(self.tick);
         let duration_secs =
             end.wrapping_sub(self.mode.start_tick) as f32 / self.tick_rate.max(1) as f32;
-        let total_enemies = authored_enemies(&self.level).max(self.mode.enemies_spawned);
+        let total_enemies = self.expected_enemies().max(self.mode.enemies_spawned);
         let exit = self.level.exit;
         let n = self.players.len();
         let mut players: Vec<PlayerResult> = self

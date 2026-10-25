@@ -557,10 +557,12 @@ fn the_world_freezes_once_the_match_is_over() {
     let t = a.tuning.clone();
     a.world.end_match(&t, EndReason::Host);
     a.ticks(60);
-    assert!(
-        a.world.enemies[&h].position.distance(start) < 0.01,
-        "AI frozen"
-    );
+    // The shared freeze (`SimWorld::frozen`): enemies idle where they stand.
+    assert!(a.world.frozen);
+    let e = &a.world.enemies[&h];
+    let moved = (e.position - start) * Vec3::new(1.0, 0.0, 1.0);
+    assert!(moved.length() < 0.2, "AI frozen: moved {moved}");
+    assert!(e.target.is_none());
     assert_eq!(a.health(p), 100.0);
     // Kill volumes put players back instead of killing them.
     place(&mut a, p, LAVA);
@@ -755,4 +757,50 @@ fn restart_resets_the_match() {
     assert_eq!(a.world.mode.start_tick, a.world.tick);
     a.ticks(5);
     assert_eq!(a.world.mode.phase, MatchPhase::Playing);
+}
+
+#[test]
+fn a_solo_death_mid_fight_resets_the_encounter_and_its_kills() {
+    let level = LevelDef::load_named("crucible_of_veins").expect("level");
+    let cp = level.checkpoints[0].spawn.position;
+    let mut a = Arena::new(level);
+    let p = a.player(0, cp, 0.0);
+    a.world.players.get_mut(&p).unwrap().notarget = true;
+    a.ticks(3);
+    assert_eq!(a.world.mode.checkpoint, Some(0));
+    a.world.start_encounter(0);
+    a.ticks(90);
+    let ids: Vec<NetId> = a
+        .world
+        .enemies
+        .values()
+        .filter(|e| e.is_alive() && e.encounter.is_some())
+        .map(|e| e.id)
+        .collect();
+    assert!(!ids.is_empty(), "the first wave is out");
+    // The player kills one of them...
+    let t = a.tuning.clone();
+    let at = a.world.enemies[&ids[0]].position;
+    let info = DamageInfo::new(500.0, Owner::Player(p), Attack::Slug).at(at, Vec3::NEG_Z);
+    a.world.apply_damage(&t, HitTarget::Entity(ids[0]), info);
+    a.tick();
+    assert_eq!(a.world.mode.stats(p).kills, 1);
+    // ... and dies: back at the checkpoint, the fight starts over and the kill is taken back.
+    kill(&mut a, p);
+    a.ticks(100);
+    assert!(!a.world.players[&p].combat.dead);
+    assert_eq!(
+        a.world.encounters.states[0].phase,
+        shared::sim::encounter::EncounterPhase::Idle
+    );
+    assert!(
+        a.world
+            .enemies
+            .values()
+            .all(|e| !e.is_alive() || e.encounter.is_none()),
+        "its enemies are gone"
+    );
+    assert_eq!(a.world.mode.stats(p).kills, 0);
+    assert_eq!(a.world.mode.team_kills, 0);
+    assert_eq!(a.world.mode.enemies_spawned, 0);
 }

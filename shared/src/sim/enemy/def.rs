@@ -16,7 +16,12 @@ use crate::sim::projectiles::ProjectileKind;
 
 /// Built-in definitions (compiled in, so the server works without an assets directory and
 /// tests don't depend on edited files). Files in `assets/enemies/` override them by name.
-const BUILTIN: &[(&str, &str)] = &[("husk", include_str!("../../../../assets/enemies/husk.ron"))];
+const BUILTIN: &[(&str, &str)] = &[
+    ("husk", include_str!("../../../../assets/enemies/husk.ron")),
+    ("spitter", include_str!("../../../../assets/enemies/spitter.ron")),
+    ("gnat", include_str!("../../../../assets/enemies/gnat.ron")),
+    ("bastion", include_str!("../../../../assets/enemies/bastion.ron")),
+];
 
 /// How an enemy moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -24,7 +29,8 @@ pub enum Locomotion {
     /// Walks on the level with gravity (capsule sweeps against the world).
     #[default]
     Ground,
-    /// Flies without gravity, keeping between `min_height` and `max_height` above the ground.
+    /// Flies without gravity, keeping its centre (the model's hover centre, half the height
+    /// above `Enemy::position`) between `min_height` and `max_height` above the ground.
     Flying { min_height: f32, max_height: f32 },
 }
 
@@ -165,6 +171,12 @@ pub struct AttackDef {
     /// Slam radius.
     pub shockwave_radius: f32,
     pub projectile: Option<ProjectileAttack>,
+    /// Melee lunge: forward speed (m/s) the enemy leaps at when the strike starts; 0 = none.
+    /// A lunging strike hits every player it reaches during the whole strike phase (once).
+    pub lunge: f32,
+    /// Only chosen against a target moving at least this fast (m/s, horizontal): gap closers
+    /// for fleeing players. 0 = always.
+    pub min_target_speed: f32,
 }
 
 impl Default for AttackDef {
@@ -188,6 +200,8 @@ impl Default for AttackDef {
             parry_damage: 150.0,
             shockwave_radius: 5.0,
             projectile: None,
+            lunge: 0.0,
+            min_target_speed: 0.0,
         }
     }
 }
@@ -212,6 +226,8 @@ pub struct AiDef {
     pub aggro_switch_fraction: f32,
     /// Seconds between target re-evaluations.
     pub retarget_interval: f32,
+    /// Seconds between path re-plans while chasing (navigation, see `sim::nav`).
+    pub repath_interval: f32,
 }
 
 impl Default for AiDef {
@@ -225,6 +241,7 @@ impl Default for AiDef {
             target_stickiness: 0.6,
             aggro_switch_fraction: 0.3,
             retarget_interval: 0.25,
+            repath_interval: 0.6,
         }
     }
 }

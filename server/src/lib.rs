@@ -344,6 +344,8 @@ impl Server {
             Some(dir) => EnemyRegistry::load_dir(dir),
             None => EnemyRegistry::load_default(),
         };
+        // Enemy navigation: build the nav grid at level load, not on the first enemy tick.
+        world.build_nav();
         let mut server = Server {
             renet: RenetServer::new(connection_config()),
             transport,
