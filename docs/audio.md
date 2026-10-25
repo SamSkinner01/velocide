@@ -67,8 +67,8 @@ pub fn generate_all_sfx() -> Vec<Vec<Vec<f32>>>;        // [sfx][variant], mono 
 - **Pitch.** `Ricochet` is designed to be chained at rising pitch, for example
   `pitch = 1.0 + 0.12 * bounce_index`. `Countdown` can be pitched up for the final beep.
 - **Rapid fire is safe.** Per-sound voice limits steal the oldest instance, and a minimum
-  interval merges repeats that land in the same frame. Ten shotgun pellets produce one
-  `Hitmarker`, not ten stacked ones.
+  interval merges repeats that land in the same frame. Twelve Bellows pellets produce one
+  `Hitmarker`, not twelve stacked ones.
 - **Intensity.** Set the intensity from raw game state every frame; it is smoothed internally.
   A suggested mapping:
   - 0 when exploring.
@@ -78,9 +78,11 @@ pub fn generate_all_sfx() -> Vec<Vec<Vec<f32>>>;        // [sfx][variant], mono 
   - Drop it back to around 0.2 once an encounter is cleared.
 - **Track per mode.** Main menu and lobby use `Menu`, campaign and co-op levels use `Campaign`,
   PvP uses `Arena`, and the results screen uses `Results`.
-- **Long sounds.** `LancetCharge` (1.1 s rising whine) and `Slide` (0.6 s) are one-shots. Call
-  `stop` when the charge is released early or the slide ends. `GnatBuzz` (0.6 s) is meant to be
-  re-triggered periodically by each Gnat.
+- **Long sounds.** `DischargeCharge` (1.3 s rising whine that holds after 1 s) and `Slide`
+  (0.6 s) are one-shots. Call `stop` when the charge is released or cancelled, or the slide
+  ends. `GravewellHum` (1.6 s) covers a planted Gravewell's whole pull. `WispHum` (0.5 s, soft
+  in and out) and `GnatBuzz` (0.6 s) are meant to be re-triggered periodically at the moving
+  wisp / Gnat.
 
 ## Architecture
 
@@ -148,7 +150,10 @@ All recipes live in `sfx.rs::recipe` and are built from a handful of generators:
 - `growl`: jittery saw through two formants that follow the pitch.
 - `chord`: detuned saw stacks.
 - `notes`: melodic lines.
-- `Gun`: transient click, body thump, crack and noise tail.
+- Weapon helpers: `pluck` (Karplus–Strong string), `zap` (pitch-jumping saw buzz + noise,
+  high-passed: electric arcs), `glass_spray` (scattered tiny glassy pings), `quill_crack`,
+  `bellows_core` / `bellows_wheeze`, `envelope` (fades a crackle's pops, not just their
+  density).
 
 Post effects are `drive` (soft clip), `crush` (bit depth plus sample-and-hold rate reduction,
 for the PS1 crunch), `echo`, `reverb` (Freeverb-style) and filters. Every sound is seeded from
@@ -170,23 +175,52 @@ its index, so generation is deterministic.
   - `Death` and `Downed` are stuttering power-downs.
   - `Respawn` and `Revive` are rising swells and arpeggios.
   - `NoStamina` is a dull double buzz.
-- **Weapons.** Each is layered as transient click, body thump, crack and noise tail, then
-  driven and lightly crushed.
-  - The **Thresher** is clearly heavier than the **Lancet**: 88 % of its energy sits below
-    150 Hz against 46 %, with a longer, darker blast and a small room tail.
-  - **Riveter** shots are short pneumatic ticks (3 variants, quieter, 6 voices) so sustained
-    fire doesn't dominate.
+- **Weapons.** Each weapon has its own material, so the four read apart instantly: the
+  Quill is a dry string-and-whip crack, the Bellows breathes air, the Arclash buzzes and
+  crackles, the Tumbler is hollow iron.
+  - **Quill.** `QuillFire` is a whip-crack of band-passed noise (7→2.2 kHz), the snap of a
+    Karplus–Strong string at 820 Hz, a tiny metallic tick and a small high thump: 0.13 s,
+    centroid ≈ 6.8 kHz, no boom. `BrandFire` adds a branding-iron hiss and sputter;
+    `Branded` (at the branded target) is a searing sizzle over a low, ominous toll (155 Hz
+    with a rubbing minor second). `SplinterFire` is a lower, heavier crack after a glassy
+    pre-tick; `SplinterBurst` (at the impact) is a spray of 16 tiny glass pings.
+  - **Bellows.** `BellowsBlast` is a breathy low "whumpf" (low-passed noise 2.6 kHz→280 Hz
+    over a 150→40 Hz body) with a short crack, then the bellows refilling: a reedy in-draw
+    through a sweeping formant with a leather creak. `BellowsGust` has no crack at all: a
+    pressure pop, then a band-passed rush of air that swells for 45 ms and keeps blowing
+    (half its energy above 250 Hz, against 93 % below for the blast). `BothBarrels` is the
+    loudest weapon (−10): two blast cores 25 ms apart (the second high-passed so the bodies
+    don't phase-lock into a late swell), a clean 95→28 Hz sub added after the distortion,
+    a room tail and a longer wheeze. `Deflect` is a rising "fwip" into a bright 2.8 kHz
+    inharmonic ping.
+  - **Arclash.** Arcs are a saw buzz whose pitch jumps randomly every 1.5 ms, plus noise,
+    high-passed at 700 Hz. `ArcZap` (85 ms, 3 variants, 8 voices, 20 ms minimum interval) is
+    the per-zap tick at 10/s; `ArcChain` is a higher zap with an upward square chirp.
+    `WispLaunch` is an electric thoom with a rising buzz, `WispHum` a soft 98/147 Hz buzz with
+    23 Hz flutter and crackle, `WispZap` a sharp crackle-snap. `DischargeCharge` is a pulsing
+    capacitor whine (380 Hz → 3.1 kHz over 1 s, then holding, pulse rate 8→40 Hz) over a mains
+    hum with growing crackle; `DischargeRelease` is a thunder-crack, an electric boom (thump +
+    FM) and a sizzling tail.
+  - **Tumbler.** `BombLaunch` is a hollow triangle "bonk" over a thump, then three ratchet
+    clicks of the drum turning. `BombBounce` is a short iron clank on a thud (2 variants, wide
+    pitch jitter). `BreachBlast` is tighter and drier than `Explosion` (0.9 s against 2.1 s): a
+    hard crack, a short boom, crunch and a little debris. `GravewellLaunch` is a deep thunk
+    with the canister's clamps locking; `GravewellHum` a 1.6 s sub drone rising 48→74 Hz with
+    a warble and band noise sliding down (air being sucked in); `GravewellImplode` a reversed,
+    exponentially growing suck-in that stops dead on a deep compressed thump.
+  - **Thorn.** `ThornThrow` is a thin whistling "fwit"; `ThornPlant` a glassy "tunk" plus a
+    quivering plucked twang (330 Hz with a 26 Hz wobble); `ThornShatter` a small glass crumble
+    and fizzle.
   - **Explosion** is a crack, a 90→28 Hz sub boom, a low-pass sweep from 6 kHz down to 250 Hz,
     a rumble, crackle, and a reverb tail (2.1 s).
-  - `LancetCharge` is a 1.1 s rising whine with accelerating tremolo. `LancetBeam` is an FM
-    zap with echo.
 - **Parry.** The loudest and brightest sound in the game (spectral centroid 6.2 kHz): a
   transient crack, a long inharmonic clang (C6 with partials at ×1.5, 2.76, 5.4, 8.9 and 13.3),
   a beating 3.52 kHz shimmer, a fast whoosh, then saturation and a reverb tail. Nothing else
   sounds like it.
-- **Ricochet.** A pinging "zing" that glides from about 5.2 kHz down to 2.3 kHz, with a
-  metallic ping and a short echo. It is short and pitched, so chaining it at rising pitch reads
-  as a combo. 2 variants, 8 voices, no minimum interval.
+- **Ricochet.** A thorn shattering as the shot re-fires from it: a burst of high noise and a
+  few glass pings, then a bright crystalline chime (≈1.8–2 kHz, near-harmonic partials and a
+  slowly beating doubled fundamental) with a short echo. It is pitched, so chaining it at
+  rising pitch reads as a combo. 2 variants, 8 voices, no minimum interval.
 - **Hit feedback.** `Hitmarker` is a crisp 2.6 kHz tick. `Headshot` is a brighter double tick
   plus a splat. `KillConfirm` is a thud plus a two-note FM ping.
 - **Enemy telegraphs.** Every attack has an unmistakable windup.
@@ -259,23 +293,23 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 
 | family | target (LU, 50 ms) |
 |--------|--------------------|
-| Parry, Explosion, Bastion slam | −10 |
-| Bastion telegraph, shotgun (fire / slug), Lancet beam | −11 … −12 |
+| Parry, Explosion, Both Barrels, Bastion slam | −10 |
+| Bastion telegraph, Bellows blast, Breach, Discharge release, Gravewell implosion | −11 … −12 |
 | Slam impact, death | −12 |
-| Pistol, launchers, punch hit, wave/match stingers | −13 … −15 |
-| Enemy windups (telegraphs) | −14 … −15 |
-| Hurt, rank up, kill confirm, enemy attacks | −14 … −17 |
-| Riveter (rapid fire), dash, heavy landings, slam, wall jump, jump pad | −16 … −19 |
-| Hitmarker, enemy hurt, UI select/back, chat | −18 … −20 |
-| Jump, land, slide, gnat buzz, weapon/mode switch, UI move | −20 … −22 |
+| Quill shots, Gust, launchers (bomb, wisp, gravewell), deflect, punch hit, wave/match stingers | −13 … −15 |
+| Enemy windups (telegraphs), Branded | −14 … −15 |
+| Hurt, rank up, kill confirm, enemy attacks, splinter burst, wisp zap, thorn plant | −14 … −17 |
+| Arc zaps (10/s), bomb bounce, dash, heavy landings, slam, wall jump, jump pad | −16 … −19 |
+| Hitmarker, enemy hurt, UI select/back, chat, Gravewell hum, thorn throw / shatter, Discharge charge | −18 … −20 |
+| Jump, land, slide, gnat buzz, wisp hum, weapon/mode switch, UI move | −20 … −22 |
 | Footsteps (constant, 4 voices) | −25 |
 
 Each track is mastered so the full mix's loudest 400 ms sits at **−21 LU** (Campaign and
 Arena), −23 (Menu) or −22 (Results), with peaks at −5 dBFS or lower. In practice:
 
 - Full-combat music measures about −21 LU momentary and about −17 to −18.5 LU over its loudest
-  50 ms. On the same 50 ms scale, pistol shots sit about 3 LU above it, the shotgun about 6–7,
-  and the parry and Bastion telegraph about 7.
+  50 ms. On the same 50 ms scale, Quill shots sit about 3 LU above it, the Bellows about 6–7,
+  and Both Barrels, the parry and the Bastion telegraph about 7.
 - The pad alone measures about −29 to −30 LU.
 
 The music stays clearly under the gameplay-critical cues even at full music volume.
@@ -288,13 +322,15 @@ Measured with `audio_demo --wav-dir` (excerpt):
 name                           secs  peak dB   rms dB   LU 50ms  LU 400ms
 UiMove                         0.05    -13.8    -22.6     -22.0     -22.0
 Footstep                       0.12    -13.1    -27.1     -25.0     -28.7
-LancetFire                     0.30     -8.5    -20.2     -14.0     -21.0
-ThresherFire                   0.72     -5.8    -17.4     -11.0     -17.8
-RiveterFire                    0.10    -10.1    -20.2     -17.0     -20.0
-Explosion                      2.12     -0.9    -15.8     -10.0     -14.2
+QuillFire                      0.13     -4.3    -18.4     -14.0     -18.3
+BellowsBlast                   0.75     -5.5    -16.1     -11.0     -17.2
+BothBarrels                    1.01     -3.2    -14.7     -10.0     -15.1
+ArcZap                         0.09     -1.2    -21.7     -17.0     -19.1
+DischargeRelease               1.30     -5.8    -18.8     -11.0     -16.6
+Explosion                      2.12     -0.9    -15.8     -10.0     -14.1
 Parry                          2.20     -3.7    -18.0     -10.0     -10.9
-Ricochet                       0.65    -10.1    -26.0     -15.0     -20.8
-Hitmarker                      0.05     -8.4    -22.7     -20.0     -20.0
+Ricochet                       0.91     -5.7    -24.6     -15.0     -19.0
+Hitmarker                      0.05     -8.9    -22.7     -20.0     -20.0
 BastionTelegraph               1.30     -9.0    -17.1     -11.0     -14.0
 RankUp                         1.17     -5.0    -19.2     -14.0     -16.3
 Campaign_mix_calm             25.60    -14.0    -29.1     -27.5     -28.9

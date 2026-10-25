@@ -21,7 +21,7 @@
 //! // every frame:
 //! audio.set_listener(Vec3::ZERO, Quat::IDENTITY);
 //! audio.set_music_intensity(0.8);
-//! audio.play_2d(Sfx::ThresherFire);
+//! audio.play_2d(Sfx::BellowsBlast);
 //! audio.play_at(Sfx::HuskWindup, Vec3::new(4.0, 0.0, -10.0));
 //! audio.play(Sfx::Ricochet, PlayParams { pitch: 1.12, ..Default::default() });
 //! audio.update(1.0 / 60.0);
