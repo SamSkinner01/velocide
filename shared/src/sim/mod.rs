@@ -132,6 +132,16 @@ pub fn neutral_input(input: &PlayerInput) -> PlayerInput {
 /// Inputs to apply this tick, per player, ascending `seq`. Each input is one movement step.
 pub type TickInputs = BTreeMap<PlayerId, Vec<PlayerInput>>;
 
+/// Most `player`'s view may be rewound (ticks): `net.lag_comp_max_ms`, tightened by the
+/// server's RTT-based [`SimPlayer::view_lag_limit_ms`].
+fn max_rewind_ticks(net: &crate::tuning::NetTuning, player: &SimPlayer, tick_rate: u32) -> f64 {
+    let mut ms = net.lag_comp_max_ms.max(0.0);
+    if let Some(limit) = player.view_lag_limit_ms.filter(|l| !l.is_nan()) {
+        ms = ms.min(limit.max(0.0));
+    }
+    ms as f64 / 1000.0 * tick_rate as f64
+}
+
 /// Past hitboxes for lag-compensated hit tests. Implemented by the server's
 /// `server::lagcomp::LagCompHistory` and passed to [`SimWorld::step`]; weapons validating a
 /// shot from `input` call `rewind(input.view_time_ticks(), tuning.net.lag_comp_max_ms)` to
@@ -159,8 +169,14 @@ pub struct SimPlayer {
     /// Health, hard damage, death/respawn, weapons (sent to the owner in `OwnState`).
     pub combat: PlayerCombat,
     /// How far in the past (ticks) this player sees remote entities: server tick minus the
-    /// view time of its last input. Used for parry tolerance (0 for bots).
+    /// view time of its last input, clamped to [`SimWorld::max_rewind_ticks`]. Used for parry
+    /// tolerance (0 for bots).
     pub view_lag_ticks: f32,
+    /// Server-side bound (ms) on how old this player's view may claim to be, from their
+    /// measured round-trip time (set by the server every tick; `None` = unknown, only
+    /// `net.lag_comp_max_ms` applies). The view time travels in the client's inputs, so
+    /// without it a low-ping client could always claim the maximum rewind.
+    pub view_lag_limit_ms: Option<f32>,
     /// Dev `/notarget`: enemies ignore this player.
     pub notarget: bool,
 }
@@ -178,6 +194,7 @@ impl SimPlayer {
             inputs_processed: 0,
             combat: PlayerCombat::default(),
             view_lag_ticks: 0.0,
+            view_lag_limit_ms: None,
             notarget: false,
         }
     }
@@ -574,6 +591,15 @@ impl SimWorld {
             || self.blood.contains_key(&id)
     }
 
+    /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
+    /// `net.lag_comp_max_ms`, tightened by their RTT-based [`SimPlayer::view_lag_limit_ms`].
+    pub fn max_rewind_ticks(&self, t: &Tuning, id: PlayerId) -> f64 {
+        match self.players.get(&id) {
+            Some(p) => max_rewind_ticks(&t.net, p, self.tick_rate),
+            None => t.net.lag_comp_max_ms.max(0.0) as f64 / 1000.0 * self.tick_rate as f64,
+        }
+    }
+
     /// Picks the next spawn point (round robin).
     pub fn next_spawn_point(&mut self) -> SpawnPoint {
         let spawns = &self.level.spawns;
@@ -745,8 +771,9 @@ impl SimWorld {
                 player.last_input_seq = input.seq;
                 player.inputs_processed += 1;
                 let view = input.view_time_ticks();
+                let max_lag = max_rewind_ticks(&tuning.net, player, tick_rate);
                 player.view_lag_ticks = if view.is_finite() {
-                    (tick as f64 - view).max(0.0) as f32
+                    (tick as f64 - view).clamp(0.0, max_lag) as f32
                 } else {
                     0.0
                 };
@@ -1170,6 +1197,42 @@ mod tests {
             spawns[1].position
         );
         assert_eq!(w.players[&PlayerId(1)].movement.velocity, Vec3::ZERO);
+    }
+
+    #[test]
+    fn claimed_view_lag_is_bounded_per_player() {
+        let t = Tuning::default(); // lag_comp_max_ms 350 = 21 ticks
+        let mut w = world();
+        let id = PlayerId(0);
+        w.add_player(id, "A");
+        for _ in 0..60 {
+            w.step(&TickInputs::new(), &t, None);
+        }
+        let now = w.tick;
+        let claim = PlayerInput {
+            seq: 1,
+            view_tick: now - 21,
+            ..Default::default()
+        };
+        // No RTT known (single-player, tests): only `lag_comp_max_ms` applies.
+        assert_eq!(w.view_time(&t, id, &claim), (now - 21) as f64);
+        let unbounded_delay = w.parry_delay_ticks(&t, id);
+        // The server measured a fast connection: at most 100 ms.
+        w.players.get_mut(&id).unwrap().view_lag_limit_ms = Some(100.0);
+        assert_eq!(w.max_rewind_ticks(&t, id), 6.0);
+        assert_eq!(w.view_time(&t, id, &claim), now as f64 - 6.0);
+        let mut inputs = TickInputs::new();
+        inputs.insert(id, vec![claim]);
+        w.step(&inputs, &t, None);
+        assert_eq!(w.players[&id].view_lag_ticks, 6.0);
+        // The parry delay (tolerance + view lag) shrinks with it: 4.8 + 6 ticks.
+        assert_eq!(w.parry_delay_ticks(&t, id), 11);
+        assert_eq!(unbounded_delay, 5, "no view lag before the first input");
+        // A limit above `lag_comp_max_ms` changes nothing; garbage is ignored.
+        for limit in [1000.0, f32::NAN] {
+            w.players.get_mut(&id).unwrap().view_lag_limit_ms = Some(limit);
+            assert_eq!(w.max_rewind_ticks(&t, id), 21.0);
+        }
     }
 
     fn rivet(w: &mut SimWorld, t: &Tuning) -> Option<NetId> {

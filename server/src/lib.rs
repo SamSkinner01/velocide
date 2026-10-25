@@ -69,6 +69,9 @@ pub const MAX_BASELINE_AGE_TICKS: u32 = 120;
 const SENT_FRAMES_KEPT: usize = 64;
 /// Lag compensation history length (ms). Rewinds are clamped by `NetTuning::lag_comp_max_ms`.
 pub const LAG_COMP_HISTORY_MS: f32 = 1000.0;
+/// Slack (ms) on top of what a client's connection explains when bounding how old its view
+/// may be (`Server::update_view_lag_limits`).
+pub const VIEW_LAG_MARGIN_MS: f32 = 50.0;
 /// A client sending this many undecodable messages is kicked.
 const MAX_DECODE_ERRORS: u32 = 200;
 /// Per update, at most this many messages are processed per client and channel (the rest is
@@ -1059,6 +1062,7 @@ impl Server {
             }
         }
 
+        self.update_view_lag_limits();
         let events = self.world.step(&inputs, &self.tuning, Some(&self.lagcomp));
 
         let mut scratch = std::mem::take(&mut self.hitbox_scratch);
@@ -1101,6 +1105,24 @@ impl Server {
                 self.tick_time_accum.as_secs_f32() * 1e6 / self.tick_time_count as f32;
             self.tick_time_accum = Duration::ZERO;
             self.tick_time_count = 0;
+        }
+    }
+
+    /// Bounds how old each player's view may claim to be (lag-compensation rewind, parry
+    /// windows) by what their connection can explain: measured RTT + one snapshot interval +
+    /// the largest interpolation delay + [`VIEW_LAG_MARGIN_MS`] (`net.lag_comp_max_ms` still
+    /// caps it). The view time is chosen by the client, so without this a LAN client could
+    /// claim the full rewind and parry window.
+    fn update_view_lag_limits(&mut self) {
+        let snapshot_ms = self.snapshot_interval as f32 * 1000.0 / self.config.tick_rate as f32;
+        let interp_ms = self.tuning.net.interp_delay_max_ms.max(0.0);
+        for conn in self.clients.values() {
+            let Some(p) = conn.player.and_then(|id| self.world.players.get_mut(&id)) else {
+                continue;
+            };
+            let rtt_ms = (self.renet.rtt(conn.id) * 1000.0) as f32;
+            p.view_lag_limit_ms =
+                Some(rtt_ms.max(0.0) + snapshot_ms + interp_ms + VIEW_LAG_MARGIN_MS);
         }
     }
 

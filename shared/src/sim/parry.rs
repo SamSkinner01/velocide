@@ -8,7 +8,8 @@
 //! parryable projectile is tested in the *puncher's* frame of reference:
 //!
 //! 1. its position **rewound to the puncher's view time** (its trail at
-//!    `now − view lag`, clamped to `net.lag_comp_max_ms`) — what the puncher saw, and
+//!    `now − view lag`, clamped to `net.lag_comp_max_ms` and the puncher's RTT-based bound,
+//!    [`SimWorld::max_rewind_ticks`]) — what the puncher saw, and
 //! 2. its current position (for projectiles that are already pending on the puncher: the
 //!    point it hit, backed off along its incoming direction, so the puncher must face it).
 //!
@@ -21,7 +22,7 @@
 //!
 //! **Network tolerance.** A parryable projectile that touches a player does not hurt
 //! immediately: it freezes in a *pending impact* for [`SimWorld::parry_delay_ticks`] =
-//! `net.parry_tolerance_ms` (+ the victim's current view lag, clamped to `lag_comp_max_ms`,
+//! `net.parry_tolerance_ms` (+ the victim's current view lag, clamped like the rewind,
 //! when `combat.parry_compensate_view_lag`). A valid parry arriving inside that delay cancels
 //! the damage; after it the hit is applied and the parry is too late.
 //!
@@ -98,7 +99,7 @@ impl SimWorld {
         let rate = self.tick_rate as f32;
         let tolerance = t.net.parry_tolerance_ms.max(0.0) / 1000.0 * rate;
         let lag = if t.combat.parry_compensate_view_lag {
-            let max = t.net.lag_comp_max_ms.max(0.0) / 1000.0 * rate;
+            let max = self.max_rewind_ticks(t, victim) as f32;
             self.players
                 .get(&victim)
                 .map_or(0.0, |p| p.view_lag_ticks.clamp(0.0, max))
@@ -141,7 +142,7 @@ impl SimWorld {
         let eye = p.movement.eye_position(&t.movement);
         let aim = input.look_dir();
         let half_cone = (c.punch_cone_degrees * 0.5).to_radians();
-        let view = self.shot_view(t, history, input);
+        let view = self.shot_view(t, history, id, input);
         let shooter = Owner::Player(id);
         let world = &self.collision.world;
         let best = view
@@ -202,7 +203,7 @@ impl SimWorld {
         let eye = p.movement.eye_position(&t.movement);
         let aim = look_dir(p.yaw, p.pitch);
         let now = self.tick;
-        let max_lag = t.net.lag_comp_max_ms.max(0.0) as f64 / 1000.0 * self.tick_rate as f64;
+        let max_lag = self.max_rewind_ticks(t, id);
         let view_time = now as f64 - (p.view_lag_ticks as f64).clamp(0.0, max_lag);
         let half_cone = (c.parry_cone_degrees * 0.5).to_radians();
         // In the cone within range, or touching-close anywhere in front (not from behind).

@@ -1,12 +1,16 @@
 //! Server hardening end to end (docs/network.md, "Robustness"): who may use dev chat
-//! commands, and that they are rate limited like chat. A real server and real clients over
-//! UDP loopback on the shared virtual clock (see `common`).
+//! commands, that they are rate limited like chat, and that a client can't claim an older
+//! view (more lag-compensation rewind) than its connection explains. A real server and real
+//! clients over UDP loopback on the shared virtual clock (see `common`).
 
 mod common;
 
 use client::net::NetEvent;
 use common::*;
 use server::{LobbyConfig, ServerConfig};
+use shared::input::PlayerInput;
+use shared::protocol::{self, ClientUnreliable, InputPacket};
+use shared::tuning::Tuning;
 
 /// Dedicated-server rules: a lobby without a host token (the first player to join hosts).
 fn dedicated(dev_commands: bool) -> ServerConfig {
@@ -87,6 +91,61 @@ fn dedicated_servers_need_dev_commands_opted_in_and_then_only_the_host_has_them(
     let reply = god(&mut h, host);
     assert_eq!(reply, "god on");
     assert!(has_god(&h, host));
+}
+
+/// A client without network delay whose inputs all claim a view `claim_ms` old (its own
+/// inputs would claim ~100 ms). Returns the server's RTT-based limit for it and the largest
+/// view lag (rewind) the server granted, both in ms.
+fn claimed_view_lag(tuning: Tuning, claim_ms: f32) -> (f32, f32) {
+    let mut h = Harness::new(server_config());
+    h.server.set_tuning(tuning);
+    let a = h.add_client("Liar", None, script_idle);
+    h.clients[a].scripted = false; // inputs are crafted below
+    h.wait_in_game();
+    h.run_for(1.0, |_| {}); // RTT samples
+    let id = h.clients[a].id();
+    let claim_ticks = (claim_ms / 1000.0 * 60.0).round() as u32;
+    let mut seq = h.server.world().players[&id].last_input_seq;
+    let mut granted = 0.0f32;
+    for _ in 0..120 {
+        let tick = h.server.tick();
+        seq += 1;
+        let input = PlayerInput {
+            seq,
+            view_tick: tick.saturating_sub(claim_ticks),
+            ..Default::default()
+        };
+        let packet = ClientUnreliable::Input(InputPacket {
+            ack_tick: None,
+            inputs: vec![input],
+        });
+        h.clients[a].net.send_raw(false, protocol::encode(&packet));
+        h.run_until(0.1, |h| h.server.tick() > tick);
+        granted = granted.max(h.server.world().players[&id].view_lag_ticks);
+    }
+    let p = &h.server.world().players[&id];
+    assert!(p.inputs_processed >= 100, "crafted inputs processed");
+    (p.view_lag_limit_ms.expect("server sets a limit"), granted * 1000.0 / 60.0)
+}
+
+#[test]
+fn a_low_ping_client_cannot_claim_the_maximum_rewind() {
+    // Default tuning: lag_comp_max_ms 350. A LAN client claiming a 350 ms old view (the most
+    // the server would rewind, and the longest parry delay) gets what its connection
+    // explains: RTT + snapshot interval + max interpolation delay (250) + 50 ms margin.
+    let (limit, granted) = claimed_view_lag(Tuning::default(), 350.0);
+    println!("claimed 350 ms: limit {limit:.0} ms, granted {granted:.0} ms");
+    assert!(limit < 345.0, "limit {limit}");
+    // (The limit follows the RTT estimate, which moves by a millisecond or two.)
+    assert!(granted < 345.0, "granted {granted} ms of a 350 ms claim");
+    assert!((granted - limit).abs() < 5.0, "clamped to the limit: {granted} vs {limit}");
+
+    // With a generous lag_comp_max_ms the RTT bound is what stops a 900 ms claim.
+    let mut tuning = Tuning::default();
+    tuning.net.lag_comp_max_ms = 1000.0;
+    let (limit, granted) = claimed_view_lag(tuning, 900.0);
+    println!("claimed 900 ms: limit {limit:.0} ms, granted {granted:.0} ms");
+    assert!(granted < limit + 5.0 && granted < 400.0, "granted {granted} ms");
 }
 
 #[test]

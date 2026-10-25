@@ -2,7 +2,8 @@
 //!
 //! A shot from an input is tested against the hitboxes **as the shooter saw them**: the
 //! server's [`HitboxHistory`] rewinds every player and enemy hitbox to the input's
-//! `view_tick + view_frac/256` (clamped to `net.lag_comp_max_ms`), and live prisms are rewound
+//! `view_tick + view_frac/256` (clamped to `net.lag_comp_max_ms` and to the shooter's
+//! RTT-based bound, [`SimWorld::max_rewind_ticks`]), and live prisms are rewound
 //! to the same time through their own position trails. Level geometry (`MASK_SHOTS`) is
 //! static, so a wall between the shooter and the (rewound) target always blocks. The shooter
 //! never hits itself; targets that may not be hurt (co-op teammates, dead players, dying
@@ -89,10 +90,12 @@ pub struct TraceResult {
 }
 
 impl SimWorld {
-    /// Clamped lag-compensation view time of an input.
-    pub fn view_time(&self, t: &Tuning, input: &PlayerInput) -> f64 {
+    /// Clamped lag-compensation view time of player `id`'s input: at most
+    /// [`SimWorld::max_rewind_ticks`] in the past (the client chooses its view time; the
+    /// server bounds it by `net.lag_comp_max_ms` and the player's measured RTT).
+    pub fn view_time(&self, t: &Tuning, id: PlayerId, input: &PlayerInput) -> f64 {
         let now = self.tick as f64;
-        let max = t.net.lag_comp_max_ms.max(0.0) as f64 / 1000.0 * self.tick_rate as f64;
+        let max = self.max_rewind_ticks(t, id);
         let v = input.view_time_ticks();
         if v.is_finite() {
             v.clamp(now - max, now)
@@ -101,17 +104,19 @@ impl SimWorld {
         }
     }
 
-    /// Hitboxes as `input`'s sender saw them (rewound through `history`; current hitboxes
-    /// without a history or before it has frames).
+    /// Hitboxes as player `id` saw them when sending `input` (rewound through `history` to
+    /// [`SimWorld::view_time`]; current hitboxes without a history or before it has frames).
     pub fn shot_view(
         &self,
         t: &Tuning,
         history: Option<&dyn HitboxHistory>,
+        id: PlayerId,
         input: &PlayerInput,
     ) -> ShotView {
-        let time = self.view_time(t, input);
+        let time = self.view_time(t, id, input);
+        let max_rewind_ms = (self.max_rewind_ticks(t, id) * 1000.0 / self.tick_rate as f64) as f32;
         let hitboxes = history
-            .map(|h| h.rewind_hitboxes(input.view_time_ticks(), t.net.lag_comp_max_ms))
+            .map(|h| h.rewind_hitboxes(input.view_time_ticks(), max_rewind_ms))
             .filter(|b| !b.is_empty())
             .unwrap_or_else(|| self.current_hitboxes(t));
         ShotView { time, hitboxes }
@@ -149,7 +154,7 @@ impl SimWorld {
         attack: Attack,
         shots: &[ShotSpec],
     ) -> Vec<TraceResult> {
-        let view = self.shot_view(t, history, input);
+        let view = self.shot_view(t, history, id, input);
         let shooter = Owner::Player(id);
         let mut results = Vec::with_capacity(shots.len());
         for shot in shots {
