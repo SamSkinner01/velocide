@@ -52,13 +52,9 @@ impl Server {
         }
     }
 
-    /// The match is over (campaign exit, frag / time limit, or [`Server::end_match_now`]).
-    /// Results have been broadcast; clients show their results screen.
-    ///
-    /// HOOK(lobby): move the server to the lobby's Results phase here (`Server::end_match()`
-    /// → Results → back to the lobby). Until the lobby lands the world keeps running in
-    /// `MatchPhase::Ended` (everyone protected, nothing scores) until the host restarts the
-    /// level (`ServerCommand::RestartLevel`).
+    /// The sim's mode rules ended the match (campaign exit, frag / time limit): the results
+    /// went out with this tick's events; the lobby flow moves to its Results phase
+    /// (`Server::end_match`, docs/lobby.md), which also returns everyone to the lobby later.
     fn on_match_ended(&mut self, results: &MatchResults) {
         log::info!(
             "match over ({:?}, {:.0} s): {}",
@@ -81,10 +77,12 @@ impl Server {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        self.end_match();
     }
 
-    /// Ends the running match now (host / admin); results go out with the next tick.
-    pub fn end_match_now(&mut self) {
+    /// The lobby flow ended the match (host / admin `EndMatch`): end the sim's match too so
+    /// results (grades, standings) are built and broadcast with the next tick.
+    pub(crate) fn end_sim_match(&mut self) {
         let tuning = self.tuning.clone();
         self.world
             .end_match(&tuning, shared::sim::EndReason::Host);

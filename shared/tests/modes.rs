@@ -15,8 +15,9 @@ use shared::protocol::{NetFrame, NetId, player_flags};
 use shared::sim::modes::{authored_enemies, grade_player};
 use shared::sim::{
     Attack, Blocked, DamageInfo, EndReason, Grade, HitTarget, LifeState, MatchPhase,
-    MatchResults, ModeEvent, ModeKind, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
+    MatchResults, ModeEvent, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
 };
+use shared::lobby::{GameMode, MatchSettings};
 use shared::tuning::ModeTuning;
 
 fn vol(min: [f32; 3], max: [f32; 3]) -> Volume {
@@ -375,7 +376,7 @@ fn solo_exit_ends_the_level_with_graded_results() {
     let ev = a.tick();
     let r = results(&ev).expect("level complete");
     assert_eq!(r.reason, EndReason::Exit);
-    assert_eq!(r.rules.kind, ModeKind::Campaign);
+    assert_eq!(r.rules.kind, GameMode::Campaign);
     assert_eq!(a.world.mode.phase, MatchPhase::Ended);
     assert_eq!(r.total_enemies, 1);
     assert_eq!(r.team_kills, 1);
@@ -496,8 +497,62 @@ fn arenas_default_to_deathmatch_rules() {
     assert_eq!(w.mode.rules, ModeRules::deathmatch(20, 600.0));
     assert!(w.rules.friendly_fire);
     let w = SimWorld::new("c", Arc::new(campaign_level()), 60);
-    assert_eq!(w.mode.rules.kind, ModeKind::Campaign);
+    assert_eq!(w.mode.rules.kind, GameMode::Campaign);
     assert!(!w.rules.friendly_fire);
+}
+
+#[test]
+fn the_lobbys_match_settings_drive_the_rules() {
+    let mut w = SimWorld::new("a", Arc::new(arena_level()), 60);
+    let settings = MatchSettings {
+        mode: GameMode::Deathmatch,
+        frag_limit: 5,
+        time_limit_secs: 120,
+        ..MatchSettings::new(GameMode::Deathmatch, "a")
+    };
+    w.apply_match_settings(settings);
+    assert_eq!(w.mode.rules, ModeRules::deathmatch(5, 120.0));
+    assert!(w.rules.friendly_fire);
+    // A frag limit from the lobby ends the match.
+    let mut a = Arena::new(arena_level());
+    a.world.apply_match_settings(MatchSettings {
+        frag_limit: 1,
+        time_limit_secs: 0,
+        ..MatchSettings::new(GameMode::Deathmatch, "a")
+    });
+    let p0 = a.player(0, Vec3::new(-10.0, 0.0, 0.0), 0.0);
+    let p1 = a.player(1, Vec3::new(10.0, 0.0, 0.0), 0.0);
+    a.ticks(2);
+    hit(&mut a, p1, p0, 500.0);
+    let r = results(&a.tick()).expect("1 frag ends it");
+    assert_eq!(r.reason, EndReason::FragLimit);
+    // Co-op settings keep the lobby's friendly-fire toggle.
+    let mut c = SimWorld::new("c", Arc::new(campaign_level()), 60);
+    c.apply_match_settings(MatchSettings {
+        friendly_fire: true,
+        ..MatchSettings::new(GameMode::Campaign, "c")
+    });
+    assert_eq!(c.mode.rules.kind, GameMode::Campaign);
+    assert!(c.rules.friendly_fire);
+}
+
+#[test]
+fn the_world_freezes_once_the_match_is_over() {
+    let mut a = campaign();
+    let p = a.player(0, Vec3::new(0.0, 0.0, 30.0), 0.0);
+    a.ticks(2);
+    let h = a.husk(Vec3::new(0.0, 0.0, 26.0), 0.0);
+    let start = a.world.enemies[&h].position;
+    let t = a.tuning.clone();
+    a.world.end_match(&t, EndReason::Host);
+    a.ticks(60);
+    assert!(a.world.enemies[&h].position.distance(start) < 0.01, "AI frozen");
+    assert_eq!(a.health(p), 100.0);
+    // Kill volumes put players back instead of killing them.
+    place(&mut a, p, LAVA);
+    a.tick();
+    assert!(!a.world.players[&p].combat.dead);
+    assert_eq!(a.world.mode.stats(p).deaths, 0);
 }
 
 #[test]

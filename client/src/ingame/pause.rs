@@ -1,6 +1,6 @@
-//! Pause menu (Esc / Start): RESUME, RESTART (single-player), SETTINGS, LEAVE. In multiplayer
-//! the game keeps running behind it; in single-player the in-process server is paused
-//! (`ServerCommand::SetPaused`).
+//! Pause menu (Esc / Start): RESUME, RESTART (single-player), RETURN TO LOBBY (multiplayer
+//! host), SETTINGS, LEAVE. In multiplayer the game keeps running behind it; in single-player
+//! the in-process server is paused (`ServerCommand::SetPaused`).
 
 use engine::audio::Sfx;
 use engine::input::InputState;
@@ -15,6 +15,8 @@ pub enum PauseAction {
     None,
     Resume,
     Restart,
+    /// Host: end the match and bring everyone back to the lobby.
+    ReturnToLobby,
     Leave,
 }
 
@@ -59,6 +61,7 @@ impl PauseMenu {
         s: &mut Settings,
         input: &InputState,
         single_player: bool,
+        lobby_host: bool,
         subtitle: &str,
     ) -> PauseOutput {
         let mut out = PauseOutput {
@@ -90,6 +93,9 @@ impl PauseMenu {
             }
             if single_player && ui.button("RESTART LEVEL") {
                 out.action = PauseAction::Restart;
+            }
+            if lobby_host && ui.button("RETURN TO LOBBY") {
+                out.action = PauseAction::ReturnToLobby;
             }
             if ui.button("SETTINGS") {
                 self.settings = Some(SettingsMenu::new());

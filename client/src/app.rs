@@ -3,14 +3,18 @@
 //! machine:
 //!
 //! ```text
-//!   MainMenu ──Start(mode)──▶ InGame (connecting → loading → playing; pause/chat/scoreboard)
-//!      ▲                         │
-//!      └──MainMenu{message}──────┘   (leave, disconnect, connection error)
+//!   MainMenu ──Start(single player)──────────────────────▶ InGame (connecting → playing)
+//!      │  ▲                                                  ▲  │
+//!      │  └────────── MainMenu{message} (leave, disconnect) ─┼──┤
+//!      │                                                     │  │
+//!      └──Start(host / join)──▶ Lobby ──EnterMatch (Handoff)─┘  │
+//!                                 ▲                             │
+//!                                 └──ReturnToLobby (Handoff)────┘
 //! ```
 //!
-//! A lobby screen (ready-up, mode / level selection) slots in between: `Transition::Start`
-//! would go to a `Screen::Lobby` that owns the `Session` and hands it to `InGame` when the
-//! match starts (see docs/client.md).
+//! The lobby screen (`menus::lobby`, docs/lobby.md) owns the network `Session` while the
+//! server is in its lobby and hands it to `InGame` when a match starts; `InGame` hands it back
+//! when the server returns to the lobby. Single-player never sees the lobby.
 //!
 //! Each frame: global hotkeys (F11 fullscreen, F3 debug overlay) → build `UiInput` → the
 //! screen fills the [`FrameBuffers`] and returns a [`ScreenOutput`] → settings changes are
@@ -31,6 +35,7 @@ use crate::cli::{LaunchOptions, StartMode};
 use crate::controls::Action;
 use crate::frame::{FrameBuffers, FrameIo, ScreenOutput, Transition};
 use crate::ingame::InGame;
+use crate::menus::lobby::LobbyScreen;
 use crate::menus::main_menu::MainMenu;
 use crate::models::ModelLibrary;
 use crate::settings::Settings;
@@ -198,6 +203,8 @@ impl Common {
 
 enum Screen {
     Menu(Box<MainMenu>),
+    /// Hosted / joined games between matches (owns the session).
+    Lobby(Box<LobbyScreen>),
     Game(Box<InGame>),
 }
 
@@ -214,10 +221,21 @@ pub struct VelocideApp {
 
 impl VelocideApp {
     fn start_game(&mut self, ctx: &mut EngineContext, mode: &StartMode) {
-        match InGame::start(mode, &mut self.common, &mut ctx.renderer) {
-            Ok(game) => {
+        // Hosted and joined games gather in the lobby; single-player starts right away.
+        let screen = match mode {
+            StartMode::Host { .. } | StartMode::Join { .. } => {
+                LobbyScreen::start(mode, &mut self.common, &mut ctx.renderer)
+                    .map(|l| Screen::Lobby(Box::new(l)))
+            }
+            StartMode::Menu | StartMode::SinglePlayer { .. } => {
+                InGame::start(mode, &mut self.common, &mut ctx.renderer)
+                    .map(|g| Screen::Game(Box::new(g)))
+            }
+        };
+        match screen {
+            Ok(screen) => {
                 self.leave_screen(ctx);
-                self.screen = Screen::Game(Box::new(game));
+                self.screen = screen;
                 self.common.ui_state.reset_interaction();
             }
             Err(e) => {
@@ -228,10 +246,44 @@ impl VelocideApp {
         }
     }
 
+    /// Lobby -> game: the session moves to a new `InGame`.
+    fn enter_match(&mut self, ctx: &mut EngineContext) {
+        let placeholder = Screen::Menu(Box::new(MainMenu::empty()));
+        match std::mem::replace(&mut self.screen, placeholder) {
+            Screen::Lobby(lobby) => match lobby.into_handoff(&mut ctx.renderer) {
+                Some(handoff) => {
+                    let game = InGame::from_handoff(handoff, &mut self.common, &mut ctx.renderer);
+                    self.screen = Screen::Game(Box::new(game));
+                    self.common.ui_state.reset_interaction();
+                }
+                None => self.go_to_menu(ctx, Some("Lost the session".into())),
+            },
+            other => self.screen = other,
+        }
+    }
+
+    /// Game -> lobby: the session moves back to a new `LobbyScreen`.
+    fn return_to_lobby(&mut self, ctx: &mut EngineContext) {
+        let placeholder = Screen::Menu(Box::new(MainMenu::empty()));
+        match std::mem::replace(&mut self.screen, placeholder) {
+            Screen::Game(game) => match game.into_handoff(&mut ctx.renderer, &mut self.common) {
+                Some(handoff) => {
+                    let lobby = LobbyScreen::from_handoff(handoff, &self.common, &mut ctx.renderer);
+                    self.screen = Screen::Lobby(Box::new(lobby));
+                    self.common.ui_state.reset_interaction();
+                    self.common.audio.set_music(MusicTrack::Menu);
+                    self.common.audio.set_music_intensity(0.0);
+                }
+                None => self.go_to_menu(ctx, Some("Lost the session".into())),
+            },
+            other => self.screen = other,
+        }
+    }
+
     fn go_to_menu(&mut self, ctx: &mut EngineContext, message: Option<String>) {
         match &mut self.screen {
             Screen::Menu(menu) => menu.show_message(message),
-            Screen::Game(_) => {
+            Screen::Lobby(_) | Screen::Game(_) => {
                 self.leave_screen(ctx);
                 let mut menu = MainMenu::new(&mut ctx.renderer, &self.common);
                 menu.show_message(message);
@@ -248,6 +300,7 @@ impl VelocideApp {
         let placeholder = Screen::Menu(Box::new(MainMenu::empty()));
         match std::mem::replace(&mut self.screen, placeholder) {
             Screen::Menu(menu) => menu.free(&mut ctx.renderer),
+            Screen::Lobby(lobby) => lobby.shutdown(&mut ctx.renderer),
             Screen::Game(game) => game.shutdown(&mut ctx.renderer, &mut self.common),
         }
     }
@@ -395,6 +448,7 @@ impl Game for VelocideApp {
             };
             match &mut self.screen {
                 Screen::Menu(menu) => menu.frame(&mut self.common, &mut io, &mut self.buffers),
+                Screen::Lobby(lobby) => lobby.frame(&mut self.common, &mut io, &mut self.buffers),
                 Screen::Game(game) => game.frame(&mut self.common, &mut io, &mut self.buffers),
             }
         };
@@ -427,7 +481,7 @@ impl Game for VelocideApp {
             let renderer = &ctx.renderer;
             self.debug_ui.run(&ctx.window, |egui_ctx| match screen {
                 Screen::Game(game) => game.debug_window(egui_ctx, common, renderer),
-                Screen::Menu(_) => {
+                Screen::Menu(_) | Screen::Lobby(_) => {
                     crate::ingame::debug::menu_debug_window(egui_ctx, common, renderer)
                 }
             });
@@ -447,6 +501,8 @@ impl Game for VelocideApp {
             None => {}
             Some(Transition::Start(mode)) => self.start_game(ctx, &mode),
             Some(Transition::MainMenu { message }) => self.go_to_menu(ctx, message),
+            Some(Transition::EnterMatch) => self.enter_match(ctx),
+            Some(Transition::ReturnToLobby) => self.return_to_lobby(ctx),
             Some(Transition::Quit) => ctx.quit(),
         }
     }

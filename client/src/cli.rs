@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use shared::lobby::GameMode;
+
 use crate::net::NetSimConfig;
 
 pub const USAGE: &str = "\
@@ -17,6 +19,9 @@ GAME:
     --level <NAME>               level for --sp / --host (alone: single-player)
     --name <NAME>                player name (not saved)
     --max-players <N>            player slots when hosting (default from settings)
+    --mode <MODE>                hosting: campaign | deathmatch (default: last used)
+    --ready                      ready up in the lobby automatically
+    --autostart                  hosting: start the match when everyone is ready (implies --ready)
     --netsim <LAT,JIT,LOSS>      simulate one-way latency ms, jitter ms, loss % on this client
 
 WINDOW:
@@ -54,6 +59,12 @@ pub struct LaunchOptions {
     pub start: StartMode,
     pub name: Option<String>,
     pub max_players: Option<u32>,
+    /// Hosting: initial game mode.
+    pub mode: Option<GameMode>,
+    /// Ready up in the lobby automatically (`--ready`, `--bot`, `--autostart`).
+    pub ready: bool,
+    /// Hosting: the server starts the match once everyone is ready.
+    pub autostart: bool,
     pub netsim: Option<NetSimConfig>,
     pub window_size: Option<(u32, u32)>,
     pub fullscreen: Option<bool>,
@@ -72,6 +83,9 @@ impl Default for LaunchOptions {
             start: StartMode::Menu,
             name: None,
             max_players: None,
+            mode: None,
+            ready: false,
+            autostart: false,
             netsim: None,
             window_size: None,
             fullscreen: None,
@@ -162,6 +176,18 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
                     v.parse()
                         .map_err(|_| format!("--max-players: bad number '{v}'"))?,
                 )
+            }
+            "--mode" => {
+                let v = value("--mode")?;
+                o.mode = Some(
+                    GameMode::parse(&v)
+                        .ok_or_else(|| format!("--mode: '{v}' is not campaign or deathmatch"))?,
+                );
+            }
+            "--ready" => o.ready = true,
+            "--autostart" => {
+                o.autostart = true;
+                o.ready = true;
             }
             "--netsim" => {
                 let v = value("--netsim")?;

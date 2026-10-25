@@ -55,8 +55,8 @@ pub use combat::{
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry};
 pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
-    EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeKind,
-    ModeRules, ModeState, PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
+    EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules,
+    ModeState, PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
 };
 pub use parry::{ParryEvent, ParryTarget};
 pub use prism::Prism;
@@ -66,6 +66,7 @@ pub use weapons::{FireIntent, Weapon, WeaponState, step_weapons};
 
 use crate::input::PlayerInput;
 use crate::level::{Brush, Door, JumpPad, LevelCollision, LevelDef, LevelKind, SpawnPoint, Volume};
+use crate::lobby::{GameMode, MatchSettings};
 use crate::movement::{self, MoveEnv, MoveEvents, MoveState, SlamLanded};
 use crate::protocol::{EntityState, NetFrame, NetId, door_flags, kind, player_flags};
 use crate::tuning::{MovementTuning, Tuning};
@@ -421,7 +422,13 @@ pub struct SimWorld {
     pub level: Arc<LevelDef>,
     pub collision: LevelCollision,
     pub players: BTreeMap<PlayerId, SimPlayer>,
-    /// Game-mode combat rules (PvP friendly fire, co-op scaling). From the level kind.
+    /// Mode, level and limits of the running match, set by the server at match start (the
+    /// lobby's settings; docs/lobby.md). Game-mode rules (frag / time limits, respawns) read
+    /// them here; `rules.friendly_fire` follows `match_settings` (see
+    /// [`SimWorld::apply_match_settings`]). Client prediction copies keep the default.
+    pub match_settings: MatchSettings,
+    /// Game-mode combat rules (PvP friendly fire, co-op scaling). From the level kind; the
+    /// server applies the lobby's match settings on top.
     pub rules: CombatRules,
     /// Enemy definitions (built-ins; the server loads `assets/enemies/`).
     pub enemy_defs: EnemyRegistry,
@@ -470,6 +477,7 @@ impl SimWorld {
             level,
             collision,
             players: BTreeMap::new(),
+            match_settings: MatchSettings::default(),
             rules,
             enemy_defs: EnemyRegistry::builtin(),
             enemies: BTreeMap::new(),
@@ -546,6 +554,23 @@ impl SimWorld {
     /// out from the first one again, in player order) with fresh movement state. Returns a
     /// `Respawned` event per player. Systems that keep level state (encounters, enemies,
     /// pickups, doors) reset themselves here as they are added.
+    /// Stores the match settings (docs/lobby.md) and derives the combat rules from them:
+    /// deathmatch is PvP, co-op scales enemies and hurts teammates only with
+    /// `friendly_fire`. Called by the server on every new match world.
+    pub fn apply_match_settings(&mut self, settings: MatchSettings) {
+        self.rules = match settings.mode {
+            GameMode::Deathmatch => CombatRules::pvp(),
+            GameMode::Campaign => CombatRules {
+                friendly_fire: settings.friendly_fire,
+                ..CombatRules::coop()
+            },
+        };
+        // Game-mode rules (frag / time limits) start afresh with the settings (modes.rs).
+        self.mode = ModeState::new(ModeRules::from_settings(&settings));
+        self.style.clear();
+        self.match_settings = settings;
+    }
+
     pub fn restart_level(&mut self) -> Vec<SimEvent> {
         self.next_spawn = 0;
         // Combat state goes back to the level start too.
@@ -663,9 +688,11 @@ impl SimWorld {
         self.projectiles_stepped = true;
         self.tick_parry_windows(tuning);
 
-        // 3. Enemies and their parry-delayed hits.
-        self.step_enemies(tuning);
-        self.apply_due_pending_hits(tuning);
+        // 3. Enemies and their parry-delayed hits (frozen once the match is over: modes.rs).
+        if !self.mode.is_over() {
+            self.step_enemies(tuning);
+            self.apply_due_pending_hits(tuning);
+        }
 
         // 4. Prisms, healing, vitals.
         self.step_prisms(tuning);
@@ -750,7 +777,12 @@ impl SimWorld {
             self.respawn_player(t, id);
         }
         for id in kill {
-            self.kill_player(t, id, Attack::World);
+            if self.mode.is_over() {
+                // Nobody dies on the results screen: back to a spawn instead.
+                self.respawn_player(t, id);
+            } else {
+                self.kill_player(t, id, Attack::World);
+            }
         }
     }
 

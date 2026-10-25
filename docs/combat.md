@@ -87,9 +87,13 @@ differs, when a sticky exploded server-side).
 
 ### Rules (`SimWorld::rules: CombatRules`)
 
-`friendly_fire` (PvP) and `coop_enemy_scaling`. From the level kind: `Arena` → PvP
-(friendly fire on), `Campaign` → co-op (off, enemy health scaled). Game modes / lobby set
-them; dev `/ff on|off` toggles.
+`friendly_fire` (PvP) and `coop_enemy_scaling`. `SimWorld::new` derives them from the level
+kind (`Arena` → PvP, friendly fire on; `Campaign` → co-op, off, enemy health scaled); the
+server then applies the lobby's match settings (`SimWorld::apply_match_settings`, docs/lobby.md):
+deathmatch → PvP, co-op → co-op rules with the lobby's FRIENDLY FIRE toggle. Servers without a
+lobby use the level kind's mode, so the result is the same as before. Dev `/ff on|off` toggles
+until the next match world. Dev commands and `spawn_enemies` do nothing while the server is in
+its lobby.
 
 ## Damage pipeline (`SimWorld::apply_damage(t, target, DamageInfo) -> DamageEvent`)
 

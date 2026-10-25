@@ -8,10 +8,10 @@
 //!   anyone who missed the extraction.
 //! * **Deathmatch**: winner banner and the final standings (frags, deaths, best rank, style).
 //!
-//! Enter / click skips the reveal; then CONTINUE (and RESTART for the host / single player).
+//! Enter / click skips the reveal; then the lobby's buttons appear (CONTINUE TO LOBBY / LEAVE
+//! for the host, RESTART / MAIN MENU in single player; drawn by `ingame::match_flow`).
 //! Data: `shared::sim::MatchResults` (`ModeEvent::Ended`); grading rules in
-//! docs/style_modes.md. Drawn over the dimmed game by the in-game screen (until the lobby's
-//! Results phase takes over, see `ingame::mode_hud`).
+//! docs/style_modes.md. Shown during the lobby's Results phase (`InGame::results_ui`).
 
 use engine::audio::Sfx;
 use engine::gfx::UiDrawList;
@@ -21,25 +21,11 @@ use engine::ui::text::line_width;
 use engine::ui::{Rect, TextStyle, Theme, Ui, UiDrawExt, UiKey};
 use glam::{Vec2, Vec4, vec2};
 use shared::sim::style::rank_name;
-use shared::sim::{EndReason, Grade, MatchResults, ModeKind, PlayerId, PlayerResult};
+use shared::lobby::GameMode;
+use shared::sim::{EndReason, Grade, MatchResults, PlayerId, PlayerResult};
 
 use crate::ingame::remote_players::player_color;
 use crate::ingame::style_hud::rank_text_color;
-
-/// What the player chose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResultsAction {
-    None,
-    Continue,
-    Restart,
-}
-
-/// One frame's outcome: the choice plus sounds to play (stamps, the final rank).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResultsOutput {
-    pub action: ResultsAction,
-    pub sounds: Vec<Sfx>,
-}
 
 /// One line of the solo tally: label, value at reveal progress 0..1, sub line, grade.
 type TallyRow<'a> = (&'a str, Box<dyn Fn(f32) -> String + 'a>, String, Option<Grade>);
@@ -53,10 +39,8 @@ struct Step {
 
 pub struct ResultsScreen {
     pub results: MatchResults,
-    /// The local player (highlighted row, "YOU WIN").
+    /// The local player (highlighted row, "VICTORY").
     pub local: Option<PlayerId>,
-    /// RESTART is offered (single player / host).
-    pub can_restart: bool,
     opened: f64,
     /// Stamps already heard.
     stamps_played: usize,
@@ -101,24 +85,23 @@ pub fn thousands(n: u32) -> String {
 }
 
 impl ResultsScreen {
-    pub fn new(results: MatchResults, local: Option<PlayerId>, can_restart: bool, now: f64) -> Self {
+    pub fn new(results: MatchResults, local: Option<PlayerId>, now: f64) -> Self {
         Self {
             results,
             local,
-            can_restart,
             opened: now,
             stamps_played: 0,
         }
     }
 
     fn is_coop(&self) -> bool {
-        self.results.rules.kind == ModeKind::Campaign && self.results.players.len() > 1
+        self.results.rules.kind == GameMode::Campaign && self.results.players.len() > 1
     }
 
     /// The reveal steps of this layout (their stamps make the sounds).
     fn steps(&self) -> Vec<Step> {
         match self.results.rules.kind {
-            ModeKind::Campaign if !self.is_coop() => {
+            GameMode::Campaign if !self.is_coop() => {
                 let mut v: Vec<Step> = (0..4)
                     .map(|i| {
                         let start = FIRST + i as f64 * ROW_STEP;
@@ -135,7 +118,7 @@ impl ResultsScreen {
                 });
                 v
             }
-            ModeKind::Campaign => {
+            GameMode::Campaign => {
                 let mut v: Vec<Step> = (0..self.results.players.len())
                     .map(|i| {
                         let start = FIRST + 0.35 + i as f64 * 0.45;
@@ -152,7 +135,7 @@ impl ResultsScreen {
                 });
                 v
             }
-            ModeKind::Deathmatch => {
+            GameMode::Deathmatch => {
                 let mut v = vec![Step {
                     start: 0.35,
                     stamp: 0.6,
@@ -178,18 +161,17 @@ impl ResultsScreen {
         now - self.opened >= self.reveal_time()
     }
 
-    /// Jumps to the end of the reveal.
+    /// Jumps to the end of the reveal (finished from the next frame on, so the key that
+    /// skipped doesn't also press a button).
     pub fn skip(&mut self, now: f64) {
-        self.opened = now - self.reveal_time();
+        self.opened = now - self.reveal_time() + 1e-6;
         self.stamps_played = self.steps().len();
     }
 
-    /// Draws the screen and its buttons. `name`: display names for players.
-    pub fn ui(&mut self, ui: &mut Ui, now: f64) -> ResultsOutput {
-        let mut out = ResultsOutput {
-            action: ResultsAction::None,
-            sounds: Vec::new(),
-        };
+    /// Draws the screen (not the buttons: see the module docs). Enter / Esc / click during
+    /// the reveal skips it. Returns the sounds to play this frame (stamps, the final rank).
+    pub fn draw(&mut self, ui: &mut Ui, now: f64) -> Vec<Sfx> {
+        let mut sounds = Vec::new();
         let input = ui.input();
         let skip_pressed = input.mouse_pressed
             || input
@@ -204,10 +186,10 @@ impl ResultsScreen {
         let steps = self.steps();
         while self.stamps_played < steps.len() && age >= steps[self.stamps_played].stamp {
             let last = self.stamps_played + 1 == steps.len();
-            out.sounds.push(if last {
+            sounds.push(if last {
                 match self.results.rules.kind {
-                    ModeKind::Campaign => Sfx::RankUp,
-                    ModeKind::Deathmatch => Sfx::KillConfirm,
+                    GameMode::Campaign => Sfx::RankUp,
+                    GameMode::Deathmatch => Sfx::KillConfirm,
                 }
             } else {
                 Sfx::KillConfirm
@@ -217,46 +199,18 @@ impl ResultsScreen {
 
         let t = ui.theme();
         let c = ui.canvas();
-        {
-            let list = ui.painter();
-            backdrop(list, t, c, age);
-            match self.results.rules.kind {
-                ModeKind::Campaign if self.is_coop() => self.draw_coop(list, t, c, age, now, &steps),
-                ModeKind::Campaign => self.draw_solo(list, t, c, age, now, &steps),
-                ModeKind::Deathmatch => self.draw_deathmatch(list, t, c, age, now, &steps),
-            }
+        let list = ui.painter();
+        backdrop(list, t, c, age);
+        match self.results.rules.kind {
+            GameMode::Campaign if self.is_coop() => self.draw_coop(list, t, c, age, now, &steps),
+            GameMode::Campaign => self.draw_solo(list, t, c, age, now, &steps),
+            GameMode::Deathmatch => self.draw_deathmatch(list, t, c, age, now, &steps),
         }
-
-        // Buttons once the tally is done (Enter during the reveal skips it instead).
-        let bottom = c.max.y - 30.0;
-        if self.finished(now) {
-            let n = if self.can_restart { 2 } else { 1 };
-            let w = 110.0 * n as f32 + 6.0 * (n as f32 - 1.0);
-            let rect = Rect::new(
-                vec2(c.center().x - w * 0.5, bottom - 16.0),
-                vec2(c.center().x + w * 0.5, bottom),
-            );
-            let can_restart = self.can_restart;
-            ui.area(rect, |ui| {
-                ui.default_focus();
-                ui.row(n, |ui| {
-                    if ui.button("CONTINUE") {
-                        out.action = ResultsAction::Continue;
-                    }
-                    if can_restart && ui.button("RESTART") {
-                        out.action = ResultsAction::Restart;
-                    }
-                });
-            });
-            if ui.back_pressed() {
-                out.action = ResultsAction::Continue;
-            }
-        } else {
+        if !self.finished(now) {
             let hint = TextStyle::new(t.ash).centered().shadow(t.shadow);
-            ui.painter()
-                .text(vec2(c.center().x, bottom - 10.0), "ENTER  SKIP", &hint);
+            list.text(vec2(c.center().x, c.max.y - 40.0), "ENTER  SKIP", &hint);
         }
-        out
+        sounds
     }
 
     // ---- layouts ----------------------------------------------------------------------------
@@ -764,11 +718,11 @@ mod tests {
     use super::*;
     use shared::sim::{Grades, ModeRules, PlayerStats};
 
-    fn results(kind: ModeKind, players: usize) -> MatchResults {
+    fn results(kind: GameMode, players: usize) -> MatchResults {
         MatchResults {
             rules: match kind {
-                ModeKind::Campaign => ModeRules::campaign(),
-                ModeKind::Deathmatch => ModeRules::deathmatch(20, 600.0),
+                GameMode::Campaign => ModeRules::campaign(),
+                GameMode::Deathmatch => ModeRules::deathmatch(20, 600.0),
             },
             reason: EndReason::Exit,
             level: "Test".into(),
@@ -784,7 +738,7 @@ mod tests {
                     style_points: 1234,
                     best_rank: 3,
                     extracted: true,
-                    grades: (kind == ModeKind::Campaign).then_some(Grades {
+                    grades: (kind == GameMode::Campaign).then_some(Grades {
                         time: Some(Grade::S),
                         kills: Some(Grade::A),
                         style: Grade::B,
@@ -800,16 +754,17 @@ mod tests {
 
     #[test]
     fn reveal_has_a_stamp_per_row_plus_the_rank() {
-        let s = ResultsScreen::new(results(ModeKind::Campaign, 1), None, true, 0.0);
+        let s = ResultsScreen::new(results(GameMode::Campaign, 1), None, 0.0);
         assert_eq!(s.steps().len(), 5);
         assert!(!s.finished(1.0));
         assert!(s.finished(10.0));
-        let s = ResultsScreen::new(results(ModeKind::Campaign, 3), None, true, 0.0);
+        let s = ResultsScreen::new(results(GameMode::Campaign, 3), None, 0.0);
         assert_eq!(s.steps().len(), 4);
-        let mut s = ResultsScreen::new(results(ModeKind::Deathmatch, 4), None, false, 0.0);
+        let mut s = ResultsScreen::new(results(GameMode::Deathmatch, 4), None, 0.0);
         assert_eq!(s.steps().len(), 5);
         s.skip(0.1);
-        assert!(s.finished(0.1));
+        assert!(!s.finished(0.1), "not in the frame that skipped");
+        assert!(s.finished(0.12));
     }
 
     #[test]

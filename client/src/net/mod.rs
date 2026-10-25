@@ -47,6 +47,9 @@
 
 pub mod clock;
 pub mod interpolation;
+pub mod lan;
+/// Lobby state, level catalog and host commands on `NetClient` (docs/lobby.md).
+mod lobby;
 pub mod prediction;
 pub mod session;
 pub mod transport;
@@ -60,6 +63,7 @@ use std::time::Duration;
 use glam::Vec3;
 use renet::RenetClient;
 use shared::input::PlayerInput;
+use shared::lobby::{LevelInfo, LobbyPhase, LobbyState};
 use shared::movement::{MoveEvents, MoveState};
 use shared::protocol::{
     self, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE, ClientMessage, ClientUnreliable, ConnectRequest,
@@ -87,6 +91,9 @@ pub struct ClientConfig {
     pub netsim: Option<NetSimConfig>,
     /// Protocol version announced to the server (override only to test rejection).
     pub protocol_version: u32,
+    /// Listen-server host: the secret the session gave its in-process server; presented after
+    /// the welcome to become the lobby host (`LobbyRequest::ClaimHost`).
+    pub host_token: Option<u64>,
 }
 
 impl ClientConfig {
@@ -95,6 +102,7 @@ impl ClientConfig {
             name: name.to_string(),
             netsim: None,
             protocol_version: PROTOCOL_VERSION,
+            host_token: None,
         }
     }
 
@@ -151,6 +159,17 @@ pub enum NetEvent {
         text: String,
     },
     Game(GameEvent),
+    /// A lobby state arrived (`NetClient::lobby`): phase, settings, players, pings. Sent on
+    /// every change and once per second. When the phase leaves the match (`Lobby` /
+    /// `Countdown`) the level has already been unloaded (`world()` is `None`).
+    LobbyChanged {
+        phase: LobbyPhase,
+        previous: Option<LobbyPhase>,
+    },
+    /// The server refused a lobby request ("only the host can...").
+    Notice {
+        text: String,
+    },
     Disconnected {
         reason: String,
     },
@@ -230,6 +249,10 @@ pub struct NetClient {
     stats: NetStats,
     /// Style meter / rank / freshness from the newest `OwnState` (style HUD).
     own_style: Option<shared::sim::StyleView>,
+    /// Latest lobby state / level catalog from the server (docs/lobby.md).
+    lobby: Option<LobbyState>,
+    levels: Vec<LevelInfo>,
+    host_token: Option<u64>,
 }
 
 impl NetClient {
@@ -245,7 +268,9 @@ impl NetClient {
             request.to_user_data(),
             config.netsim,
         )?;
-        Ok(Self::with_transport(Box::new(transport)))
+        let mut client = Self::with_transport(Box::new(transport));
+        client.host_token = config.host_token;
+        Ok(client)
     }
 
     /// Uses a custom transport (Steam networking, relays...).
@@ -278,6 +303,9 @@ impl NetClient {
             time: 0.0,
             stats: NetStats::default(),
             own_style: None,
+            lobby: None,
+            levels: Vec::new(),
+            host_token: None,
         }
     }
 
@@ -620,6 +648,7 @@ impl NetClient {
                 let player_id = welcome.player_id;
                 self.welcome = Some(welcome);
                 self.events.push_back(NetEvent::Connected { player_id });
+                self.claim_host();
             }
             ServerMessage::Rejected { reason } => {
                 self.rejected = Some(reason.clone());
@@ -679,6 +708,7 @@ impl NetClient {
                 }
                 self.events.push_back(NetEvent::Game(event));
             }
+            ServerMessage::Lobby(update) => self.on_lobby_update(update),
         }
     }
 

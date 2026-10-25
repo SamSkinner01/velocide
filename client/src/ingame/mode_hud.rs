@@ -14,21 +14,22 @@ use engine::audio::{Audio, MusicTrack, PlayParams, Sfx};
 use engine::gfx::{Camera, UiDrawList};
 use engine::ui::draw::{self, fade, mix};
 use engine::ui::hud::format_timer;
-use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
+use engine::ui::{Rect, TextStyle, Theme, Ui, UiDrawExt};
 use glam::{Vec2, Vec3, vec2};
 use shared::protocol::{EntityState, PlayerInfo, player_flags};
-use shared::sim::{LifeState, MatchPhase, ModeEvent, ModeKind, PlayerId, Scoreboard};
+use shared::lobby::GameMode;
+use shared::sim::style::rank_name;
+use shared::sim::{LifeState, MatchPhase, ModeEvent, PlayerId, Scoreboard};
 
-use server::ServerCommand;
 
 use super::InGame;
 use super::hud::{Hud, project};
 use super::remote_players::{RemotePlayers, player_color};
-use super::scoreboard::ScoreRow;
+use super::scoreboard::{ScoreColumn, ScoreRow};
+use super::style_hud::rank_text_color;
 use crate::app::Common;
-use crate::frame::Transition;
-use crate::menus::results::{ResultsAction, ResultsOutput, ResultsScreen};
-use crate::net::{NetClient, Session, SessionKind};
+use crate::menus::results::ResultsScreen;
+use crate::net::{NetClient, Session};
 
 /// What the HUD needs from the game this frame.
 pub struct ModeHudInfo<'a> {
@@ -88,7 +89,7 @@ impl ModeHud {
         Self::default()
     }
 
-    pub fn mode(&self) -> Option<ModeKind> {
+    pub fn mode(&self) -> Option<GameMode> {
         self.scoreboard.as_ref().map(|b| b.rules.kind)
     }
 
@@ -114,7 +115,6 @@ impl ModeHud {
         audio: &mut Audio,
         players: &BTreeMap<PlayerId, PlayerInfo>,
         local: Option<PlayerId>,
-        can_restart: bool,
         now: f64,
     ) -> ModeEffects {
         let mut fx = ModeEffects::default();
@@ -227,16 +227,11 @@ impl ModeHud {
                 self.downed.clear();
                 self.reviving.clear();
                 audio.play_2d(match results.rules.kind {
-                    ModeKind::Campaign => Sfx::LevelComplete,
-                    ModeKind::Deathmatch => Sfx::MatchEnd,
+                    GameMode::Campaign => Sfx::LevelComplete,
+                    GameMode::Deathmatch => Sfx::MatchEnd,
                 });
                 audio.set_music(MusicTrack::Results);
-                self.results = Some(ResultsScreen::new(
-                    (**results).clone(),
-                    local,
-                    can_restart,
-                    now,
-                ));
+                self.results = Some(ResultsScreen::new((**results).clone(), local, now));
                 fx.results_opened = true;
             }
         }
@@ -266,8 +261,8 @@ impl ModeHud {
         }
 
         match board.rules.kind {
-            ModeKind::Deathmatch => self.draw_deathmatch(list, t, info, board, c),
-            ModeKind::Campaign => {
+            GameMode::Deathmatch => self.draw_deathmatch(list, t, info, board, c),
+            GameMode::Campaign => {
                 if board.rows.len() > 1 {
                     self.draw_team(list, t, info, board, &secs_until);
                 }
@@ -540,7 +535,7 @@ impl ModeHud {
                 &TextStyle::new(t.bone).centered().outline(outline),
             );
         } else if info.local_dead
-            && board.rules.kind == ModeKind::Campaign
+            && board.rules.kind == GameMode::Campaign
             && self.wipe.is_none()
         {
             let text = if board.rows.len() <= 1 {
@@ -590,7 +585,6 @@ impl InGame {
         let empty = BTreeMap::new();
         let players = net.map_or(&empty, NetClient::players);
         let local = net.and_then(NetClient::local_player_id);
-        let can_restart = self.kind != SessionKind::Join;
         let fx = self.modes.on_event(
             e,
             &common.theme,
@@ -598,7 +592,6 @@ impl InGame {
             &mut common.audio,
             players,
             local,
-            can_restart,
             self.time,
         );
         if fx.results_opened {
@@ -678,77 +671,76 @@ impl InGame {
         self.style.music_floor()
     }
 
-    /// Applies what the results screen asked for. Returns a transition when leaving.
-    ///
-    /// HOOK(lobby): CONTINUE goes back to the main menu until the lobby's Results phase
-    /// exists; then it should return to the lobby instead.
-    pub(super) fn on_results_output(
-        &mut self,
-        out: ResultsOutput,
-        common: &mut Common,
-    ) -> Option<Transition> {
-        for s in out.sounds {
-            common.audio.play_2d(s);
-        }
-        match out.action {
-            ResultsAction::None => None,
-            ResultsAction::Continue => Some(Transition::MainMenu { message: None }),
-            ResultsAction::Restart => {
-                self.modes.results = None;
-                common.audio.set_music(Common::game_music(self.world.kind()));
-                match self.kind {
-                    SessionKind::SinglePlayer => self.restart(),
-                    SessionKind::Host => {
-                        self.send_server(ServerCommand::RestartLevel);
-                        self.restart_pending = true;
+    /// Fills the score cells (columns from `scoreboard::columns_for`: FRAGS, KILLS, DEATHS,
+    /// RANK, STYLE) and the status of one row from the server's scoreboard.
+    pub(super) fn fill_score_row(&self, columns: &[ScoreColumn], row: &mut ScoreRow, id: PlayerId) {
+        let Some(e) = self
+            .modes
+            .scoreboard
+            .as_ref()
+            .and_then(|b| b.rows.iter().find(|r| r.player == id))
+        else {
+            return;
+        };
+        let theme = Theme::default();
+        row.cell_colors = vec![None; columns.len()];
+        for (i, c) in columns.iter().enumerate() {
+            let text = match c.title {
+                "FRAGS" => {
+                    if e.frags < 0 {
+                        row.cell_colors[i] = Some(theme.blood_bright);
                     }
-                    SessionKind::Join => {}
+                    e.frags.to_string()
                 }
-                None
+                "KILLS" => e.kills.to_string(),
+                "DEATHS" => e.deaths.to_string(),
+                "RANK" => {
+                    row.cell_colors[i] = Some(rank_text_color(&theme, e.rank, self.time));
+                    rank_name(e.rank).to_string()
+                }
+                "STYLE" => e.style.to_string(),
+                _ => continue,
+            };
+            if let Some(cell) = row.cells.get_mut(i) {
+                *cell = text;
             }
+        }
+        match e.life {
+            LifeState::Downed => row.status = "DOWNED".into(),
+            LifeState::Dead => row.status = "DEAD".into(),
+            LifeState::Alive => {}
         }
     }
 
-    /// Scoreboard rows with the game-mode stats (Tab).
-    pub(super) fn scoreboard_rows(&self) -> Vec<ScoreRow> {
-        let Some(net) = self.session.as_ref().map(Session::client) else {
-            return Vec::new();
+    /// Deathmatch: rows by frags (then style); campaign keeps the player order.
+    pub(super) fn sort_score_rows(&self, ids: &[PlayerId], rows: &mut Vec<ScoreRow>) {
+        let Some(board) = self.modes.scoreboard.as_ref() else {
+            return;
         };
-        let local = net.local_player_id();
-        let rtt = net.stats().rtt_ms;
-        let board = self.modes.scoreboard.as_ref();
-        let mut rows: Vec<(i32, u32, ScoreRow)> = net
-            .players()
-            .values()
-            .map(|p| {
-                let entry = board.and_then(|b| b.rows.iter().find(|r| r.player == p.id));
-                let mut row = ScoreRow::new(p.name.clone(), player_color(p.id));
-                row.is_local = Some(p.id) == local;
-                row.ping_ms =
-                    (row.is_local && self.kind != SessionKind::SinglePlayer).then_some(rtt);
-                row.status = match entry.map(|e| e.life) {
-                    Some(LifeState::Downed) => "DOWNED",
-                    Some(LifeState::Dead) => "DEAD",
-                    _ if p.bot => "BOT",
-                    _ if row.is_local && self.kind == SessionKind::Host => "HOST",
-                    _ => "ALIVE",
-                };
-                if let Some(e) = entry {
-                    row.kills = Some(e.kills);
-                    row.deaths = Some(e.deaths);
-                    row.frags = Some(e.frags);
-                    row.rank = Some(e.rank);
-                    row.style = Some(e.style);
-                }
-                let frags = entry.map_or(0, |e| e.frags);
-                let style = entry.map_or(0, |e| e.style);
-                (frags, style, row)
-            })
-            .collect();
-        if self.modes.mode() == Some(ModeKind::Deathmatch) {
-            rows.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+        if board.rules.kind != GameMode::Deathmatch {
+            return;
         }
-        rows.into_iter().map(|r| r.2).collect()
+        let key = |id: &PlayerId| {
+            board
+                .rows
+                .iter()
+                .find(|r| r.player == *id)
+                .map_or((i32::MIN, 0), |r| (r.frags, r.style))
+        };
+        let mut paired: Vec<(PlayerId, ScoreRow)> =
+            ids.iter().copied().zip(std::mem::take(rows)).collect();
+        paired.sort_by_key(|p| std::cmp::Reverse(key(&p.0)));
+        *rows = paired.into_iter().map(|p| p.1).collect();
+    }
+
+    /// The game-mode results screen inside the lobby's Results phase (`match_flow::results_ui`):
+    /// the animated tally / standings. `None` without results data (the lobby's plain
+    /// scoreboard results are shown then); otherwise the first sound of the frame and whether
+    /// the reveal is done (then the lobby's buttons go under it).
+    pub(super) fn draw_mode_results(&mut self, ui: &mut Ui, now: f64) -> Option<(Option<Sfx>, bool)> {
+        let screen = self.modes.results.as_mut()?;
+        let sounds = screen.draw(ui, now);
+        Some((sounds.first().copied(), screen.finished(now)))
     }
 }
 

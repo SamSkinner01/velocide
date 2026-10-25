@@ -130,6 +130,10 @@ pub enum Transition {
     MainMenu {
         message: Option<String>,
     },
+    /// Lobby -> game: the match started; the running session moves to the in-game screen.
+    EnterMatch,
+    /// Game -> lobby: the server went back to its lobby; the session moves to the lobby screen.
+    ReturnToLobby,
     Quit,
 }
 

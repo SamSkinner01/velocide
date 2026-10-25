@@ -31,39 +31,19 @@ use super::combat::{Attack, CombatRules, DamageFlags, KillInfo, Owner, PlayerCom
 use super::style::{StyleBonus, StyleEvent};
 use super::{HitTarget, PlayerId, SimEvent, SimWorld, WeaponState};
 use crate::input::Buttons;
-use crate::level::{LevelDef, LevelKind, SpawnPoint};
+use crate::level::{LevelDef, SpawnPoint};
+use crate::lobby::{DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS, GameMode, MatchSettings};
 use crate::movement::MoveState;
 use crate::protocol::{EntityState, player_flags};
 use crate::tuning::{ModeTuning, Tuning};
 
-/// Deathmatch defaults (`docs/gameplay.md`); the lobby's match settings override them.
-pub const DEFAULT_FRAG_LIMIT: u32 = 20;
-pub const DEFAULT_TIME_LIMIT_SECS: f32 = 600.0;
 
-/// Which rules a match is played with.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ModeKind {
-    /// Single player / co-op campaign level: checkpoints, downed & revive, exit → results.
-    Campaign,
-    /// PvP deathmatch: frags, timed respawns, frag / time limit.
-    Deathmatch,
-}
-
-impl ModeKind {
-    pub fn name(self) -> &'static str {
-        match self {
-            ModeKind::Campaign => "CAMPAIGN",
-            ModeKind::Deathmatch => "DEATHMATCH",
-        }
-    }
-}
-
-/// The match configuration the mode rules run with. Until the lobby's match settings exist it
-/// is derived from the level kind ([`ModeRules::for_level`]); `SimWorld::set_mode_rules`
-/// replaces it.
+/// The match configuration the mode rules run with: from the lobby's match settings
+/// (`SimWorld::apply_match_settings` → [`ModeRules::from_settings`]); worlds that never get any
+/// (tests, client copies) derive it from the level kind ([`ModeRules::for_level`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModeRules {
-    pub kind: ModeKind,
+    pub kind: GameMode,
     /// Deathmatch: first to this many frags wins (0 = no limit).
     pub frag_limit: u32,
     /// Deathmatch: the match ends after this many seconds (0 = no limit).
@@ -73,7 +53,7 @@ pub struct ModeRules {
 impl ModeRules {
     pub fn campaign() -> Self {
         Self {
-            kind: ModeKind::Campaign,
+            kind: GameMode::Campaign,
             frag_limit: 0,
             time_limit_secs: 0.0,
         }
@@ -81,7 +61,7 @@ impl ModeRules {
 
     pub fn deathmatch(frag_limit: u32, time_limit_secs: f32) -> Self {
         Self {
-            kind: ModeKind::Deathmatch,
+            kind: GameMode::Deathmatch,
             frag_limit,
             time_limit_secs: time_limit_secs.max(0.0),
         }
@@ -89,17 +69,29 @@ impl ModeRules {
 
     /// Campaign levels → campaign rules; arenas → deathmatch with the default limits.
     pub fn for_level(level: &LevelDef) -> Self {
-        match level.kind {
-            LevelKind::Campaign => Self::campaign(),
-            LevelKind::Arena => Self::deathmatch(DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS),
+        match GameMode::for_level_kind(level.kind) {
+            GameMode::Campaign => Self::campaign(),
+            GameMode::Deathmatch => {
+                Self::deathmatch(DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS as f32)
+            }
+        }
+    }
+
+    /// The rules of the lobby's match settings (mode, frag and time limits).
+    pub fn from_settings(settings: &MatchSettings) -> Self {
+        match settings.mode {
+            GameMode::Campaign => Self::campaign(),
+            GameMode::Deathmatch => {
+                Self::deathmatch(settings.frag_limit, settings.time_limit_secs as f32)
+            }
         }
     }
 
     /// The combat rules that go with the mode (deathmatch = PvP).
     pub fn combat_rules(&self) -> CombatRules {
         match self.kind {
-            ModeKind::Campaign => CombatRules::coop(),
-            ModeKind::Deathmatch => CombatRules::pvp(),
+            GameMode::Campaign => CombatRules::coop(),
+            GameMode::Deathmatch => CombatRules::pvp(),
         }
     }
 }
@@ -422,6 +414,11 @@ impl ModeState {
         self.phase == MatchPhase::Playing
     }
 
+    /// The match ended (results): AI and damage are frozen, nothing scores.
+    pub fn is_over(&self) -> bool {
+        self.phase == MatchPhase::Ended
+    }
+
     /// Something on the scoreboard changed: it is re-broadcast soon.
     pub fn touch(&mut self) {
         self.scoreboard_dirty = true;
@@ -474,13 +471,13 @@ impl SimWorld {
                 self.push_style(e);
             }
             match self.mode.rules.kind {
-                ModeKind::Campaign => {
+                GameMode::Campaign => {
                     self.tick_checkpoints();
                     self.tick_revives(t);
                     self.check_team_wipe(t);
                     self.tick_exit(t);
                 }
-                ModeKind::Deathmatch => self.tick_deathmatch(t),
+                GameMode::Deathmatch => self.tick_deathmatch(t),
             }
         } else if self.mode.phase == MatchPhase::Ended {
             // Nothing can hurt anyone on the results screen.
@@ -538,8 +535,8 @@ impl SimWorld {
             self.style.player(id);
             self.mode.touch();
             let move_them = match self.mode.rules.kind {
-                ModeKind::Campaign => self.mode.checkpoint.is_some(),
-                ModeKind::Deathmatch => self.players.len() > 1,
+                GameMode::Campaign => self.mode.checkpoint.is_some(),
+                GameMode::Deathmatch => self.players.len() > 1,
             };
             if late
                 && move_them
@@ -553,7 +550,7 @@ impl SimWorld {
 
     /// Stats from this tick's events: damage taken, kills, deaths, frags, enemies spawned.
     fn account_events(&mut self, t: &Tuning, events: &[SimEvent]) {
-        let dm = self.mode.rules.kind == ModeKind::Deathmatch;
+        let dm = self.mode.rules.kind == GameMode::Deathmatch;
         let credit_ticks = secs_to_ticks(t.modes.knockoff_credit, self.tick_rate, 0) as u32;
         for event in events {
             match event {
@@ -643,12 +640,12 @@ impl SimWorld {
         let void = kill.attack == Attack::World || kill.flags.contains(DamageFlags::ENVIRONMENT);
         let solo = self.is_solo();
         let (secs, life) = match (self.mode.rules.kind, self.mode.phase) {
-            (_, MatchPhase::Ended) | (ModeKind::Deathmatch, _) => {
+            (_, MatchPhase::Ended) | (GameMode::Deathmatch, _) => {
                 (t.combat.respawn_delay, LifeState::Dead)
             }
-            (ModeKind::Campaign, _) if solo => (t.modes.sp_death_time, LifeState::Dead),
-            (ModeKind::Campaign, _) if void => (t.modes.fall_respawn_time, LifeState::Dead),
-            (ModeKind::Campaign, _) => (t.modes.downed_time, LifeState::Downed),
+            (GameMode::Campaign, _) if solo => (t.modes.sp_death_time, LifeState::Dead),
+            (GameMode::Campaign, _) if void => (t.modes.fall_respawn_time, LifeState::Dead),
+            (GameMode::Campaign, _) => (t.modes.downed_time, LifeState::Downed),
         };
         let ticks = secs_to_ticks(secs, rate, 1);
         if let Some(p) = self.players.get_mut(&id) {
@@ -683,7 +680,7 @@ impl SimWorld {
     /// team wipe first puts the level back to its checkpoint state.
     pub(crate) fn mode_respawn_player(&mut self, t: &Tuning, id: PlayerId) {
         let was_dead = self.players.get(&id).is_some_and(|p| p.combat.dead);
-        if self.mode.rules.kind == ModeKind::Campaign
+        if self.mode.rules.kind == GameMode::Campaign
             && self.mode.phase == MatchPhase::Playing
             && ((was_dead && self.is_solo()) || self.mode.wipe.take().is_some())
         {
@@ -727,8 +724,8 @@ impl SimWorld {
     pub fn mode_spawn_point(&self, id: PlayerId) -> SpawnPoint {
         let level = &self.level;
         match self.mode.rules.kind {
-            ModeKind::Deathmatch => self.farthest_spawn(id),
-            ModeKind::Campaign => {
+            GameMode::Deathmatch => self.farthest_spawn(id),
+            GameMode::Campaign => {
                 if let Some(cp) = self.mode.checkpoint.and_then(|i| level.checkpoints.get(i)) {
                     return cp.spawn;
                 }
@@ -1034,7 +1031,7 @@ impl SimWorld {
                 let feet = p.movement.position;
                 let extracted = !p.combat.dead
                     && exit.is_some_and(|e| e.contains(feet) || e.contains(feet + Vec3::Y * 0.9));
-                let grades = (rules.kind == ModeKind::Campaign).then(|| {
+                let grades = (rules.kind == GameMode::Campaign).then(|| {
                     grade_player(
                         &t.modes,
                         duration_secs,
@@ -1058,11 +1055,11 @@ impl SimWorld {
             })
             .collect();
         let (team_grade, winner) = match rules.kind {
-            ModeKind::Campaign => (
+            GameMode::Campaign => (
                 Grade::average(players.iter().filter_map(|p| Some(p.grades?.overall))),
                 None,
             ),
-            ModeKind::Deathmatch => {
+            GameMode::Deathmatch => {
                 players.sort_by(|a, b| {
                     b.stats
                         .frags

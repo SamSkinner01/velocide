@@ -301,6 +301,21 @@ fn listen_server_accepts_a_second_player() {
     let mut guest = Session::join(addr, "Guest").unwrap();
     let mut ts_host = FixedTimestep::new(60.0);
     let mut ts_guest = FixedTimestep::new(60.0);
+    // Listen servers open in the lobby: once both are there, the host force-starts.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(10) {
+        drive(&mut host, &mut ts_host, 0.01, |_| false);
+        drive(&mut guest, &mut ts_guest, 0.01, |_| false);
+        if host.client().is_host() && host.client().lobby().is_some_and(|l| l.players.len() == 2) {
+            break;
+        }
+    }
+    assert!(
+        host.client().is_host(),
+        "the listen server's own player hosts"
+    );
+    assert!(!guest.client().is_host());
+    host.client_mut().start_match(true);
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(10) {
         drive(&mut host, &mut ts_host, 0.01, |_| false);
