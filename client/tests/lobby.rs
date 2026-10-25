@@ -13,8 +13,8 @@ use shared::sim::PlayerId;
 
 const TOKEN: u64 = 0x5EC2_E7E5;
 
-/// A lobby server; `token` = listen server (the client with the token hosts), `None` =
-/// dedicated rules.
+/// A lobby server; `token` = listen server (the client with the token hosts; dev commands on
+/// for it, like `ServerConfig::host`), `None` = dedicated rules (no `--dev-commands`).
 fn lobby_config(token: Option<u64>) -> ServerConfig {
     let mut config = server_config();
     config.lobby = LobbyConfig {
@@ -22,6 +22,7 @@ fn lobby_config(token: Option<u64>) -> ServerConfig {
         host_token: token,
         ..LobbyConfig::enabled()
     };
+    config.dev_commands = token.is_some();
     config
 }
 
@@ -674,10 +675,7 @@ fn last_server_line(c: &TestClient) -> Option<String> {
 
 #[test]
 fn dev_commands_are_host_only_and_teleports_work() {
-    // A listen server (`ServerConfig::host` turns dev commands on).
-    let mut config = lobby_config(Some(TOKEN));
-    config.dev_commands = true;
-    let mut h = Harness::new(config);
+    let mut h = Harness::new(lobby_config(Some(TOKEN)));
     let host = h.add_client_with(host_client("Host"), script_idle);
     let guest = h.add_client("Guest", None, script_idle);
     wait_lobby(&mut h, 2);

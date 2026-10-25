@@ -105,11 +105,10 @@ fn claimed_view_lag(tuning: Tuning, claim_ms: f32) -> (f32, f32) {
     h.run_for(1.0, |_| {}); // RTT samples
     let id = h.clients[a].id();
     let claim_ticks = (claim_ms / 1000.0 * 60.0).round() as u32;
-    let mut seq = h.server.world().players[&id].last_input_seq;
+    let first_seq = h.server.world().players[&id].last_input_seq + 1;
     let mut granted = 0.0f32;
-    for _ in 0..120 {
+    for seq in first_seq..first_seq + 120 {
         let tick = h.server.tick();
-        seq += 1;
         let input = PlayerInput {
             seq,
             view_tick: tick.saturating_sub(claim_ticks),

@@ -1003,6 +1003,12 @@ impl Drop for NetClient {
     }
 }
 
+/// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS
+/// random source, so other clients can't predict it).
+fn random_client_id() -> u64 {
+    u64::from_le_bytes(renet_netcode::generate_random_bytes::<8>())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1107,8 +1113,3 @@ mod tests {
     }
 }
 
-/// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS
-/// random source, so other clients can't predict it).
-fn random_client_id() -> u64 {
-    u64::from_le_bytes(renet_netcode::generate_random_bytes::<8>())
-}
