@@ -15,6 +15,7 @@ use shared::input::look_dir;
 use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags};
 use shared::sim::PlayerId;
 
+use crate::models::shrike::REMOTE_SCALE;
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
 use engine::gfx::DrawItem;
 
@@ -140,7 +141,10 @@ impl RemotePlayers {
             };
             let color = e.id.as_player().map_or(PLAYER_COLORS[0], player_color);
             let anim = player_anim(e, v, self.time);
-            let info = lib.draw_player(&anim, e.position, &Tint::team(color), out);
+            // Other Shrikes are drawn a little larger than life so they read at a distance
+            // (visual only: hit shapes and movement are unchanged).
+            let info =
+                lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &Tint::team(color), out);
             v.head = info.head;
             v.muzzle = info.muzzle;
             v.muzzle_dir = info.muzzle_dir;

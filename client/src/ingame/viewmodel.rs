@@ -3,21 +3,21 @@
 //! view space, own FOV, never clips into walls).
 //!
 //! This module keeps the animation state the models need ([`ViewmodelAnim`]: walk bob, look
-//! sway, switch raise, fire kick, punch / prism-throw progress, Riveter barrel spin) and layers
+//! sway, switch raise, fire kick, punch / thorn-throw progress, Tumbler drum turn) and layers
 //! the movement feel on top as an extra view-space transform: landing dip, slide tilt, dash
 //! pull-back and a counter-roll against the camera tilt. Everything runs on the *visual*
 //! clock (hitstop freezes it).
 //!
 //! Combat hooks: [`Viewmodel::fire`] (recoil kick), [`Viewmodel::punch`],
-//! [`Viewmodel::throw_prism`], [`Viewmodel::set_charge`] (Lancet overcharge), `spinning`
-//! (Riveter barrels) and [`Viewmodel::last_draw`] (view-space muzzle / fist for tracers and
-//! sparks).
+//! [`Viewmodel::throw_thorn`], [`Viewmodel::set_charge`] (Arclash Discharge),
+//! [`Viewmodel::turn_drum`] (a Tumbler shot) and [`Viewmodel::last_draw`] (view-space muzzle /
+//! fist for tracers and sparks).
 
 use engine::gfx::DrawItem;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::movement::{MoveMode, MoveState};
 
-use crate::models::{BarrelSpin, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo};
+use crate::models::{DrumTurn, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo};
 
 const SWITCH_TIME: f32 = 0.12;
 /// Ground speed giving full bob.
@@ -31,9 +31,7 @@ fn approach(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
 #[derive(Default)]
 pub struct Viewmodel {
     anim: ViewmodelAnim,
-    spin: BarrelSpin,
-    /// Riveter firing (barrel spin-up), set by combat.
-    pub spinning: bool,
+    drum: DrumTurn,
     slide: f32,
     dash: f32,
     last_angles: Option<(f32, f32)>,
@@ -67,12 +65,17 @@ impl Viewmodel {
         self.anim.punch = 0.01;
     }
 
-    /// Starts the prism throw animation.
-    pub fn throw_prism(&mut self) {
+    /// Starts the thorn throw animation.
+    pub fn throw_thorn(&mut self) {
         self.anim.throw = 0.01;
     }
 
-    /// Lancet overcharge 0..1.
+    /// A Tumbler shot: the drum turns one chamber.
+    pub fn turn_drum(&mut self) {
+        self.drum.kick();
+    }
+
+    /// Arclash Discharge charge 0..1.
     pub fn set_charge(&mut self, charge: f32) {
         self.anim.alt_charge = charge.clamp(0.0, 1.0);
     }
@@ -118,8 +121,8 @@ impl Viewmodel {
                 }
             }
         }
-        self.spin.update(self.spinning, dt);
-        a.spin = self.spin.angle;
+        self.drum.update(dt);
+        a.spin = self.drum.angle();
         a.time = self.time;
         let sliding = state.mode == MoveMode::Slide;
         self.slide = approach(self.slide, sliding as u8 as f32, 12.0, dt);

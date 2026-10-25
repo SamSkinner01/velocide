@@ -764,7 +764,7 @@ impl InGame {
             self.remote
                 .draw(lib, net.remote_players(), dt, &mut out.draws);
         }
-        // Enemies, projectiles, blood bursts, prisms, tracers.
+        // Enemies, projectiles, healing bursts, thorns, tracers.
         self.combat_draw(common, out);
         self.effects.update(vdt, world.map(|w| &w.collision.world));
         self.effects.draw(&mut out.sprites, &mut out.decals);
