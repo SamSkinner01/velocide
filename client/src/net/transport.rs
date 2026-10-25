@@ -12,7 +12,7 @@ use renet::RenetClient;
 // Authentication types from `renet_netcode`; the netcode.io client is driven directly so the
 // network simulator can sit between it and the socket.
 use renet_netcode::ClientAuthentication;
-use renetcode::NetcodeClient;
+use renetcode::{DisconnectReason, NetcodeClient};
 use server::{NetSimConfig, TransportStats, UdpLink};
 use shared::protocol::{CONNECT_USER_DATA_BYTES, PROTOCOL_ID};
 
@@ -29,6 +29,24 @@ pub trait ClientTransport: Send {
     fn is_connected(&self) -> bool;
     fn server_addr(&self) -> Option<SocketAddr>;
     fn stats(&self) -> TransportStats;
+}
+
+/// A player-facing reason for a netcode disconnect (shown after "Couldn't connect: " /
+/// "Disconnected: " in the main menu).
+pub fn disconnect_text(reason: DisconnectReason) -> String {
+    match reason {
+        DisconnectReason::ConnectionRequestTimedOut
+        | DisconnectReason::ConnectionResponseTimedOut
+        | DisconnectReason::ConnectTokenExpired => {
+            "no answer from the server (check the address, that the game is hosted and that \
+             its UDP port is open)"
+                .into()
+        }
+        DisconnectReason::ConnectionTimedOut => "lost the connection to the server".into(),
+        DisconnectReason::ConnectionDenied => "the server refused the connection".into(),
+        DisconnectReason::DisconnectedByServer => "the server closed the connection".into(),
+        DisconnectReason::DisconnectedByClient => "left the server".into(),
+    }
 }
 
 /// netcode (Unsecure) over UDP.
@@ -81,7 +99,7 @@ impl ClientTransport for NetcodeClientTransport {
         self.link.advance(dt);
         if let Some(reason) = self.netcode.disconnect_reason() {
             client.disconnect_due_to_transport();
-            return Err(reason.to_string());
+            return Err(disconnect_text(reason));
         }
         if let Some(reason) = client.disconnect_reason() {
             if let Ok((addr, packet)) = self.netcode.disconnect() {
@@ -118,7 +136,7 @@ impl ClientTransport for NetcodeClientTransport {
 
     fn send_packets(&mut self, client: &mut RenetClient) -> Result<(), String> {
         if let Some(reason) = self.netcode.disconnect_reason() {
-            return Err(reason.to_string());
+            return Err(disconnect_text(reason));
         }
         if !self.netcode.is_connected() {
             return Ok(());
