@@ -138,6 +138,8 @@ pub struct Ui<'a> {
     /// Innermost scroll area that contains the focused widget this frame.
     focus_scroll: Option<Id>,
     focus_order: Vec<Id>,
+    /// Left / Right already moved the focus between row buttons this frame.
+    row_nav_done: bool,
     enabled: bool,
     escape_consumed: bool,
     mouse_moved: bool,
@@ -197,6 +199,7 @@ impl<'a> Ui<'a> {
             scroll_request: None,
             focus_scroll: None,
             focus_order: Vec::new(),
+            row_nav_done: false,
             enabled: true,
             escape_consumed,
             mouse_moved,
@@ -746,8 +749,20 @@ impl<'a> Ui<'a> {
     pub fn button(&mut self, label: &str) -> bool {
         let (text, id) = self.label_id(label);
         let t = self.theme;
+        let in_row = self.layouts.last().is_some_and(|l| l.row.is_some());
         let rect = self.allocate(t.row_height + 2.0);
         let resp = self.interact(id, rect, true);
+        // Buttons side by side (PLAY | BACK, RESTART | MAIN MENU): Left / Right (d-pad) move
+        // between them like Up / Down; the new focus shows from the next frame.
+        if resp.focused && in_row && self.enabled && !self.row_nav_done {
+            let steps =
+                self.key_count(UiKey::Right) as isize - self.key_count(UiKey::Left) as isize;
+            if steps != 0 {
+                self.state.move_focus(steps.signum());
+                self.state.focus_requested = true;
+                self.row_nav_done = true;
+            }
+        }
         let down = resp.held && resp.hovered;
         let bg = if !self.enabled {
             fade(t.widget, 0.5)
@@ -949,7 +964,10 @@ impl<'a> Ui<'a> {
         let (_, control, resp) = self.control_row(text, id);
         let (lo, hi) = (min.min(max), min.max(max));
         let before = *value;
-        let value_w = 44.0;
+        // Room for the widest value text ("600 DEG/S"), so it never runs into the track.
+        let widest = line_width(&format_value(format, lo, step), 1.0)
+            .max(line_width(&format_value(format, hi, step), 1.0));
+        let value_w = (widest + 6.0).max(44.0);
         let (track_area, value_rect) = control.split_right(value_w);
         let track = Rect::new(
             Vec2::new(

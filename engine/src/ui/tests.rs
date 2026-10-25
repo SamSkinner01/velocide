@@ -94,6 +94,28 @@ fn three_buttons(ui: &mut Ui) -> [bool; 3] {
 }
 
 #[test]
+fn left_right_move_between_buttons_in_a_row() {
+    let mut h = Harness::new();
+    let row = |ui: &mut Ui| ui.row(2, |ui| [ui.button("RESTART"), ui.button("MAIN MENU")]);
+    let column = |ui: &mut Ui| [ui.button("RESUME"), ui.button("LEAVE")];
+    h.idle(row);
+    h.frame(keys(&[UiKey::Down]), row);
+    let first = h.state.focused();
+    h.frame(keys(&[UiKey::Right]), row);
+    assert_ne!(h.state.focused(), first, "Right moves to MAIN MENU");
+    assert_eq!(h.frame(keys(&[UiKey::Enter]), row), [false, true]);
+    h.frame(keys(&[UiKey::Left]), row);
+    assert_eq!(h.frame(keys(&[UiKey::Enter]), row), [true, false]);
+    // A column of buttons keeps Left / Right to itself (no sideways focus jumps).
+    let mut h = Harness::new();
+    h.idle(column);
+    h.frame(keys(&[UiKey::Down]), column);
+    let first = h.state.focused();
+    h.frame(keys(&[UiKey::Right]), column);
+    assert_eq!(h.state.focused(), first);
+}
+
+#[test]
 fn keyboard_focus_navigation() {
     let mut h = Harness::new();
     h.idle(three_buttons);
@@ -342,6 +364,31 @@ fn slider_keys_and_drag() {
     // After release, moving the mouse doesn't change the value.
     h.frame(mouse(start, false, false, false), |ui| slider(ui, &mut v));
     assert_eq!(v, 1.0);
+}
+
+#[test]
+fn long_slider_values_do_not_overlap_the_track() {
+    let mut h = Harness::new();
+    let mut v = 240.0;
+    h.idle(|ui| ui.slider("LOOK SPEED", &mut v, 60.0, 600.0, 10.0, "{} DEG/S"));
+    let track_end = h
+        .list
+        .quads
+        .iter()
+        .filter(|q| q.texture == crate::gfx::UiTexture::White && q.color == h.theme.widget_hover)
+        .map(|q| q.max.x)
+        .fold(f32::MIN, f32::max);
+    let text_start = h
+        .list
+        .quads
+        .iter()
+        .filter(|q| q.texture == crate::gfx::UiTexture::Font && q.min.x > 300.0)
+        .map(|q| q.min.x)
+        .fold(f32::MAX, f32::min);
+    assert!(
+        text_start > track_end + 1.0,
+        "value text starts at {text_start}, track ends at {track_end}"
+    );
 }
 
 #[test]
