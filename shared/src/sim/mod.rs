@@ -89,6 +89,12 @@ impl std::fmt::Display for PlayerId {
 /// Default simulation rate (ticks per second).
 pub const DEFAULT_TICK_RATE: u32 = 60;
 
+/// Most enemies (corpses included) in the world at once: further spawns (dev `/spawn`, waves)
+/// are refused, and an encounter wave simply has fewer enemies.
+pub const MAX_ENEMIES: usize = 256;
+/// Most projectiles in flight at once: further shots / enemy attacks spawn nothing.
+pub const MAX_PROJECTILES: usize = 1024;
+
 /// Seconds per tick for a tick rate. Client and server must use this exact expression so
 /// prediction is bit-identical.
 pub fn tick_dt(tick_rate: u32) -> f32 {
@@ -126,6 +132,16 @@ pub fn neutral_input(input: &PlayerInput) -> PlayerInput {
 /// Inputs to apply this tick, per player, ascending `seq`. Each input is one movement step.
 pub type TickInputs = BTreeMap<PlayerId, Vec<PlayerInput>>;
 
+/// Most `player`'s view may be rewound (ticks): `net.lag_comp_max_ms`, tightened by the
+/// server's RTT-based [`SimPlayer::view_lag_limit_ms`].
+fn max_rewind_ticks(net: &crate::tuning::NetTuning, player: &SimPlayer, tick_rate: u32) -> f64 {
+    let mut ms = net.lag_comp_max_ms.max(0.0);
+    if let Some(limit) = player.view_lag_limit_ms.filter(|l| !l.is_nan()) {
+        ms = ms.min(limit.max(0.0));
+    }
+    ms as f64 / 1000.0 * tick_rate as f64
+}
+
 /// Past hitboxes for lag-compensated hit tests. Implemented by the server's
 /// `server::lagcomp::LagCompHistory` and passed to [`SimWorld::step`]; weapons validating a
 /// shot from `input` call `rewind(input.view_time_ticks(), tuning.net.lag_comp_max_ms)` to
@@ -153,8 +169,14 @@ pub struct SimPlayer {
     /// Health, hard damage, death/respawn, weapons (sent to the owner in `OwnState`).
     pub combat: PlayerCombat,
     /// How far in the past (ticks) this player sees remote entities: server tick minus the
-    /// view time of its last input. Used for parry tolerance (0 for bots).
+    /// view time of its last input, clamped to [`SimWorld::max_rewind_ticks`]. Used for parry
+    /// tolerance (0 for bots).
     pub view_lag_ticks: f32,
+    /// Server-side bound (ms) on how old this player's view may claim to be, from their
+    /// measured round-trip time (set by the server every tick; `None` = unknown, only
+    /// `net.lag_comp_max_ms` applies). The view time travels in the client's inputs, so
+    /// without it a low-ping client could always claim the maximum rewind.
+    pub view_lag_limit_ms: Option<f32>,
     /// Dev `/notarget`: enemies ignore this player.
     pub notarget: bool,
 }
@@ -172,6 +194,7 @@ impl SimPlayer {
             inputs_processed: 0,
             combat: PlayerCombat::default(),
             view_lag_ticks: 0.0,
+            view_lag_limit_ms: None,
             notarget: false,
         }
     }
@@ -537,11 +560,44 @@ impl SimWorld {
         }
     }
 
-    /// Allocates a fresh id for a dynamic replicated entity (never reused in a session).
-    pub fn alloc_net_id(&mut self) -> NetId {
-        let id = NetId(self.next_dynamic_id);
-        self.next_dynamic_id = (self.next_dynamic_id + 1).min(NetId::STATIC_START - 1);
-        id
+    /// Allocates an id for a new dynamic replicated entity. Ids count up from
+    /// `NetId::DYNAMIC_START`; after the last one (2²⁴ − 1) they wrap around, skipping ids
+    /// still in use by an enemy, projectile, prism or blood burst. `None` if no id is free:
+    /// the spawn is refused.
+    pub fn alloc_net_id(&mut self) -> Option<NetId> {
+        let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
+        let live = self.enemies.len() + self.projectiles.len() + self.prisms.len() + self.blood.len();
+        // Of `live + 1` consecutive candidates at least one is free.
+        for _ in 0..=live.min(span - 1) {
+            let id = NetId(self.next_dynamic_id);
+            self.next_dynamic_id = if self.next_dynamic_id + 1 >= NetId::STATIC_START {
+                NetId::DYNAMIC_START
+            } else {
+                self.next_dynamic_id + 1
+            };
+            if !self.net_id_in_use(id) {
+                return Some(id);
+            }
+        }
+        log::warn!("no free entity id ({live} live entities): spawn refused");
+        None
+    }
+
+    /// Is `id` held by a live dynamic entity?
+    fn net_id_in_use(&self, id: NetId) -> bool {
+        self.enemies.contains_key(&id)
+            || self.projectiles.contains_key(&id)
+            || self.prisms.contains_key(&id)
+            || self.blood.contains_key(&id)
+    }
+
+    /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
+    /// `net.lag_comp_max_ms`, tightened by their RTT-based [`SimPlayer::view_lag_limit_ms`].
+    pub fn max_rewind_ticks(&self, t: &Tuning, id: PlayerId) -> f64 {
+        match self.players.get(&id) {
+            Some(p) => max_rewind_ticks(&t.net, p, self.tick_rate),
+            None => t.net.lag_comp_max_ms.max(0.0) as f64 / 1000.0 * self.tick_rate as f64,
+        }
     }
 
     /// Picks the next spawn point (round robin).
@@ -715,8 +771,9 @@ impl SimWorld {
                 player.last_input_seq = input.seq;
                 player.inputs_processed += 1;
                 let view = input.view_time_ticks();
+                let max_lag = max_rewind_ticks(&tuning.net, player, tick_rate);
                 player.view_lag_ticks = if view.is_finite() {
-                    (tick as f64 - view).max(0.0) as f32
+                    (tick as f64 - view).clamp(0.0, max_lag) as f32
                 } else {
                     0.0
                 };
@@ -1140,6 +1197,165 @@ mod tests {
             spawns[1].position
         );
         assert_eq!(w.players[&PlayerId(1)].movement.velocity, Vec3::ZERO);
+    }
+
+    #[test]
+    fn claimed_view_lag_is_bounded_per_player() {
+        let t = Tuning::default(); // lag_comp_max_ms 350 = 21 ticks
+        let mut w = world();
+        let id = PlayerId(0);
+        w.add_player(id, "A");
+        for _ in 0..60 {
+            w.step(&TickInputs::new(), &t, None);
+        }
+        let now = w.tick;
+        let claim = PlayerInput {
+            seq: 1,
+            view_tick: now - 21,
+            ..Default::default()
+        };
+        // No RTT known (single-player, tests): only `lag_comp_max_ms` applies.
+        assert_eq!(w.view_time(&t, id, &claim), (now - 21) as f64);
+        let unbounded_delay = w.parry_delay_ticks(&t, id);
+        // The server measured a fast connection: at most 100 ms.
+        w.players.get_mut(&id).unwrap().view_lag_limit_ms = Some(100.0);
+        assert_eq!(w.max_rewind_ticks(&t, id), 6.0);
+        assert_eq!(w.view_time(&t, id, &claim), now as f64 - 6.0);
+        let mut inputs = TickInputs::new();
+        inputs.insert(id, vec![claim]);
+        w.step(&inputs, &t, None);
+        assert_eq!(w.players[&id].view_lag_ticks, 6.0);
+        // The parry delay (tolerance + view lag) shrinks with it: 4.8 + 6 ticks.
+        assert_eq!(w.parry_delay_ticks(&t, id), 11);
+        assert_eq!(unbounded_delay, 5, "no view lag before the first input");
+        // A limit above `lag_comp_max_ms` changes nothing; garbage is ignored.
+        for limit in [1000.0, f32::NAN] {
+            w.players.get_mut(&id).unwrap().view_lag_limit_ms = Some(limit);
+            assert_eq!(w.max_rewind_ticks(&t, id), 21.0);
+        }
+    }
+
+    fn rivet(w: &mut SimWorld, t: &Tuning) -> Option<NetId> {
+        let at = Vec3::new(0.0, 50.0, 0.0);
+        w.spawn_projectile(t, ProjectileKind::Rivet, Owner::World, at, Vec3::ZERO)
+    }
+
+    #[test]
+    fn net_ids_wrap_around_without_reusing_live_ones() {
+        let t = Tuning::default();
+        let mut w = world();
+        let start = NetId::DYNAMIC_START;
+        // One live entity of every kind at the start of the dynamic range.
+        let projectile = rivet(&mut w, &t).unwrap();
+        let enemy = w.spawn_enemy("husk", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
+        let blood = w
+            .spawn_blood(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
+            .unwrap();
+        let prism = w
+            .spawn_prism(&t, PlayerId(9), Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO)
+            .unwrap();
+        assert_eq!(
+            [projectile, enemy, blood, prism].map(|id| id.0),
+            [start, start + 1, start + 2, start + 3]
+        );
+        // A very long session reaches the end of the id space ...
+        w.next_dynamic_id = NetId::STATIC_START - 1;
+        let last = rivet(&mut w, &t).unwrap();
+        assert_eq!(last.0, NetId::STATIC_START - 1);
+        // ... and wraps around, skipping the ids still alive (it used to hand out the last id
+        // forever, each new entity silently replacing the previous one).
+        let wrapped = rivet(&mut w, &t).unwrap();
+        assert_eq!(wrapped.0, start + 4);
+        let next = rivet(&mut w, &t).unwrap();
+        assert_eq!(next.0, start + 5);
+        assert_eq!(w.projectiles.len(), 4);
+        for id in [projectile, enemy, blood, prism, last, wrapped, next] {
+            assert!(id.0 >= start && id.0 < NetId::STATIC_START);
+        }
+        assert!(w.projectiles.contains_key(&projectile) && w.enemies.contains_key(&enemy));
+        assert!(w.blood.contains_key(&blood) && w.prisms.contains_key(&prism));
+    }
+
+    #[test]
+    fn spawns_beyond_the_world_caps_are_refused() {
+        let t = Tuning::default();
+        let mut w = world();
+        for _ in 0..MAX_PROJECTILES {
+            assert!(rivet(&mut w, &t).is_some());
+        }
+        assert!(rivet(&mut w, &t).is_none());
+        assert_eq!(w.projectiles.len(), MAX_PROJECTILES);
+        for i in 0..MAX_ENEMIES {
+            let at = Vec3::new((i % 16) as f32 * 3.0 - 24.0, 0.0, (i / 16) as f32 * 3.0 - 24.0);
+            assert!(w.spawn_enemy("husk", at, 0.0).is_some(), "enemy {i}");
+        }
+        assert!(w.spawn_enemy("husk", Vec3::ZERO, 0.0).is_none());
+        assert_eq!(w.enemies.len(), MAX_ENEMIES);
+        // A crowded world keeps ticking.
+        w.step(&TickInputs::new(), &t, None);
+    }
+
+    #[test]
+    fn encounter_waves_fill_up_to_the_enemy_cap_and_still_clear() {
+        use crate::level::{Encounter, EnemySpawn, Wave};
+        let t = Tuning::default();
+        let mut level = builtin_level(BUILTIN_LEVEL).unwrap();
+        level.kind = LevelKind::Campaign;
+        let husk = EnemySpawn {
+            enemy: "husk".into(),
+            position: Vec3::new(10.0, 0.0, 10.0),
+            yaw: 0.0,
+        };
+        level.encounters.push(Encounter {
+            trigger: Volume {
+                min: Vec3::splat(-300.0),
+                max: Vec3::splat(-299.0),
+            },
+            arena: None,
+            rally: None,
+            lock_doors: vec![],
+            unlock_doors: vec![],
+            waves: vec![Wave {
+                delay: 0.0,
+                spawns: vec![husk; 3],
+            }],
+        });
+        let mut w = SimWorld::new("capped", Arc::new(level), DEFAULT_TICK_RATE);
+        w.add_player(PlayerId(0), "A").notarget = true;
+        // Room for two more enemies.
+        let filler: Vec<NetId> = (0..MAX_ENEMIES - 2)
+            .map(|i| {
+                let at = Vec3::new((i % 16) as f32 * 3.0 - 50.0, 0.0, (i / 16) as f32 * 3.0 - 50.0);
+                w.spawn_enemy("husk", at, 0.0).unwrap()
+            })
+            .collect();
+        w.start_encounter(0);
+        let mut events = Vec::new();
+        for _ in 0..5 {
+            events.extend(w.step(&TickInputs::new(), &t, None));
+        }
+        let wave = events.iter().find_map(|e| match e {
+            SimEvent::WaveStarted { enemies, .. } => Some(*enemies),
+            _ => None,
+        });
+        assert_eq!(wave, Some(2), "the wave spawns what fits");
+        assert_eq!(w.enemies.len(), MAX_ENEMIES);
+        let wave_enemies = w.encounters.states[0].alive.clone();
+        assert_eq!(wave_enemies.len(), 2);
+        assert!(wave_enemies.iter().all(|id| !filler.contains(id)));
+        for id in wave_enemies {
+            w.kill_enemy(&t, id);
+        }
+        let mut events = Vec::new();
+        for _ in 0..5 {
+            events.extend(w.step(&TickInputs::new(), &t, None));
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, SimEvent::EncounterCleared { index: 0 })),
+            "{events:?}"
+        );
     }
 
     #[test]

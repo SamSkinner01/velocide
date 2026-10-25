@@ -69,6 +69,9 @@ pub const MAX_BASELINE_AGE_TICKS: u32 = 120;
 const SENT_FRAMES_KEPT: usize = 64;
 /// Lag compensation history length (ms). Rewinds are clamped by `NetTuning::lag_comp_max_ms`.
 pub const LAG_COMP_HISTORY_MS: f32 = 1000.0;
+/// Slack (ms) on top of what a client's connection explains when bounding how old its view
+/// may be (`Server::update_view_lag_limits`).
+pub const VIEW_LAG_MARGIN_MS: f32 = 50.0;
 /// A client sending this many undecodable messages is kicked.
 const MAX_DECODE_ERRORS: u32 = 200;
 /// Per update, at most this many messages are processed per client and channel (the rest is
@@ -109,7 +112,11 @@ pub struct ServerConfig {
     /// host can change it up to `shared::lobby::MAX_PLAYERS`).
     pub lobby: LobbyConfig,
     /// Allow dev chat commands (`/spawn husk 3`, `/god`, `/give`...). See `docs/combat.md`.
-    /// With the lobby enabled only its host may use them.
+    /// Off by default: on for single-player and listen servers ([`ServerConfig::single_player`],
+    /// [`ServerConfig::host`]); dedicated servers opt in with `--dev-commands`. With the lobby
+    /// enabled only its host may use them (on a listen server: the player whose client
+    /// presented the host token); without one (single-player, `--no-lobby`) every player may.
+    /// Commands cost a chat token (same rate limit as chat).
     pub dev_commands: bool,
     /// Enemy definitions directory; `None` = `assets/enemies` (built-ins as fallback).
     pub enemies_dir: Option<PathBuf>,
@@ -129,30 +136,34 @@ impl Default for ServerConfig {
             delta_compression: true,
             server_name: format!("{} server", shared::GAME_NAME),
             lobby: LobbyConfig::default(),
-            dev_commands: true,
+            dev_commands: false,
             enemies_dir: None,
         }
     }
 }
 
 impl ServerConfig {
-    /// In-process server for single-player: loopback, ephemeral port, one player.
+    /// In-process server for single-player: loopback, ephemeral port, one player, dev
+    /// commands on.
     pub fn single_player(level: &str) -> Self {
         Self {
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             max_players: 1,
             level: level.to_string(),
+            dev_commands: true,
             ..Default::default()
         }
     }
 
-    /// Listen server on all interfaces, starting in the lobby.
+    /// Listen server on all interfaces, starting in the lobby. Dev commands are on for the
+    /// host (whose client presents the lobby's host token), never for guests.
     pub fn host(port: u16, level: &str, max_players: usize) -> Self {
         Self {
             bind: SocketAddr::from(([0, 0, 0, 0], port)),
             max_players,
             level: level.to_string(),
             lobby: LobbyConfig::enabled(),
+            dev_commands: true,
             ..Default::default()
         }
     }
@@ -445,7 +456,8 @@ impl Server {
     }
 
     /// Spawns `count` enemies of definition `name` spread around `position` (on the ground
-    /// below it when there is one). Returns their ids (empty if the name is unknown).
+    /// below it when there is one). Returns their ids (empty if the name is unknown; fewer
+    /// than `count` at the world's enemy limit, `shared::sim::MAX_ENEMIES`).
     pub fn spawn_enemies(
         &mut self,
         name: &str,
@@ -498,8 +510,12 @@ impl Server {
         infos
     }
 
-    /// Replaces the tuning and pushes it to every client.
-    pub fn set_tuning(&mut self, tuning: Tuning) {
+    /// Replaces the tuning (sanitized: out-of-range values are clamped) and pushes it to every
+    /// client.
+    pub fn set_tuning(&mut self, mut tuning: Tuning) {
+        if tuning.sanitize() {
+            log::warn!("tuning: out-of-range values were clamped");
+        }
         if tuning == self.tuning {
             return;
         }
@@ -948,26 +964,25 @@ impl Server {
         };
         match msg {
             ClientMessage::Chat { text } => {
+                // Chat and dev commands share one token bucket.
                 let elapsed = (now - conn.chat_refill_time).max(0.0) as f32;
                 conn.chat_refill_time = now;
                 conn.chat_tokens = (conn.chat_tokens + elapsed * CHAT_PER_SECOND).min(CHAT_BURST);
                 if conn.chat_tokens < 1.0 {
                     return;
                 }
-                if self.config.dev_commands && text.trim_start().starts_with('/') {
-                    // Dev commands are not chat (and not rate limited like it). On lobby
-                    // servers only the host may use them (no guest `/god` in a deathmatch).
-                    let reply = if self.config.lobby.enabled && self.flow.host != Some(player) {
-                        "dev commands are for the host only".to_string()
-                    } else {
-                        self.run_chat_command(player, text.trim())
+                conn.chat_tokens -= 1.0;
+                if text.trim_start().starts_with('/') {
+                    // Dev commands are not chat; the reply goes to the sender only.
+                    let reply = match self.dev_command_refusal(player) {
+                        Some(refusal) => refusal.to_string(),
+                        None => self.run_chat_command(player, text.trim()),
                     };
                     if let Some(text) = protocol::sanitize_chat(&reply) {
                         self.send(client, &ServerMessage::Chat { from: None, text });
                     }
                     return;
                 }
-                conn.chat_tokens -= 1.0;
                 if let Some(text) = protocol::sanitize_chat(&text) {
                     self.broadcast(&ServerMessage::Chat {
                         from: Some(player),
@@ -978,6 +993,20 @@ impl Server {
             ClientMessage::SetReady { ready } => self.lobby_set_ready(client, player, ready),
             ClientMessage::Lobby(request) => self.handle_lobby_request(client, player, request),
         }
+    }
+
+    /// Why `player` may not run dev commands (`None`: they may). See
+    /// [`ServerConfig::dev_commands`].
+    fn dev_command_refusal(&self, player: PlayerId) -> Option<&'static str> {
+        if !self.config.dev_commands {
+            return Some("dev commands are disabled on this server");
+        }
+        // Lobby servers: the host only (on listen servers the host is the token holder, so
+        // no guest `/god` in someone's deathmatch).
+        if self.config.lobby.enabled && self.flow.host != Some(player) {
+            return Some("dev commands are for the host only");
+        }
+        None
     }
 
     fn handle_input_packet(
@@ -1033,6 +1062,7 @@ impl Server {
             }
         }
 
+        self.update_view_lag_limits();
         let events = self.world.step(&inputs, &self.tuning, Some(&self.lagcomp));
 
         let mut scratch = std::mem::take(&mut self.hitbox_scratch);
@@ -1075,6 +1105,24 @@ impl Server {
                 self.tick_time_accum.as_secs_f32() * 1e6 / self.tick_time_count as f32;
             self.tick_time_accum = Duration::ZERO;
             self.tick_time_count = 0;
+        }
+    }
+
+    /// Bounds how old each player's view may claim to be (lag-compensation rewind, parry
+    /// windows) by what their connection can explain: measured RTT + one snapshot interval +
+    /// the largest interpolation delay + [`VIEW_LAG_MARGIN_MS`] (`net.lag_comp_max_ms` still
+    /// caps it). The view time is chosen by the client, so without this a LAN client could
+    /// claim the full rewind and parry window.
+    fn update_view_lag_limits(&mut self) {
+        let snapshot_ms = self.snapshot_interval as f32 * 1000.0 / self.config.tick_rate as f32;
+        let interp_ms = self.tuning.net.interp_delay_max_ms.max(0.0);
+        for conn in self.clients.values() {
+            let Some(p) = conn.player.and_then(|id| self.world.players.get_mut(&id)) else {
+                continue;
+            };
+            let rtt_ms = (self.renet.rtt(conn.id) * 1000.0) as f32;
+            p.view_lag_limit_ms =
+                Some(rtt_ms.max(0.0) + snapshot_ms + interp_ms + VIEW_LAG_MARGIN_MS);
         }
     }
 

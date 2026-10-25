@@ -116,13 +116,15 @@ the `InMatch` state.
 ## Host rules
 
 - **Listen server**: `Session::start` gives the in-process server a random
-  `LobbyConfig::host_token` and the local client presents it (`ClaimHost`). Only that player
-  is host; the role never passes to a guest (their server is in the host's process anyway).
-  A wrong token is ignored (logged). The first lobby state can arrive one round trip before
-  the claim (host shown as nobody for a frame).
+  `LobbyConfig::host_token` (OS randomness, `session::random_host_token`) and the local client
+  presents it (`ClaimHost`). Only that player is host; the role never passes to a guest (their
+  server is in the host's process anyway). A wrong token is ignored (logged). The first lobby
+  state can arrive one round trip before the claim (host shown as nobody for a frame). Dev
+  chat commands are the host's only.
 - **Dedicated server** (no token): the longest-connected human is host; when they leave, the
   next one in join order becomes host and the server says "*NAME is now the host*". Bots never
-  host. An empty server has no host until someone joins.
+  host. An empty server has no host until someone joins. Dev chat commands are off unless the
+  server was started with `--dev-commands` (then for the host only).
 - **Autostart** (`LobbyConfig::autostart`, `velocide-server --autostart`, client
   `--autostart` when hosting): whenever every connected human is ready the server starts the
   countdown itself; if someone stops being ready or a not-ready player joins, it is cancelled.

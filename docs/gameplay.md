@@ -46,7 +46,9 @@ slot key again cycles its alt mode. Damage multipliers: head/weak point ×2 (per
 - Pressing `PUNCH` opens a **parry window** of 0.2 s. Any parryable enemy projectile that is
   within 3 m of the player (in front, 70° cone) during the window is **deflected**: it now
   belongs to the player, flies along the player's aim (auto-aimed at the nearest enemy within a
-  15° cone), at 1.5× speed and 2× damage. Kills with it score *RETURN TO SENDER*.
+  15° cone), at 1.5× speed and 2× damage. Kills with it score *RETURN TO SENDER*. Punching
+  the same projectile back and forth never takes it past 250 m/s or 400 damage
+  (`parry_max_speed`, `parry_max_damage`).
 - **Network tolerance**: the server validates against the lag-compensated (rewound) projectile
   positions at the client's view time and accepts a parry up to `parry_tolerance_ms` (80 ms)
   after the server would otherwise have applied the hit. To make that possible, damage from a

@@ -5,6 +5,7 @@
 //! when open. glTF props are loaded through `engine::assets::gltf` and cached per path.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Component, Path, PathBuf};
 
 use engine::assets::meshgen::{BoxDesc, MeshBuilder};
 use engine::assets::{gltf, procedural};
@@ -21,6 +22,44 @@ pub fn material_is_unlit(material: &str) -> bool {
 /// Opacity of a material (translucent materials are drawn in the translucent pass).
 pub fn material_alpha(material: &str) -> f32 {
     if material == "glass" { 0.45 } else { 1.0 }
+}
+
+/// Largest glTF file a level prop may load.
+pub const MAX_PROP_MODEL_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Resolves a level prop's `model` (a path relative to the assets folder) to a file inside
+/// `assets`. Levels come from servers, so the path must be relative and made only of plain
+/// names (no `..`, `.`, root, drive or `\`), end in `.gltf` / `.glb`, stay inside the
+/// assets folder after resolving symlinks, and name a regular file of at most
+/// [`MAX_PROP_MODEL_BYTES`]. Anything else (device files, pipes, network paths, files
+/// elsewhere on disk) is refused with the reason.
+pub fn resolve_prop_model(assets: &Path, model: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(model);
+    if model.is_empty() || model.contains(['\\', ':', '\0']) {
+        return Err("not a plain relative path".into());
+    }
+    if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+        return Err("must be a relative path inside assets/ without '.' or '..'".into());
+    }
+    let ext = rel.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !ext.eq_ignore_ascii_case("gltf") && !ext.eq_ignore_ascii_case("glb") {
+        return Err("not a .gltf / .glb file".into());
+    }
+    let root = assets
+        .canonicalize()
+        .map_err(|e| format!("assets folder {}: {e}", assets.display()))?;
+    let path = root.join(rel).canonicalize().map_err(|e| e.to_string())?;
+    if !path.starts_with(&root) {
+        return Err("resolves outside the assets folder".into());
+    }
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a regular file".into());
+    }
+    if meta.len() > MAX_PROP_MODEL_BYTES {
+        return Err(format!("larger than {MAX_PROP_MODEL_BYTES} bytes"));
+    }
+    Ok(path)
 }
 
 /// CPU-side level geometry (no GPU resources), useful for tools and tests.
@@ -151,9 +190,17 @@ impl LevelRender {
         // glTF props, loaded once per distinct path.
         let mut prop_cache: HashMap<String, Vec<(engine::gfx::MeshId, TextureId, Vec4)>> =
             HashMap::new();
+        let assets = engine::assets_dir();
         for prop in &level.props {
             let parts = prop_cache.entry(prop.model.clone()).or_insert_with(|| {
-                let path = engine::assets_dir().join(&prop.model);
+                // The level may come from a server: only files inside assets/ are read.
+                let path = match resolve_prop_model(&assets, &prop.model) {
+                    Ok(path) => path,
+                    Err(err) => {
+                        log::warn!("level prop {:?} skipped: {err}", prop.model);
+                        return Vec::new();
+                    }
+                };
                 match gltf::load(&path) {
                     Ok(parts) => parts
                         .into_iter()
@@ -282,5 +329,56 @@ mod tests {
             assert!(mesh.indices.iter().all(|&i| (i as usize) < mesh.vertices.len()));
         }
         assert_eq!(geometry.doors.len(), level.doors.len());
+    }
+
+    #[test]
+    fn prop_models_stay_inside_the_assets_folder() {
+        let base = std::env::temp_dir().join(format!("velocide-props-{}", std::process::id()));
+        let assets = base.join("assets");
+        let models = assets.join("models");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(models.join("dir.glb")).unwrap();
+        std::fs::write(models.join("crate.glb"), b"glTF").unwrap();
+        std::fs::write(models.join("Crate.GLTF"), b"{}").unwrap();
+        std::fs::write(models.join("notes.txt"), b"hi").unwrap();
+        std::fs::write(base.join("outside.glb"), b"glTF").unwrap();
+        let big = std::fs::File::create(models.join("big.glb")).unwrap();
+        big.set_len(MAX_PROP_MODEL_BYTES + 1).unwrap(); // sparse
+        drop(big);
+
+        let ok = |m: &str| resolve_prop_model(&assets, m);
+        let expected = models.join("crate.glb").canonicalize().unwrap();
+        assert_eq!(ok("models/crate.glb"), Ok(expected));
+        assert!(ok("models/Crate.GLTF").is_ok());
+        for evil in [
+            "",
+            "/etc/passwd",
+            "/dev/zero",
+            "/dev/zero.glb",
+            "../outside.glb",
+            "models/../../outside.glb",
+            "models/../models/crate.glb",
+            "./models/crate.glb",
+            "models//../crate.glb",
+            "models\\..\\..\\outside.glb",
+            "\\\\server\\share\\x.glb",
+            "C:/Windows/x.glb",
+            "C:x.glb",
+            "models/notes.txt",
+            "models/crate",
+            "models/missing.glb",
+            "models/dir.glb",
+            "models/big.glb",
+        ] {
+            assert!(ok(evil).is_err(), "{evil:?} must be refused");
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(base.join("outside.glb"), models.join("link.glb")).unwrap();
+            std::os::unix::fs::symlink("/dev/zero", models.join("zero.glb")).unwrap();
+            assert!(ok("models/link.glb").unwrap_err().contains("outside"));
+            assert!(ok("models/zero.glb").is_err());
+        }
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

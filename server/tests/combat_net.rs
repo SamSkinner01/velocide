@@ -421,18 +421,22 @@ fn net_parry(one_way_ms: f32, punch_at: Option<f32>, late_ms: f32) -> (bool, f32
         .world_mut()
         .spawn_enemy("husk", Vec3::new(0.0, 0.0, -50.0), 0.0)
         .unwrap();
-    let orb = n.server.world_mut().spawn_enemy_projectile(
-        &tuning,
-        ProjectileKind::SpitterOrb,
-        owner,
-        Attack::Enemy {
-            kind: kind::HUSK,
-            attack: 0,
-        },
-        Vec3::new(0.0, 1.4, -25.0),
-        Vec3::new(0.0, 0.0, 22.0),
-        20.0,
-    );
+    let orb = n
+        .server
+        .world_mut()
+        .spawn_enemy_projectile(
+            &tuning,
+            ProjectileKind::SpitterOrb,
+            owner,
+            Attack::Enemy {
+                kind: kind::HUSK,
+                attack: 0,
+            },
+            Vec3::new(0.0, 1.4, -25.0),
+            Vec3::new(0.0, 0.0, 22.0),
+            20.0,
+        )
+        .expect("orb");
     let mut punched_at: Option<f64> = None;
     let mut touched_at: Option<f64> = None;
     let mut time = 0.0;
@@ -710,7 +714,10 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
 
 #[test]
 fn dev_chat_commands() {
-    let mut n = Net::new(config());
+    let mut n = Net::new(ServerConfig {
+        dev_commands: true,
+        ..config()
+    });
     let a = n.add("Dev", None);
     n.wait_in_game();
     let id = n.clients[a].id();
@@ -723,7 +730,8 @@ fn dev_chat_commands() {
         "/bogus",
     ] {
         n.clients[a].net.send_chat(cmd);
-        n.run(0.2, &mut |_, _| Some(idle(0.0)));
+        // Commands share chat's rate limit (burst 5, then 1/s).
+        n.run(0.5, &mut |_, _| Some(idle(0.0)));
     }
     let replies: Vec<String> = n.clients[a]
         .events

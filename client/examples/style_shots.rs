@@ -529,6 +529,7 @@ fn main() -> anyhow::Result<()> {
         level: "crucible_of_veins".into(),
         max_players: 4,
         watch_tuning: false,
+        dev_commands: true, // `/kill`
         ..Default::default()
     })?;
     let address = server.connect_addr().to_string();

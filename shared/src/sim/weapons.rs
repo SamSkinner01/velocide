@@ -512,7 +512,7 @@ impl SimWorld {
                                 eye,
                                 dir * r.rivet_speed,
                             );
-                            if let Some(proj) = self.projectiles.get_mut(&pid) {
+                            if let Some(proj) = pid.and_then(|pid| self.projectiles.get_mut(&pid)) {
                                 proj.attack = Attack::Volley;
                                 proj.damage = r.volley_damage;
                             }

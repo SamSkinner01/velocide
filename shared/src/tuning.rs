@@ -223,6 +223,11 @@ pub struct CombatTuning {
     /// Deflected projectiles fly this much faster (flak uses its own multiplier).
     pub parry_speed_multiplier: f32,
     pub parry_damage_multiplier: f32,
+    /// Parrying never makes a projectile faster than this (m/s) ...
+    pub parry_max_speed: f32,
+    /// ... or its direct / explosion damage higher than this, however often it is punched
+    /// back and forth (a projectile already beyond a cap keeps its value).
+    pub parry_max_damage: f32,
     /// Deflections auto-aim at the nearest hostile within this cone / range.
     pub parry_auto_aim_degrees: f32,
     pub parry_auto_aim_range: f32,
@@ -280,6 +285,8 @@ impl Default for CombatTuning {
             parry_close_range: 1.2,
             parry_speed_multiplier: 1.5,
             parry_damage_multiplier: 2.0,
+            parry_max_speed: 250.0,
+            parry_max_damage: 400.0,
             parry_auto_aim_degrees: 15.0,
             parry_auto_aim_range: 80.0,
             parry_hard_damage_clear: 0.5,
@@ -813,14 +820,277 @@ impl Default for ModeTuning {
     }
 }
 
+// ---- range checks ([`Tuning::sanitize`]) ------------------------------------------------------
+//
+// Tuning comes from a file anyone can edit and, on clients, from the server. Absurd values
+// (u32::MAX pellets, 1e30 m ranges, NaN speeds) would allocate billions of rays, stall
+// collision queries or poison the simulation, so every field is clamped to a sane range.
+// The ranges are generous: they exist to keep the game running, not to judge game design.
+
+/// Distances, ranges, radii, heights (m).
+const MAX_DIST: f32 = 1.0e4;
+/// Speeds and knockbacks (m/s).
+const MAX_SPEED: f32 = 1.0e3;
+/// Accelerations, gravity (m/s²).
+const MAX_ACCEL: f32 = 1.0e4;
+/// Durations, cooldowns, lifetimes (s).
+const MAX_TIME: f32 = 3600.0;
+/// Damage, health and heal amounts (HP).
+const MAX_DAMAGE: f32 = 1.0e5;
+/// Multipliers.
+const MAX_MULT: f32 = 100.0;
+/// Shot / projectile / charge counts.
+const MAX_COUNT: u32 = 64;
+/// Network timings (ms).
+const MAX_MS: f32 = 1000.0;
+/// Style points.
+const MAX_POINTS: f32 = 1.0e6;
+
+/// `v` clamped to `lo..=hi`; NaN becomes `default`.
+fn clamped(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
+    if v.is_nan() { default } else { v.clamp(lo, hi) }
+}
+
+/// `clamp!(self, defaults, lo, hi; field, ...)`: clamps float fields (NaN → their default).
+macro_rules! clamp {
+    ($s:ident, $d:ident, $lo:expr, $hi:expr; $($f:ident),+ $(,)?) => {
+        $( $s.$f = clamped($s.$f, $lo, $hi, $d.$f); )+
+    };
+}
+
+/// `clamp_count!(self; field, ...)`: caps counts at [`MAX_COUNT`].
+macro_rules! clamp_count {
+    ($s:ident; $($f:ident),+ $(,)?) => {
+        $( $s.$f = $s.$f.min(MAX_COUNT); )+
+    };
+}
+
+impl MovementTuning {
+    /// Clamps every value to a sane range (see [`Tuning::sanitize`]).
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.05, 5.0; radius);
+        clamp!(self, d, 0.2, 20.0; standing_height, slide_height);
+        clamp!(self, d, 0.0, 20.0; eye_height, slide_eye_height);
+        clamp!(self, d, 0.0, 5.0; step_height);
+        clamp!(self, d, 0.0, 90.0; max_ground_slope_degrees, fov_kick_degrees,
+            slide_tilt_degrees, wall_tilt_degrees);
+        clamp!(self, d, 0.0, MAX_SPEED; ground_speed, ground_stop_speed, air_max_speed,
+            max_fall_speed, max_speed, jump_speed, dash_speed, dash_end_speed, slide_min_speed,
+            slide_max_speed, slam_speed, slam_bounce_speed, slam_bounce_power_bonus,
+            wall_jump_up_speed, wall_jump_out_speed, wall_jump_input_speed,
+            wall_cling_max_fall_speed, fov_kick_speed);
+        clamp!(self, d, 0.0, MAX_ACCEL; ground_accel, ground_overspeed_decel, ground_friction,
+            air_accel, gravity);
+        clamp!(self, d, 0.0, MAX_TIME; coyote_time, jump_buffer_time, dash_duration,
+            dash_invuln_time, slam_bounce_window);
+        clamp!(self, d, 0.0, MAX_DIST; footstep_stride, slam_min_height, slam_full_power_height,
+            slam_shockwave_radius);
+        clamp!(self, d, 0.0, MAX_COUNT as f32; dash_charges);
+        clamp!(self, d, 0.0, MAX_MULT; dash_regen_rate, dash_jump_keep, slide_slope_accel,
+            slide_jump_boost, slam_horizontal_keep);
+        clamp!(self, d, 0.0, 3600.0; slide_steer_degrees);
+        clamp!(self, d, 0.0, 10.0; wall_detect_distance, landing_dip);
+        clamp_count!(self; wall_jumps);
+    }
+}
+
+impl CombatTuning {
+    /// Clamps every value to a sane range (see [`Tuning::sanitize`]).
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 1.0, MAX_DAMAGE; max_health);
+        clamp!(self, d, 0.0, MAX_DAMAGE; hard_damage_recover_rate, parry_max_damage,
+            punch_damage, slam_damage);
+        clamp!(self, d, 0.0, 1.0; hard_damage_fraction, self_damage_fraction,
+            parry_hard_damage_clear, explosion_edge_fraction, slam_min_power_scale);
+        clamp!(self, d, 0.0, MAX_TIME; hard_damage_recover_delay, respawn_delay,
+            spawn_protection, parry_window, punch_cooldown);
+        clamp!(self, d, 0.0, MAX_MULT; player_head_multiplier, parry_speed_multiplier,
+            parry_damage_multiplier, explosion_up_bias);
+        clamp!(self, d, 0.0, MAX_DIST; hitscan_range, parry_range, parry_close_range,
+            parry_auto_aim_range, melee_parry_range, punch_range);
+        clamp!(self, d, 0.0, 360.0; parry_cone_degrees, parry_auto_aim_degrees,
+            punch_cone_degrees);
+        clamp!(self, d, 0.0, MAX_SPEED; parry_max_speed, punch_knockback, slam_knockback);
+        self.blood.sanitize();
+        self.prism.sanitize();
+        self.lancet.sanitize();
+        self.thresher.sanitize();
+        self.riveter.sanitize();
+        self.cinderbox.sanitize();
+        self.enemy_projectiles.sanitize();
+    }
+}
+
+impl BloodTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_MULT; heal_fraction, melee_heal_fraction);
+        clamp!(self, d, 0.0, MAX_DIST; radius, death_radius, merge_distance);
+        clamp!(self, d, 0.0, MAX_TIME; lifetime, death_lifetime, merge_window);
+        clamp!(self, d, 0.0, MAX_DAMAGE; death_pool);
+    }
+}
+
+impl PrismTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp_count!(self; charges);
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, lifetime);
+        clamp!(self, d, 0.0, MAX_SPEED; throw_speed, throw_up_speed);
+        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
+        clamp!(self, d, 0.0, 10.0; radius);
+        clamp!(self, d, 0.0, MAX_DIST; ricochet_radius, chain_range, target_range);
+        clamp!(self, d, 0.0, MAX_MULT; damage_multiplier);
+        clamp!(self, d, 0.0, 1.0; restitution);
+    }
+}
+
+impl LancetTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage, overcharge_min_damage, overcharge_max_damage,
+            fan_damage);
+        clamp!(self, d, 0.0, MAX_TIME; interval, overcharge_time, overcharge_cooldown,
+            fan_cooldown);
+        clamp!(self, d, 0.0, 90.0; fan_spread_degrees);
+        clamp_count!(self; overcharge_pierce, fan_shots);
+    }
+}
+
+impl ThresherTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp_count!(self; pellets);
+        clamp!(self, d, 0.0, MAX_DAMAGE; pellet_damage, slug_damage, flak_damage);
+        clamp!(self, d, 0.0, 180.0; cone_degrees);
+        clamp!(self, d, 0.0, MAX_TIME; interval, slug_cooldown, flak_fuse, flak_cooldown);
+        clamp!(self, d, 0.0, MAX_SPEED; pellet_knockback, slug_knockback, slug_recoil,
+            flak_speed, flak_knockback);
+        clamp!(self, d, 0.0, MAX_DIST; pellet_range, flak_radius);
+        clamp!(self, d, 0.0, MAX_ACCEL; flak_gravity);
+        clamp!(self, d, 0.0, 10.0; flak_projectile_radius);
+        clamp!(self, d, 0.0, MAX_MULT; flak_parry_speed_multiplier);
+    }
+}
+
+impl RiveterTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_SPEED; rivet_speed, saw_speed);
+        clamp!(self, d, 0.0, MAX_DAMAGE; rivet_damage, saw_damage, volley_damage);
+        clamp!(self, d, 0.1, 1000.0; rate);
+        clamp!(self, d, 0.0, 180.0; spread_degrees);
+        clamp!(self, d, 0.0, 89.0; volley_ring_degrees);
+        clamp!(self, d, 0.0, 10.0; rivet_radius, saw_radius);
+        clamp!(self, d, 0.0, MAX_TIME; rivet_lifetime, saw_damage_interval, saw_lifetime,
+            saw_cooldown, volley_cooldown);
+        clamp_count!(self; saw_bounces, volley_count);
+    }
+}
+
+impl CinderboxTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_SPEED; rocket_speed, rocket_knockback, sticky_speed,
+            sticky_knockback, mortar_speed, mortar_knockback);
+        clamp!(self, d, 0.0, MAX_DIST; rocket_radius, sticky_radius, mortar_radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; rocket_damage, sticky_damage, mortar_damage);
+        clamp!(self, d, 0.0, MAX_TIME; rocket_interval, rocket_lifetime, sticky_cooldown,
+            sticky_chain_window, sticky_lifetime, mortar_cooldown);
+        clamp!(self, d, 0.0, 10.0; rocket_projectile_radius);
+        clamp!(self, d, 0.0, MAX_ACCEL; sticky_gravity, mortar_gravity);
+        clamp!(self, d, 0.0, 90.0; mortar_angle_degrees);
+        clamp_count!(self; sticky_max);
+    }
+}
+
+impl EnemyProjectileTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, 10.0; orb_radius, bolt_radius);
+        clamp!(self, d, 0.0, MAX_ACCEL; orb_gravity, bolt_gravity);
+        clamp!(self, d, 0.0, MAX_TIME; orb_lifetime, bolt_lifetime);
+    }
+}
+
+impl NetTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 1.0, 1000.0; snapshot_rate);
+        clamp!(self, d, 0.0, MAX_MS; interp_delay_ms, lag_comp_max_ms, parry_tolerance_ms,
+            max_extrapolation_ms, interp_delay_max_ms);
+        clamp!(self, d, 0.0, 1000.0; correction_smoothing);
+        clamp!(self, d, 0.0, MAX_DIST; correction_snap_distance);
+        clamp!(self, d, 0.0, MAX_MULT; interp_jitter_factor);
+    }
+}
+
+impl StyleTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 1.0, MAX_POINTS; points_per_rank);
+        clamp!(self, d, 0.0, MAX_POINTS; decay_lowest, decay_highest, kill, frag, headshot,
+            airkill, airshot, multikill, parry, return_to_sender, ricochet, ricochet_per_bounce,
+            exploded, slam_kill, fisted);
+        clamp!(self, d, 0.0, 1.0; rank_down_refill, freshness_cost, freshness_restore,
+            freshness_regen, freshness_min, stale_threshold);
+        clamp!(self, d, 0.0, MAX_TIME; rank_grace, multikill_window);
+        clamp!(self, d, 0.0, MAX_DAMAGE; close_call_health);
+        clamp!(self, d, 0.0, MAX_MULT; close_call_multiplier);
+    }
+}
+
+impl ModeTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; sp_death_time, downed_time, revive_time,
+            fall_respawn_time, wipe_respawn_time, exit_countdown, knockoff_credit,
+            scoreboard_interval);
+        clamp!(self, d, 0.0, MAX_DIST; revive_range);
+        clamp!(self, d, 0.0, MAX_DAMAGE; revive_health);
+        for (values, defaults) in [
+            (&mut self.grade_time, d.grade_time),
+            (&mut self.grade_kills, d.grade_kills),
+            (&mut self.grade_style, d.grade_style),
+            (&mut self.grade_damage, d.grade_damage),
+        ] {
+            for (v, default) in values.iter_mut().zip(defaults) {
+                *v = clamped(*v, 0.0, MAX_POINTS, default);
+            }
+        }
+    }
+}
+
 impl Tuning {
     pub fn default_path() -> PathBuf {
         crate::assets_dir().join("tuning.ron")
     }
 
+    /// Clamps every value to a sane range: NaN becomes the field's default, floats are
+    /// limited (distances ≤ 1e4 m, speeds ≤ 1e3 m/s, times ≤ 1 h, rates > 0...), counts
+    /// ≤ 64. Idempotent; the defaults (and any reasonable file) are unchanged. Applied on
+    /// every load and by clients to the tuning a server sends. Returns true if anything was
+    /// changed.
+    pub fn sanitize(&mut self) -> bool {
+        let before = self.clone();
+        self.movement.sanitize();
+        self.combat.sanitize();
+        self.net.sanitize();
+        self.style.sanitize();
+        self.modes.sanitize();
+        *self != before
+    }
+
+    /// Loads and sanitizes a tuning file (out-of-range values are clamped with a warning).
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)?;
-        Ok(ron::from_str(&text)?)
+        let mut tuning: Tuning = ron::from_str(&text)?;
+        if tuning.sanitize() {
+            log::warn!("{}: out-of-range values were clamped", path.display());
+        }
+        Ok(tuning)
     }
 
     /// Loads the tuning file, falling back to defaults (with a warning) if it is missing or
@@ -850,6 +1120,84 @@ mod tests {
         let t = Tuning::default();
         let back: Tuning = ron::from_str(&t.to_ron()).unwrap();
         assert_eq!(t, back);
+    }
+
+    /// The defaults as RON with every float replaced by `float` and every integer by `int`.
+    fn defaults_with(float: &str, int: &str) -> Tuning {
+        let text = ron::to_string(&Tuning::default()).unwrap();
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        let mut prev = ' ';
+        while let Some(c) = chars.next() {
+            let starts_number = (c.is_ascii_digit() || c == '-') && matches!(prev, ':' | ',' | '(' | '[');
+            if !starts_number {
+                out.push(c);
+                prev = c;
+                continue;
+            }
+            let mut token = c.to_string();
+            while let Some(&n) = chars.peek() {
+                if !(n.is_ascii_alphanumeric() || matches!(n, '.' | '-' | '+')) {
+                    break;
+                }
+                token.push(n);
+                chars.next();
+            }
+            out.push_str(if token.contains(['.', 'e']) { float } else { int });
+            prev = '0';
+        }
+        ron::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"))
+    }
+
+    #[test]
+    fn sanitize_keeps_the_defaults_and_the_shipped_file() {
+        let mut t = Tuning::default();
+        assert!(!t.sanitize());
+        assert_eq!(t, Tuning::default());
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/tuning.ron");
+        let mut shipped: Tuning = ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(!shipped.sanitize(), "assets/tuning.ron has out-of-range values");
+    }
+
+    #[test]
+    fn sanitize_checks_every_field() {
+        // NaN everywhere: every float falls back to its default (a field missing from
+        // `sanitize` would stay NaN and fail the comparison).
+        let mut t = defaults_with("NaN", "3");
+        assert!(t.sanitize());
+        let mut expected = Tuning::default();
+        for n in [
+            &mut expected.movement.wall_jumps,
+            &mut expected.combat.prism.charges,
+            &mut expected.combat.lancet.overcharge_pierce,
+            &mut expected.combat.lancet.fan_shots,
+            &mut expected.combat.thresher.pellets,
+            &mut expected.combat.riveter.saw_bounces,
+            &mut expected.combat.riveter.volley_count,
+            &mut expected.combat.cinderbox.sticky_max,
+        ] {
+            *n = 3;
+        }
+        assert_eq!(t, expected);
+
+        // Absurdly large values (what a hostile server could send): clamped, and stable.
+        for float in ["1e30", "inf", "-1e30", "-inf"] {
+            let mut t = defaults_with(float, &u32::MAX.to_string());
+            assert!(t.sanitize());
+            let c = &t.combat;
+            assert_eq!(c.thresher.pellets, MAX_COUNT);
+            assert_eq!(c.riveter.volley_count, MAX_COUNT);
+            assert!(c.hitscan_range <= MAX_DIST && c.thresher.pellet_range <= MAX_DIST);
+            assert!(c.parry_max_speed <= MAX_SPEED && c.cinderbox.rocket_speed <= MAX_SPEED);
+            assert!(c.riveter.rate >= 0.1 && t.net.snapshot_rate >= 1.0);
+            assert!(t.movement.radius >= 0.05 && t.style.points_per_rank >= 1.0);
+            assert!(t.net.lag_comp_max_ms <= MAX_MS);
+            let text = ron::to_string(&t).unwrap();
+            assert!(!text.contains("inf") && !text.contains("NaN"), "{text}");
+            let before = t.clone();
+            assert!(!t.sanitize(), "idempotent");
+            assert_eq!(t, before);
+        }
     }
 
     #[test]

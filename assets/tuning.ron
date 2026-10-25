@@ -96,6 +96,8 @@
         parry_close_range: 1.2,          // touching-close: any angle in front
         parry_speed_multiplier: 1.5,
         parry_damage_multiplier: 2.0,
+        parry_max_speed: 250.0,          // repeated parries stop speeding a projectile up here
+        parry_max_damage: 400.0,         // ... and doubling its (direct / explosion) damage here
         parry_auto_aim_degrees: 15.0,
         parry_auto_aim_range: 80.0,
         parry_hard_damage_clear: 0.5,

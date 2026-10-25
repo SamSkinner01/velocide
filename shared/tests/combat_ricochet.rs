@@ -22,7 +22,7 @@ fn setup() -> (Arena, PlayerId) {
 /// A prism resting in mid-air at `pos` (as if it had come to rest there).
 fn prism_at(a: &mut Arena, owner: PlayerId, pos: Vec3) -> NetId {
     let t = a.tuning.clone();
-    let id = a.world.spawn_prism(&t, owner, pos, Vec3::ZERO);
+    let id = a.world.spawn_prism(&t, owner, pos, Vec3::ZERO).expect("prism");
     let prism = a.world.prisms.get_mut(&id).unwrap();
     prism.position = pos;
     prism.resting = true;

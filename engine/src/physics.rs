@@ -8,6 +8,13 @@
 //! Colliders are bucketed into a uniform XZ grid for broadphase. Each collider carries a `groups`
 //! bitmask; queries pass a `mask` and only colliders with `groups & mask != 0` are considered.
 //! Colliders can be disabled at runtime (e.g. an arena door that opens).
+//!
+//! **Robustness** (levels and tuning can come from a remote server): colliders covering more
+//! than [`MAX_CELLS_PER_COLLIDER`] grid cells are kept in an "oversize" list that every query
+//! checks directly instead of being inserted into every cell; colliders with a non-finite
+//! bounding box are never hit. Queries with non-finite inputs report nothing, a query box
+//! spanning more cells than there are colliders scans the collider list instead of the cells,
+//! and rays are limited to [`MAX_RAY_DISTANCE`] and stop once they leave the grid.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -30,6 +37,13 @@ pub const MASK_MOVEMENT: u32 = GROUP_WORLD | GROUP_PLAYER_CLIP | GROUP_DOOR;
 pub const MASK_SHOTS: u32 = GROUP_WORLD | GROUP_DOOR;
 
 const CELL_SIZE: f32 = 8.0;
+
+/// Colliders whose bounding box covers more grid cells than this are not inserted into the
+/// grid; every query tests them directly (a few huge floors are cheap to test, a brush with
+/// 100 km extents in every 8 m cell would exhaust memory).
+pub const MAX_CELLS_PER_COLLIDER: i64 = 1024;
+/// Rays are clamped to this length (metres).
+pub const MAX_RAY_DISTANCE: f32 = 1.0e5;
 
 /// Margin around the query region kept when clipping large boxes (see [`clip_box`]).
 const CLIP_MARGIN: f32 = 2.0;
@@ -84,6 +98,10 @@ pub struct ContactInfo {
 pub struct CollisionWorld {
     colliders: Vec<Collider>,
     grid: HashMap<(i32, i32), Vec<u32>>,
+    /// Colliders too large for the grid (see [`MAX_CELLS_PER_COLLIDER`]); tested by every query.
+    oversize: Vec<u32>,
+    /// Smallest / largest grid cell holding a collider (`None` while the grid is empty).
+    grid_bounds: Option<((i32, i32), (i32, i32))>,
     /// Per-collider stamp used to avoid testing a collider twice in one query.
     stamps: Vec<Cell<u32>>,
     stamp: Cell<u32>,
@@ -148,8 +166,20 @@ impl CollisionWorld {
         let aabb = shape.compute_aabb(&pose);
         let id = self.colliders.len() as u32;
         let (aabb_min, aabb_max) = (aabb.mins, aabb.maxs);
-        for cell in cells_overlapping(aabb_min, aabb_max) {
-            self.grid.entry(cell).or_default().push(id);
+        if !aabb_min.is_finite() || !aabb_max.is_finite() {
+            // Kept (ids stay dense) but never queried.
+            log::warn!("collider {id} has a non-finite bounding box; it will never be hit");
+        } else if cell_count(aabb_min, aabb_max) > MAX_CELLS_PER_COLLIDER {
+            self.oversize.push(id);
+        } else {
+            let (lo, hi) = (cell_of(aabb_min), cell_of(aabb_max));
+            for cell in cells_overlapping(aabb_min, aabb_max) {
+                self.grid.entry(cell).or_default().push(id);
+            }
+            self.grid_bounds = Some(match self.grid_bounds {
+                None => (lo, hi),
+                Some((a, b)) => ((a.0.min(lo.0), a.1.min(lo.1)), (b.0.max(hi.0), b.1.max(hi.1))),
+            });
         }
         self.colliders.push(Collider {
             shape,
@@ -185,6 +215,9 @@ impl CollisionWorld {
         skin: f32,
         mask: u32,
     ) -> Option<SweepHit> {
+        if !start.is_finite() || !motion.is_finite() || !skin.is_finite() {
+            return None;
+        }
         let start_pose = Pose::from_translation(start);
         let local_aabb = shape.compute_local_aabb();
         let end = start + motion;
@@ -255,23 +288,58 @@ impl CollisionWorld {
         self.cast_shape(&ball, center, motion, 0.0, mask)
     }
 
-    /// Casts a ray. `dir` does not need to be normalized; `max_distance` is in world units.
+    /// Casts a ray. `dir` does not need to be normalized; `max_distance` is in world units
+    /// (clamped to [`MAX_RAY_DISTANCE`]). Non-finite inputs never hit.
     pub fn cast_ray(&self, origin: Vec3, dir: Vec3, max_distance: f32, mask: u32) -> Option<RayHit> {
+        if !origin.is_finite() || !dir.is_finite() || max_distance.is_nan() {
+            return None;
+        }
         let dir = dir.normalize_or_zero();
         if dir == Vec3::ZERO || max_distance <= 0.0 {
             return None;
         }
         let ray = Ray::new(origin, dir);
         let mut best: Option<RayHit> = None;
-        let mut limit = max_distance;
+        let mut limit = max_distance.min(MAX_RAY_DISTANCE);
+        let stamp = self.next_stamp();
+        let mut test = |id: u32, limit: &mut f32| {
+            let collider = &self.colliders[id as usize];
+            if !collider.enabled || collider.groups & mask == 0 {
+                return;
+            }
+            let s = &self.stamps[id as usize];
+            if s.get() == stamp {
+                return;
+            }
+            s.set(stamp);
+            if let Some(hit) =
+                collider
+                    .shape
+                    .cast_ray_and_get_normal(&collider.pose, &ray, *limit, true)
+            {
+                *limit = hit.time_of_impact;
+                best = Some(RayHit {
+                    distance: hit.time_of_impact,
+                    point: origin + dir * hit.time_of_impact,
+                    normal: hit.normal.normalize_or(Vec3::Y),
+                    collider: ColliderId(id),
+                    tag: collider.tag,
+                });
+            }
+        };
+        for &id in &self.oversize {
+            test(id, &mut limit);
+        }
+        let Some((grid_lo, grid_hi)) = self.grid_bounds else {
+            return best;
+        };
 
         // Walk the grid cells the ray passes through (2D DDA on XZ) so long rays stay cheap.
-        let stamp = self.next_stamp();
         let mut cell = cell_of(origin);
         let step_x = if dir.x > 0.0 { 1 } else { -1 };
         let step_z = if dir.z > 0.0 { 1 } else { -1 };
         let next_boundary = |c: i32, step: i32| -> f32 {
-            (if step > 0 { c + 1 } else { c }) as f32 * CELL_SIZE
+            (if step > 0 { c as i64 + 1 } else { c as i64 }) as f32 * CELL_SIZE
         };
         let mut t_max_x = if dir.x.abs() > 1e-8 {
             (next_boundary(cell.0, step_x) - origin.x) / dir.x
@@ -285,34 +353,25 @@ impl CollisionWorld {
         };
         let t_delta_x = if dir.x.abs() > 1e-8 { CELL_SIZE / dir.x.abs() } else { f32::INFINITY };
         let t_delta_z = if dir.z.abs() > 1e-8 { CELL_SIZE / dir.z.abs() } else { f32::INFINITY };
+        // A cell outside the grid's range on an axis the ray moves away from (or doesn't move
+        // along) can never lead back into the grid.
+        let gone = |c: i32, step: i32, moves: bool, lo: i32, hi: i32| {
+            (c < lo && (step < 0 || !moves)) || (c > hi && (step > 0 || !moves))
+        };
         let mut t_cell_start = 0.0f32;
+        // A ray of length `limit` crosses at most this many cells (each step moves one cell
+        // along one axis): a hard bound on the loop whatever the floats do.
+        let max_steps = (2.0 * limit / CELL_SIZE) as usize + 4;
 
-        loop {
+        for _ in 0..max_steps {
+            if gone(cell.0, step_x, t_delta_x.is_finite(), grid_lo.0, grid_hi.0)
+                || gone(cell.1, step_z, t_delta_z.is_finite(), grid_lo.1, grid_hi.1)
+            {
+                break;
+            }
             if let Some(ids) = self.grid.get(&cell) {
                 for &id in ids {
-                    let collider = &self.colliders[id as usize];
-                    if !collider.enabled || collider.groups & mask == 0 {
-                        continue;
-                    }
-                    let s = &self.stamps[id as usize];
-                    if s.get() == stamp {
-                        continue;
-                    }
-                    s.set(stamp);
-                    if let Some(hit) =
-                        collider
-                            .shape
-                            .cast_ray_and_get_normal(&collider.pose, &ray, limit, true)
-                    {
-                        limit = hit.time_of_impact;
-                        best = Some(RayHit {
-                            distance: hit.time_of_impact,
-                            point: origin + dir * hit.time_of_impact,
-                            normal: hit.normal.normalize_or(Vec3::Y),
-                            collider: ColliderId(id),
-                            tag: collider.tag,
-                        });
-                    }
+                    test(id, &mut limit);
                 }
             }
             let t_cell_end = t_max_x.min(t_max_z);
@@ -320,12 +379,21 @@ impl CollisionWorld {
                 break;
             }
             t_cell_start = t_cell_end;
+            // Far from the origin an f32 sum can stop changing: no progress, stop.
             if t_max_x < t_max_z {
-                cell.0 += step_x;
-                t_max_x += t_delta_x;
+                cell.0 = cell.0.saturating_add(step_x);
+                let next = t_max_x + t_delta_x;
+                if next <= t_max_x {
+                    break;
+                }
+                t_max_x = next;
             } else {
-                cell.1 += step_z;
-                t_max_z += t_delta_z;
+                cell.1 = cell.1.saturating_add(step_z);
+                let next = t_max_z + t_delta_z;
+                if next <= t_max_z {
+                    break;
+                }
+                t_max_z = next;
             }
         }
         best
@@ -340,6 +408,9 @@ impl CollisionWorld {
 
     /// True if `shape` placed at `center` overlaps any collider.
     pub fn intersects(&self, shape: &dyn Shape, center: Vec3, mask: u32) -> bool {
+        if !center.is_finite() {
+            return false;
+        }
         let pose = Pose::from_translation(center);
         let aabb = shape.compute_aabb(&pose);
         let mut hit = false;
@@ -367,6 +438,9 @@ impl CollisionWorld {
         prediction: f32,
         mask: u32,
     ) -> Vec<ContactInfo> {
+        if !center.is_finite() || !prediction.is_finite() {
+            return Vec::new();
+        }
         let pose = Pose::from_translation(center);
         let aabb = shape.compute_aabb(&pose);
         let lo = aabb.mins - Vec3::splat(prediction);
@@ -405,6 +479,8 @@ impl CollisionWorld {
         s
     }
 
+    /// Calls `f` once for every enabled collider matching `mask` whose bounding box overlaps
+    /// `lo..=hi` (nothing for a non-finite box).
     fn for_each_candidate(
         &self,
         lo: Vec3,
@@ -412,23 +488,43 @@ impl CollisionWorld {
         mask: u32,
         mut f: impl FnMut(u32, &Collider),
     ) {
+        if !lo.is_finite() || !hi.is_finite() {
+            return;
+        }
         let stamp = self.next_stamp();
+        let mut visit = |id: u32| {
+            let s = &self.stamps[id as usize];
+            if s.get() == stamp {
+                return;
+            }
+            s.set(stamp);
+            let c = &self.colliders[id as usize];
+            if !c.enabled || c.groups & mask == 0 {
+                return;
+            }
+            if !(c.aabb_max.cmpge(lo).all() && c.aabb_min.cmple(hi).all()) {
+                return;
+            }
+            // Broken colliders are never hit (they are in no cell, but a full scan sees them).
+            if !c.aabb_min.is_finite() || !c.aabb_max.is_finite() {
+                return;
+            }
+            f(id, c);
+        };
+        for &id in &self.oversize {
+            visit(id);
+        }
+        if cell_count(lo, hi) > self.colliders.len() as i64 {
+            // A huge query box: testing every collider beats visiting billions of cells.
+            for id in 0..self.colliders.len() as u32 {
+                visit(id);
+            }
+            return;
+        }
         for cell in cells_overlapping(lo, hi) {
             let Some(ids) = self.grid.get(&cell) else { continue };
             for &id in ids {
-                let s = &self.stamps[id as usize];
-                if s.get() == stamp {
-                    continue;
-                }
-                s.set(stamp);
-                let c = &self.colliders[id as usize];
-                if !c.enabled || c.groups & mask == 0 {
-                    continue;
-                }
-                if c.aabb_max.cmplt(lo).any() || c.aabb_min.cmpgt(hi).any() {
-                    continue;
-                }
-                f(id, c);
+                visit(id);
             }
         }
     }
@@ -478,6 +574,15 @@ fn cell_of(p: Vec3) -> (i32, i32) {
         (p.x / CELL_SIZE).floor() as i32,
         (p.z / CELL_SIZE).floor() as i32,
     )
+}
+
+/// Number of grid cells the box `lo..=hi` covers (computed without overflow).
+fn cell_count(lo: Vec3, hi: Vec3) -> i64 {
+    let (x0, z0) = cell_of(lo);
+    let (x1, z1) = cell_of(hi);
+    let nx = (x1 as i64 - x0 as i64 + 1).max(0);
+    let nz = (z1 as i64 - z0 as i64 + 1).max(0);
+    nx.saturating_mul(nz)
 }
 
 fn cells_overlapping(lo: Vec3, hi: Vec3) -> impl Iterator<Item = (i32, i32)> {
@@ -585,6 +690,115 @@ mod tests {
             assert_eq!(contacts.len(), 1);
             assert!(contacts[0].normal.y > 0.99999 && (contacts[0].distance - 0.01).abs() < 1e-4);
         }
+    }
+
+    /// Runs `f` and fails if it takes longer than `secs` (the defects these guard against
+    /// made a query take minutes or loop forever).
+    fn quick<T>(secs: f32, f: impl FnOnce() -> T) -> T {
+        let start = std::time::Instant::now();
+        let out = f();
+        let took = start.elapsed().as_secs_f32();
+        assert!(took < secs, "took {took:.2} s");
+        out
+    }
+
+    #[test]
+    fn very_long_rays_terminate() {
+        let w = floor_world();
+        for len in [1.0e8, 1.3e8, 1.0e12, f32::MAX, f32::INFINITY] {
+            // Through the wall: still hit.
+            let hit = quick(1.0, || w.cast_ray(Vec3::new(-19.0, 1.0, 0.3), Vec3::X, len, MASK_SHOTS))
+                .expect("hit wall");
+            assert_eq!(hit.tag, 1);
+            // Over everything, away from the grid: nothing, quickly.
+            for dir in [Vec3::new(1.0, 0.2, 0.7), Vec3::new(-0.3, 0.01, -1.0), Vec3::Y] {
+                let miss = quick(1.0, || w.cast_ray(Vec3::new(0.0, 30.0, 0.0), dir, len, MASK_SHOTS));
+                assert!(miss.is_none());
+            }
+        }
+        // From far outside the grid (and beyond the i32 cell range) towards it.
+        for origin in [Vec3::new(5.0e9, 1.0, 0.0), Vec3::new(1.0e30, 1.0, -1.0e30)] {
+            let r = quick(1.0, || w.cast_ray(origin, -origin, f32::MAX, MASK_SHOTS));
+            assert!(r.is_none(), "{r:?}");
+        }
+    }
+
+    #[test]
+    fn non_finite_queries_report_nothing() {
+        let w = floor_world();
+        let nan = Vec3::splat(f32::NAN);
+        let inf = Vec3::new(f32::INFINITY, 0.0, 0.0);
+        for bad in [nan, inf, -inf] {
+            assert!(w.cast_ray(bad, Vec3::X, 10.0, MASK_SHOTS).is_none());
+            assert!(w.cast_ray(Vec3::new(0.0, 1.0, 0.0), bad, 10.0, MASK_SHOTS).is_none());
+            assert!(w.cast_sphere(bad, 0.5, Vec3::X, MASK_SHOTS).is_none());
+            assert!(w.cast_sphere(Vec3::new(0.0, 1.0, 0.0), 0.5, bad, MASK_SHOTS).is_none());
+            assert!(!w.intersects_capsule(bad, 0.5, 0.4, MASK_MOVEMENT));
+            assert!(w.capsule_contacts(bad, 0.5, 0.4, 0.01, MASK_MOVEMENT).is_empty());
+        }
+        assert!(w.cast_ray(Vec3::new(0.0, 1.0, 0.0), -Vec3::Y, f32::NAN, MASK_SHOTS).is_none());
+        // A non-finite shape size: no hang, no hit.
+        assert!(quick(1.0, || w.cast_sphere(Vec3::new(0.0, 1.0, 0.0), f32::NAN, Vec3::X, MASK_SHOTS)).is_none());
+    }
+
+    #[test]
+    fn huge_sweeps_stay_fast() {
+        // A projectile parried back and forth used to reach speeds whose swept box covered
+        // billions of grid cells.
+        let w = floor_world();
+        for len in [1.0e6f32, 1.0e9, 1.0e15, 3.0e38] {
+            let hit = quick(1.0, || {
+                w.cast_sphere(Vec3::new(-19.0, 1.0, 0.3), 0.2, Vec3::X * len, MASK_SHOTS)
+            });
+            assert!(hit.is_some_and(|h| h.fraction < 1e-3), "{len}: {hit:?}");
+            quick(1.0, || {
+                w.capsule_contacts(Vec3::new(0.0, 0.8, 0.0), 0.5, 0.4, len, MASK_MOVEMENT)
+            });
+        }
+    }
+
+    #[test]
+    fn oversize_and_broken_colliders() {
+        let mut w = CollisionWorld::new();
+        // 200 km floor: one collider, not 600 million cell entries.
+        quick(1.0, || {
+            w.add_box(
+                Vec3::new(0.0, -0.5, 0.0),
+                Vec3::new(1.0e5, 0.5, 1.0e5),
+                Quat::IDENTITY,
+                GROUP_WORLD,
+                7,
+            )
+        });
+        assert_eq!(w.oversize.len(), 1);
+        assert!(w.grid.is_empty());
+        // Broken colliders are kept (ids stay dense) but never hit.
+        w.add_box(Vec3::splat(f32::NAN), Vec3::ONE, Quat::IDENTITY, GROUP_WORLD, 8);
+        w.add_box(Vec3::ZERO, Vec3::splat(f32::INFINITY), Quat::IDENTITY, GROUP_WORLD, 9);
+        w.add_box(Vec3::new(30.0, 1.0, 0.0), Vec3::ONE, Quat::IDENTITY, GROUP_WORLD, 10);
+        assert_eq!(w.len(), 4);
+        // Queries still see the huge floor (and the ordinary box) everywhere.
+        for x in [0.0, 5.0e4, -9.0e4] {
+            let hit = w
+                .cast_ray(Vec3::new(x, 10.0, 3.0), -Vec3::Y, 100.0, MASK_SHOTS)
+                .expect("floor");
+            assert_eq!(hit.tag, 7);
+            let c = w.capsule_contacts(Vec3::new(x, 0.85, 3.0), 0.5, 0.4, 0.1, MASK_MOVEMENT);
+            assert_eq!(c.len(), 1);
+            assert!(c[0].normal.y > 0.999);
+        }
+        let hit = w
+            .cast_ray(Vec3::new(0.0, 1.0, 0.0), Vec3::X, 100.0, MASK_SHOTS)
+            .expect("box");
+        assert_eq!(hit.tag, 10);
+        assert!(w.intersects_capsule(Vec3::new(30.0, 1.0, 0.0), 0.5, 0.4, MASK_MOVEMENT));
+        // A query so large it scans every collider still skips the broken ones.
+        let all = quick(1.0, || {
+            w.capsule_contacts(Vec3::new(0.0, 0.85, 3.0), 0.5, 0.4, 1.0e6, MASK_MOVEMENT)
+        });
+        let mut tags: Vec<u32> = all.iter().map(|c| w.collider(c.collider).tag).collect();
+        tags.sort();
+        assert_eq!(tags, [7, 10]);
     }
 
     #[test]

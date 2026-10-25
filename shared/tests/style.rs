@@ -400,18 +400,21 @@ fn a_rocket_through_a_crowd_is_a_multikill() {
 fn parries_score_and_meter_decays_back_down() {
     let (mut a, p, h) = range(&[Vec3::new(0.0, 0.0, -60.0)]);
     let t = a.tuning.clone();
-    let orb = a.world.spawn_enemy_projectile(
-        &t,
-        shared::sim::ProjectileKind::SpitterOrb,
-        h[0],
-        Attack::Enemy {
-            kind: kind::HUSK,
-            attack: 0,
-        },
-        Vec3::new(0.0, 1.4, -20.0),
-        Vec3::new(0.0, 0.0, 22.0),
-        20.0,
-    );
+    let orb = a
+        .world
+        .spawn_enemy_projectile(
+            &t,
+            shared::sim::ProjectileKind::SpitterOrb,
+            h[0],
+            Attack::Enemy {
+                kind: kind::HUSK,
+                attack: 0,
+            },
+            Vec3::new(0.0, 1.4, -20.0),
+            Vec3::new(0.0, 0.0, 22.0),
+            20.0,
+        )
+        .expect("orb");
     let mut all = Vec::new();
     for _ in 0..200 {
         let d = a.world.projectiles[&orb].position.distance(a.eye(p));
@@ -435,7 +438,8 @@ fn a_ricochet_kill_scores_the_bounce() {
     let t = a.tuning.clone();
     let prism = a
         .world
-        .spawn_prism(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO);
+        .spawn_prism(&t, p, Vec3::new(0.0, 1.6, -6.0), Vec3::ZERO)
+        .expect("prism");
     {
         let pr = a.world.prisms.get_mut(&prism).unwrap();
         pr.position = Vec3::new(0.0, 1.6, -6.0);

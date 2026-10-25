@@ -13,8 +13,8 @@ use shared::sim::PlayerId;
 
 const TOKEN: u64 = 0x5EC2_E7E5;
 
-/// A lobby server; `token` = listen server (the client with the token hosts), `None` =
-/// dedicated rules.
+/// A lobby server; `token` = listen server (the client with the token hosts; dev commands on
+/// for it, like `ServerConfig::host`), `None` = dedicated rules (no `--dev-commands`).
 fn lobby_config(token: Option<u64>) -> ServerConfig {
     let mut config = server_config();
     config.lobby = LobbyConfig {
@@ -22,6 +22,7 @@ fn lobby_config(token: Option<u64>) -> ServerConfig {
         host_token: token,
         ..LobbyConfig::enabled()
     };
+    config.dev_commands = token.is_some();
     config
 }
 

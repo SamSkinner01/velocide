@@ -57,7 +57,6 @@ pub mod transport;
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use glam::Vec3;
@@ -719,6 +718,19 @@ impl NetClient {
                 self.events.push_back(NetEvent::Rejected { reason });
             }
             ServerMessage::LoadLevel { name, level } => {
+                // A hostile or broken server could send a level that takes forever or all the
+                // memory to build (100 km brushes, millions of them, NaN coordinates).
+                let checked = if name.len() > shared::level::MAX_LEVEL_STRING_BYTES {
+                    Err("level name too long".to_string())
+                } else {
+                    level.validate()
+                };
+                if let Err(err) = checked {
+                    log::warn!("server sent an invalid level: {err}");
+                    self.rejected = Some(format!("The server sent an invalid level ({err})"));
+                    self.disconnect();
+                    return;
+                }
                 self.world = Some(SimWorld::new(&name, Arc::new(*level), self.tick_rate()));
                 // A new level means a new body; the next snapshot re-creates the prediction.
                 self.prediction = None;
@@ -728,7 +740,12 @@ impl NetClient {
                 }
                 self.events.push_back(NetEvent::LevelLoaded { name });
             }
-            ServerMessage::Tuning(tuning) => {
+            ServerMessage::Tuning(mut tuning) => {
+                // Never trust the numbers blindly (u32::MAX pellets, 1e30 m ranges...). A
+                // well-behaved server sanitizes too, so prediction still matches it.
+                if tuning.sanitize() {
+                    log::warn!("server tuning had out-of-range values (clamped)");
+                }
                 self.tuning = *tuning;
                 self.events.push_back(NetEvent::TuningChanged);
             }
@@ -781,6 +798,12 @@ impl NetClient {
         if self.frames.contains(snap.tick) {
             return; // duplicate
         }
+        if self.frames.is_stale(snap.tick) {
+            // Far older than the newest frame: useless, and keeping it would let late or
+            // replayed snapshots grow the buffer without bound.
+            self.stats.snapshots_dropped += 1;
+            return;
+        }
         // Effects don't depend on the entity baseline: keep them even if the delta is lost.
         let fx = std::mem::take(&mut snap.fx);
         self.receive_fx(fx);
@@ -803,7 +826,10 @@ impl NetClient {
                 return;
             }
         };
-        self.frames.insert(snap.tick, frame.clone());
+        if !self.frames.insert(snap.tick, frame.clone()) {
+            self.stats.snapshots_dropped += 1;
+            return;
+        }
         self.stats.snapshots_received += 1;
         if snap.baseline_tick.is_none() {
             self.stats.full_snapshots_received += 1;
@@ -821,7 +847,6 @@ impl NetClient {
             }
         }
         self.latest_snapshot_tick = Some(snap.tick);
-        self.frames.prune();
 
         if let Some(world) = &mut self.world {
             world.apply_replicated_level_state(&frame);
@@ -978,20 +1003,113 @@ impl Drop for NetClient {
     }
 }
 
-/// Random 64-bit id for netcode's unsecure mode (must be unique per connection).
+/// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS
+/// random source, so other clients can't predict it).
 fn random_client_id() -> u64 {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let mut x = nanos
-        ^ (std::process::id() as u64) << 32
-        ^ COUNTER
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    // splitmix64 finaliser
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
+    u64::from_le_bytes(renet_netcode::generate_random_bytes::<8>())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A transport that never delivers anything: messages are fed to the client directly.
+    struct NoTransport;
+
+    impl ClientTransport for NoTransport {
+        fn update(&mut self, _: Duration, _: &mut RenetClient) -> Result<(), String> {
+            Ok(())
+        }
+        fn send_packets(&mut self, _: &mut RenetClient) -> Result<(), String> {
+            Ok(())
+        }
+        fn disconnect(&mut self) {}
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn server_addr(&self) -> Option<SocketAddr> {
+            None
+        }
+        fn stats(&self) -> TransportStats {
+            TransportStats::default()
+        }
+    }
+
+    fn client() -> NetClient {
+        NetClient::with_transport(Box::new(NoTransport))
+    }
+
+    fn proving_ground() -> Box<shared::level::LevelDef> {
+        Box::new(shared::sim::builtin_level(shared::sim::BUILTIN_LEVEL).unwrap())
+    }
+
+    #[test]
+    fn oversized_levels_from_the_server_are_refused() {
+        let mut c = client();
+        let mut level = proving_ground();
+        // 100 km extents: building its collision used to take minutes and gigabytes.
+        level.brushes[0].max = Vec3::splat(1.0e5);
+        let started = std::time::Instant::now();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: "evil".into(),
+            level,
+        });
+        assert!(started.elapsed().as_secs_f32() < 1.0);
+        assert!(c.world().is_none());
+        assert!(c.is_disconnected());
+        let reason = c.disconnect_reason().unwrap();
+        assert!(reason.contains("invalid level") && reason.contains("brush 0"), "{reason}");
+
+        let mut c = client();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: "x".repeat(10_000),
+            level: proving_ground(),
+        });
+        assert!(c.is_disconnected() && c.world().is_none());
+
+        let mut c = client();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: shared::sim::BUILTIN_LEVEL.into(),
+            level: proving_ground(),
+        });
+        assert!(c.world().is_some() && !c.is_disconnected());
+    }
+
+    #[test]
+    fn late_snapshots_cannot_grow_the_frame_buffer() {
+        let mut c = client();
+        let snapshot = |tick: u32| SnapshotMessage {
+            tick,
+            baseline_tick: None,
+            last_input_seq: 0,
+            own: None,
+            entities: protocol::encode_full(&NetFrame::default()),
+            fx: Vec::new(),
+        };
+        c.handle_snapshot(snapshot(10_000));
+        for tick in (1..10_000).rev() {
+            c.handle_snapshot(snapshot(tick));
+        }
+        let kept = interpolation::FRAME_RETENTION_TICKS as usize + 1;
+        assert_eq!(c.frames.len(), kept);
+        assert_eq!(c.stats.snapshots_received, kept as u64);
+        assert_eq!(c.stats.snapshots_dropped, 10_000 - kept as u64);
+        assert_eq!(c.latest_snapshot_tick, Some(10_000));
+    }
+
+    #[test]
+    fn server_tuning_is_sanitized() {
+        let mut c = client();
+        let mut t = Tuning::default();
+        t.combat.thresher.pellets = u32::MAX;
+        t.combat.hitscan_range = 1.0e30;
+        t.movement.gravity = f32::NAN;
+        c.handle_message(ServerMessage::Tuning(Box::new(t)));
+        let t = c.tuning();
+        assert_eq!(t.combat.thresher.pellets, 64);
+        assert!(t.combat.hitscan_range <= 1.0e4);
+        assert_eq!(t.movement.gravity, Tuning::default().movement.gravity);
+        assert!(c.drain_events().contains(&NetEvent::TuningChanged));
+    }
+}
+

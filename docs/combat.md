@@ -492,7 +492,14 @@ spawn protected; death screen.
 | `Fx::EnemyAttack` | `strike == false`: telegraph sound (`HuskWindup`, `SpitterWindup`, `BastionTelegraph`) + glint; `parryable` → yellow flash; `strike == true`: `HuskSwipe` / `BastionSlam` |
 | `Fx::EnemyFired` / `EnemyShockwave` / `EnemyAlert` | spit/muzzle flash (`SpitterFire`, `GnatFire`) / slam ring / `HuskAlert` bark |
 
-## Dev commands (chat, `ServerConfig::dev_commands`, default on)
+## Dev commands (chat, `ServerConfig::dev_commands`)
+
+On in single-player (`ServerConfig::single_player`) and on listen servers (`ServerConfig::host`,
+for the host only); off on dedicated servers unless started with `--dev-commands` (then for
+the lobby host; for everyone with `--no-lobby`). Elsewhere `/...` is answered with "dev
+commands are disabled on this server" and never broadcast. Each command costs a chat token
+(burst 5, then 1/s, shared with chat).
+
 
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
 `/god`, `/notarget`, `/give` (full health, no hard damage, prisms, cooldowns), `/kill`,

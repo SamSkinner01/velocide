@@ -364,7 +364,8 @@ impl SimWorld {
     }
 
     /// Spawns an enemy with an explicit health multiplier (encounters scale by the player
-    /// count at wave start). `yaw` in radians. `None` if the name is unknown.
+    /// count at wave start). `yaw` in radians. `None` if the name is unknown or the world is
+    /// full ([`super::MAX_ENEMIES`]).
     pub fn spawn_enemy_scaled(
         &mut self,
         name: &str,
@@ -373,7 +374,11 @@ impl SimWorld {
         health_scale: f32,
     ) -> Option<NetId> {
         let def = self.enemy_defs.get(name)?;
-        let id = self.alloc_net_id();
+        if self.enemies.len() >= super::MAX_ENEMIES {
+            log::warn!("enemy limit ({}) reached: '{name}' not spawned", super::MAX_ENEMIES);
+            return None;
+        }
+        let id = self.alloc_net_id()?;
         let health = def.health * health_scale.max(0.01);
         let enemy = Enemy::new(id, def, position, yaw, health, self.tick);
         let kind = enemy.net_kind();

@@ -102,7 +102,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-server_args=(--port "$PORT" --level "$LEVEL")
+# A local test server: dev chat commands (/god, /spawn...) for the lobby host, as before they
+# became opt-in on dedicated servers.
+server_args=(--port "$PORT" --level "$LEVEL" --dev-commands)
 [[ -n "$MODE" ]] && server_args+=(--mode "$MODE")
 [[ "$LOBBY" == 0 ]] && server_args+=(--autostart)
 [[ -n "$SERVER_NETSIM" ]] && server_args+=(--netsim "$SERVER_NETSIM")
