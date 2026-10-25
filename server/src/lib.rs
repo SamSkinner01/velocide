@@ -498,8 +498,12 @@ impl Server {
         infos
     }
 
-    /// Replaces the tuning and pushes it to every client.
-    pub fn set_tuning(&mut self, tuning: Tuning) {
+    /// Replaces the tuning (sanitized: out-of-range values are clamped) and pushes it to every
+    /// client.
+    pub fn set_tuning(&mut self, mut tuning: Tuning) {
+        if tuning.sanitize() {
+            log::warn!("tuning: out-of-range values were clamped");
+        }
         if tuning == self.tuning {
             return;
         }
