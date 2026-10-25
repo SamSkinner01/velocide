@@ -304,22 +304,25 @@ pub fn spire() -> Gen {
     // the last onto the NW landing (the top of the spiral).
     let cage_a = ([-51.5f32, -46.5f32], [3.0f32, 8.0f32], 9.0f32);
     let cage_b = ([-53.5f32, -48.5f32], [-5.0f32, 0.0f32], 17.5f32);
-    for (name, (xs, zs, y)) in [("A", cage_a), ("B", cage_b)] {
+    let centre = |(xs, zs, y): ([f32; 2], [f32; 2], f32)| [(xs[0] + xs[1]) * 0.5, y, (zs[0] + zs[1]) * 0.5];
+    for (name, cage) in [("A", cage_a), ("B", cage_b)] {
+        let ((xs, zs, y), [cx, _, cz]) = (cage, centre(cage));
         g.bx(&format!("A2 hoist cage {name} floor"), [xs[0], y - 0.6, zs[0]], [xs[1], y, zs[1]], IRON);
         for (x, z) in [(xs[0], zs[0]), (xs[1] - 0.2, zs[0]), (xs[0], zs[1] - 0.2), (xs[1] - 0.2, zs[1] - 0.2)] {
             g.deco(&format!("A2 hoist cage {name} bar"), [x, y, z], [x + 0.2, y + 3.0, z + 0.2], BRASS);
         }
-        g.deco(&format!("A2 hoist cage {name} chain"), [(xs[0] + xs[1]) * 0.5 - 0.15, y + 3.0, (zs[0] + zs[1]) * 0.5 - 0.15], [(xs[0] + xs[1]) * 0.5 + 0.15, 42.0, (zs[0] + zs[1]) * 0.5 + 0.15], IRON);
+        let chain = format!("A2 hoist cage {name} chain");
+        g.deco(&chain, [cx - 0.15, y + 3.0, cz - 0.15], [cx + 0.15, 42.0, cz + 0.15], IRON);
     }
-    let centre = |(xs, zs, y): ([f32; 2], [f32; 2], f32)| [(xs[0] + xs[1]) * 0.5, y, (zs[0] + zs[1]) * 0.5];
     let hoist = [
         ("A2 hoist pad: floor -> cage A", [-46.0, 0.0, 12.0], centre(cage_a)),
         ("A2 hoist pad: cage A -> cage B", centre(cage_a), centre(cage_b)),
         ("A2 hoist pad: cage B -> NW landing", centre(cage_b), [-57.0, 26.0, -11.0]),
     ];
     for (note, from, to) in hoist {
-        g.pad(note, vol([from[0] - 1.2, from[1], from[2] - 1.2], [from[0] + 1.2, from[1] + 1.0, from[2] + 1.2]), pad_velocity(from, to, 4.5));
-        g.bx("A2 pad ring", [from[0] - 1.5, from[1], from[2] - 1.5], [from[0] + 1.5, from[1] + 0.06, from[2] + 1.5], HAZARD);
+        let [x, y, z] = from;
+        g.pad(note, vol([x - 1.2, y, z - 1.2], [x + 1.2, y + 1.0, z + 1.2]), pad_velocity(from, to, 4.5));
+        g.bx("A2 pad ring", [x - 1.5, y, z - 1.5], [x + 1.5, y + 0.06, z + 1.5], HAZARD);
     }
     // Verdigris downpipes and wax weeping down the shaft walls in sheets.
     for z in [-4.0, 10.0] {
