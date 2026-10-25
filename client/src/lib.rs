@@ -4,3 +4,4 @@
 //! clock sync, net stats, sessions); the game client is built on top of it.
 
 pub mod net;
+pub mod level_mesh;
