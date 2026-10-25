@@ -15,6 +15,8 @@
 //! | `/orb [distance]` | a parryable Spitter orb flies at you from in front (parry practice) |
 //! | `/encounter <n>` | starts arena encounter n (1-based; stragglers incl. you go to its rally point) |
 //! | `/encounters` | encounter states (docs/enemies.md) |
+//! | `/tp <x> <y> <z>` | teleports you to that point (feet) |
+//! | `/goto <exit / start / checkpoint n / encounter n>` | teleports you to the level exit, the start, checkpoint n's spawn or encounter n's rally point |
 //! | `/help` | this list |
 
 use glam::Vec3;
@@ -24,7 +26,7 @@ use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /orb [dist], /encounter <n>, /encounters";
+const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /orb [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>";
 
 impl Server {
     /// Runs one dev command for `player`; returns the reply.
@@ -193,7 +195,56 @@ impl Server {
                     states.join(", ")
                 }
             }
+            "tp" => {
+                let coords: Vec<f32> = args
+                    .iter()
+                    .filter_map(|a| a.parse::<f32>().ok())
+                    .filter(|v| v.is_finite() && v.abs() < 100_000.0)
+                    .collect();
+                if coords.len() != 3 || args.len() != 3 {
+                    return "usage: /tp <x> <y> <z>".into();
+                }
+                let to = Vec3::new(coords[0], coords[1], coords[2]);
+                self.teleport(player, to, None)
+            }
+            "goto" => {
+                let level = &self.world.level;
+                let n = args
+                    .get(1)
+                    .and_then(|a| a.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let target = match args.first().map(|a| a.to_ascii_lowercase()).as_deref() {
+                    Some("exit") => level.exit.map(|v| (v.center(), None)),
+                    Some("start") => level
+                        .spawns
+                        .first()
+                        .map(|s| (s.position, Some(s.yaw.to_radians()))),
+                    Some("checkpoint") => n
+                        .checked_sub(1)
+                        .and_then(|i| level.checkpoints.get(i))
+                        .map(|c| (c.spawn.position, Some(c.spawn.yaw.to_radians()))),
+                    Some("encounter") => n
+                        .checked_sub(1)
+                        .and_then(|i| level.encounters.get(i))
+                        .and_then(|e| e.rally)
+                        .map(|r| (r.position, Some(r.yaw.to_radians()))),
+                    _ => return "usage: /goto <exit|start|checkpoint n|encounter n>".into(),
+                };
+                match target {
+                    Some((to, yaw)) => self.teleport(player, to, yaw),
+                    None => "no such place on this level".into(),
+                }
+            }
             other => format!("unknown command '/{other}'. {HELP}"),
+        }
+    }
+
+    /// Dev teleport (`SimWorld::teleport_player`).
+    fn teleport(&mut self, player: PlayerId, to: Vec3, yaw: Option<f32>) -> String {
+        if self.world.teleport_player(player, to, yaw) {
+            format!("teleported to {:.1} {:.1} {:.1}", to.x, to.y, to.z)
+        } else {
+            "no living body to move".into()
         }
     }
 }
