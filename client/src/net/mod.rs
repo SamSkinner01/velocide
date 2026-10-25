@@ -719,6 +719,19 @@ impl NetClient {
                 self.events.push_back(NetEvent::Rejected { reason });
             }
             ServerMessage::LoadLevel { name, level } => {
+                // A hostile or broken server could send a level that takes forever or all the
+                // memory to build (100 km brushes, millions of them, NaN coordinates).
+                let checked = if name.len() > shared::level::MAX_LEVEL_STRING_BYTES {
+                    Err("level name too long".to_string())
+                } else {
+                    level.validate()
+                };
+                if let Err(err) = checked {
+                    log::warn!("server sent an invalid level: {err}");
+                    self.rejected = Some(format!("The server sent an invalid level ({err})"));
+                    self.disconnect();
+                    return;
+                }
                 self.world = Some(SimWorld::new(&name, Arc::new(*level), self.tick_rate()));
                 // A new level means a new body; the next snapshot re-creates the prediction.
                 self.prediction = None;
@@ -728,7 +741,12 @@ impl NetClient {
                 }
                 self.events.push_back(NetEvent::LevelLoaded { name });
             }
-            ServerMessage::Tuning(tuning) => {
+            ServerMessage::Tuning(mut tuning) => {
+                // Never trust the numbers blindly (u32::MAX pellets, 1e30 m ranges...). A
+                // well-behaved server sanitizes too, so prediction still matches it.
+                if tuning.sanitize() {
+                    log::warn!("server tuning had out-of-range values (clamped)");
+                }
                 self.tuning = *tuning;
                 self.events.push_back(NetEvent::TuningChanged);
             }
@@ -975,6 +993,88 @@ impl Drop for NetClient {
         if self.state != ConnectionState::Disconnected {
             self.transport.disconnect();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A transport that never delivers anything: messages are fed to the client directly.
+    struct NoTransport;
+
+    impl ClientTransport for NoTransport {
+        fn update(&mut self, _: Duration, _: &mut RenetClient) -> Result<(), String> {
+            Ok(())
+        }
+        fn send_packets(&mut self, _: &mut RenetClient) -> Result<(), String> {
+            Ok(())
+        }
+        fn disconnect(&mut self) {}
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn server_addr(&self) -> Option<SocketAddr> {
+            None
+        }
+        fn stats(&self) -> TransportStats {
+            TransportStats::default()
+        }
+    }
+
+    fn client() -> NetClient {
+        NetClient::with_transport(Box::new(NoTransport))
+    }
+
+    fn proving_ground() -> Box<shared::level::LevelDef> {
+        Box::new(shared::sim::builtin_level(shared::sim::BUILTIN_LEVEL).unwrap())
+    }
+
+    #[test]
+    fn oversized_levels_from_the_server_are_refused() {
+        let mut c = client();
+        let mut level = proving_ground();
+        // 100 km extents: building its collision used to take minutes and gigabytes.
+        level.brushes[0].max = Vec3::splat(1.0e5);
+        let started = std::time::Instant::now();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: "evil".into(),
+            level,
+        });
+        assert!(started.elapsed().as_secs_f32() < 1.0);
+        assert!(c.world().is_none());
+        assert!(c.is_disconnected());
+        let reason = c.disconnect_reason().unwrap();
+        assert!(reason.contains("invalid level") && reason.contains("brush 0"), "{reason}");
+
+        let mut c = client();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: "x".repeat(10_000),
+            level: proving_ground(),
+        });
+        assert!(c.is_disconnected() && c.world().is_none());
+
+        let mut c = client();
+        c.handle_message(ServerMessage::LoadLevel {
+            name: shared::sim::BUILTIN_LEVEL.into(),
+            level: proving_ground(),
+        });
+        assert!(c.world().is_some() && !c.is_disconnected());
+    }
+
+    #[test]
+    fn server_tuning_is_sanitized() {
+        let mut c = client();
+        let mut t = Tuning::default();
+        t.combat.thresher.pellets = u32::MAX;
+        t.combat.hitscan_range = 1.0e30;
+        t.movement.gravity = f32::NAN;
+        c.handle_message(ServerMessage::Tuning(Box::new(t)));
+        let t = c.tuning();
+        assert_eq!(t.combat.thresher.pellets, 64);
+        assert!(t.combat.hitscan_range <= 1.0e4);
+        assert_eq!(t.movement.gravity, Tuning::default().movement.gravity);
+        assert!(c.drain_events().contains(&NetEvent::TuningChanged));
     }
 }
 

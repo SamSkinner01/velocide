@@ -237,6 +237,104 @@ pub struct LevelDef {
     pub par_time: f32,
 }
 
+// ---- limits checked by [`LevelDef::validate`] -------------------------------------------------
+//
+// Levels arrive from servers (`ServerMessage::LoadLevel`) and from files anyone can drop into
+// `assets/levels/`; the shipped ones are far inside every limit.
+
+/// Every coordinate (brush corners, spawns, volumes, lights, props) lies within ± this (m).
+pub const MAX_LEVEL_COORD: f32 = 1.0e4;
+pub const MAX_BRUSHES: usize = 16_384;
+pub const MAX_LIGHTS: usize = 1024;
+pub const MAX_SPAWNS: usize = 256;
+pub const MAX_CHECKPOINTS: usize = 256;
+pub const MAX_DOORS: usize = 1024;
+pub const MAX_ENCOUNTERS: usize = 256;
+/// Per encounter.
+pub const MAX_WAVES: usize = 64;
+/// Per wave.
+pub const MAX_WAVE_SPAWNS: usize = 128;
+/// Doors an encounter locks / unlocks (each list).
+pub const MAX_ENCOUNTER_DOORS: usize = 64;
+pub const MAX_JUMP_PADS: usize = 1024;
+pub const MAX_KILL_VOLUMES: usize = 1024;
+pub const MAX_PROPS: usize = 4096;
+/// Names, materials, enemy names, model paths, music (bytes).
+pub const MAX_LEVEL_STRING_BYTES: usize = 256;
+/// Jump pad launch speed (m/s).
+pub const MAX_JUMP_PAD_SPEED: f32 = 1000.0;
+/// Seconds (wave delays, par time).
+const MAX_LEVEL_TIME: f32 = 1.0e5;
+
+fn check_count(what: &str, n: usize, max: usize) -> Result<(), String> {
+    if n > max {
+        Err(format!("too many {what}: {n} (at most {max})"))
+    } else {
+        Ok(())
+    }
+}
+
+fn check_text(what: &str, s: &str) -> Result<(), String> {
+    if s.len() > MAX_LEVEL_STRING_BYTES {
+        Err(format!("{what} is longer than {MAX_LEVEL_STRING_BYTES} bytes"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Finite and within `±max` on every axis.
+fn check_vec(what: &str, v: Vec3, max: f32) -> Result<(), String> {
+    if v.is_finite() && v.abs().max_element() <= max {
+        Ok(())
+    } else {
+        Err(format!("{what} {v} is not finite or outside ±{max}"))
+    }
+}
+
+fn check_point(what: &str, p: Vec3) -> Result<(), String> {
+    check_vec(what, p, MAX_LEVEL_COORD)
+}
+
+fn check_num(what: &str, v: f32, lo: f32, hi: f32) -> Result<(), String> {
+    if v.is_finite() && (lo..=hi).contains(&v) {
+        Ok(())
+    } else {
+        Err(format!("{what} {v} is not in {lo}..={hi}"))
+    }
+}
+
+fn check_volume(v: &Volume) -> Result<(), String> {
+    check_point("min", v.min)?;
+    check_point("max", v.max)
+}
+
+fn check_spawn(s: &SpawnPoint) -> Result<(), String> {
+    check_point("position", s.position)?;
+    check_num("yaw", s.yaw, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)
+}
+
+fn check_brush(b: &Brush) -> Result<(), String> {
+    check_point("min", b.min)?;
+    check_point("max", b.max)?;
+    check_vec("rotation", b.rotation, MAX_LEVEL_COORD)?;
+    check_vec("tint", b.tint, MAX_LEVEL_COORD)?;
+    check_text("material", &b.material)
+}
+
+/// Runs `check` on every item, prefixing errors with `what` and the item's index.
+fn check_each<T>(
+    what: &str,
+    items: &[T],
+    max: usize,
+    check: impl Fn(&T) -> Result<(), String>,
+) -> Result<(), String> {
+    check_count(what, items.len(), max)?;
+    items
+        .iter()
+        .enumerate()
+        .try_for_each(|(i, item)| check(item).map_err(|e| format!("{what} {i}: {e}")))
+}
+
 /// Collision world for a level plus the collider ids of its doors.
 pub struct LevelCollision {
     pub world: CollisionWorld,
@@ -268,10 +366,81 @@ impl LevelDef {
         Self::dir().join(format!("{name}.ron"))
     }
 
+    /// Reads, parses and [validates](LevelDef::validate) a level file.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-        ron::from_str(&text).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))
+        let level: LevelDef =
+            ron::from_str(&text).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        level
+            .validate()
+            .map_err(|e| anyhow::anyhow!("invalid level {}: {e}", path.display()))?;
+        Ok(level)
+    }
+
+    /// Checks that the level is safe to build and simulate: every number finite, every
+    /// coordinate within ±[`MAX_LEVEL_COORD`] m, at most [`MAX_BRUSHES`] brushes (and the
+    /// other `MAX_*` counts), strings at most [`MAX_LEVEL_STRING_BYTES`] long. The server
+    /// checks the level files it loads; clients check every level a server sends them (a
+    /// brush with 100 km extents or a million brushes would stall or exhaust memory).
+    pub fn validate(&self) -> Result<(), String> {
+        check_text("name", &self.name)?;
+        let env = &self.environment;
+        for (what, v) in [
+            ("sky_color", env.sky_color),
+            ("fog_color", env.fog_color),
+            ("ambient", env.ambient),
+            ("light_dir", env.light_dir),
+            ("light_color", env.light_color),
+        ] {
+            check_vec(what, v, MAX_LEVEL_COORD)?;
+        }
+        check_num("fog_start", env.fog_start, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)?;
+        check_num("fog_end", env.fog_end, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)?;
+        check_text("music", &env.music)?;
+        check_each("brush", &self.brushes, MAX_BRUSHES, check_brush)?;
+        check_each("light", &self.lights, MAX_LIGHTS, |l| {
+            check_point("position", l.position)?;
+            check_vec("color", l.color, MAX_LEVEL_COORD)?;
+            check_num("radius", l.radius, 0.0, MAX_LEVEL_COORD)
+        })?;
+        check_each("spawn", &self.spawns, MAX_SPAWNS, check_spawn)?;
+        check_each("checkpoint", &self.checkpoints, MAX_CHECKPOINTS, |c| {
+            check_volume(&c.trigger)?;
+            check_spawn(&c.spawn)
+        })?;
+        check_each("door", &self.doors, MAX_DOORS, |d| check_brush(&d.brush))?;
+        check_each("encounter", &self.encounters, MAX_ENCOUNTERS, |e| {
+            check_volume(&e.trigger)?;
+            e.arena.as_ref().map_or(Ok(()), check_volume)?;
+            e.rally.as_ref().map_or(Ok(()), check_spawn)?;
+            check_count("lock_doors", e.lock_doors.len(), MAX_ENCOUNTER_DOORS)?;
+            check_count("unlock_doors", e.unlock_doors.len(), MAX_ENCOUNTER_DOORS)?;
+            check_each("wave", &e.waves, MAX_WAVES, |w| {
+                check_num("delay", w.delay, 0.0, MAX_LEVEL_TIME)?;
+                check_each("spawn", &w.spawns, MAX_WAVE_SPAWNS, |s| {
+                    check_text("enemy", &s.enemy)?;
+                    check_point("position", s.position)?;
+                    check_num("yaw", s.yaw, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)
+                })
+            })
+        })?;
+        self.exit
+            .as_ref()
+            .map_or(Ok(()), check_volume)
+            .map_err(|e| format!("exit: {e}"))?;
+        check_each("jump pad", &self.jump_pads, MAX_JUMP_PADS, |j| {
+            check_volume(&j.trigger)?;
+            check_vec("velocity", j.velocity, MAX_JUMP_PAD_SPEED)
+        })?;
+        check_each("kill volume", &self.kill_volumes, MAX_KILL_VOLUMES, check_volume)?;
+        check_each("prop", &self.props, MAX_PROPS, |p| {
+            check_text("model", &p.model)?;
+            check_point("position", p.position)?;
+            check_vec("rotation", p.rotation, MAX_LEVEL_COORD)?;
+            check_num("scale", p.scale, -1000.0, 1000.0)
+        })?;
+        check_num("par_time", self.par_time, 0.0, MAX_LEVEL_TIME)
     }
 
     pub fn load_named(name: &str) -> anyhow::Result<Self> {
@@ -352,8 +521,73 @@ mod tests {
 
     #[test]
     fn all_shipped_levels_parse() {
-        for name in LevelDef::list() {
-            LevelDef::load_named(&name).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let names = LevelDef::list();
+        assert!(!names.is_empty());
+        for name in names {
+            // `load` validates too.
+            let level = LevelDef::load_named(&name).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(level.validate(), Ok(()), "{name}");
         }
+        let builtin = crate::sim::builtin_level(crate::sim::BUILTIN_LEVEL).unwrap();
+        assert_eq!(builtin.validate(), Ok(()));
+    }
+
+    #[test]
+    fn hostile_levels_are_rejected() {
+        let base = crate::sim::builtin_level(crate::sim::BUILTIN_LEVEL).unwrap();
+        let bad = |f: &dyn Fn(&mut LevelDef)| {
+            let mut level = base.clone();
+            f(&mut level);
+            level.validate().expect_err("must be rejected")
+        };
+        // A brush with 100 km extents (used to put a collider into ~150 million grid cells).
+        let e = bad(&|l| l.brushes[0].max = Vec3::splat(1.0e5));
+        assert!(e.starts_with("brush 0: max"), "{e}");
+        bad(&|l| l.brushes[3].rotation.y = f32::NAN);
+        bad(&|l| l.brushes[3].min.x = f32::NEG_INFINITY);
+        bad(&|l| l.spawns[0].position.y = f32::NAN);
+        bad(&|l| l.doors[0].brush.max.z = 2.0e4);
+        bad(&|l| l.kill_volumes[0].min.y = -1.0e9);
+        bad(&|l| l.jump_pads[0].velocity.y = 1.0e6);
+        bad(&|l| l.lights.push(LightDef { position: Vec3::ZERO, color: Vec3::ONE, radius: f32::NAN }));
+        bad(&|l| l.environment.fog_end = f32::INFINITY);
+        bad(&|l| l.par_time = -1.0);
+        bad(&|l| l.name = "x".repeat(MAX_LEVEL_STRING_BYTES + 1));
+        bad(&|l| l.brushes[1].material = "m".repeat(10_000));
+        let e = bad(&|l| {
+            let b = l.brushes[5].clone();
+            l.brushes.resize(MAX_BRUSHES + 1, b);
+        });
+        assert!(e.contains("too many brush"), "{e}");
+        bad(&|l| {
+            l.encounters.push(Encounter {
+                trigger: Volume { min: Vec3::ZERO, max: Vec3::ONE },
+                arena: None,
+                rally: None,
+                lock_doors: vec![],
+                unlock_doors: vec![],
+                waves: vec![Wave {
+                    delay: 0.0,
+                    spawns: vec![
+                        EnemySpawn { enemy: "husk".into(), position: Vec3::ZERO, yaw: 0.0 };
+                        MAX_WAVE_SPAWNS + 1
+                    ],
+                }],
+            })
+        });
+        bad(&|l| {
+            l.props.push(Prop {
+                model: "models/x.glb".into(),
+                position: Vec3::ZERO,
+                rotation: Vec3::ZERO,
+                scale: f32::NAN,
+            })
+        });
+        // At the limits is fine.
+        let mut ok = base.clone();
+        ok.brushes[0].min = Vec3::splat(-MAX_LEVEL_COORD);
+        ok.brushes[0].max = Vec3::splat(MAX_LEVEL_COORD);
+        assert_eq!(ok.validate(), Ok(()));
+        ok.build_collision();
     }
 }
