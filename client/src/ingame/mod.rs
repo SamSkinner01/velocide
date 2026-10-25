@@ -28,6 +28,7 @@
 pub mod audio_hooks;
 pub mod camera;
 pub mod chat;
+pub mod combat;
 pub mod debug;
 pub mod effects;
 pub mod feedback;
@@ -78,8 +79,6 @@ use world_render::WorldRender;
 
 /// No snapshot for this long while playing shows "CONNECTION PROBLEM".
 const STALL_WARNING_SECS: f64 = 0.6;
-/// Placeholder until combat replicates health.
-const PLACEHOLDER_HEALTH: f32 = 100.0;
 
 pub struct InGame {
     session: Option<Session>,
@@ -96,6 +95,8 @@ pub struct InGame {
     pub world: WorldRender,
     pub remote: RemotePlayers,
     pub hud: Hud,
+    /// Combat presentation (weapons feel, Fx, enemies / projectiles, combat HUD).
+    pub combat: combat::CombatClient,
     pub chat: Chat,
     pause: PauseMenu,
     remote_sounds: audio_hooks::RemoteSounds,
@@ -212,6 +213,7 @@ impl InGame {
             remote: RemotePlayers::new(),
             hud: Hud::new(),
             chat,
+            combat: combat::CombatClient::new(renderer),
             pause: PauseMenu::new(),
             remote_sounds: audio_hooks::RemoteSounds::new(),
             debug: DebugOverlay::default(),
@@ -269,6 +271,23 @@ impl InGame {
         common.audio.stop(Sfx::Slide);
         self.world.free(renderer);
         self.effects.free(renderer);
+        self.combat.free(renderer);
+    }
+
+    /// Loopback address of the in-process server (single-player / host), for tools and tests
+    /// that connect extra clients.
+    pub fn server_addr(&self) -> Option<std::net::SocketAddr> {
+        self.session
+            .as_ref()
+            .and_then(Session::server)
+            .map(|s| s.connect_addr())
+    }
+
+    /// Sends a chat line (also dev commands like `/spawn husk 3`; tools and tests).
+    pub fn send_chat(&mut self, text: &str) {
+        if let Some(s) = &mut self.session {
+            s.client_mut().send_chat(text);
+        }
     }
 
     /// Back to the lobby: frees GPU resources but keeps the session (and the chat log).
@@ -358,6 +377,7 @@ impl InGame {
                 self.effects.clear();
                 // A new level (next match / restart): the timer restarts at the next spawn.
                 self.spawned = false;
+                self.combat.clear();
                 common
                     .audio
                     .set_music(Common::game_music(self.world.kind()));
@@ -419,9 +439,8 @@ impl InGame {
             NetEvent::Notice { text } => {
                 self.chat.system(&text.to_uppercase(), t.blood_bright, now);
             }
-            // Combat events (damage, hit confirms, kills, parries) are presented by the combat
-            // client layer; see docs/combat.md "client presentation contract".
-            NetEvent::Game(_) => {}
+            // Combat events (damage, hit confirms, kills, parries): `combat` module.
+            NetEvent::Game(ev) => self.combat_game_event(ev, common),
             NetEvent::Disconnected { reason } => {
                 if !self.leaving {
                     let what = if self.spawned {
@@ -568,6 +587,9 @@ impl InGame {
 
         // 5. Visual time (hitstop) and the camera.
         let vdt = self.feedback.update(dt);
+        if in_game {
+            self.combat_update(common, vdt);
+        }
         let alpha = self.timestep.alpha();
         let scene = self.update_camera(common, alpha, dt, vdt);
 
@@ -606,6 +628,7 @@ impl InGame {
             controls,
             timestep,
             tick_events,
+            combat,
             ..
         } = self;
         let Some(session) = session else {
@@ -630,6 +653,7 @@ impl InGame {
             if let Some(ev) = net.tick(input) {
                 audio_hooks::play_local_move_events(&mut common.audio, &ev);
                 tick_events.push(ev);
+                combat.after_tick(net);
             }
         }
         let feet = net.local_state().map_or(Vec3::ZERO, |s| s.position);
@@ -639,6 +663,7 @@ impl InGame {
             self.on_local_move_events(ev, feet, &tuning);
         }
         self.tick_events = events;
+        self.combat_after_ticks(common);
     }
 
     fn update_camera(&mut self, common: &Common, alpha: f32, dt: f32, vdt: f32) -> SceneParams {
@@ -698,9 +723,9 @@ impl InGame {
         if let Some(net) = net {
             self.remote
                 .draw(lib, net.remote_players(), dt, &mut out.draws);
-            // Future replicated entity kinds (enemies, projectiles, pickups): iterate
-            // `net.remote_entities()` filtered by `kind` here (see docs/client.md).
         }
+        // Enemies, projectiles, blood bursts, prisms, tracers.
+        self.combat_draw(common, out);
         self.effects.update(vdt, world.map(|w| &w.collision.world));
         self.effects.draw(&mut out.sprites, &mut out.decals);
 
@@ -785,7 +810,8 @@ impl InGame {
         scoreboard: bool,
         transition: &mut Option<Transition>,
     ) {
-        let now = io.time;
+        // Same clock as `on_net_event` stamps feed / chat / combat HUD entries with.
+        let now = self.time;
         let status = self.status_line(common);
         let in_game = self.is_playing();
         let list = &mut out.ui;
@@ -969,10 +995,11 @@ impl InGame {
         let speed = Vec2::new(state.velocity.x, state.velocity.z).length();
         let ping = (self.kind != SessionKind::SinglePlayer).then(|| net.stats().rtt_ms);
         let status = if self.sp_paused { None } else { status };
+        let (health, max_health, hard_damage) = self.combat_health();
         let info = HudInfo {
-            health: PLACEHOLDER_HEALTH,
-            max_health: 100.0,
-            hard_damage: 0.0,
+            health,
+            max_health,
+            hard_damage,
             stamina: state.stamina(tuning),
             stamina_max: tuning.dash_charges.round().max(1.0) as u32,
             weapons: &self.controls.weapons,
@@ -985,6 +1012,7 @@ impl InGame {
             time: now,
         };
         self.hud.draw(list, &common.theme, &info);
+        self.combat_hud(common, list, now);
     }
 
     /// The egui debug window (feature `debug-ui`).

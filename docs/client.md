@@ -27,6 +27,7 @@ the debug overlay.
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
 | `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / throw, Riveter spin, plus landing dip / slide tilt / dash pull-back |
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
+| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, blood bursts, prisms), `hud` (hit markers, damage numbers, direction, vignette, death screen, prisms / stickies / cooldowns) |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
@@ -86,17 +87,22 @@ input, dt, time, window size), so they run headless in tests and tools.
    `NetClient::tick` (predict + send) → predicted `MoveEvents` → `audio_hooks` and
    `InGame::on_local_move_events` (landing dip, stair smoothing, slam shockwave + shake +
    short hitstop, dust, jump-pad glow). Skipped while the single-player server is paused.
-5. **Visual time**: `Feedback::update(real dt) -> visual dt` (0 during hitstop).
+5. **Visual time**: `Feedback::update(real dt) -> visual dt` (0 during hitstop), then
+   `combat_update` (drains `NetClient::drain_fx` into the Fx queue and plays what is due at
+   the render tick, enemy / projectile bookkeeping, viewmodel charge + spin, music intensity).
    `CameraRig::update` places the camera at `local_render_position(alpha)` + smoothed eye
    height + landing dip + stair offset, with the FOV (settings, horizontal at 16:9, Hor+) +
    smoothed `fov_kick`, smoothed `view_roll`, and shake offsets. The viewmodel and effects
    advance on visual time.
 6. **Draw** (`draw_world`, `draw_ui`): level (doors hidden while the replicated door state says
-   open), remote players, effects (sprites + decals), viewmodel, debug ghosts; name tags, HUD,
-   chat log, scoreboard, then the interactive layer (connecting panel / pause menu / chat
-   field) in one `Ui`.
+   open), remote players, combat entities + tracers (`combat_draw`), effects (sprites +
+   decals), viewmodel, debug ghosts; name tags, HUD (+ `combat_hud`), chat log, scoreboard,
+   then the interactive layer (connecting panel / pause menu / chat field) in one `Ui`. UI,
+   feed, chat and combat HUD all use `InGame::time` as their clock.
 7. **Audio**: listener = camera, positional remote-player movement sounds, music
-   (`Menu` in menus, `Campaign` / `Arena` by `LevelKind` in game, intensity 0.2 for now).
+   (`Menu` in menus, `Campaign` / `Arena` by `LevelKind` in game; intensity 0.2 → 1.0 from
+   nearby alert enemies and recent combat, rising fast and decaying slowly, set in
+   `combat_update`).
 
 Mouse look is per frame, inputs are per tick: the input sent each tick carries the newest
 angles, so the server always simulates the view the player saw last.
@@ -143,6 +149,25 @@ tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `thr
 `set_charge(c)`, `spinning = true` (Riveter); `viewmodel.last_draw()` has the view-space muzzle
 / fist (transform by the camera for world tracers).
 
+### Combat presentation (`ingame::combat`)
+
+Hooks in `InGame` (all in `ingame/combat/mod.rs`, an `impl InGame` block):
+`combat_after_ticks` (after the tick loop: effects for the shots `WeaponPredictor::after_tick`
+recorded right after each `NetClient::tick`), `combat_game_event` (`Damaged`, `HitConfirm`,
+`Killed`, `Parried`, `Respawned`), `combat_update` (per frame, visual time), `combat_draw`,
+`combat_hud`, `combat_health` (feeds `HudInfo`). `NetClient` additions: `own_combat()`
+(`OwnCombat { tick, seq, combat }`, `dead_at(seq)`), `drain_fx()` (de-duplicated by `seq`);
+`tick` predicts with `neutral_input` while dead. Own projectiles are drawn from the newest
+snapshot at the present (see `docs/combat.md`), everything else at the render tick.
+`InGame::send_chat` / `server_addr` exist for tools.
+
+Look at it: `cargo run -p client --release --example combat_shots -- [out_dir]` plays a
+scripted single-player session (dev commands spawn husks / orbs, every weapon fires, a
+parry, damage, death) plus a hosted game with a scripted rival client shooting at you, and
+writes PNGs (`combat_lancet`, `combat_thresher`, `combat_explosion`, `combat_overcharge_beam`,
+`combat_ricochet`, `combat_husk_windup`, `combat_parry`, `combat_hit_by_husk`,
+`combat_low_health`, `combat_death`, `combat_remote_shot`, ...) and frame-time numbers.
+
 ### React to gameplay events (damage, kills, parries...)
 
 Add a match arm in `InGame::on_net_event` for your `NetEvent::Game(GameEvent::...)` and call
@@ -164,9 +189,9 @@ NetEvent::Game(GameEvent::Killed { killer, victim, .. }) => {
 }
 ```
 
-Owner-only state (health, hard damage, style) arrives in `OwnState`; expose it from
-`NetClient` and feed it into `HudInfo` in `InGame::draw_hud` (health is a placeholder 100
-until then: `PLACEHOLDER_HEALTH`).
+Owner-only state arrives in `OwnState`: combat's is exposed as `NetClient::own_combat()` and
+already feeds health / hard damage into `HudInfo`; add new owner-only fields (style) the same
+way.
 
 ### Feedback and effects API (`self.feedback`, `self.effects` on `InGame`)
 
@@ -312,6 +337,8 @@ velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-af
 - `client_tuning_reload`: editor → file → server watcher → client prediction in sync.
 - `lobby` (headless network) / `lobby_screen` (GPU): lobby and match flow, see
   `docs/lobby.md`.
+- `client_combat`: client weapon prediction == server weapon state (0 mismatches at 100 ms
+  RTT), own combat state follows damage, Fx arrive exactly once.
 - unit tests: camera dip / slide eye height, feedback (hitstop, toggles, trauma decay),
   effects (decal ring, particle cap, blood splats), tuning file rewriting, UI repeat.
 
@@ -332,6 +359,8 @@ players drawn ≈200 ms behind the server tick; ≈7.8 KB/s down, 12 KB/s up per
 ## Known limitations
 
 - Health / hard damage / style are placeholders until combat replicates them (`HudInfo`).
+- Style is a placeholder until the style system replicates it (`HudInfo`).
+- Scoreboard ping is only known for the local player (the protocol has no per-player ping).
 - After a server-side teleport (restart, respawn) the `Spawned` event can arrive a snapshot
   before the corrected position, so the new view angle is shown at the old spot for a frame
   or two.

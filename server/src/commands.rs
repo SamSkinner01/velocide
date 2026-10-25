@@ -12,15 +12,17 @@
 //! | `/kill` | kills you (respawn rule applies) |
 //! | `/ff [on/off]` | PvP damage between players |
 //! | `/hurt <amount>` | damages you (test hard damage / healing) |
+//! | `/orb [distance]` | a parryable Spitter orb flies at you from in front (parry practice) |
 //! | `/help` | this list |
 
 use glam::Vec3;
 use shared::input::look_dir;
-use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, WeaponState};
+use shared::protocol::kind;
+use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind, WeaponState};
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>";
+const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /orb [dist]";
 
 impl Server {
     /// Runs one dev command for `player`; returns the reply.
@@ -95,6 +97,34 @@ impl Server {
                 }
                 None => "no body".into(),
             },
+            "orb" => {
+                let dist = args
+                    .first()
+                    .and_then(|a| a.parse::<f32>().ok())
+                    .unwrap_or(16.0)
+                    .clamp(3.0, 60.0);
+                let Some(p) = self.world.players.get(&player) else {
+                    return "no body".into();
+                };
+                let eye = p.movement.eye_position(&tuning.movement);
+                let from = eye + look_dir(p.yaw, 0.0) * dist;
+                let speed = 22.0;
+                // A phantom enemy owns it (RETURN TO SENDER has nobody to hit).
+                let owner = self.world.alloc_net_id();
+                self.world.spawn_enemy_projectile(
+                    &tuning,
+                    ProjectileKind::SpitterOrb,
+                    owner,
+                    Attack::Enemy {
+                        kind: kind::SPITTER,
+                        attack: 0,
+                    },
+                    from,
+                    (eye - from).normalize_or(Vec3::Z) * speed,
+                    20.0,
+                );
+                format!("orb incoming from {dist:.0} m")
+            }
             "kill" => {
                 self.world.kill_player(&tuning, player, Attack::Dev);
                 "you died".into()
