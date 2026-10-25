@@ -168,6 +168,13 @@ pub struct NetTuning {
     pub correction_smoothing: f32,
     /// Errors larger than this (metres) snap instead of smoothing.
     pub correction_snap_distance: f32,
+    /// Remote entities are extrapolated at most this long (ms) past the newest snapshot when
+    /// snapshots are late, then frozen.
+    pub max_extrapolation_ms: f32,
+    /// Extra interpolation delay per unit of measured snapshot arrival jitter (multiplier).
+    pub interp_jitter_factor: f32,
+    /// Upper bound (ms) for the adaptive interpolation delay.
+    pub interp_delay_max_ms: f32,
 }
 
 impl Default for NetTuning {
@@ -179,6 +186,9 @@ impl Default for NetTuning {
             parry_tolerance_ms: 80.0,
             correction_smoothing: 12.0,
             correction_snap_distance: 3.0,
+            max_extrapolation_ms: 100.0,
+            interp_jitter_factor: 2.0,
+            interp_delay_max_ms: 250.0,
         }
     }
 }
