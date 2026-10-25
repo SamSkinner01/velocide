@@ -1,0 +1,40 @@
+VELOCIDE  (build @VERSION@)
+==========================
+
+START THE GAME
+  Windows: double-click velocide.exe
+    If Windows shows "Windows protected your PC", click "More info" and then "Run anyway".
+    This happens because the game isn't code-signed.
+    A black console window opens next to the game. It shows the game's log; you can ignore it,
+    but if something goes wrong, send a screenshot of it.
+  Linux:   run ./velocide from this folder
+    You need a working Vulkan driver (on Debian/Ubuntu: mesa-vulkan-drivers, or the NVIDIA
+    driver).
+
+  Keep the "assets" folder next to the game. The game won't find its levels without it.
+
+PLAY WITH FRIENDS
+  Join:  Main menu -> JOIN GAME -> type the address you were given, e.g. 203.0.113.7:47420
+  Host:  Main menu -> HOST GAME. Your friends need your IP address, and port 47420 must be
+         forwarded on your router (UDP). Using a dedicated server avoids all of that.
+  Everyone must use the same build (the version above). After an update, everyone downloads
+  the new one.
+
+CONTROLS (rebind them in Settings -> Controls)
+  WASD move        Mouse look       Space jump / wall jump     Shift dash
+  Ctrl or C        slide on the ground, slam in the air
+  Left mouse       fire             Right mouse  alt fire
+  1 2 3 4          weapons (press the same number again to switch alt mode)
+  F punch / parry  Q throw prism    E use / revive a teammate
+  Tab scoreboard   T chat           Esc pause      F11 fullscreen
+  Gamepads work too.
+
+TIPS
+  Never stop moving: slides keep their speed, and slide-jumps and dash-jumps carry momentum.
+  Slam (crouch in the air), then jump right after landing for a huge bounce.
+  Hits make enemies bleed. Stand in the blood to heal.
+  Punch an incoming projectile just before it hits you: it flies back at double damage and
+  heals you.
+  Throw a prism and shoot it: the shot ricochets to the nearest enemy.
+
+Settings are saved in %APPDATA%\velocide (Windows) or ~/.config/velocide (Linux).
