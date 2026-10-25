@@ -120,6 +120,22 @@ impl SimPlayer {
         if self.movement.is_invulnerable() {
             flags |= player_flags::INVULNERABLE;
         }
+        let m = &self.movement;
+        for (on, bit) in [
+            (m.on_ground, player_flags::ON_GROUND),
+            (m.is_sliding(), player_flags::SLIDING),
+            (m.is_dashing(), player_flags::DASHING),
+            (m.is_slamming(), player_flags::SLAMMING),
+        ] {
+            if on {
+                flags |= bit;
+            }
+        }
+        let mut aux = 0;
+        if m.wall_clinging && m.wall_normal != Vec3::ZERO {
+            flags |= player_flags::WALL_CLING;
+            aux = crate::protocol::quantize_yaw((-m.wall_normal.x).atan2(-m.wall_normal.z)) as u32;
+        }
         EntityState {
             id: NetId::player(self.id),
             kind: kind::PLAYER,
@@ -129,6 +145,8 @@ impl SimPlayer {
             yaw: self.yaw,
             pitch: self.pitch,
             flags,
+            state: self.last_input.weapon as u16 | (self.last_input.weapon_mode as u16) << 8,
+            aux,
             ..Default::default()
         }
     }

@@ -10,7 +10,7 @@ the debug overlay.
 | module | contents |
 |---|---|
 | `main.rs` | parses the command line (`cli`), loads settings, calls `app::run` |
-| `app` | `VelocideApp` (`engine::app::Game`): the screen state machine, `Common` (app-wide state), `FrameStats` |
+| `app` | `VelocideApp` (`engine::app::Game`): the screen state machine, `Common` (app-wide state incl. the `ModelLibrary`), `FrameStats` |
 | `frame` | `FrameBuffers` (reused draw lists → `FrameDesc`), `SceneParams`, `FrameIo` (engine inputs of a frame), `ScreenOutput`, `Transition` |
 | `cli` | `LaunchOptions`, `StartMode`, `parse`, `USAGE` |
 | `settings` | `Settings` (RON, persisted), `CROSSHAIRS`, `RESOLUTIONS` |
@@ -24,14 +24,15 @@ the debug overlay.
 | `ingame::camera` | `CameraRig`: eye height, FOV kick, view roll, landing dip, stair smoothing, shake |
 | `ingame::feedback` | `Feedback`: screen shake (trauma), hitstop / visual time scale, screen flashes |
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
-| `ingame::viewmodel` | `Viewmodel`: held weapon (placeholder meshes) with bob, sway, dip, switch, kick |
-| `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, ghost-outline helpers |
-| `ingame::remote_players` | `RemotePlayers`: the seam that draws other players (placeholder bodies), `player_color` |
+| `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / throw, Riveter spin, plus landing dip / slide tilt / dash pull-back |
+| `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
+| `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard, pause menu |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
 | `level_mesh` | `LevelRender`: level geometry for the renderer |
+| `models` | procedural models, rigs and poses (owned by the models area, `docs/models.md`) |
 | `net` | networking core (owned by the network area) |
 
 ## Screens
@@ -109,21 +110,29 @@ state (encounters, enemies, pickups) reset themselves in `SimWorld::restart_leve
 ### Draw a new replicated entity kind (enemies, projectiles, pickups, prisms)
 
 1. The simulation adds a `kind` constant and replicates it (see `docs/network.md`).
-2. Add a renderer module next to `ingame/remote_players.rs` (e.g. `ingame/enemies.rs`) with a
-   `new(&mut Renderer)` that creates meshes once and a
-   `draw(&mut self, entities: impl Iterator<Item = &EntityState>, dt, out: &mut Vec<DrawItem>)`.
-   Keep per-entity animation state in a `HashMap<NetId, _>` and drop unseen ids (see
-   `RemotePlayers::draw`).
-3. Create it in `InGame::start`, free it in `InGame::shutdown`, and call it in
-   `InGame::draw_world` with `net.remote_entities().iter().filter(|e| e.kind == kind::HUSK)`.
+2. Add a module next to `ingame/remote_players.rs` (e.g. `ingame/enemies.rs`) with a
+   `draw(&mut self, lib: Option<&ModelLibrary>, entities: impl Iterator<Item = &EntityState>,
+   dt, out: &mut Vec<DrawItem>)` that builds the model's animation input from the entity
+   (`EnemyAnim { kind, state, speed, cycle, .. }`, `lib.draw_enemy(&anim, EnemyAnim::root(pos,
+   yaw), &Tint::default(), out)`; projectiles: `lib.draw_model(ModelId::Rocket, ..)`). Keep
+   per-entity animation state (walk `cycle`, hit flash) in a `HashMap<NetId, _>` and drop
+   unseen ids (see `RemotePlayers::draw`). The library lives in `common.models`.
+3. Create it in `InGame::start` and call it in `InGame::draw_world` (where `lib` is already
+   in scope) with `net.remote_entities().iter().filter(|e| e.kind == kind::HUSK)`.
    Fast projectiles may extrapolate from `position + velocity * dt` using
    `NetClient::server_tick_estimate()`.
 4. Positional sounds for state changes go in a tracker like `audio_hooks::RemoteSounds`;
    anything the server reports as an event goes in `on_net_event` (below).
 
-Player models: replace the body of `RemotePlayers::draw` with the `client::models` Shrike rig;
-the per-player `PlayerAnim` (run phase, run amount, crouch) is already tracked. The
-viewmodel's `gun_mesh` placeholders are swapped in `Viewmodel::new`.
+Players: `RemotePlayers::draw` builds a `PlayerAnim` per remote player from the replicated
+entity (`player_flags::{ON_GROUND, SLIDING, DASHING, SLAMMING, WALL_CLING}`, held weapon in
+`state`, wall normal in `aux`) plus the client-kept walk `cycle`, and draws the Shrike with
+`Tint::team(player_color(id))`; name tags hang above the drawn head. Combat drives the
+third-person shot recoil / punch / downed / dead through `self.remote.visual_mut(id)`
+(`firing = 1.0`, `punching = 0.01`, ...); `visual(id).muzzle` gives the world-space muzzle for
+tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `throw_prism()`,
+`set_charge(c)`, `spinning = true` (Riveter); `viewmodel.last_draw()` has the view-space muzzle
+/ fist (transform by the camera for world tracers).
 
 ### React to gameplay events (damage, kills, parries...)
 
@@ -161,7 +170,7 @@ until then: `PLACEHOLDER_HEALTH`).
 | `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `blood(pos, dir, amount)`, `gibs(pos, n)`, `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
-| `viewmodel.kick(amount)` | weapon recoil |
+| `viewmodel.fire(kick)`, `punch()`, `throw_prism()`, `set_charge(c)` | first-person weapon animation |
 
 All of it respects the player's `screen_shake` / `screen_flashes` / `hitstop` toggles.
 Particles are capped at 2048 (oldest replaced); colliding particles cost one ray per frame.
@@ -299,9 +308,16 @@ sliding, slamming and wall jumps; 28–30 snapshots/s, interpolation delay ≈10
 players drawn ≈200 ms behind the server tick; ≈7.8 KB/s down, 12 KB/s up per client; 165 FPS
 (vsync) at 960x540 on an RTX 4070 Ti SUPER.
 
+## Server / shared additions made for the client
+
+- `server::ServerCommand::SetPaused(bool)` / `Server::set_paused` (single-player pause: no
+  ticks, no snapshots, transport keeps flushing; `InputQueue::reset_timing` on resume) and
+  `ServerCommand::RestartLevel` / `Server::restart_level` → `SimWorld::restart_level`.
+- Player entities replicate animation state: `player_flags::{ON_GROUND, SLIDING, DASHING,
+  SLAMMING, WALL_CLING}`, `state` = held weapon | alt mode << 8, `aux` = wall-cling normal yaw.
+
 ## Known limitations
 
-- Player and weapon models are placeholders (blocky meshgen) until `client::models` lands.
 - Health / hard damage / style are placeholders until combat replicates them (`HudInfo`).
 - Scoreboard ping is only known for the local player (the protocol has no per-player ping).
 - After a server-side teleport (restart, respawn) the `Spawned` event can arrive a snapshot

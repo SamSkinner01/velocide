@@ -82,11 +82,7 @@ impl PlayerInput {
     /// Movement axes as floats, length clamped to 1. x = right, y = forward.
     pub fn move_axes(&self) -> Vec2 {
         let v = Vec2::new(self.right as f32, self.forward as f32) / 127.0;
-        if v.length_squared() > 1.0 {
-            v.normalize()
-        } else {
-            v
-        }
+        if v.length_squared() > 1.0 { v.normalize() } else { v }
     }
 
     /// Horizontal world-space direction the player wants to move in (length <= 1).
@@ -129,15 +125,9 @@ mod tests {
     fn yaw_zero_looks_down_negative_z() {
         let d = look_dir(0.0, 0.0);
         assert!((d - Vec3::NEG_Z).length() < 1e-6);
-        let input = PlayerInput {
-            forward: 127,
-            ..Default::default()
-        };
+        let input = PlayerInput { forward: 127, ..Default::default() };
         assert!((input.wish_dir() - Vec3::NEG_Z).length() < 1e-6);
-        let input = PlayerInput {
-            right: 127,
-            ..Default::default()
-        };
+        let input = PlayerInput { right: 127, ..Default::default() };
         assert!((input.wish_dir() - Vec3::X).length() < 1e-6);
     }
 

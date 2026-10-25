@@ -66,7 +66,7 @@ use effects::Effects;
 use feedback::Feedback;
 use hud::{Hud, HudInfo, NameTag};
 use pause::{PauseAction, PauseMenu};
-use remote_players::{RemotePlayers, name_tag_anchor, player_color};
+use remote_players::{RemotePlayers, player_color};
 use viewmodel::Viewmodel;
 use world_render::WorldRender;
 
@@ -161,6 +161,7 @@ impl InGame {
                 )
             }
         };
+        common.load_models(renderer);
         let session = Session::start(spec, client)?;
         log::info!("session started: {target} as '{name}'");
         let mut feedback = Feedback::new();
@@ -175,9 +176,9 @@ impl InGame {
             camera: CameraRig::new(),
             feedback,
             effects: Effects::new(renderer),
-            viewmodel: Viewmodel::new(renderer),
+            viewmodel: Viewmodel::new(),
             world: WorldRender::new(),
-            remote: RemotePlayers::new(renderer),
+            remote: RemotePlayers::new(),
             hud: Hud::new(),
             chat: Chat::new(),
             pause: PauseMenu::new(),
@@ -233,8 +234,6 @@ impl InGame {
         }
         common.audio.stop(Sfx::Slide);
         self.world.free(renderer);
-        self.remote.free(renderer);
-        self.viewmodel.free(renderer);
         self.effects.free(renderer);
     }
 
@@ -628,9 +627,12 @@ impl InGame {
     fn draw_world(&mut self, common: &Common, out: &mut FrameBuffers, dt: f32, vdt: f32) {
         let net = self.session.as_ref().map(Session::client);
         let world = net.and_then(NetClient::world);
+        let lib = common.models.as_ref();
         self.world.draw(world, &mut out.draws, &mut out.lights);
+        self.world.draw_props(lib, self.time, &mut out.draws);
         if let Some(net) = net {
-            self.remote.draw(net.remote_players(), dt, &mut out.draws);
+            self.remote
+                .draw(lib, net.remote_players(), dt, &mut out.draws);
             // Future replicated entity kinds (enemies, projectiles, pickups): iterate
             // `net.remote_entities()` filtered by `kind` here (see docs/client.md).
         }
@@ -641,8 +643,14 @@ impl InGame {
             && net.local_state().is_some()
         {
             if common.settings.show_viewmodel {
+                let team = net
+                    .local_player_id()
+                    .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
                 self.viewmodel.draw(
+                    lib,
                     self.controls.weapons.current,
+                    self.controls.weapons.mode(),
+                    team,
                     self.camera.dip(),
                     self.camera.roll(),
                     &mut out.viewmodel,
@@ -727,7 +735,7 @@ impl InGame {
                     .remote_players()
                     .filter_map(|e| {
                         let id = e.id.as_player()?;
-                        let pos = name_tag_anchor(e);
+                        let pos = self.remote.name_tag_position(e);
                         Some(NameTag {
                             position: pos,
                             name: net.player_name(id).unwrap_or("?"),

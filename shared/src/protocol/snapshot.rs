@@ -73,7 +73,9 @@ impl NetId {
 /// Entity kinds (the `kind` field of [`NetEntity`]). Gameplay code adds its own constants here
 /// (keep them stable: they are part of the protocol).
 pub mod kind {
-    /// A player (`owner` = player id).
+    /// A player (`owner` = player id, `flags` = [`super::player_flags`], `state` = held weapon
+    /// slot | alt mode << 8, `aux` = wall-cling normal as a quantised yaw while
+    /// `WALL_CLING`).
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
@@ -90,6 +92,13 @@ pub mod player_flags {
     pub const LOW_PROFILE: u32 = 1 << 0;
     /// Dash invulnerability frames.
     pub const INVULNERABLE: u32 = 1 << 1;
+    // Movement state for third-person animation (clients can't run other players' movement).
+    pub const ON_GROUND: u32 = 1 << 2;
+    pub const SLIDING: u32 = 1 << 3;
+    pub const DASHING: u32 = 1 << 4;
+    pub const SLAMMING: u32 = 1 << 5;
+    /// Clinging to a wall; `aux` holds the wall normal's yaw (`quantize_yaw`).
+    pub const WALL_CLING: u32 = 1 << 6;
 }
 
 /// Flag bits of door entities.

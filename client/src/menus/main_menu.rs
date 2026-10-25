@@ -134,7 +134,7 @@ impl MainMenu {
         out: &mut FrameBuffers,
     ) -> ScreenOutput {
         let mut scene = match &self.backdrop {
-            Some(b) => b.frame(io.time, out),
+            Some(b) => b.frame(io.time, common.models.as_ref(), out),
             None => SceneParams::default(),
         };
         // Slightly darker / redder than in game so the UI pops.

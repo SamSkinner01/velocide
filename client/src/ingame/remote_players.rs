@@ -1,22 +1,25 @@
-//! Drawing other players (interpolated `NetClient::remote_players()`).
+//! Drawing other players (interpolated `NetClient::remote_players()`) with the Shrike model
+//! from `client::models`.
 //!
-//! This is the seam for player models: [`RemotePlayers::draw`] gets every interpolated player
-//! entity and appends draw items. The placeholder is a blocky chrome "Shrike" made of tinted
-//! cubes (legs and arms swing with speed, the body squashes while sliding, the head follows the
-//! pitch, a visor glows in the player's colour). When `client::models` provides the Shrike rig,
-//! replace the body of `draw` with the model + its procedural animation; per-player animation
-//! state already lives in [`PlayerAnim`].
+//! The replicated player entity carries everything the third-person animation needs:
+//! velocity, look angles, movement-state flags (`player_flags::{ON_GROUND, SLIDING, DASHING,
+//! SLAMMING, WALL_CLING}`), the held weapon (`state`) and the wall normal (`aux`). The
+//! locomotion phase is kept per player here ([`PlayerAnim::advance_cycle`]); combat adds
+//! `firing` / `punching` / `downed` / `dead` from its events in [`PlayerVisual`].
 
 use std::collections::HashMap;
 
-use engine::assets::meshgen::cuboid;
-use engine::gfx::{DrawItem, MeshId, TextureId};
-use engine::render::Renderer;
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use shared::protocol::{EntityState, NetId, player_flags};
+use glam::Vec3;
+use glam::Vec4;
+use shared::input::look_dir;
+use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags};
 use shared::sim::PlayerId;
 
-/// Distinct colours per player slot (sRGB).
+use crate::models::{ModelLibrary, PlayerAnim, Tint};
+use engine::gfx::DrawItem;
+
+/// Distinct colours per player slot (sRGB), used for the Shrike's team trim, visor, name tags,
+/// chat names and the scoreboard.
 pub const PLAYER_COLORS: [Vec4; 8] = [
     Vec4::new(0.93, 0.15, 0.17, 1.0),
     Vec4::new(0.38, 0.78, 1.0, 1.0),
@@ -32,175 +35,116 @@ pub fn player_color(id: PlayerId) -> Vec4 {
     PLAYER_COLORS[id.0 as usize % PLAYER_COLORS.len()]
 }
 
-/// Where a name tag hangs (above the head).
+/// Name-tag anchor without a model (above the capsule).
 pub fn name_tag_anchor(e: &EntityState) -> Vec3 {
     let low = e.flags & player_flags::LOW_PROFILE != 0;
     e.position + Vec3::Y * if low { 1.35 } else { 2.15 }
 }
 
-/// Per-player animation state.
+/// Client-side animation state of one remote player.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PlayerAnim {
-    pub phase: f32,
-    /// 0 = standing still .. 1 = full run.
-    pub run: f32,
-    /// Smoothed crouch (slide) amount.
-    pub crouch: f32,
-    pub seen: bool,
+pub struct PlayerVisual {
+    /// Locomotion phase (cycles).
+    pub cycle: f32,
+    /// Recoil 0..1 (combat sets 1 on a shot event; decays here).
+    pub firing: f32,
+    /// Punch progress 0..1 (combat starts it at a small value; advances here).
+    pub punching: f32,
+    pub downed: bool,
+    pub dead: bool,
+    /// World-space head of the last drawn pose (name tags).
+    pub head: Vec3,
+    /// World-space muzzle of the held weapon (tracers, muzzle flashes).
+    pub muzzle: Vec3,
+    pub muzzle_dir: Vec3,
+    seen: bool,
 }
 
+/// The animation input for a replicated player entity.
+pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
+    let f = |bit: u32| e.flags & bit != 0;
+    PlayerAnim {
+        velocity: e.velocity,
+        yaw: e.yaw,
+        pitch: e.pitch,
+        on_ground: f(player_flags::ON_GROUND),
+        sliding: f(player_flags::SLIDING),
+        dashing: f(player_flags::DASHING),
+        slamming: f(player_flags::SLAMMING),
+        wall_cling: f(player_flags::WALL_CLING)
+            .then(|| look_dir(dequantize_yaw(e.aux as u16), 0.0)),
+        firing: v.firing,
+        punching: v.punching,
+        downed: v.downed,
+        dead: v.dead,
+        time,
+        weapon: (e.state & 0xff) as u8,
+        cycle: v.cycle,
+    }
+}
+
+#[derive(Default)]
 pub struct RemotePlayers {
-    cube: MeshId,
-    texture: TextureId,
-    anims: HashMap<NetId, PlayerAnim>,
+    visuals: HashMap<NetId, PlayerVisual>,
+    time: f64,
 }
-
-const CHROME: Vec4 = Vec4::new(0.72, 0.74, 0.8, 1.0);
-const DARK: Vec4 = Vec4::new(0.2, 0.18, 0.2, 1.0);
 
 impl RemotePlayers {
-    pub fn new(renderer: &mut Renderer) -> Self {
-        let mut cube = cuboid(Vec3::splat(0.5), Vec4::ONE);
-        cube.shade_by_normal(1.0, 0.8, 0.55);
-        Self {
-            cube: renderer.create_mesh(&cube.build()),
-            texture: renderer.white_texture(),
-            anims: HashMap::new(),
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Animation state of a player (combat code sets `firing` / `punching` / `dead` here).
+    pub fn visual_mut(&mut self, id: NetId) -> &mut PlayerVisual {
+        self.visuals.entry(id).or_default()
+    }
+
+    pub fn visual(&self, id: NetId) -> Option<&PlayerVisual> {
+        self.visuals.get(&id)
+    }
+
+    /// Where the name tag of `e` goes (above the model's head when drawn).
+    pub fn name_tag_position(&self, e: &EntityState) -> Vec3 {
+        match self.visuals.get(&e.id) {
+            Some(v) if v.seen => v.head + Vec3::Y * 0.42,
+            _ => name_tag_anchor(e),
         }
     }
 
-    pub fn anim(&self, id: NetId) -> Option<&PlayerAnim> {
-        self.anims.get(&id)
-    }
-
-    fn part(
-        &self,
-        base: Mat4,
-        center: Vec3,
-        half: Vec3,
-        rot: Quat,
-        tint: Vec4,
-        unlit: bool,
-    ) -> DrawItem {
-        DrawItem {
-            mesh: self.cube,
-            texture: self.texture,
-            transform: base * Mat4::from_scale_rotation_translation(half * 2.0, rot, center),
-            tint,
-            unlit,
-        }
-    }
-
-    /// Advances animation by `dt` (real time) and appends every player's parts.
+    /// Advances animation by `dt` (real time) and appends every player.
     pub fn draw<'a>(
         &mut self,
+        lib: Option<&ModelLibrary>,
         players: impl Iterator<Item = &'a EntityState>,
         dt: f32,
         out: &mut Vec<DrawItem>,
     ) {
-        for a in self.anims.values_mut() {
-            a.seen = false;
+        self.time += dt as f64;
+        for v in self.visuals.values_mut() {
+            v.seen = false;
         }
         for e in players {
-            let anim = self.anims.entry(e.id).or_default();
-            anim.seen = true;
-            let speed = Vec2::new(e.velocity.x, e.velocity.z).length();
-            let low = e.flags & player_flags::LOW_PROFILE != 0;
-            let airborne = e.velocity.y.abs() > 1.0;
-            let run_target = if low || airborne {
-                0.0
-            } else {
-                (speed / 16.0).min(1.0)
+            let v = self.visuals.entry(e.id).or_default();
+            v.cycle = PlayerAnim::advance_cycle(v.cycle, e.velocity, dt);
+            v.firing = (v.firing - dt / 0.2).max(0.0);
+            if v.punching > 0.0 {
+                v.punching += dt / 0.35;
+                if v.punching >= 1.0 {
+                    v.punching = 0.0;
+                }
+            }
+            v.seen = true;
+            let Some(lib) = lib else {
+                v.head = name_tag_anchor(e) - Vec3::Y * 0.42;
+                continue;
             };
-            let k = 1.0 - (-10.0 * dt).exp();
-            anim.run += (run_target - anim.run) * k;
-            anim.crouch += ((low as u8 as f32) - anim.crouch) * (1.0 - (-14.0 * dt).exp());
-            anim.phase += speed.min(30.0) * dt * std::f32::consts::PI / 2.6;
-            let anim = *anim;
-
             let color = e.id.as_player().map_or(PLAYER_COLORS[0], player_color);
-            // Squash while sliding (the capsule halves), leaning back.
-            let squash = 1.0 - 0.48 * anim.crouch;
-            let base = Mat4::from_rotation_translation(Quat::from_rotation_y(e.yaw), e.position)
-                * Mat4::from_scale(Vec3::new(1.0, squash, 1.0))
-                * Mat4::from_rotation_x(0.35 * anim.crouch);
-            let swing = anim.phase.sin() * 0.7 * anim.run;
-            let tuck = if airborne { 0.5 } else { 0.0 };
-            let hip = Vec3::new(0.0, 0.84, 0.0);
-            for (side, s) in [(-1.0f32, swing), (1.0, -swing)] {
-                let rot = Quat::from_rotation_x(s + tuck * 0.8);
-                let leg_center = hip + rot * Vec3::new(side * 0.13, -0.42, 0.0);
-                out.push(self.part(
-                    base,
-                    leg_center,
-                    Vec3::new(0.09, 0.42, 0.1),
-                    rot,
-                    DARK,
-                    false,
-                ));
-            }
-            out.push(self.part(
-                base,
-                Vec3::new(0.0, 1.17, 0.0),
-                Vec3::new(0.24, 0.31, 0.15),
-                Quat::IDENTITY,
-                CHROME,
-                false,
-            ));
-            // Chest plate in the player's colour.
-            out.push(self.part(
-                base,
-                Vec3::new(0.0, 1.25, -0.15),
-                Vec3::new(0.16, 0.12, 0.02),
-                Quat::IDENTITY,
-                color,
-                false,
-            ));
-            let shoulder = Vec3::new(0.0, 1.42, 0.0);
-            for (side, s) in [(-1.0f32, -swing), (1.0, swing)] {
-                let rot = Quat::from_rotation_x(s * 0.8 - tuck);
-                let arm_center =
-                    shoulder + Vec3::new(side * 0.33, 0.0, 0.0) + rot * Vec3::new(0.0, -0.28, 0.0);
-                out.push(self.part(
-                    base,
-                    arm_center,
-                    Vec3::new(0.07, 0.29, 0.08),
-                    rot,
-                    CHROME,
-                    false,
-                ));
-                out.push(self.part(
-                    base,
-                    shoulder + Vec3::new(side * 0.33, 0.04, 0.0),
-                    Vec3::new(0.1, 0.06, 0.11),
-                    Quat::IDENTITY,
-                    color,
-                    false,
-                ));
-            }
-            let head_rot = Quat::from_rotation_x(e.pitch * 0.8);
-            let head_center = Vec3::new(0.0, 1.62, 0.0);
-            out.push(self.part(
-                base,
-                head_center,
-                Vec3::new(0.14, 0.14, 0.15),
-                head_rot,
-                CHROME,
-                false,
-            ));
-            out.push(self.part(
-                base,
-                head_center + head_rot * Vec3::new(0.0, 0.02, -0.15),
-                Vec3::new(0.11, 0.035, 0.02),
-                head_rot,
-                color,
-                true,
-            ));
+            let anim = player_anim(e, v, self.time);
+            let info = lib.draw_player(&anim, e.position, &Tint::team(color), out);
+            v.head = info.head;
+            v.muzzle = info.muzzle;
+            v.muzzle_dir = info.muzzle_dir;
         }
-        self.anims.retain(|_, a| a.seen);
-    }
-
-    pub fn free(self, renderer: &mut Renderer) {
-        renderer.free_mesh(self.cube);
+        self.visuals.retain(|_, v| v.seen);
     }
 }

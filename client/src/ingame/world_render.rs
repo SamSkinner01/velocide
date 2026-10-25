@@ -1,10 +1,11 @@
 //! The level: geometry via [`LevelRender`] (doors hidden while the replicated door state says
-//! open), environment (sky, fog, lights), plus debug ghost outlines of the local player's
-//! capsule (server-authoritative vs predicted).
+//! open), environment (sky, fog, lights), model props (`client::models`: jump pads,
+//! checkpoints, the exit gate) plus debug ghost outlines of the local player's capsule
+//! (server-authoritative vs predicted).
 
 use engine::gfx::{DebugLine, DrawItem, PointLight};
 use engine::render::Renderer;
-use glam::{Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use shared::level::{LevelDef, LevelKind};
 use shared::movement::MoveState;
 use shared::sim::SimWorld;
@@ -12,6 +13,17 @@ use shared::tuning::MovementTuning;
 
 use crate::frame::SceneParams;
 use crate::level_mesh::LevelRender;
+use crate::models::{ModelId, ModelLibrary, Tint, props};
+
+/// Radius of the jump pad prop model (octagon, metres).
+const JUMP_PAD_PROP_RADIUS: f32 = 0.95;
+
+/// A model placed by the level.
+#[derive(Clone, Copy, Debug)]
+struct PropInstance {
+    model: ModelId,
+    root: Mat4,
+}
 
 #[derive(Default)]
 pub struct WorldRender {
@@ -19,6 +31,54 @@ pub struct WorldRender {
     scene: SceneParams,
     kind: LevelKind,
     name: String,
+    props: Vec<PropInstance>,
+}
+
+/// Prop models for the level's gameplay volumes.
+fn level_props(level: &LevelDef) -> Vec<PropInstance> {
+    let mut out = Vec::new();
+    for pad in &level.jump_pads {
+        let (min, max) = (pad.trigger.min, pad.trigger.max);
+        let half = (max - min).abs() * 0.5;
+        // Cover the whole trigger footprint (the level mesh marks it with a glowing slab).
+        let scale =
+            (half.x.max(half.z) * std::f32::consts::SQRT_2 / JUMP_PAD_PROP_RADIUS).clamp(0.5, 6.0);
+        let center = Vec3::new(
+            (min.x + max.x) * 0.5,
+            min.y.min(max.y),
+            (min.z + max.z) * 0.5,
+        );
+        out.push(PropInstance {
+            model: ModelId::JumpPad,
+            root: Mat4::from_scale_rotation_translation(Vec3::splat(scale), Quat::IDENTITY, center),
+        });
+    }
+    for cp in &level.checkpoints {
+        let c = cp.trigger.center();
+        let floor = cp.trigger.min.y.min(cp.trigger.max.y);
+        out.push(PropInstance {
+            model: ModelId::Checkpoint,
+            root: Mat4::from_translation(Vec3::new(c.x, floor, c.z)),
+        });
+    }
+    if let Some(exit) = &level.exit {
+        let c = exit.center();
+        let size = (exit.max - exit.min).abs();
+        // The gate faces along the exit volume's thin axis.
+        let yaw = if size.x < size.z {
+            std::f32::consts::FRAC_PI_2
+        } else {
+            0.0
+        };
+        out.push(PropInstance {
+            model: ModelId::ExitGate,
+            root: Mat4::from_rotation_translation(
+                Quat::from_rotation_y(yaw),
+                Vec3::new(c.x, exit.min.y.min(exit.max.y), c.z),
+            ),
+        });
+    }
+    out
 }
 
 impl WorldRender {
@@ -35,6 +95,7 @@ impl WorldRender {
         self.level = Some(LevelRender::new(renderer, level));
         self.scene = SceneParams::for_level(level);
         self.kind = level.kind;
+        self.props = level_props(level);
         self.name = if level.name.is_empty() {
             name.to_string()
         } else {
@@ -62,6 +123,24 @@ impl WorldRender {
     /// Display name of the level.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Appends the level's model props (animated by `time`). Checkpoints are drawn inactive
+    /// until checkpoint state is replicated.
+    pub fn draw_props(&self, lib: Option<&ModelLibrary>, time: f64, draws: &mut Vec<DrawItem>) {
+        let Some(lib) = lib else {
+            return;
+        };
+        let tint = Tint::default();
+        for p in &self.props {
+            let pose = match p.model {
+                ModelId::JumpPad => props::jump_pad_pose(time),
+                ModelId::Checkpoint => props::checkpoint_pose(false, time),
+                ModelId::ExitGate => props::exit_gate_pose(time),
+                _ => lib.get(p.model).rest_pose(),
+            };
+            lib.get(p.model).draw(&pose, p.root, &tint, draws);
+        }
     }
 
     /// Appends level draw items and lights. Doors follow the client's replicated door state.

@@ -23,6 +23,7 @@ use std::sync::Mutex;
 use engine::app::{EngineContext, Game};
 use engine::audio::{Audio, MusicTrack, Sfx};
 use engine::gfx::UiDrawList;
+use engine::render::Renderer;
 use engine::ui::{Id, Theme, UiState};
 use winit::event::WindowEvent;
 
@@ -31,6 +32,7 @@ use crate::controls::Action;
 use crate::frame::{FrameBuffers, FrameIo, ScreenOutput, Transition};
 use crate::ingame::InGame;
 use crate::menus::main_menu::MainMenu;
+use crate::models::ModelLibrary;
 use crate::settings::Settings;
 use crate::ui_input::UiInputMapper;
 
@@ -112,6 +114,9 @@ pub struct Common {
     pub stats: FrameStats,
     /// Debug overlay visible (F3).
     pub debug_overlay: bool,
+    /// Player, weapon, enemy and prop models (`client::models`), loaded once
+    /// ([`Common::load_models`]).
+    pub models: Option<ModelLibrary>,
 }
 
 impl Common {
@@ -134,6 +139,27 @@ impl Common {
             ui_state: UiState::new(),
             launch,
             stats: FrameStats::default(),
+            models: None,
+        }
+    }
+
+    /// Loads the model library once (missing files are generated in memory; a failure only
+    /// logs an error: players and the viewmodel are then not drawn).
+    pub fn load_models(&mut self, renderer: &mut Renderer) {
+        if self.models.is_some() {
+            return;
+        }
+        let started = std::time::Instant::now();
+        match ModelLibrary::load(renderer) {
+            Ok(lib) => {
+                log::info!(
+                    "models loaded in {:.0} ms ({} regenerated)",
+                    started.elapsed().as_secs_f32() * 1000.0,
+                    lib.regenerated.len()
+                );
+                self.models = Some(lib);
+            }
+            Err(e) => log::error!("couldn't load models: {e:#}"),
         }
     }
 
@@ -313,6 +339,7 @@ impl Game for VelocideApp {
             ctx.renderer.internal_size().1
         );
 
+        common.load_models(&mut ctx.renderer);
         #[cfg(feature = "debug-ui")]
         let debug_ui = engine::debug_ui::DebugUi::new(ctx);
         let menu = MainMenu::new(&mut ctx.renderer, &common);

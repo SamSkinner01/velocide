@@ -8,7 +8,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use engine::physics::{ColliderId, CollisionWorld, GROUP_DOOR, GROUP_PLAYER_CLIP, GROUP_WORLD};
+use engine::physics::{
+    ColliderId, CollisionWorld, GROUP_DOOR, GROUP_PLAYER_CLIP, GROUP_WORLD,
+};
 use glam::{EulerRot, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -289,11 +291,7 @@ impl LevelDef {
             if brush.no_collide {
                 continue;
             }
-            let group = if brush.clip_only {
-                GROUP_PLAYER_CLIP
-            } else {
-                GROUP_WORLD
-            };
+            let group = if brush.clip_only { GROUP_PLAYER_CLIP } else { GROUP_WORLD };
             world.add_box(
                 brush.center(),
                 brush.half_extents(),

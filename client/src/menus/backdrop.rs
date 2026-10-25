@@ -8,6 +8,7 @@ use shared::level::LevelDef;
 
 use crate::frame::{FrameBuffers, SceneParams};
 use crate::ingame::world_render::WorldRender;
+use crate::models::ModelLibrary;
 
 pub struct Backdrop {
     world: WorldRender,
@@ -36,8 +37,14 @@ impl Backdrop {
     }
 
     /// Draws the level and returns the scene with the orbit camera at `time`.
-    pub fn frame(&self, time: f64, out: &mut FrameBuffers) -> SceneParams {
+    pub fn frame(
+        &self,
+        time: f64,
+        lib: Option<&ModelLibrary>,
+        out: &mut FrameBuffers,
+    ) -> SceneParams {
         self.world.draw(None, &mut out.draws, &mut out.lights);
+        self.world.draw_props(lib, time, &mut out.draws);
         let a = (time * 0.035) as f32 + 0.6;
         let bob = ((time * 0.21).sin() as f32) * 2.0;
         let position = self.center

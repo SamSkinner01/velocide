@@ -33,14 +33,16 @@ fn invalid_file_gives_defaults() {
 #[test]
 fn save_and_load_round_trip() {
     let path = scratch("roundtrip");
-    let mut s = Settings::default();
-    s.fov = 118.0;
-    s.mouse_sensitivity = 1.75;
-    s.invert_y = true;
+    let mut s = Settings {
+        fov: 118.0,
+        mouse_sensitivity: 1.75,
+        invert_y: true,
+        player_name: "Gravel Shrike".into(),
+        last_join_address: "10.0.0.7:47420".into(),
+        ..Default::default()
+    };
     s.retro.dithering = false;
     s.retro.internal_height = 240;
-    s.player_name = "Gravel Shrike".into();
-    s.last_join_address = "10.0.0.7:47420".into();
     s.bindings.bind(Action::Dash, Binding::Key(Key::KeyV));
     s.save(&path).unwrap();
     let back = Settings::load(&path);
