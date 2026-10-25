@@ -497,7 +497,10 @@ spawn protected; death screen.
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
 `/god`, `/notarget`, `/give` (full health, no hard damage, prisms, cooldowns), `/kill`,
 `/hurt <hp>`, `/ff [on|off]`, `/orb [distance]` (a parryable Spitter orb flies at you: parry
-practice), `/help`. The reply goes to the sender only; commands are not
+practice), `/encounter <n>`, `/encounters`, `/tp <x> <y> <z>`, `/goto <exit|start|checkpoint
+n|encounter n>` (teleports: `SimWorld::teleport_player`, the client snaps like a rally),
+`/help`. On lobby servers (hosted / dedicated games) only the lobby host may use them; guests
+get "dev commands are for the host only". The reply goes to the sender only; commands are not
 broadcast. Programmatic: `ServerCommand::{SpawnEnemy, KillAllEnemies, SetFriendlyFire}`,
 `Server::spawn_enemies`, `Server::kill_all_enemies`, `Server::drain_sim_events`.
 

@@ -661,3 +661,67 @@ fn combat_follows_the_match_settings() {
         "proving ground is an arena"
     );
 }
+
+/// The newest server chat line (dev command reply) a client received.
+fn last_server_line(c: &TestClient) -> Option<String> {
+    c.events.iter().rev().find_map(|e| match e {
+        NetEvent::Chat {
+            from: None, text, ..
+        } => Some(text.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn dev_commands_are_host_only_and_teleports_work() {
+    let mut h = Harness::new(lobby_config(Some(TOKEN)));
+    let host = h.add_client_with(host_client("Host"), script_idle);
+    let guest = h.add_client("Guest", None, script_idle);
+    wait_lobby(&mut h, 2);
+    h.server
+        .set_match_settings(MatchSettings::new(GameMode::Campaign, "crucible_of_veins"))
+        .unwrap();
+    h.server.start_match().unwrap();
+    wait(&mut h, 5.0, "co-op match", all_in_game);
+    h.run_for(0.5, |_| {});
+    let guest_id = h.clients[guest].id();
+    let host_id = h.clients[host].id();
+
+    // A guest can't cheat (no `/god` in someone's deathmatch).
+    h.clients[guest].net.send_chat("/god");
+    wait(&mut h, 2.0, "guest refused", |h| {
+        last_server_line(&h.clients[guest]).is_some_and(|t| t.contains("host only"))
+    });
+    assert!(!h.server.world().players[&guest_id].combat.god);
+
+    // The host can: `/goto checkpoint 2` puts them at its spawn and their client follows.
+    let target = h.server.world().level.checkpoints[1].spawn.position;
+    h.clients[host].net.send_chat("/goto checkpoint 2");
+    wait(&mut h, 2.0, "host teleported", |h| {
+        let s = h.server.world().players[&host_id].movement.position;
+        let c = h.clients[host].net.local_state().map(|m| m.position);
+        s.distance(target) < 1.0 && c.is_some_and(|c| c.distance(target) < 1.0)
+    });
+    assert!(
+        last_server_line(&h.clients[host]).is_some_and(|t| t.starts_with("teleported")),
+        "{:?}",
+        last_server_line(&h.clients[host])
+    );
+    // `/tp x y z`, and a malformed one answers with the usage.
+    h.clients[host].net.send_chat("/tp 0 0 -40");
+    wait(&mut h, 2.0, "tp", |h| {
+        let s = h.server.world().players[&host_id].movement.position;
+        s.distance(glam::Vec3::new(0.0, 0.0, -40.0)) < 1.0
+    });
+    h.clients[host].net.send_chat("/tp 1 2");
+    wait(&mut h, 2.0, "tp usage", |h| {
+        last_server_line(&h.clients[host]).is_some_and(|t| t.contains("usage"))
+    });
+    // `/goto exit` lands in the exit volume (co-op: that starts the extraction countdown).
+    h.clients[host].net.send_chat("/goto exit");
+    let exit = h.server.world().level.exit.expect("campaign exit");
+    wait(&mut h, 3.0, "at the exit", |h| {
+        let p = h.server.world().players[&host_id].movement.position;
+        exit.contains(p) || exit.contains(p + glam::Vec3::Y)
+    });
+}

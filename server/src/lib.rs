@@ -109,6 +109,7 @@ pub struct ServerConfig {
     /// host can change it up to `shared::lobby::MAX_PLAYERS`).
     pub lobby: LobbyConfig,
     /// Allow dev chat commands (`/spawn husk 3`, `/god`, `/give`...). See `docs/combat.md`.
+    /// With the lobby enabled only its host may use them.
     pub dev_commands: bool,
     /// Enemy definitions directory; `None` = `assets/enemies` (built-ins as fallback).
     pub enemies_dir: Option<PathBuf>,
@@ -954,8 +955,13 @@ impl Server {
                     return;
                 }
                 if self.config.dev_commands && text.trim_start().starts_with('/') {
-                    // Dev commands are not chat (and not rate limited like it).
-                    let reply = self.run_chat_command(player, text.trim());
+                    // Dev commands are not chat (and not rate limited like it). On lobby
+                    // servers only the host may use them (no guest `/god` in a deathmatch).
+                    let reply = if self.config.lobby.enabled && self.flow.host != Some(player) {
+                        "dev commands are for the host only".to_string()
+                    } else {
+                        self.run_chat_command(player, text.trim())
+                    };
                     if let Some(text) = protocol::sanitize_chat(&reply) {
                         self.send(client, &ServerMessage::Chat { from: None, text });
                     }

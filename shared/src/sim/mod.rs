@@ -643,6 +643,30 @@ impl SimWorld {
         events
     }
 
+    /// Moves a living player to `position` (feet) with a fresh movement state, like an
+    /// encounter rally: pending hits on them are dropped and `Respawned` (emitted with the
+    /// next step's events) snaps their client's view. Dev `/tp`, `/goto`. False if there is
+    /// no such living player.
+    pub fn teleport_player(&mut self, id: PlayerId, position: Vec3, yaw: Option<f32>) -> bool {
+        let Some(p) = self.players.get_mut(&id) else {
+            return false;
+        };
+        if p.combat.dead {
+            return false;
+        }
+        p.movement = MoveState::spawn(position);
+        p.yaw = yaw.unwrap_or(p.yaw);
+        p.pitch = 0.0;
+        let yaw = p.yaw;
+        self.cancel_pending_for_victim(id);
+        self.events.push(SimEvent::Respawned {
+            player: id,
+            position,
+            yaw,
+        });
+        true
+    }
+
     /// External impulse (explosions, knockback): changes velocity between movement steps.
     /// Clients pick it up through reconciliation.
     pub fn apply_impulse(&mut self, id: PlayerId, delta_velocity: Vec3) {

@@ -702,6 +702,7 @@ impl InGame {
         let mut scene = self.world.scene();
         let net = self.session.as_ref().map(Session::client);
         let local = net.and_then(|n| Some((n.local_state()?, n.local_render_position(alpha)?, n)));
+        let downed = self.local_downed();
         if let Some((state, feet, net)) = local {
             let tuning = &net.tuning().movement;
             self.last_camera = self.camera.update(&CameraFrame {
@@ -712,6 +713,7 @@ impl InGame {
                 pitch: self.controls.pitch,
                 settings: &common.settings,
                 shake: self.feedback.shake_offset(),
+                downed,
                 dt,
             });
             if common.settings.show_viewmodel {
@@ -1035,7 +1037,15 @@ impl InGame {
         let ping = (self.kind != SessionKind::SinglePlayer).then(|| net.stats().rtt_ms);
         let status = if self.sp_paused { None } else { status };
         let (health, max_health, hard_damage) = self.combat_health();
+        let health_label = if self.local_downed() {
+            "DOWNED"
+        } else if net.own_combat().is_some_and(|c| c.combat.dead) {
+            "DEAD"
+        } else {
+            "BLOOD"
+        };
         let info = HudInfo {
+            health_label,
             health,
             max_health,
             hard_damage,

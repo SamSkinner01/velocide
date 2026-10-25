@@ -14,7 +14,7 @@
 //!   extraction countdown (`exit_countdown`); it ends early once every living player is in.
 //!   Whoever is still outside when it runs out is *left behind* (shown on the results).
 //! * **Deathmatch**: +1 frag per kill, −1 per suicide / kill-volume death (a kill-volume death
-//!   shortly after being hit also frags the hitter: `knockoff_credit`), respawn after
+//!   shortly after being hit frags the hitter instead: `knockoff_credit`), respawn after
 //!   `combat.respawn_delay` at the spawn point farthest from other players with
 //!   `combat.spawn_protection`; frag / time limit → match end.
 //!
@@ -663,8 +663,8 @@ impl SimWorld {
                         }
                     }
                     Owner::World if dm => {
-                        self.mode.player(victim).stats.frags -= 1;
-                        // Knocked into the coolant: the last hitter gets the frag.
+                        // Knocked into the coolant: the last hitter gets the frag and the
+                        // victim no suicide penalty; an uncredited world death costs one.
                         if let Some((hitter, at)) = last_hit
                             && k.tick.wrapping_sub(at) <= credit_ticks
                             && self.players.contains_key(&hitter)
@@ -681,6 +681,8 @@ impl SimWorld {
                             for e in out {
                                 self.push_style(e);
                             }
+                        } else {
+                            self.mode.player(victim).stats.frags -= 1;
                         }
                     }
                     Owner::World | Owner::Enemy(_) => {}

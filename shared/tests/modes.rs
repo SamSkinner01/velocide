@@ -614,7 +614,11 @@ fn knocking_someone_into_a_kill_volume_frags_them() {
     a.ticks(30);
     place(&mut a, p1, Vec3::new(65.0, 0.0, 0.0));
     a.tick();
-    assert_eq!(a.world.mode.stats(p1).frags, -1);
+    assert_eq!(
+        a.world.mode.stats(p1).frags,
+        0,
+        "a credited knock-off costs the victim nothing"
+    );
     assert_eq!(a.world.mode.stats(p0).frags, 1, "knock-off credit");
     // Too long after the hit: no credit.
     a.ticks(200);
@@ -623,7 +627,7 @@ fn knocking_someone_into_a_kill_volume_frags_them() {
     place(&mut a, p1, Vec3::new(65.0, 0.0, 0.0));
     a.tick();
     assert_eq!(a.world.mode.stats(p0).frags, 1);
-    assert_eq!(a.world.mode.stats(p1).frags, -2);
+    assert_eq!(a.world.mode.stats(p1).frags, -1, "uncredited world death");
 }
 
 #[test]

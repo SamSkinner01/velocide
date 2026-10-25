@@ -18,6 +18,8 @@ use crate::settings::Settings;
 
 /// Everything the HUD shows this frame.
 pub struct HudInfo<'a> {
+    /// Label over the health bar: "BLOOD", or "DEAD" / "DOWNED".
+    pub health_label: &'a str,
     pub health: f32,
     pub max_health: f32,
     pub hard_damage: f32,
@@ -188,7 +190,7 @@ impl Hud {
             list,
             t,
             health_rect,
-            "BLOOD",
+            info.health_label,
             info.health,
             info.max_health,
             info.hard_damage,

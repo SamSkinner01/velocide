@@ -111,7 +111,8 @@ lighting), screen shake, flashes, hitstop, FOV, sensitivity, volumes and key bin
   packet loss.
 - **Local multiplayer test:** `scripts/local_test.sh --netsim 100,20,2` starts a dedicated
   server plus two clients with one command.
-- **Dev chat commands** (in a match): `/spawn husk 5`, `/spawn bastion`, `/god`, `/give`,
-  `/killall`, `/orb` (parry practice), `/encounter 1`, `/help`.
+- **Dev chat commands** (in a match; in hosted games only the host can use them):
+  `/spawn husk 5`, `/spawn bastion`, `/god`, `/give`, `/killall`, `/orb` (parry practice),
+  `/encounter 1`, `/goto exit`, `/goto checkpoint 3`, `/tp x y z`, `/help`.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which
   must stay at zero warnings.

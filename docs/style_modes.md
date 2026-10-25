@@ -137,7 +137,8 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
   client; the scoreboard carries the index and the client draws reached checkpoint props active.
 * **Downed** players have `combat.dead` set (no hitboxes, no input, AI ignores them, prediction
   uses `neutral_input`) and replicate `player_flags::DOWNED` *instead of* `DEAD`, so teammates
-  draw the downed pose and the revive marker. They can look around; they can't move or shoot.
+  draw the downed pose and the revive marker. They can look around (their view sinks to 0.6 m,
+  `camera::DOWNED_EYE_HEIGHT`, and rises again on revive / respawn); they can't move or shoot.
 * **Revive**: a living, non-downed teammate holding `USE` within `revive_range` (2.5 m, feet to
   feet) for `revive_time` (1.5 s). The nearest helper takes it; letting go or stepping out of range
   cancels (`ModeEvent::Reviving { reviver: None }`). Success: back up where they lie with
@@ -169,8 +170,9 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
 ### Deathmatch
 
 * Frags: +1 per player killed, −1 per suicide (own explosion) or kill-volume / dev death. A
-  kill-volume death within `knockoff_credit` (3 s) of being hit by another player also gives that
-  player the frag (+ FRAG style): knocking someone into the coolant counts.
+  kill-volume death within `knockoff_credit` (3 s) of being hit by another player gives that
+  player the frag (+ FRAG style) instead: knocking someone into the coolant counts, and the
+  victim loses nothing (only uncredited self-kills / world deaths cost a frag).
 * Respawn after `combat.respawn_delay` (2 s) at the level spawn whose nearest living opponent is
   farthest away; `combat.spawn_protection` (1.5 s) blocks damage (`Blocked::SpawnProtection`).
 * Friendly fire is PvP (all players are enemies; `CombatRules::pvp`), self damage on. Blood-burst
@@ -343,7 +345,3 @@ cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD 
 * Downed players can look around but don't crawl (crawling would need predicted downed movement
   on the client); the third-person downed pose comes from the models.
 * Players who leave mid-match drop off the results.
-* The local camera stays at standing eye height while downed (death-cam presentation is the
-  combat client's).
-* Kill-volume deaths in deathmatch cost the victim a frag even when someone else gets the
-  knock-off credit.

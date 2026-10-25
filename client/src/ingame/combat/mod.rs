@@ -318,13 +318,15 @@ fn entity_capsule(e: &EntityState) -> Option<(Vec3, Vec3, f32)> {
 }
 
 impl InGame {
-    /// Local player's health, max and hard damage for the HUD.
+    /// Local player's health, max and hard damage for the HUD. Dead or downed: no health and
+    /// no hard damage (the hard-damage counter would read "-100").
     pub(super) fn combat_health(&self) -> (f32, f32, f32) {
         let Some(net) = self.session.as_ref().map(Session::client) else {
             return (100.0, 100.0, 0.0);
         };
         let t = &net.tuning().combat;
         match net.own_combat() {
+            Some(c) if c.combat.dead => (0.0, t.max_health, 0.0),
             Some(c) => (c.combat.health(t), t.max_health, c.combat.hard),
             None => (t.max_health, t.max_health, 0.0),
         }

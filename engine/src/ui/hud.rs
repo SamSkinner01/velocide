@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use glam::{Vec2, Vec4};
 
 use super::draw::{self, Rect, fade, fill, mix};
-use super::font::{CAP_HEIGHT, GLYPH_ADVANCE};
+use super::font::{CAP_HEIGHT, GLYPH_ADVANCE, GLYPH_SPACING};
 use super::text::{self, Align, TextStyle, draw_text, line_width};
 use super::theme::Theme;
 use crate::gfx::UiDrawList;
@@ -200,7 +200,8 @@ pub fn health(
         label,
         &label_style,
     );
-    let hard_text = if hard >= 1.0 {
+    // No "-100" under a dead player's empty bar.
+    let hard_text = if hard >= 1.0 && health > 0.0 {
         format!("-{}", hard.round() as i32)
     } else {
         String::new()
@@ -411,7 +412,9 @@ impl TextFeed {
     }
 
     /// Draw with the anchor `pos` (x per `align`, y = top of the newest line when
-    /// `newest_on_top`, else bottom of the newest line).
+    /// `newest_on_top`, else bottom of the newest line). Every line stays inside the canvas:
+    /// the slide-in never pushes text past the screen edge and lines too long for the space
+    /// beside the anchor are cut short with "..".
     pub fn draw(
         &self,
         list: &mut UiDrawList,
@@ -422,6 +425,19 @@ impl TextFeed {
         time: f64,
     ) {
         let line_h = (CAP_HEIGHT + 5.0) * scale;
+        // Room for the outline at the screen edges.
+        let edge = scale.max(1.0) + 1.0;
+        let canvas_w = list.canvas_size.x;
+        let max_w = match align {
+            Align::Right => pos.x - edge,
+            Align::Left => canvas_w - edge - pos.x,
+            Align::Center => canvas_w - 2.0 * edge,
+        };
+        // How far the slide-in may move a line outwards before it leaves the screen.
+        let slide_room = match align {
+            Align::Right => (canvas_w - edge - pos.x).max(0.0),
+            _ => (pos.x - edge).max(0.0),
+        };
         for (i, e) in self.entries.iter().rev().enumerate() {
             let age = time - e.time;
             let alpha = if age < self.lifetime {
@@ -433,7 +449,9 @@ impl TextFeed {
                 continue;
             }
             // Slide in from the outer side for the first 0.12 s, flash white for 0.06 s.
-            let slide = ((1.0 - age / 0.12).clamp(0.0, 1.0) as f32 * 14.0).round();
+            let slide = ((1.0 - age / 0.12).clamp(0.0, 1.0) as f32 * 14.0)
+                .min(slide_room)
+                .round();
             let dx = match align {
                 Align::Right => slide,
                 _ => -slide,
@@ -444,11 +462,12 @@ impl TextFeed {
                 pos.y - (i + 1) as f32 * line_h
             };
             let color = if age < 0.06 { theme.bone } else { e.color };
-            let text = if e.count > 1 {
-                format!("{} x{}", e.text, e.count)
+            let suffix = if e.count > 1 {
+                format!(" x{}", e.count)
             } else {
-                e.text.clone()
+                String::new()
             };
+            let text = fit_line(&e.text, &suffix, max_w, scale);
             let style = TextStyle::new(fade(color, alpha))
                 .scale(scale)
                 .align(align)
@@ -456,6 +475,20 @@ impl TextFeed {
             draw_text(list, Vec2::new(pos.x + dx, y), &text, &style);
         }
     }
+}
+
+/// `text` + `suffix`, with `text` cut short ("..") so the line is at most `max_width` wide
+/// (the suffix, e.g. a repeat count, is always kept).
+pub fn fit_line(text: &str, suffix: &str, max_width: f32, scale: f32) -> String {
+    let full = format!("{text}{suffix}");
+    if line_width(&full, scale) <= max_width {
+        return full;
+    }
+    let advance = GLYPH_ADVANCE * scale.max(1e-3);
+    let fit = ((max_width + GLYPH_SPACING * scale) / advance).floor().max(0.0) as usize;
+    let keep = fit.saturating_sub(suffix.chars().count() + 2);
+    let head: String = text.chars().take(keep).collect();
+    format!("{}..{suffix}", head.trim_end())
 }
 
 /// Big centred announcement (rank-up, "ROUND START") with a pop-in scale pulse, a dark band
@@ -786,6 +819,62 @@ mod tests {
         assert_eq!(feed.entries.len(), 3);
         feed.update(10.0);
         assert!(feed.entries.is_empty());
+    }
+
+    #[test]
+    fn feed_lines_stay_on_screen() {
+        let theme = Theme::default();
+        let canvas = Vec2::new(640.0, 360.0);
+        let mut feed = TextFeed::new(6, 4.0);
+        feed.push("YOU [CINDERBOX] HUSK", Vec4::ONE, 0.0);
+        for k in 1..5 {
+            // Merged repeats re-trigger the slide-in.
+            feed.push("YOU [CINDERBOX] HUSK", Vec4::ONE, k as f64 * 0.01);
+        }
+        feed.push("X".repeat(200), Vec4::ONE, 0.05);
+        // Every moment of the slide-in, right-aligned 10 units from the edge (the kill feed).
+        for step in 0..20 {
+            let time = 0.05 + step as f64 * 0.01;
+            let mut list = UiDrawList::new(canvas);
+            feed.draw(
+                &mut list,
+                &theme,
+                Vec2::new(630.0, 30.0),
+                Align::Right,
+                1.0,
+                time,
+            );
+            assert!(!list.quads.is_empty());
+            for q in &list.quads {
+                assert!(
+                    q.min.x >= 0.0 && q.max.x <= canvas.x,
+                    "quad {:?}..{:?} off screen at t={time}",
+                    q.min,
+                    q.max
+                );
+            }
+        }
+        assert_eq!(fit_line("SHORT", " x2", 300.0, 1.0), "SHORT x2");
+        let cut = fit_line(&"A".repeat(100), " x5", 120.0, 1.0);
+        assert!(cut.ends_with(".. x5"), "{cut}");
+        assert!(line_width(&cut, 1.0) <= 120.0, "{cut}");
+    }
+
+    #[test]
+    fn health_hides_hard_damage_when_empty() {
+        let theme = Theme::default();
+        let rect = Rect::new(Vec2::new(14.0, 312.0), Vec2::new(200.0, 338.0));
+        let red_glyphs = |health: f32| {
+            let mut list = UiDrawList::new(Vec2::new(640.0, 360.0));
+            // 30 hard damage; at t = 0.2 a low-health number isn't in its red blink phase.
+            super::health(&mut list, &theme, rect, "BLOOD", health, 100.0, 30.0, 0.2);
+            list.quads
+                .iter()
+                .filter(|q| q.color == theme.blood_bright && q.texture == crate::gfx::UiTexture::Font)
+                .count()
+        };
+        assert!(red_glyphs(50.0) > 0, "the -30 hard damage counter shows");
+        assert_eq!(red_glyphs(0.0), 0, "no '-100' under an empty bar");
     }
 
     #[test]
