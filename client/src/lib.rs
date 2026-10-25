@@ -17,6 +17,7 @@ pub mod frame;
 pub mod ingame;
 pub mod level_mesh;
 pub mod menus;
+pub mod models;
 pub mod net;
 pub mod settings;
 pub mod ui_input;

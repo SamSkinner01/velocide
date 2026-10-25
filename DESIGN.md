@@ -121,6 +121,27 @@ have group bits (`GROUP_WORLD`, `GROUP_PLAYER_CLIP`, `GROUP_DOOR`) and can be di
 Deterministic: same inputs + same start state ⇒ bit-identical result. External impulses
 (explosions) are applied by the server to `MoveState::velocity` between steps.
 
+Movement helpers for the client camera: `view_roll`, `fov_kick`, `landing_dip`. Full rules and
+tuning rationale in `docs/movement.md`.
+
+Physics note: `CollisionWorld` clips large box colliders to the query region (+2 m margin) before
+parry queries, because parry's GJK tolerances scale with shape size (a 400 m floor produced cm
+errors and bad normals otherwise).
+
+### `shared::sim` / `shared::protocol` / `server` / `client::net`
+- `SimWorld::step(inputs, tuning, history: Option<&dyn HitboxHistory>) -> Vec<SimEvent>`; tick
+  pipeline: inputs → movement (`sim::player_move_step`, the single movement entry point used by
+  server and prediction) → gameplay systems → world rules → events. `replicate()` fills a
+  `NetFrame` of quantised `NetEntity`s (delta-compressed per client against its last ack).
+- Server: `Server::new(ServerConfig)`, `ServerHandle::spawn(config)` (own thread, used for SP and
+  listen servers), `velocide-server` binary. Lag compensation in `server::lagcomp`.
+- Client: `client::net::Session::{single_player, host, join}` → `NetClient` (`update(dt)` per
+  frame, `tick(input)` per fixed tick — predicts and sends), `remote_entities()` (interpolated),
+  `stats()` (`NetStats` for the debug overlay), `drain_events()`.
+- Custom transport glue (`server::transport`, `client::net::transport`) wraps `renetcode` so the
+  network simulator (`NetSimConfig { latency_ms (one-way), jitter_ms, loss_percent }`) can sit
+  between the socket and netcode. Full protocol notes: `docs/network.md`.
+
 ### `shared::level::LevelDef`
 RON brush levels in `assets/levels/`: brushes (boxes with rotation, material, tint), lights,
 spawns, checkpoints, doors, encounters (trigger, lock/unlock doors, waves of enemy spawns), exit,
