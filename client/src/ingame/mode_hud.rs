@@ -104,6 +104,11 @@ impl ModeHud {
         self.results.is_some()
     }
 
+    /// `id` is down (co-op), waiting for a revive.
+    pub fn is_downed(&self, id: PlayerId) -> bool {
+        self.downed.contains_key(&id)
+    }
+
     /// A mode event from the server.
     #[allow(clippy::too_many_arguments)]
     pub fn on_event(
@@ -739,10 +744,20 @@ impl InGame {
             .draw(list, &common.theme, &info, &mut common.audio);
     }
 
-    /// Music intensity from game-mode state (style rank). Combat intensity can be combined
-    /// here with `max`.
+    /// The local player is downed (co-op), waiting for a revive.
+    pub(super) fn local_downed(&self) -> bool {
+        let local = self
+            .session
+            .as_ref()
+            .map(Session::client)
+            .and_then(NetClient::local_player_id);
+        local.is_some_and(|id| self.modes.is_downed(id))
+    }
+
+    /// Music intensity: the combat layer's (alert enemies, recent fighting) nudged up by the
+    /// style rank (MERCILESS and above play everything).
     pub(super) fn mode_music_intensity(&self) -> f32 {
-        self.style.music_floor()
+        self.style.music_floor().max(self.combat.music)
     }
 
     /// Fills the score cells (columns from `scoreboard::columns_for`: FRAGS, KILLS, DEATHS,

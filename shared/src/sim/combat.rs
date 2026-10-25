@@ -493,7 +493,9 @@ impl SimWorld {
         let dealt = amount.min(health_before);
         let hard = (amount * c.hard_damage_fraction).max(0.0);
         p.combat.damage += amount;
-        p.combat.hard = (p.combat.hard + hard).min(p.combat.damage);
+        p.combat.hard = (p.combat.hard + hard)
+            .min(p.combat.damage)
+            .min(c.max_health);
         p.combat.hard_delay = secs_to_ticks(c.hard_damage_recover_delay, self.tick_rate, 0);
         p.combat.last_attacker = info.source;
         p.combat.last_attack = info.attack;
