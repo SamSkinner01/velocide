@@ -141,7 +141,8 @@ implicit: snapshots carry the recipient's `last_input_seq`.
 `yaw: u16` (2π/65536), `pitch: i16` (same scale), `flags: u32`, `state: u16`, `health: u16`,
 `aux: u32`. Meaning of `flags/state/health/aux/owner` is per `kind`. Id ranges: players
 `0..256` (= `PlayerId`), dynamic entities from 1024 (allocated by `SimWorld::alloc_net_id`,
-never reused), level-static entities from 2²⁴ (doors: `2²⁴ + door id`). Kinds today:
+counting up; after 2²⁴ − 1 it wraps around, skipping ids still in use, and refuses the spawn
+if none is free), level-static entities from 2²⁴ (doors: `2²⁴ + door id`). Kinds today:
 `PLAYER` (flags `LOW_PROFILE`, `INVULNERABLE`), `DOOR` (`aux` = door id, flag `OPEN`; clients
 apply door states to their collision world so prediction collides like the server).
 
@@ -220,8 +221,18 @@ between). `Rewound::ray_hit` finds the nearest hit, ignoring the shooter.
 
 Weapons run inside `SimWorld::step`, which receives the history as
 `Option<&dyn HitboxHistory>`; a hitscan shot from `input` calls
-`history.rewind_hitboxes(input.view_time_ticks(), tuning.net.lag_comp_max_ms)`. Parry timing
-should validate against the same rewound time with `parry_tolerance_ms` extra.
+`history.rewind_hitboxes(input.view_time_ticks(), max_rewind_ms)`. Parry timing validates
+against the same rewound time with `parry_tolerance_ms` extra.
+
+**Per-player rewind bound.** The view time is chosen by the client, so on its own
+`lag_comp_max_ms` would let a LAN player always claim the full rewind (and the longest parry
+delay). Every tick the server sets `SimPlayer::view_lag_limit_ms` = renet RTT + one snapshot
+interval + `interp_delay_max_ms` + 50 ms (`VIEW_LAG_MARGIN_MS`) — everything a real client's
+view lag is made of — and the sim clamps hitscan / punch rewinds, the parry view time,
+`view_lag_ticks` and the parry delay to `min(lag_comp_max_ms, limit)`
+(`SimWorld::max_rewind_ticks`). At ~0 ms RTT that is ≈ 335 ms; at 200 ms RTT ≈ 535 ms (so
+`lag_comp_max_ms` decides). Without a measured RTT (bots, sim-only tests) only
+`lag_comp_max_ms` applies.
 
 ## Tuning
 
@@ -230,7 +241,9 @@ The server loads `assets/tuning.ron` (`Tuning::load_or_default`), watches it wit
 previous values) and broadcasts `ServerMessage::Tuning`. Clients always predict with the
 server's tuning (`NetClient::tuning()`), and the client's own `NetTuning` (interpolation,
 smoothing) comes from the server too. `Server::set_tuning` / `ServerCommand::SetTuning` push
-changes programmatically (e.g. a listen-server debug UI).
+changes programmatically (e.g. a listen-server debug UI). Every value is range-checked by
+`Tuning::sanitize` on load, in `set_tuning` and on the client when it arrives (see
+Robustness); a well-behaved server's tuning is unchanged by it, so prediction still matches.
 
 ## Network simulator (`server::netsim`)
 
@@ -287,7 +300,8 @@ loop {
 `--name <name>`, `--netsim <l,j,loss>`; no flags = single-player.
 `velocide-server` flags: `--port`, `--bind`, `--level`, `--max-players`, `--mode`,
 `--frag-limit`, `--time-limit`, `--friendly-fire`, `--autostart`, `--no-lobby`, `--tick-rate`,
-`--snapshot-rate`, `--netsim`, `--tuning`, `--no-watch`, `--no-delta`, `--name`.
+`--snapshot-rate`, `--netsim`, `--tuning`, `--no-watch`, `--no-delta`, `--name`,
+`--dev-commands` (dev chat commands for the lobby host; off by default on dedicated servers).
 `scripts/local_test.sh [--netsim 100,20,2] [--clients N] [--release]` builds and launches a
 dedicated server plus clients; Ctrl-C stops everything.
 
@@ -296,9 +310,30 @@ dedicated server plus clients; Ctrl-C stops everything.
 Never trusted: inputs are sanitised (above), seq windows enforced, ≤ 16 inputs per packet,
 ≤ 1 simulated input per tick on average (token bucket), ≤ 64 queued; acks only move forward and
 must be ≤ the current tick; chat is size-limited, control characters stripped, rate-limited;
-names sanitised (printable, ≤ 24 chars, made unique); per update at most 32 reliable / 128
-unreliable messages per client are processed (the rest dropped); undecodable messages are
-counted and a client sending 200 is kicked. Clients never send positions or hit claims.
+names sanitised (printable ASCII, ≤ 24 chars, "server" reserved, made unique); per update at
+most 32 reliable / 128 unreliable messages per client are processed (the rest dropped);
+undecodable messages are counted and a client sending 200 is kicked. Clients never send
+positions or hit claims; their claimed view time is bounded by their RTT (above).
+
+## Robustness
+
+Players host for friends over the internet and run dedicated servers, so both sides must
+survive bad or hostile data. Limits and validations (each has a regression test):
+
+| what | limit / check | where |
+|---|---|---|
+| levels (files the server loads, `LoadLevel` a client receives) | `LevelDef::validate`: every number finite, coordinates within ±1e4 m, ≤ 16384 brushes, 1024 lights, 256 spawns / checkpoints / encounters, 1024 doors / jump pads / kill volumes, 64 waves per encounter, 128 spawns per wave, 4096 props, strings ≤ 256 bytes; a client disconnects with "The server sent an invalid level (…)" | `shared::level` |
+| level props | model path relative, plain names only, `.gltf` / `.glb`, inside the canonical assets folder after symlinks, a regular file ≤ 16 MiB; else skipped with a warning | `client::level_mesh::resolve_prop_model` |
+| tuning | `Tuning::sanitize`: NaN → default, distances ≤ 1e4 m, speeds ≤ 1e3 m/s, times ≤ 1 h, rates > 0, counts (pellets, fan shots, volley...) ≤ 64 | `shared::tuning` |
+| parries | a projectile punched back and forth never exceeds `parry_max_speed` (250 m/s) / `parry_max_damage` (400) | `shared::sim::parry` |
+| world | ≤ 256 enemies (`MAX_ENEMIES`), ≤ 1024 projectiles (`MAX_PROJECTILES`): further spawns are skipped (waves spawn what fits); net ids wrap around safely | `shared::sim` |
+| collision queries | non-finite input → no hit; colliders over 1024 grid cells live in an oversize list (not in every cell); a query box spanning more cells than there are colliders scans the colliders; rays ≤ 1e5 m, bounded steps, stop when they leave the grid | `engine::physics` |
+| lag compensation | rewind / parry view lag ≤ min(`lag_comp_max_ms`, RTT + snapshot interval + `interp_delay_max_ms` + 50 ms) | `Server::update_view_lag_limits` |
+| UDP receive | ≤ 4096 datagrams per update (`MAX_DATAGRAMS_PER_RECEIVE`), the rest next update | `server::transport::UdpLink` |
+| client snapshot buffer | frames older than newest − 180 ticks are refused; pruned on every insert | `client::net::interpolation` |
+| dev chat commands | single-player, the token-verified host of a listen server; dedicated servers only with `--dev-commands` (lobby host only; everyone with `--no-lobby`); never guests; each costs a chat token | `Server::dev_command_refusal` |
+| names | printable ASCII, "server" reserved (see above) | `protocol::sanitize_name` |
+| listen-server host token, netcode client id | OS randomness (`renet_netcode::generate_random_bytes`) | `client::net::session` |
 
 ## Measurements (from the tests, virtual clock)
 
