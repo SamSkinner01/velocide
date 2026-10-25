@@ -1,0 +1,46 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["client"]
+# Everything needed to run a windowed game: rendering, audio, input, asset loading.
+# The dedicated server builds the engine with `default-features = false` and only gets
+# physics queries, fixed timestep and hot-reload helpers.
+client = [
+    "dep:wgpu",
+    "dep:winit",
+    "dep:gilrs",
+    "dep:kira",
+    "dep:gltf",
+    "dep:image",
+    "dep:pollster",
+]
+# egui debug overlay (tuning editor, network graphs).
+debug-ui = ["client", "dep:egui", "dep:egui-wgpu", "dep:egui-winit"]
+
+[dependencies]
+glam.workspace = true
+parry3d.workspace = true
+serde.workspace = true
+ron.workspace = true
+notify.workspace = true
+log.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+
+wgpu = { workspace = true, optional = true }
+winit = { workspace = true, optional = true }
+gilrs = { workspace = true, optional = true }
+kira = { workspace = true, optional = true }
+gltf = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
+egui-wgpu = { workspace = true, optional = true }
+egui-winit = { workspace = true, optional = true }
+
+[dev-dependencies]
+env_logger.workspace = true

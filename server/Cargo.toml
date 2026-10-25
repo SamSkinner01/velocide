@@ -1,0 +1,25 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "velocide-server"
+path = "src/main.rs"
+
+[dependencies]
+engine.workspace = true
+shared.workspace = true
+glam.workspace = true
+serde.workspace = true
+ron.workspace = true
+bincode.workspace = true
+renet.workspace = true
+renet_netcode.workspace = true
+log.workspace = true
+env_logger.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,145 @@
+# Project: Fast-paced retro multiplayer FPS on a custom Rust engine
+
+You are building two things in one Cargo workspace:
+1. A small, purpose-built **3D game engine in Rust**
+2. A **high-speed, style-driven retro multiplayer FPS** built on that engine
+
+The game takes inspiration from the *feel* of ULTRAKILL-style "boomer shooters": extreme movement speed, aggressive combat that rewards risk, and a crunchy PS1-era look. Everything must be **original**: original names, characters, weapons, enemies, art, audio and UI. Do not copy assets, names or designs from any existing game.
+
+The game supports **single-player**, **online co-op** (campaign levels with 2–4 players) and **PvP arena deathmatch** (up to 8 players). Networking is designed in from Milestone 1. Never build a system single-player-only and retrofit it later.
+
+## Ground rules
+- Work in **milestones** (below). Finish each one, make sure it compiles and runs, then summarize what works before starting the next.
+- `cargo build` and `cargo clippy` must pass with no warnings at every milestone.
+- Prefer simple, readable code over clever abstractions. This is a focused engine for one game, not a general-purpose engine.
+- Use placeholder art (colored boxes, procedural textures) until the rendering pipeline is solid.
+- Keep a `DESIGN.md` updated with architecture decisions, network protocol notes and tuning values.
+
+## Workspace layout
+- `engine/`: platform, rendering, audio, assets, physics queries, debug tools
+- `shared/`: the game simulation, components, movement, combat rules and network protocol. Everything both client and server run.
+- `client/`: rendering the game, input, prediction, interpolation, UI, audio
+- `server/`: authoritative simulation; builds both as a library (for in-process/listen servers) and a headless dedicated-server binary
+
+Single-player runs a server in-process, so there is only one code path.
+
+## Tech stack
+- **Windowing/input:** `winit`; `gilrs` for gamepads
+- **Rendering:** `wgpu` (Vulkan/Metal/DX12) with WGSL shaders
+- **Math:** `glam`
+- **ECS:** `hecs` (lightweight), or a hand-rolled struct-of-arrays if simpler
+- **Physics/collision:** a custom kinematic character controller with swept-capsule collision against static level geometry. Use `parry3d` for collision queries only, not full rigidbody simulation. Movement must be deterministic and fully under our control.
+- **Networking:** UDP via `renet` (with `renet_netcode` for connection auth); `serde` + `bincode` for serialization
+- **Audio:** `kira`
+- **Asset loading:** `gltf` for models, `image` for textures
+- **Level format:** glTF or a simple custom format (RON/JSON) for brush-based levels
+- **Debug UI:** `egui` (via `egui-wgpu`), behind a debug feature flag
+
+## Engine architecture
+- **Fixed-timestep simulation** (e.g. 60–120 Hz, configurable) with interpolated rendering. Movement and hit detection must not depend on frame rate.
+- Main loop: input → simulation ticks → render with interpolation alpha.
+- **Hot reload** for shaders and tuning values (a `tuning.ron` file watched at runtime) so movement feel can be iterated without recompiling.
+- **Hitstop / time-scale system:** a client-side visual time scale so heavy hits can freeze the view for a few frames. Hitstop never pauses the server simulation.
+
+## Networking
+### Architecture
+- **Authoritative server.** The server owns the true game state; clients send inputs only, never positions or "I hit this enemy."
+- Support both **listen servers** (a player hosts) and **headless dedicated servers**.
+- Reliable channel for events (kills, chat, level changes); unreliable channel for inputs and snapshots.
+- Server tick rate matches the fixed simulation timestep; snapshot send rate configurable separately.
+- **Snapshot delta compression** against the last acknowledged snapshot to save bandwidth.
+
+### Making fast movement feel good online
+- **Client-side prediction:** the local player runs the same `shared` movement code immediately on input. Movement code must be **deterministic** given the same inputs and starting state.
+- **Server reconciliation:** each input carries a sequence number; on receiving authoritative state, the client rewinds to it and replays unacknowledged inputs. Smooth small corrections visually instead of snapping.
+- **Entity interpolation:** remote players and enemies are rendered slightly in the past, interpolating between snapshots.
+- **Lag compensation:** the server keeps a short history (~250 ms) of hitbox positions and rewinds them to what the shooter saw when validating hitscan shots, ricochets and parries.
+- **Parry timing over the network:** validate against rewound state with a small, tunable tolerance window so parries are achievable at normal pings.
+
+## Rendering: retro PS1-style look
+Render at a **low internal resolution** (e.g. 640×360, configurable) and upscale with nearest-neighbor to the window. Then add:
+- **Vertex snapping/jitter:** snap clip-space vertex positions to a low-precision grid in the vertex shader (toggleable)
+- **Affine texture mapping option** (toggleable, for the warped-texture look)
+- **Color depth reduction** with ordered (Bayer) dithering, done in a post-process pass
+- **Point-filtered textures**, low-res (64–256 px)
+- **Distance fog** and **unlit/vertex-lit shading** by default, with optional simple per-vertex point lights
+- **Viewmodel pass:** render the held weapon in a separate pass with its own FOV and depth range so it never clips into walls
+- **Effects:** billboard sprites for muzzle flash, blood and gibs; a decal system for blood splatters; screen shake; brief red/white screen flashes on damage and parries
+- All of these are toggleable in a settings menu
+
+## Movement (the most important system)
+The player is fast and nearly never stops. Implement every move in `shared/` so it can be predicted, and expose every value in `tuning.ron`:
+- High ground speed with instant acceleration, plus air control
+- **Dash:** short, very fast burst in the input direction with brief invulnerability frames; uses a stamina meter (e.g. 3 charges that regenerate)
+- **Slide:** crouch while moving = low-profile slide that keeps momentum indefinitely on flat ground
+- **Slam (ground pound):** crouch in midair = fast downward slam; landing creates a shockwave; jumping right after a slam gives a higher bounce
+- **Wall jump:** limited number of jumps off walls before touching the ground again; also wall-cling slide
+- **Momentum preservation:** slide-jumps and dash-jumps carry speed; reward chaining moves
+- Coyote time and jump buffering
+- Camera: slight FOV kick at high speed, view tilt on slides/wall-runs, landing dip
+
+## Combat systems
+- **Hitscan and projectile weapons**, each with 2+ alternate fire modes switchable on the fly
+- **Weapon switching is instant** and encourages combos
+- **Parry:** a melee punch that, timed right, deflects projectiles back (boosted) and gives a big reward (heal + style); include hitstop and a flash. In PvP, players can parry each other's projectiles.
+- **Ricochet mechanic:** a throwable object (original design) that a hitscan shot can bounce off to auto-target the nearest enemy, chainable for bonus damage. Resolved on the server.
+- **Close-range healing:** damaging enemies creates blood bursts; standing in/near them heals whichever player is close. This pushes aggressive close-range play (and in PvP, players compete for it).
+- **Hard damage:** part of incoming damage temporarily caps max health, recovering over a few seconds
+- **Explosions** that can damage enemies and players, and can launch players (rocket-jump-style)
+- Enemy and player hitboxes with weak points (e.g. headshot multipliers)
+
+## Style / ranking system
+- A **per-player style meter** that rises from varied, flashy play and decays over time
+- Ranks from lowest to highest with original names and their own color/animation
+- Bonuses for: variety of weapons used, airborne kills, parries, ricochets, multi-kills, kills with enemies' own projectiles, low-health play; in PvP, style bonuses for player kills
+- Penalty for repeating the same weapon/action
+- A scrolling feed of style events on screen
+- End-of-level results screen grading time, kills, style and damage taken, with a co-op scoreboard and combined team rank
+
+## Enemies & AI
+- A data-driven enemy definition format (RON): health, speed, attacks, weak points, drops
+- Start with 4 original archetypes: a fodder melee enemy, a ranged projectile enemy, a flying enemy, and a heavy/armored enemy with a parryable telegraphed attack
+- Simple state-machine AI run on the server: idle → alert → chase → attack, with clear audio/visual telegraphs before every attack. AI picks targets among all players.
+- Navigation: a navmesh or grid-based pathfinding on the level geometry
+- **Arena encounters:** locked rooms with wave spawning triggers
+- In co-op, enemy health and counts scale with player count
+
+## Game modes
+- **Single-player / co-op campaign:** checkpoints; in co-op, downed players can be revived or respawn at the last checkpoint
+- **PvP deathmatch:** arena maps, timed respawns, score/time limits
+
+## Audio
+- Punchy, layered weapon sounds; distinct sounds for parries, ricochets and rank-ups
+- Music system with layered stems that intensify during combat and fade between encounters
+- 3D positional audio for enemies and other players
+
+## Game flow & UI
+- Main menu, pause menu (does not pause the game in multiplayer), settings (resolution scale, every retro-effect toggle, FOV, sensitivity, key rebinding, volume)
+- **Host game / join by IP and port.** Design the session layer so Steam networking or a matchmaking service can be plugged in later.
+- **Lobby:** player list, ready-up, mode/level selection, host settings
+- HUD: health (with hard-damage segment), stamina charges, current weapon/alt-fire, style meter
+- In-game: text chat, scoreboard (Tab), ping display, name tags over teammates
+- Instant restart (single-player), level timer
+
+## Testing & debugging
+- A **network simulator** option to inject latency, jitter and packet loss
+- Debug overlay: FPS, ping, packet loss, bandwidth, prediction-correction count, and server vs. predicted player positions shown as ghost outlines
+- One command to launch a server plus two clients locally
+
+## Milestones
+1. **Workspace + window + render loop:** `engine/shared/client/server` crates, wgpu triangle, fixed timestep, input, debug overlay
+2. **3D scene:** camera, glTF loading, low-res render target, nearest-neighbor upscale, fog
+3. **Networked character controller:** client connects to server (in-process for single-player), capsule collision, walk/jump, prediction + reconciliation, remote-player interpolation, network simulator
+4. **Advanced movement:** dash, slide, slam, wall jumps, tuning hot-reload. Test with 2 clients at 100 ms simulated latency. *Make it feel great online before continuing.*
+5. **Retro post-processing:** vertex jitter, dithering, color reduction, affine option, viewmodel pass
+6. **First weapon + lag-compensated hit detection + one server-run enemy + local hitstop/screen shake**
+7. **Parry (with network tolerance), proximity healing, hard damage, explosions**
+8. **Full weapon set with alt-fires + ricochet mechanic**
+9. **Per-player style meter, ranks, results screen with scoreboard**
+10. **All enemy types, navigation, arena wave encounters, co-op scaling**
+11. **PvP deathmatch mode + respawns**
+12. **Lobby, host/join, chat, scoreboard, name tags**
+13. **Audio + dynamic music**
+14. **Menus, settings, rebinding, one polished co-op level and one PvP arena**
+
+Begin with Milestone 1. Before writing code, briefly outline the workspace layout and crate dependencies.

@@ -1,0 +1,31 @@
+[package]
+name = "client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "velocide"
+path = "src/main.rs"
+
+[features]
+default = ["debug-ui"]
+# egui debug overlay (tuning editor, net graphs). Disable with --no-default-features.
+debug-ui = ["engine/debug-ui"]
+
+[dependencies]
+engine = { workspace = true, features = ["client"] }
+shared.workspace = true
+server.workspace = true
+glam.workspace = true
+serde.workspace = true
+ron.workspace = true
+bincode.workspace = true
+renet.workspace = true
+renet_netcode.workspace = true
+log.workspace = true
+env_logger.workspace = true
+anyhow.workspace = true
