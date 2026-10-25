@@ -214,6 +214,8 @@ pub struct Renderer {
     shader_watcher: Option<FileWatcher>,
     shader_error: Option<String>,
     stats: RenderStats,
+    /// The next `render` only polls the shader watcher (window hidden, see `skip_next_frame`).
+    skip_frame: bool,
 }
 
 fn request_device(adapter: &wgpu::Adapter) -> anyhow::Result<(wgpu::Device, wgpu::Queue)> {
@@ -453,6 +455,7 @@ impl Renderer {
             pending_capture: None,
             shader_watcher: None,
             shader_error: None,
+            skip_frame: false,
             stats: RenderStats::default(),
         };
         renderer.white = renderer.create_texture(&TextureData {
@@ -519,6 +522,13 @@ impl Renderer {
 
     // ----------------------------------------------------------------------------------------
     // Configuration
+
+    /// The next [`Renderer::render`] draws and presents nothing. The app runs frames like that
+    /// while the window gets no redraws (minimised / hidden on Wayland), so the game keeps
+    /// running without touching a surface the compositor isn't showing.
+    pub fn skip_next_frame(&mut self) {
+        self.skip_frame = true;
+    }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if (width, height) == self.window_size {
@@ -831,6 +841,9 @@ impl Renderer {
         overlay: Option<&mut dyn OverlayPainter>,
     ) -> anyhow::Result<()> {
         self.poll_shader_watcher();
+        if std::mem::take(&mut self.skip_frame) {
+            return Ok(());
+        }
         if self.window_size.0 == 0 || self.window_size.1 == 0 {
             return Ok(());
         }

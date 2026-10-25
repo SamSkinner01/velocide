@@ -17,7 +17,7 @@
 //! returns `true` (consumed) they also update [`InputState`].
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -31,6 +31,9 @@ use crate::render::Renderer;
 
 /// Longest frame time reported to the game (a debugger pause shouldn't explode the sim).
 const MAX_FRAME_DT: f32 = 0.25;
+/// No redraw for this long (the compositor stopped asking: minimised or hidden window on
+/// Wayland) → run a frame anyway, without drawing, so networking and the game keep going.
+const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -295,8 +298,17 @@ impl<G: Game> ApplicationHandler for App<G> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(running) = &self.running {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(running) = &mut self.running else {
+            return;
+        };
+        if self.last_frame.elapsed() >= HIDDEN_FRAME_INTERVAL {
+            // Redraws are throttled to the compositor's frame callbacks (`pre_present_notify`),
+            // which stop while the window is minimised or hidden: without this the game froze
+            // for 10 s at a time and could be timed out by the server.
+            running.ctx.renderer.skip_next_frame();
+            self.redraw(event_loop);
+        } else {
             running.ctx.window.request_redraw();
         }
     }
