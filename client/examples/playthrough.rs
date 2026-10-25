@@ -973,6 +973,32 @@ fn deathmatch(rig: &mut Rig) {
     rig.shot(&mut guest, "dm_07_back_in_lobby");
     rig.check(lobby, "DM: results -> CONTINUE TO LOBBY");
 
+    // Time limit: 8 s, no frag limit.
+    let mut settings = MatchSettings::new(GameMode::Deathmatch, "cistern_nine");
+    settings.frag_limit = 0;
+    settings.time_limit_secs = 8;
+    settings.max_players = 8;
+    host.command(ServerCommand::Lobby(LobbyCommand::SetSettings(settings)));
+    rig.run(&mut [&mut host, &mut guest], 20);
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
+    let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    let started = Instant::now();
+    let ended = rig.until(&mut [&mut host, &mut guest], 15.0, |cs| {
+        cs.iter().all(|c| c.game_ref().is_some_and(InGame::results_open))
+    });
+    let secs = started.elapsed().as_secs_f32();
+    rig.run(&mut [&mut host, &mut guest], 200);
+    rig.shot(&mut guest, "dm_08_time_limit_results");
+    rig.check(
+        ok && ended && (6.0..11.0).contains(&secs),
+        &format!("DM: an 8 s time limit ends the match after {secs:.1} s"),
+    );
+    host.keys = vec![UiKey::Enter];
+    rig.run(&mut [&mut host, &mut guest], 2);
+    rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
+        cs.iter().all(|c| matches!(c.screen, Screen::Lobby(_)))
+    });
+
     // Robustness: the host's game vanishes mid-match (process gone, no goodbye).
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
     wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
