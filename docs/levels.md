@@ -1,24 +1,28 @@
 # Levels
 
-Two shipping levels live in `assets/levels/` (the movement playground `movement_test.ron` is
+Four shipping levels live in `assets/levels/` (the movement playground `movement_test.ron` is
 documented in `docs/movement.md`):
 
 | file | name | kind | players | brushes | lights | notes |
 |---|---|---|---|---|---|---|
 | `crucible_of_veins.ron` | **Crucible of Veins** | `Campaign` | 1–4 co-op | 341 | 67 | 5 locked-room arenas, 86 enemies (SP), exit |
 | `cistern_nine.ron` | **Cistern Nine** | `Arena` | up to 8 | 115 | 15 | deathmatch, 10 spawns, no doors/encounters |
+| `knell_yard.ron` | **Knell Yard** | `Arena` | 2–5 (up to 8) | 272 | 26 | compact, vertical pinwheel; 12 spawns, 12 pads |
+| `ingot_run.ron` | **Ingot Run** | `Arena` | 4–8 | 122 | 21 | long, three lanes; 10 spawns, slide route end to end |
 
 ## Tools
 
 ```text
-cargo run -p client --example level_gen               # regenerate both .ron files
+cargo run -p client --example level_gen               # regenerate every .ron file
 cargo run -p client --example level_gen -- --check    # fail if the .ron files are stale
 cargo run -p client --example level_view -- crucible_of_veins [--out DIR] [--only GROUPS]
         [--lines] [--cam x,y,z,yaw,pitch] [--doors open|closed]
 cargo test -p shared --test levels [-- --nocapture]   # checks + bot traversal (prints route times)
 ```
 
-- **`client/examples/level_gen.rs` is the source of truth.** The RON files are generated (and
+- **`client/examples/level_gen.rs` is the source of truth** (newer arenas live in their own
+  modules next to it, `client/examples/level_gen/<arena>.rs`, reusing its builder; `main()`
+  lists every generated file). The RON files are generated (and
   round-trip checked) from it; they carry a comment per brush and per section, so they are
   readable, but edit the generator. Rooms are described once (interior box, wall material,
   openings) and the generator derives walls, sills, lintels and corner overlaps, so rooms are
@@ -57,8 +61,9 @@ around `docs/movement.md`:
 Lava (unlit `lava` material) always kills: every exposed lava surface has a kill volume
 starting at its bottom and ending 0.25–2.5 m above the surface (below any standable rim).
 Contract (`LevelDef::kill_volumes`): a player dies when their *feet position* is inside. Lava
-behind grilles (furnaces, gutters) is decoration and is never reachable. Both levels have a
-kill volume under the whole world.
+behind grilles (furnaces, gutters, lanterns) is decoration and is never reachable. Knell Yard's
+molten bronze and Ingot Run's slag use the same material and contract. Every level has a kill
+volume under the whole world.
 
 ## Crucible of Veins (campaign)
 
@@ -228,11 +233,166 @@ pillar caps 9.6.
 
 Suggested match settings: frag limit 20 / 10 minutes (gameplay.md defaults) for 4–8 players.
 
+## Knell Yard (compact deathmatch arena)
+
+A bell foundry yard at dusk, lantern-lit: muted brick walls, an ash-grey yard, timber walks,
+bronze and verdigris. An open belfry stands in the middle in a ring of **molten bell bronze**.
+Plum sky and fog 20–100 m, violet ambient, a low warm key light, amber lanterns and the glow
+of the bronze and the kilns; music `arena`. 48 × 48 m inside 12 m walls; invisible clip walls
+and a clip ceiling at 26 m.
+
+The layout is a **pinwheel** (90° rotational symmetry): the generator describes the north
+quarter once and turns it three times, so every quarter plays the same. Each quarter has its
+own colour so players can call places out: painted pattern shed, banner and a tinted fill
+light — **verdigris** north, **cinnabar** west, **cobalt** south, **saffron** east ("blue
+shed", "the kiln by the red shed").
+
+```text
+                                     N (-Z)
+  +------------------------------------------------+
+  |KKKKKKK   kk  GGGGGGGGGGGGGGGG///////////KKKKKKK|   1 char = 1 m (x), 1 line = 2 m (z)
+  |KKKKKKK   kk  GGGGGGGGGGGGGGGG///////////KKKKKKK|
+  |KKKKKKK   kk        ===                  KKKKKKK|   G R B Y  pattern sheds, roof y 5
+  |KKKKKKK             ===        TTT       KKKKKKK|            (verdigris, cinnabar,
+  |////           cccc ===        TTT              |             cobalt, saffron)
+  |////      ppp  cccc ===mm      TTT ppp    kkkkkk|   /  ramp down from a shed roof
+  |////                ===                         |   K  kiln, roof y 7.5 (+ chimney)
+  |////  TTTTTT  ~~~~~~===~~----~~~~~          YYYY|   k  flask rack y 6.2: 3.5 m
+  |////  TTTTTT  ~~~...===........~~~   cccc   YYYY|      wall-jump shaft to the kiln
+  |RRRR          ~~~..............~~~   cccc   YYYY|   T  casting table (1.2 m slide gap)
+  |RRRR          ---....CCCCCC....=============YYYY|   c  clay cope mould (cover)
+  |RRRR      mmm ~~~....CCCCCC....~~~ mmm      YYYY|   ~  molten bronze moat (kill)
+  |RRRR      mmm ~~~....CCCCCC....~~~ mmm      YYYY|   -  moat bridge y 0 into the arcade
+  |RRRR=============....CCCCCC....---          YYYY|   .  deck y 5 (arcade below, y 0)
+  |RRRR   cccc   ~~~..............~~~          YYYY|   C  crown y 10 (belfry roof; the
+  |RRRR   cccc   ~~~........===...~~~  TTTTTT  ////|      bell hangs below it)
+  |RRRR          ~~~~~----~~===~~~~~~  TTTTTT  ////|   =  deck bridge y 5
+  |                         ===                ////|   m  pad yard -> deck
+  |kkkkkk    ppp TTT      mm=== cccc  ppp      ////|   p  pad yard -> kiln roof
+  |              TTT        === cccc           ////|   (deck corners: small pads
+  |KKKKKKK       TTT        ===             KKKKKKK|    deck -> crown)
+  |KKKKKKK                  ===        kk   KKKKKKK|
+  |KKKKKKK///////////BBBBBBBBBBBBBBBB  kk   KKKKKKK|
+  |KKKKKKK///////////BBBBBBBBBBBBBBBB  kk   KKKKKKK|
+  +------------------------------------------------+
+                                     S (+Z)
+```
+
+Layers: moat -1.8 (kill), yard and arcade 0, casting tables 2, shed roofs and deck 5, flask
+racks 6.2, kiln roofs 7.5, crown 10.
+
+- **The belfry** (centre), three storeys: the **arcade** (y 0) is a 10 × 10 m room inside the
+  tower round a central pillar, with four pinwheel arches, each with a bridge over the moat —
+  close quarters where bombs bounce; the **deck** (y 5, 14 × 14 m, overhanging the moat by
+  1 m) is reached by four bridges from the shed roofs and four pads from the yard; the open
+  belfry storey on it has the bell hanging high enough to walk under (lip 2.2 m up) between
+  four piers; the **crown** (its roof, 6 × 6 m, y 10) is reached by the small pads in the deck
+  corners: the king-of-the-hill spot, in view of every kiln and shed roof.
+- **Molten bronze moat** (kill): a 3.7 m ring between the tower and the yard. A running jump
+  clears it anywhere; it's there to be knocked into — off the deck edge, off the moat bridges,
+  out of a moat pad's flight. Kill volume from the bed to 0.8 m above the surface.
+- **Pattern sheds** (one per quarter, along the walls): solid sheds whose roofs are the
+  gantries (y 5), a ramp down along the wall towards the kiln, a deck bridge from the roof.
+- **Kilns** (corners): roof perches (y 7.5) with a chimney for cover; reached by a pad from
+  the yard (placed 6 m out, so a player steering at the roof still clears its edge) or by
+  wall-jumping the 3.5 m shaft between the kiln and its flask rack (three wall jumps). From a
+  kiln roof you drop onto the rack (6.2) and on onto the next quarter's shed roof (5).
+- **Slide channels**: the casting tables (3 × 6 m, top 2 m) leave a 1.2 m gap: slide under at
+  full slide speed, hop on top, or go around; a runner is stopped.
+- **Sightline breakers**: the belfry blocks the whole centre at every height; the bell, cope
+  moulds, tables, sheds and kilns break up the yard. Short sightlines everywhere; the longest
+  are from the kiln roofs across a quarter.
+- **Loops, no dead ends**: yard ↔ arcade (four bridges, or jump the moat), yard → deck (four
+  pads; four ramps + shed roofs + bridges), deck → crown (four pads), crown/deck → anywhere by
+  dropping (mind the moat), yard → kiln roof (four pads, four shafts), kiln → rack → next
+  shed. A lap through all four quarters is ~20 s.
+- **Spawns** (12): in each quarter one in the yard (y 0), one on the shed roof (y 5) and one
+  on the kiln roof (y 7.5); every quadrant, three heights, ≥ 10 m apart, all facing the belfry.
+
+For the roster: Tumbler bombs and Breach in the arcade and round the bell; Gust off the deck
+edge, the moat bridges and the pad arcs into the bronze; Thorns on the tower and kiln faces;
+the Quill from the kiln roofs; Arclash chains on a crowded deck.
+
+Suggested match settings: 2–5 players, frag limit 15 / 8 minutes (up to 8 players works with
+the defaults, 20 / 10, but it's hectic).
+
+## Ingot Run (lane deathmatch arena)
+
+A casting line at a cold dawn: pale overcast sky, steel-blue fog 40–175 m, cold flood lights;
+concrete, steel and hazard stripes. The slag channel, the furnace tapholes and the hot ingots
+are the only warm colours. 96 × 40 m inside 14 m walls; invisible clip walls and a clip
+ceiling at 30 m. Mirror-symmetric west ↔ east (two tapping floors facing each other); north
+and south are different lanes.
+
+```text
+                                          N (-Z)
+  +----------------------------------------------------------------+
+  |ccc##########################################################ccc|  1 char = 1.5 m (x),
+  |ccc###          k  k         ~~~~~~         k  k          ###ccc|  1 line ≈ 2.9 m (z)
+  |ccc###          k  k         ~~~~~~         k  k          ###ccc|
+  |   ###     PPPP         pp   ~~~~~~   pp         PPPP     ###   |  # crane gantry + end
+  |   ###     PPPP              ~~~~~~              PPPP     ###   |    walkways, y 7
+  |FFF###     PPPP      ii      ~~~~~~      ii      PPPP     ###FFF|  k ingot racks (wall-jump)
+  |FFF###                   ////======////                   ###FFF|  ~ slag channel (kill)
+  |FFF###                   ////======////                   ###FFF|  = pour bridge y 3
+  |FFF###     mm     LLLL       ~~~~~~       LLLL     mm     ###FFF|  P pouring platform y 3
+  |   ###            LLLL       ~~~~~~       LLLL            ###   |  L ladle stand y 3
+  | p HHH//////////             ~~~~~~             //////////HHH p |  / ramps (S ramp to the
+  |   HHH//////////      ii     ~~~~~~     ii      //////////HHH   |    walkway, bridge, trough)
+  |                             ______                             |  F furnace (top y 11),
+  |   //________bbbbbbb________________________bbbbbbb________//   |    H tapping house
+  +----------------------------------------------------------------+  c coal bunker y 4
+   W (-X)                                                    E (+X)   _ ingot trough y -1.5,
+                                                                        b cooling beds (1.2 m
+                                                                        tunnels), duct in the
+                                                                        middle; p pads
+```
+
+Layers: slag -3.6 (kill), trough -1.5, floor 0, pour bridge and platforms 3, coal bunkers 4,
+gantry and end walkways 7, furnace tops 11.
+
+- **Three lanes**, end to end:
+  - **North, high**: the crane gantry (y 7, a 4 m grate walk, 78 m long, crossing the slag)
+    joins the end walkways into a U-shaped high route — the Quill lane, long sightlines
+    broken only by ingot stacks. Underneath, a ground lane along the wall between the gantry
+    posts.
+  - **Middle**: the casting floor with staggered y 3 platforms (the pouring platform on the
+    north side, the ladle stand on the south side, each with an ingot-pile step), mould boxes
+    and an ingot cart; the **pour bridge** (a 3 m hump, 6 m wide, no rails) over the slag is
+    the contested crossing, with the hanging ladle above it.
+  - **South, low**: the **ingot trough** (sunk 1.5 m, 4 m wide, along the south wall) is the
+    slide route: from either tapping floor slide down the trough ramp and keep 24+ m/s the
+    whole way, through a cooling-bed tunnel (1.2 m) on each side and the duct under the slag
+    (1.2 m) — end to end in 3.5 s. The duct's grate roof is a floor-level walkway over the slag.
+- **Slag channel** (kill): 8 m wide, wall to wall. A running jump clears it; knockback into
+  it is the map's kill zone. Crossings: gantry, pour bridge, duct roof, the duct.
+- **Tapping floors** (ends): the furnace with its glowing taphole (behind a grate) and the end
+  walkway (y 7) on posts in front of it; a 14.5 m ramp up to the walkway's south end over the
+  tapping house; a coal bunker (y 4) in the north corner; a pad in the south corner up onto
+  the furnace (y 11, a perch over the whole half).
+- **Pads**: floor → gantry (one per half, placed 7 m out so you clear the gantry edge while
+  steering) and floor → furnace top.
+- **Wall-jump spots**: between the two ingot racks (3.5 m) up onto the gantry, and between the
+  furnace and the buttress up onto the end walkway.
+- **Loops, no dead ends**: the high U with ramps, pads and shafts at both ends and in both
+  halves; floor ↔ trough anywhere along it (1.5 m, jump out); four channel crossings. A lap
+  covering all three lanes is ~26 s.
+- **Spawns** (10): per half, the end walkway (y 7), the gantry (y 7), the ladle stand (y 3),
+  the tapping floor (y 0) and the casting floor by the trough (y 0); every quadrant, ≥ 10 m
+  apart, all facing the middle.
+
+For the roster: the Quill down the gantry and the trough; Gust and Both Barrels on the pour
+bridge and the duct roof (into the slag); Tumbler bombs bouncing round the racks and platform
+corners; Thorns on the racks and walls to ricochet across lanes.
+
+Suggested match settings: 4–8 players, frag limit 20–25 / 10 minutes.
+
 ## Tests (`shared/tests/levels.rs`)
 
 - Every level in `assets/levels/` parses; known materials and enemy names; unique door ids;
-  encounter door references exist. Shipped levels: no zero-volume brushes, < 600 brushes,
-  a kill volume under the whole level, lights and music set.
+  encounter door references exist. Shipped levels (every level except the movement
+  playground): no zero-volume brushes, < 600 brushes, a kill volume under the whole level,
+  lights and music set.
 - Campaign structure: 4 spawns, exit, 4–5 encounters each with a checkpoint whose spawn is
   outside the encounter trigger, lock doors start open / unlock doors start closed, every door
   used; husks-only first arena, spitters in arena 2, gnats introduced in a ≥ 25 m tall room,
@@ -242,7 +402,10 @@ Suggested match settings: frag limit 20 / 10 minutes (gameplay.md defaults) for 
   (doors open and closed) inside `arena`; the arena excludes the far side of its own doors,
   other rooms' checkpoints, the player spawns and the exit; arenas don't overlap. Par time set
   for the campaign (3–15 min), 0 for the arena.
-- Arena structure: ≥ 8 spawns, ≥ 10 m apart, every quadrant, 3+ heights, no doors/encounters.
+- Arena structure, for every `Arena` level: ≥ 8 spawns, ≥ 10 m apart, in every quadrant, on
+  3+ heights and facing into the arena; no doors, encounters, checkpoints or exit; ≥ 2 pads;
+  a kill hazard; a clip ceiling over the whole arena ≥ 15 m above the highest spawn; par time
+  0; music `arena`.
 - Player/checkpoint spawns (doors open and closed): ground within 0.3 m, capsule free, head room
   for a jump, not in a kill volume, and the real movement code settles there without drifting.
 - Enemy spawns: inside their locked room, not in kill volumes, ≥ 8 m from the checkpoint,
@@ -254,15 +417,22 @@ Suggested match settings: frag limit 20 / 10 minutes (gameplay.md defaults) for 
 - Sealing: with every door closed, a flood fill through free space (1 m balls on a 1 m grid)
   from each compartment (start, each arena, exit hall) never leaves the level, never reaches
   another compartment's key point or the far side of the arena's own doors; with doors open
-  the exit is reachable from the start. Arena: the flood never leaves the level. (Every wall,
+  the exit is reachable from the start. Arenas: the flood never leaves the level. (Every wall,
   however thin, stops the flood; openings narrower than ~1 m may go unnoticed.)
 - Traversal bots: waypoint followers driven by `shared::movement::step` (steer, auto-jump at
   hurdles/gaps/ledges or when stuck, slide on slide segments, take pads) run the full critical
   path from all four spawns and from every checkpoint to the exit (doors open), never touching a
-  kill volume, entering checkpoint/encounter triggers in order; five alternate routes; a full
-  arena lap through every ramp, catwalk, tunnel and pad.
-- Advanced tech, scripted: the R1 perch dash-jump, the R3 and arena wall-jump shafts, and the
-  spillway slide (> 40 m/s).
+  kill volume, entering checkpoint/encounter triggers in order; five alternate routes. Every
+  arena has a full lap through its ramps, catwalks, tunnels and pads that must take a minimum
+  of distinct pads: Cistern Nine (~20 s), Knell Yard (~20 s, all four quarters: kiln pad,
+  crown pad, moat pad, both bridge levels, the arcade, a casting-table slide) and Ingot Run
+  (~26 s: the whole high U, the trough slide end to end, the furnace and both floor pads, the
+  pour bridge, a platform).
+- Advanced tech, scripted: the R1 perch dash-jump, the R3 and Cistern Nine wall-jump shafts,
+  the spillway slide (> 40 m/s); Knell Yard's kiln shaft (onto 7.5 m) and its slide-only
+  casting table (a runner is stopped, a slide passes at full speed); Ingot Run's rack and
+  furnace shafts (onto 7 m ledges, landing on a narrow walkway) and the end-to-end trough
+  slide (< 4.5 s, never below slide speed).
 - Chaos: random jump/dash/slide/slam input for 40 s from every spawn and checkpoint (doors open
   and closed) never leaves the level bounds.
 
