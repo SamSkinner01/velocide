@@ -215,6 +215,10 @@ pub struct VelocideApp {
     ui_mapper: UiInputMapper,
     last_focus: Option<Id>,
     capture_taken: bool,
+    /// Settings changed since they were last written (a settings page closed without BACK,
+    /// e.g. the pause menu dismissed with Start, or the window closed): written on the next
+    /// screen change and on exit.
+    settings_dirty: bool,
     #[cfg(feature = "debug-ui")]
     debug_ui: engine::debug_ui::DebugUi,
 }
@@ -404,6 +408,7 @@ impl Game for VelocideApp {
             ui_mapper: UiInputMapper::new(),
             last_focus: None,
             capture_taken: false,
+            settings_dirty: false,
             #[cfg(feature = "debug-ui")]
             debug_ui,
         };
@@ -462,10 +467,12 @@ impl Game for VelocideApp {
 
         if self.common.settings_changed {
             self.common.settings_changed = false;
+            self.settings_dirty = true;
             self.apply_settings(ctx);
         }
-        if self.common.settings_save {
+        if self.common.settings_save || (self.settings_dirty && output.transition.is_some()) {
             self.common.save_settings();
+            self.settings_dirty = false;
         }
         if output.grab_cursor != ctx.cursor_grabbed() && ctx.input.focused() {
             ctx.set_cursor_grab(output.grab_cursor);
@@ -509,7 +516,7 @@ impl Game for VelocideApp {
 
     fn exit(&mut self, ctx: &mut EngineContext) {
         self.leave_screen(ctx);
-        if self.common.settings_save {
+        if self.common.settings_save || self.settings_dirty {
             self.common.save_settings();
         }
         log::info!("bye");

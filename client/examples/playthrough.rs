@@ -11,7 +11,9 @@
 //! * **Deathmatch** (host + guest + 2 server bots, Cistern Nine): frags, respawns, scoreboard
 //!   with pings, chat, name tags, frag limit → results → lobby.
 //! * **Robustness**: the host vanishes mid-match, a guest quits mid-match, a full server, a
-//!   bad address, menu key spam.
+//!   bad address, a killed dedicated server, menu key spam.
+//! * **Settings**: every retro / view / HUD option changes the picture live; saved settings
+//!   load back; garbage settings files give defaults.
 //!
 //! Prints `PASS` / `FAIL` per check (exit code 1 on any failure) and writes PNGs.
 //!
@@ -1172,6 +1174,105 @@ fn robustness(rig: &mut Rig) {
     rig.leave(&mut lost);
 }
 
+// ---- settings ------------------------------------------------------------------------------------------
+
+/// Pixels that differ noticeably between two frames.
+fn differing(a: &engine::gfx::TextureData, b: &engine::gfx::TextureData) -> usize {
+    a.rgba
+        .chunks_exact(4)
+        .zip(b.rgba.chunks_exact(4))
+        .filter(|(p, q)| (0..3).any(|i| p[i].abs_diff(q[i]) > 6))
+        .count()
+}
+
+type Tweak = (&'static str, fn(&mut Settings));
+
+fn settings(rig: &mut Rig) {
+    println!("\n== settings: every option applies live ==");
+    let mut c = rig.client("Tweaker", LaunchOptions::default());
+    rig.transition(
+        &mut c,
+        Transition::Start(StartMode::SinglePlayer {
+            level: Some("crucible_of_veins".into()),
+        }),
+    );
+    wait_playing(rig, &mut [&mut c], 20.0);
+    rig.run(&mut [&mut c], 120);
+    let grab = |rig: &mut Rig, c: &mut Client| {
+        rig.frame(c);
+        rig.renderer.read_pixels().expect("pixels")
+    };
+    let base = grab(rig, &mut c);
+    rig.run(&mut [&mut c], 20);
+    let noise = differing(&base, &grab(rig, &mut c));
+    println!("      frame-to-frame noise: {noise} pixels");
+    let tweaks: [Tweak; 17] = [
+        ("internal resolution 240p", |s| s.retro.internal_height = 240),
+        ("internal resolution 720p", |s| s.retro.internal_height = 720),
+        ("vertex snapping off", |s| s.retro.vertex_snap = false),
+        ("snap strength 3x", |s| s.retro.vertex_snap_strength = 3.0),
+        ("affine textures on", |s| s.retro.affine_textures = true),
+        ("dithering off", |s| s.retro.dithering = false),
+        ("colour depth 3 bit", |s| s.retro.color_bits = 3),
+        ("colour depth 8 bit", |s| s.retro.color_bits = 8),
+        ("fog off", |s| s.retro.fog = false),
+        ("vertex lighting off", |s| s.retro.vertex_lighting = false),
+        ("FOV 80", |s| s.fov = 80.0),
+        ("weapon FOV 40", |s| s.viewmodel_fov = 40.0),
+        ("weapon hidden", |s| s.show_viewmodel = false),
+        ("crosshair style 2", |s| s.crosshair = 2),
+        ("speedometer off", |s| s.show_speed = false),
+        ("timer off", |s| s.show_timer = false),
+        ("FPS counter off", |s| s.show_fps = false),
+    ];
+    for (i, (name, tweak)) in tweaks.into_iter().enumerate() {
+        let before = c.common.settings.clone();
+        rig.frame(&mut c);
+        let ui_before = rig.buffers.ui.quads.len();
+        tweak(&mut c.common.settings);
+        c.common.settings_changed = true;
+        rig.run(&mut [&mut c], 4);
+        let img = grab(rig, &mut c);
+        let ui_after = rig.buffers.ui.quads.len();
+        let d = differing(&base, &img);
+        let file = format!("settings_{}", name.replace([' ', '/'], "_"));
+        rig.shot(&mut c, &file);
+        // The last four are small HUD elements: their UI quads come and go.
+        let ok = if i >= tweaks.len() - 4 {
+            ui_after != ui_before
+        } else {
+            d > noise * 2 + 300
+        };
+        rig.check(
+            ok,
+            &format!("settings: {name} changes the picture ({d} px, ui {ui_before} -> {ui_after})"),
+        );
+        c.common.settings = before;
+        c.common.settings_changed = true;
+        rig.run(&mut [&mut c], 4);
+    }
+    // Saved and loaded back (a "restart" of the game), garbage files give defaults.
+    let path = rig.out.join("settings-persist.ron");
+    let mut s = Settings::default();
+    s.retro.color_bits = 3;
+    s.fov = 95.0;
+    s.bindings.bind(
+        client::controls::Action::Dash,
+        engine::input::Binding::Key(engine::input::Key::KeyV),
+    );
+    let saved = s.save(&path).is_ok();
+    rig.check(saved && Settings::load(&path) == s, "settings: survive a restart");
+    for garbage in ["", "((((", "\u{0}\u{1}binary", "(fov: \"wide\")", "(retro: 5)"] {
+        let _ = std::fs::write(&path, garbage);
+        let loaded = Settings::load(&path);
+        rig.check(
+            loaded == Settings::default(),
+            &format!("settings: garbage file {garbage:?} -> defaults"),
+        );
+    }
+    rig.leave(&mut c);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -1201,6 +1302,9 @@ fn main() -> anyhow::Result<()> {
     }
     if want("robust") {
         robustness(&mut rig);
+    }
+    if want("settings") {
+        settings(&mut rig);
     }
     let mut ms = rig.frame_ms.clone();
     ms.sort_by(f32::total_cmp);
