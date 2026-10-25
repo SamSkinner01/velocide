@@ -150,4 +150,12 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 ## Docs per area
 - `docs/gameplay.md` — combat, enemies, style and game-mode rules with default numbers.
 - `docs/render.md`, `docs/ui.md`, `docs/audio.md`, `docs/movement.md`, `docs/network.md`,
-  `docs/models.md` (written by each area as it is built).
+  `docs/models.md`, `docs/client.md` (client architecture + extension points),
+  `docs/levels.md` (shipping levels, generator, tests), `docs/combat.md`, `docs/lobby.md`
+  (written by each area as it is built).
+
+## Running it
+- Single-player: `cargo run -p client --release -- --sp crucible_of_veins`
+- Host: `cargo run -p client --release -- --host 47420`; friends: `--connect <ip>:47420`
+- Dedicated server: `cargo run -p server --release --bin velocide-server -- --port 47420`
+- Server + two clients locally in one command: `scripts/local_test.sh --netsim 100,20,2`
