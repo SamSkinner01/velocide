@@ -201,8 +201,8 @@ dead, the body is simulated with `neutral_input` (falls/slides naturally) and fi
 **Rewind budget.** The server has to rewind ≈ one-way latency × 2 + interpolation delay +
 input buffer: ~205 ms at 100 ms RTT, ~305 ms at 200 ms RTT (measured). The networking
 default `net.lag_comp_max_ms = 350` therefore fully compensates players up to ~245 ms RTT;
-raise it (e.g. 400) to support 200 ms+ players at the cost of "shot behind cover" moments for
-their victims.
+raise it further for higher pings, at the cost of "shot behind cover" moments for their
+victims.
 
 ## Projectiles
 
@@ -404,7 +404,7 @@ then newest). Positions are `QPos` (1/64 m varints).
 |---|---|
 | `Shot { shooter, attack, origin, ends }` | everyone but the shooter |
 | `Ricochet { shooter (owner code), attack, points }` | everyone |
-| `Explosion { position, radius_dm, attack }` | everyone |
+| `Explosion { position, radius_dm, attack, owner }` | everyone (the owner plays it on arrival: it draws its own projectiles at the present) |
 | `Punch { player, hit }` | everyone but the puncher |
 | `Heal { player, amount_tenths, from }` | everyone |
 | `SlamShockwave { player, position, power, radius_dm }` | everyone |
@@ -418,30 +418,48 @@ then newest). Positions are `QPos` (1/64 m varints).
 | `EnemyShockwave { enemy, position, radius_dm }` | everyone |
 | `EnemyAlert { enemy }` | everyone |
 
-## Client presentation contract (phase 2)
+## Client presentation contract
 
-Prediction duties first:
+Implemented in `client/src/ingame/combat/` (see `docs/client.md` → "Combat presentation"):
+`weapon_feel.rs` (local weapon prediction), `fx.rs` (tracers, lights, `Fx` playback),
+`entities.rs` (enemies, projectiles, blood, prisms), `hud.rs` (combat HUD), `mod.rs`
+(`CombatClient`, the `GameEvent` reactions and the per-frame glue). `NetClient` exposes
+`own_combat()` (latest `OwnState::combat` + its input seq) and `drain_fx()` (de-duplicated
+`FxEvent`s). Verified with `cargo run -p client --release --example combat_shots` (headless
+screenshots of every case below).
 
-* **Weapons**: run `step_weapons` on each predicted input; play muzzle flash, weapon sound
-  (`LancetFire`, `ThresherFire`, `ThresherSlug`, `FlakLaunch`, `RiveterFire`, `SawLaunch`,
-  `VolleyFire`, `CinderFire`, `StickyArm`, `MortarFire`, `LancetFan`, `LancetBeam`),
-  viewmodel recoil and a local tracer (raycast your own collision world) immediately for
-  every `FireIntent`; `LancetCharge` loop + charge glow while `charge > 0`; `Punch` anim +
-  `Sfx::Punch` on `FireIntent::Punch`; `PrismThrow` on `ThrowPrism`; `StickyDetonate` click on
-  `DetonateStickies`; `WeaponSwitch` / `ModeSwitch` on selection changes. Reconcile
-  `WeaponState` against `OwnState::combat.weapons` like movement.
-* **Death**: while `OwnState::combat.dead`, predict movement with `sim::neutral_input` and
-  show the death view (killer from `last_attacker` / the `Killed` event); `Respawned` /
-  `NetEvent::Spawned` ends it.
-* **Projectiles/prisms**: draw at `replicated_position(e, render_tick, …)` (consistent with
-  lag compensation and parry validation), using the newest received frame whose `aux ≤
-  render_tick`. Optionally spawn a predicted local copy of your own projectiles on the
-  intent and swap to the entity when it arrives.
+Prediction duties:
 
-HUD (from `OwnState::combat` + tuning): health bar `max − damage` with the hard-damage
-segment `[max − hard, max]` in another colour; respawn timer; spawn protection; current
-weapon + alt mode; per-weapon cooldown pips; Overcharge charge; prism charges + recharge
-progress; live stickies (`n/3`); parry window flash.
+* **Weapons**: `WeaponPredictor` runs `step_weapons` on each predicted input (right after
+  `NetClient::tick`) and plays muzzle flash, weapon sound (`LancetFire`, `ThresherFire`,
+  `ThresherSlug`, `FlakLaunch`, `RiveterFire`, `SawLaunch`, `VolleyFire`, `CinderFire`,
+  `StickyArm`, `MortarFire`, `LancetFan`, `LancetBeam`), viewmodel kick and local tracers
+  (client ray against the level and the displayed capsules; impact sparks + scorch decal)
+  immediately for every `FireIntent`; `LancetCharge` loop + viewmodel cell glow + crosshair
+  gauge while `charge > 0`; Riveter barrels spin while firing; `Punch` anim + sound;
+  `PrismThrow`; `StickyDetonate` click; `WeaponSwitch` / `ModeSwitch` on selection changes.
+  On every newer `OwnState` the prediction is re-based on `combat.weapons` and the unacked
+  inputs are replayed without effects (`client_combat` test: 0 mismatches over 587 inputs
+  at 100 ms RTT). Recoil and knockback stay server-side (movement reconciliation).
+* **Death**: `NetClient::tick` predicts (and sends) `sim::neutral_input` for inputs up to
+  the predicted respawn (`OwnCombat::dead_at`: `seq ≤ own.seq + respawn_in`), so the corpse
+  doesn't mispredict; the death screen shows "YOU DIED", the killer line from the `Killed`
+  event and "RESPAWNING IN N.N".
+* **Projectiles/prisms**: other players' / enemies' projectiles and *all* prisms are drawn
+  at `replicated_position(e, render_tick, …)` (consistent with lag compensation, parry and
+  ricochet validation). **Your own projectiles** are taken from the newest snapshot and drawn
+  at the present (`server_tick_estimate`, at most 6 ticks past the newest snapshot), starting
+  at the drawn muzzle and blending onto the true path over 0.15 s, so a rocket leaves the
+  barrel at once instead of an interpolation delay (~130 ms) later; your own explosions
+  (`Fx::Explosion::owner`) play on arrival to match.
+
+HUD (from `OwnState::combat` + the predicted `WeaponState`): health `max − damage` with
+the hard-damage segment (existing health block via `HudInfo`); prism pips with recharge
+progress; `STICKY n/3` with the Cinderbox in sticky mode; primary / alt cooldown bars under
+the crosshair; Overcharge gauge beside it; hit markers (body white, head/weak point red,
+armour grey, kill: big red, expanding) + damage numbers (pellets merged); damage direction
+chevrons around the crosshair; pulsing low-health vignette below 40 %; `PROTECTED` while
+spawn protected; death screen.
 
 | thing | render / play |
 |---|---|
@@ -452,8 +470,8 @@ progress; live stickies (`n/3`); parry window flash.
 | **PRISM** | spinning mirrored shard with glints; `RESTING` → lying/hovering still; disappears on removal (shatter shown via `Ricochet`/`PrismExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
 | `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
-| `Killed` | kill feed (killer, attack name, flags icons); victim gibs at `position` scaled by `overkill`; `EnemyDeath`/`Death`; style feed (style system) |
-| `Parried` | for the parrier: client hitstop 0.12 s, white flash, `Parry` sound, heal flash (`healed`); for others: `Parry` sound at `position` |
+| `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; gibs come from the enemy entity entering `Dying` (also `EnemyDeath`/`Gib` sounds) |
+| `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
 | `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers from the shooter's muzzle to each end, impact sparks/decals at the ends |
 | `Fx::Ricochet` | bright tracer through `points`, prism shatter at each prism point, `Ricochet` sound (pitch up per bounce) |
@@ -471,7 +489,8 @@ progress; live stickies (`n/3`); parry window flash.
 
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
 `/god`, `/notarget`, `/give` (full health, no hard damage, prisms, cooldowns), `/kill`,
-`/hurt <hp>`, `/ff [on|off]`, `/help`. The reply goes to the sender only; commands are not
+`/hurt <hp>`, `/ff [on|off]`, `/orb [distance]` (a parryable Spitter orb flies at you: parry
+practice), `/help`. The reply goes to the sender only; commands are not
 broadcast. Programmatic: `ServerCommand::{SpawnEnemy, KillAllEnemies, SetFriendlyFire}`,
 `Server::spawn_enemies`, `Server::kill_all_enemies`, `Server::drain_sim_events`.
 
@@ -486,6 +505,8 @@ broadcast. Programmatic: `ServerCommand::{SpawnEnemy, KillAllEnemies, SetFriendl
 | crowded frame: 8 players, 50 husks, 150 projectiles | full 3.5 KB; delta 74 B with idle husks and flying projectiles |
 | bandwidth: 4 clients + 4 bots, 50 husks chasing, 150–240 projectiles, riveters firing | **28 KB/s per client** server→client (snapshot 844 B: 615 B entities ≈ 10 B per moving enemy, 3.4 FX); server tick 0.8 ms (dev build) |
 | 2 players (`net_loopback`) | snapshot 197 B (own state 155 B of it: movement 123 + combat 32); 0 prediction corrections with one player shooting |
+| client weapon prediction (`client_combat`), 100 ms RTT, 587 inputs of firing / charging / switching / punching / prisms | 0 re-base mismatches; predicted `WeaponState` == server's |
+| client frame + render with combat effects (`combat_shots`, headless 1280×720, release) | avg 0.25 ms, p95 0.33 ms over 1638 frames |
 
 Run: `cargo test -p shared --test combat_weapons --test combat_parry --test combat_ricochet
 --test combat_enemy --test combat_replication` and `cargo test -p server --test combat_net
@@ -496,8 +517,10 @@ Run: `cargo test -p shared --test combat_weapons --test combat_parry --test comb
 * No interest management: every client gets every enemy (~10 B per moving enemy per
   snapshot). Distance-based update rates would cut the crowded-scene 28 KB/s a lot.
 * Enemies chase directly (no navigation yet); players and enemies don't collide.
-* Weapon prediction, projectile drawing and FX de-duplication are client work (phase 2);
-  today the client ignores `OwnState::combat` and `SnapshotMessage::fx`.
+* Client: the predicted sticky count can be off by one for a snapshot when a sticky explodes
+  server-side (re-based right after); hitscan tracers of your own pellets use client-side
+  spread (the server's spread decides damage); the Bastion / Spitter / Gnat visuals are wired
+  (models, telegraph sounds, parryable flash) but only the Husk exists server-side so far.
 * Default `net.lag_comp_max_ms` (350) compensates up to ~245 ms RTT (see above).
 * Pending (parry-delayed) hits favour the victim by up to `lag_comp_max_ms + 80 ms`.
 * Rivets that leave the level vanish silently after 2 s; sawblades only bounce off the level.
