@@ -21,6 +21,12 @@ const BUILTIN: &[(&str, &str)] = &[
     ("spitter", include_str!("../../../../assets/enemies/spitter.ron")),
     ("gnat", include_str!("../../../../assets/enemies/gnat.ron")),
     ("bastion", include_str!("../../../../assets/enemies/bastion.ron")),
+    // Roster contract stubs (docs/roster.md).
+    ("gnawer", include_str!("../../../../assets/enemies/gnawer.ron")),
+    ("censer", include_str!("../../../../assets/enemies/censer.ron")),
+    ("harrier", include_str!("../../../../assets/enemies/harrier.ron")),
+    ("gaoler", include_str!("../../../../assets/enemies/gaoler.ron")),
+    ("heron", include_str!("../../../../assets/enemies/heron.ron")),
 ];
 
 /// How an enemy moves.
