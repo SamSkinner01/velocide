@@ -66,6 +66,9 @@ Details: `docs/lobby.md`.
 5. Cursor grab follows `ScreenOutput::grab_cursor` (true only while actually playing: never
    in menus, chat, pause or for `--bot` clients).
 6. `Audio::update`, test timers (`--capture`, `--quit-after`), egui overlay, `render`.
+   Redraws follow the compositor's frame callbacks; when none come for 50 ms (minimised or
+   hidden window on Wayland) the engine runs the frame anyway without drawing
+   (`Renderer::skip_next_frame`), so networking and the game keep going (~20 frames/s).
 7. The screen transition, after rendering. Leaving `InGame` calls `InGame::shutdown`
    (disconnect, stop the in-process server, free GPU resources).
 
@@ -326,6 +329,8 @@ Press Esc to free the cursor and interact with the window. Without `debug-ui`
 cargo test -p client                                   # unit + integration tests (GPU tests skip without an adapter)
 cargo run -p client --release --example client_shots -- out/   # headless PNGs of every screen
 cargo run -p client --release --example lobby_shots -- out/    # lobby (host / guest), countdown, match, results
+cargo run -p client --release --example playthrough -- out/    # every player-facing flow end to end, PASS/FAIL
+PLAYTHROUGH=sp,coop cargo run -p client --release --example playthrough   # only some: sp coop dm robust settings perf window
 scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --debug \
     --quit-after 20 --capture-dir captures/mp --capture-after 15   # dedicated server + 2 clients
 velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-after 6

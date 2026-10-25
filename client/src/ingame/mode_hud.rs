@@ -123,6 +123,14 @@ impl ModeHud {
     ) -> ModeEffects {
         let mut fx = ModeEffects::default();
         let me = |id: PlayerId| Some(id) == local;
+        // "YOU" in feed lines about the local player, like the kill feed.
+        let who = |id: PlayerId| {
+            if me(id) {
+                "YOU".to_string()
+            } else {
+                name_of(players, id)
+            }
+        };
         match e {
             ModeEvent::Checkpoint { player, .. } => {
                 hud.banner("CHECKPOINT", t.stamina, now);
@@ -172,11 +180,7 @@ impl ModeHud {
                     hud.banner("REVIVED", t.stamina, now);
                 }
                 hud.event(
-                    format!(
-                        "{} REVIVED {}",
-                        name_of(players, *by),
-                        name_of(players, *player)
-                    ),
+                    format!("{} REVIVED {}", who(*by), who(*player)),
                     player_color(*by),
                     now,
                 );
@@ -194,7 +198,7 @@ impl ModeHud {
                 hud.banner("EXTRACTION", t.bone, now);
                 audio.play_2d(Sfx::Checkpoint);
                 hud.event(
-                    format!("{} REACHED THE EXIT", name_of(players, *player)),
+                    format!("{} REACHED THE EXIT", who(*player)),
                     player_color(*player),
                     now,
                 );
