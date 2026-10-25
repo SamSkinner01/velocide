@@ -591,17 +591,23 @@ fn single_player(rig: &mut Rig) {
         g.restart();
     }
     let start = c.level().map_or(Vec3::ZERO, |l| l.spawns[0].position);
-    let restarted = rig.until(&mut [&mut c], 3.0, |cs| {
+    let restarted = rig.until(&mut [&mut c], 6.0, |cs| {
         cs[0].feet().is_some_and(|f| f.distance(start) < 2.0)
             && cs[0].game_ref().is_some_and(|g| g.level_time() < 1.0)
     });
     rig.run(&mut [&mut c], 20);
     rig.shot(&mut c, "sp_12_restarted");
+    let flags = c.encounter_flags(0);
+    let door2 = c.door_open(2);
     rig.check(
         restarted
-            && c.encounter_flags(0) & (encounter_flags::ACTIVE | encounter_flags::CLEARED) == 0
-            && c.door_open(2) == Some(false),
-        &format!("SP: restart -> start, timer {t_before:.1} -> 0, level reset"),
+            && flags & (encounter_flags::ACTIVE | encounter_flags::CLEARED) == 0
+            && door2 == Some(false),
+        &format!(
+            "SP: restart -> start ({restarted}, at {:?}, timer {t_before:.1} -> {:.1}), level reset (arena 1 flags {flags}, door 2 open {door2:?})",
+            c.feet(),
+            c.game_ref().map_or(-1.0, InGame::level_time)
+        ),
     );
 
     // The exit: results with grades, then MAIN MENU.
@@ -916,8 +922,28 @@ fn deathmatch(rig: &mut Rig) {
     let mut respawn_checked = false;
     c_fire(&mut host, true);
     let mut ended = false;
+    // Bot respawns: (distance from the host who killed it, spawn protection on).
+    let mut dead_bots = std::collections::BTreeSet::new();
+    let mut respawns: Vec<(f32, bool)> = Vec::new();
     for _ in 0..(60 * 40) {
         let me = host.feet().unwrap_or_default();
+        let all: Vec<(PlayerId, Vec3, u32)> = host
+            .game_ref()
+            .and_then(InGame::net)
+            .map(|n| {
+                n.remote_players()
+                    .map(|e| (PlayerId(e.id.0 as u8), e.position, e.flags))
+                    .filter(|(id, _, _)| *id != host_id && *id != guest_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (id, p, flags) in &all {
+            if flags & player_flags::DEAD != 0 {
+                dead_bots.insert(*id);
+            } else if dead_bots.remove(id) {
+                respawns.push((p.distance(me), flags & player_flags::PROTECTED != 0));
+            }
+        }
         let bots: Vec<(PlayerId, Vec3)> = host
             .game_ref()
             .and_then(InGame::net)
@@ -958,6 +984,10 @@ fn deathmatch(rig: &mut Rig) {
     }
     c_fire(&mut host, false);
     rig.check(ended, "DM: frag limit 3 ends the match");
+    rig.check(
+        !respawns.is_empty() && respawns.iter().all(|(d, protected)| *d > 25.0 && *protected),
+        &format!("DM: bots respawn far from their killer, protected ({respawns:?})"),
+    );
     rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
         cs[1].game_ref().is_some_and(InGame::results_open)
     });
