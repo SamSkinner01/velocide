@@ -119,6 +119,11 @@ impl Room {
     fn walled(&self, side: Side) -> bool {
         !self.open.contains(&side)
     }
+    /// The whole interior, from the bottom of the walls (pits included) to the ceiling.
+    fn volume(&self) -> Volume {
+        let bottom = self.bottom.unwrap_or(self.lo[1] - T);
+        vol([self.lo[0], bottom, self.lo[2]], self.hi)
+    }
 }
 
 #[derive(Default)]
@@ -375,7 +380,15 @@ impl Gen {
         self.kill_notes.push(note.into());
     }
 
-    fn encounter(&mut self, note: &str, e: Encounter) {
+    /// Adds an encounter fought in `room`: its `arena` is the room's whole interior (pits
+    /// included; never the corridors) and its `rally` point is the room's checkpoint spawn
+    /// (the checkpoint added last, just inside the entry door), so co-op players left outside
+    /// when the doors lock are pulled in there.
+    fn encounter(&mut self, note: &str, room: &Room, mut e: Encounter) {
+        let mut arena = room.volume();
+        arena.min.y = arena.min.y.min(e.trigger.min.y);
+        e.arena = Some(arena);
+        e.rally = self.def.checkpoints.last().map(|c| c.spawn);
         self.def.encounters.push(e);
         self.encounter_notes.push(note.into());
     }
@@ -443,6 +456,7 @@ fn emit(g: &Gen, header: &str) -> String {
     s.push_str("(\n");
     let _ = writeln!(s, "    name: {:?},", d.name);
     let _ = writeln!(s, "    kind: {:?},", d.kind);
+    let _ = writeln!(s, "    par_time: {}, // seconds (0 = none)", f(d.par_time));
     s.push_str("    environment: (\n");
     let _ = writeln!(s, "        sky_color: {},", v(e.sky_color));
     let _ = writeln!(s, "        fog_color: {},", v(e.fog_color));
@@ -514,6 +528,18 @@ fn emit(g: &Gen, header: &str) -> String {
         let _ = writeln!(s, "        // {note}");
         s.push_str("        (\n");
         let _ = writeln!(s, "            trigger: {},", volume(&en.trigger));
+        match &en.arena {
+            Some(a) => {
+                let _ = writeln!(s, "            arena: Some({}),", volume(a));
+            }
+            None => s.push_str("            arena: None,\n"),
+        }
+        match &en.rally {
+            Some(r) => {
+                let _ = writeln!(s, "            rally: Some({}),", spawn_ron(r));
+            }
+            None => s.push_str("            rally: None,\n"),
+        }
         let _ = writeln!(s, "            lock_doors: {:?},", en.lock_doors);
         let _ = writeln!(s, "            unlock_doors: {:?},", en.unlock_doors);
         s.push_str("            waves: [\n");
@@ -616,6 +642,9 @@ fn crucible() -> Gen {
         },
     );
 
+    // Par for the results screen: ~35 s of movement + five fights (see docs/levels.md).
+    g.def.par_time = 330.0;
+
     // ---------------------------------------------------------------- R0 Receiving Nave (start)
     g.section("R0 Receiving Nave (start)");
     let r0 = Room::new("R0", [-12.0, 0.0, 2.0], [12.0, 10.0, 32.0], BRICK)
@@ -714,6 +743,7 @@ fn crucible() -> Gen {
     );
     g.encounter(
         "encounter 1: Rendering Floor — husks",
+        &r1,
         Encounter {
             arena: None,
             rally: None,
@@ -822,6 +852,7 @@ fn crucible() -> Gen {
     );
     g.encounter(
         "encounter 2: Bleeding Cloister — husks + spitters on the mezzanine",
+        &r2,
         Encounter {
             arena: None,
             rally: None,
@@ -950,6 +981,7 @@ fn crucible() -> Gen {
     );
     g.encounter(
         "encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers",
+        &r3,
         Encounter {
             arena: None,
             rally: None,
@@ -1063,6 +1095,7 @@ fn crucible() -> Gen {
     );
     g.encounter(
         "encounter 4: Crucible Heart — a bastion on the island, then a mixed wave",
+        &r4,
         Encounter {
             arena: None,
             rally: None,
@@ -1198,6 +1231,7 @@ fn crucible() -> Gen {
     );
     g.encounter(
         "encounter 5: Furnace Cathedral — finale, four waves of everything",
+        &r5,
         Encounter {
             arena: None,
             rally: None,

@@ -538,6 +538,80 @@ fn flood(
     Ok(count)
 }
 
+/// A point 1.5 m beyond door `id` (1.2 m above its sill), on the side away from `inside`.
+fn outside_door(level: &LevelDef, id: u32, inside: Vec3) -> Vec3 {
+    let d = level.doors.iter().find(|d| d.id == id).expect("door");
+    let ext = d.brush.max - d.brush.min;
+    let axis = if ext.x < ext.z { Vec3::X } else { Vec3::Z };
+    let c = Vec3::new(d.brush.center().x, d.brush.min.y + 1.2, d.brush.center().z);
+    let a = c + axis * 1.5;
+    let b = c - axis * 1.5;
+    if a.distance(inside) > b.distance(inside) { a } else { b }
+}
+
+fn volume_inside(inner: &Volume, outer: &Volume) -> bool {
+    inner.min.cmpge(outer.min).all() && inner.max.cmple(outer.max).all()
+}
+
+#[test]
+fn encounter_arenas_and_rally_points() {
+    let level = load(CAMPAIGN);
+    let closed = collision(&level, Some(false));
+    let open = collision(&level, Some(true));
+    let arenas: Vec<Volume> = level
+        .encounters
+        .iter()
+        .enumerate()
+        .map(|(i, e)| e.arena.unwrap_or_else(|| panic!("encounter {} has no arena volume", i + 1)))
+        .collect();
+    for (i, e) in level.encounters.iter().enumerate() {
+        let n = i + 1;
+        let arena = arenas[i];
+        let rally = e.rally.unwrap_or_else(|| panic!("encounter {n} has no rally point"));
+        assert!(volume_inside(&e.trigger, &arena), "encounter {n}: trigger not inside the arena");
+        // The rally point is the checkpoint just inside the entry door: a valid standing spot
+        // inside the locked room, whether the doors are open or closed.
+        assert!(arena.contains(rally.position + Vec3::Y * 0.1), "encounter {n}: rally outside the arena");
+        assert_eq!(rally, level.checkpoints[i].spawn, "encounter {n}: rally should be its checkpoint");
+        for col in [&closed, &open] {
+            check_player_spot(&level, &col.world, rally.position, &format!("encounter {n} rally"));
+        }
+        // The arena is the room, not the corridors: the far side of its doors, other rooms'
+        // checkpoints, the player spawns and the exit are all outside it; every enemy is in it.
+        for &id in e.lock_doors.iter().chain(&e.unlock_doors) {
+            let p = outside_door(&level, id, e.trigger.center());
+            assert!(!arena.contains(p), "encounter {n}: arena reaches past door {id} ({p})");
+        }
+        for (j, c) in level.checkpoints.iter().enumerate() {
+            assert_eq!(arena.contains(c.spawn.position + Vec3::Y * 0.1), i == j, "encounter {n} vs checkpoint {}", j + 1);
+        }
+        for s in &level.spawns {
+            assert!(!arena.contains(s.position + Vec3::Y * 0.1), "encounter {n}: arena contains a player spawn");
+        }
+        if let Some(x) = level.exit {
+            assert!(!arena.contains(x.center()), "encounter {n}: arena contains the exit");
+        }
+        for s in e.waves.iter().flat_map(|w| &w.spawns) {
+            assert!(arena.contains(s.position), "encounter {n}: {} at {} outside the arena", s.enemy, s.position);
+        }
+        for (j, other) in arenas.iter().enumerate().skip(i + 1) {
+            let overlap = arena.min.cmplt(other.max).all() && other.min.cmplt(arena.max).all();
+            assert!(!overlap, "arenas {n} and {} overlap", j + 1);
+        }
+    }
+}
+
+#[test]
+fn par_times() {
+    let campaign = load(CAMPAIGN);
+    assert!(
+        (180.0..=900.0).contains(&campaign.par_time),
+        "campaign par time {} s",
+        campaign.par_time
+    );
+    assert_eq!(load(ARENA).par_time, 0.0, "deathmatch arenas have no par time");
+}
+
 #[test]
 fn campaign_compartments_are_sealed_when_doors_close() {
     let level = load(CAMPAIGN);
@@ -558,16 +632,7 @@ fn campaign_compartments_are_sealed_when_doors_close() {
     let exit = level.exit.expect("exit");
     let exit_point = Vec3::new(exit.center().x, exit.min.y + 1.0, exit.center().z);
     points.push((level.checkpoints.len() + 1, exit_point, "the exit".into()));
-    // Points 1.5 m beyond each door (on the side away from `inside`).
-    let outside_door = |id: u32, inside: Vec3| -> Vec3 {
-        let d = level.doors.iter().find(|d| d.id == id).expect("door");
-        let ext = d.brush.max - d.brush.min;
-        let axis = if ext.x < ext.z { Vec3::X } else { Vec3::Z };
-        let c = Vec3::new(d.brush.center().x, d.brush.min.y + 1.2, d.brush.center().z);
-        let a = c + axis * 1.5;
-        let b = c - axis * 1.5;
-        if a.distance(inside) > b.distance(inside) { a } else { b }
-    };
+    let outside_door = |id: u32, inside: Vec3| outside_door(&level, id, inside);
     for compartment in 0..=level.checkpoints.len() + 1 {
         let start = points.iter().find(|p| p.0 == compartment).expect("point").1;
         let mut forbidden: Vec<(Vec3, String)> = points

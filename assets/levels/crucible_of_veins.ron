@@ -3,6 +3,7 @@
 (
     name: "Crucible of Veins",
     kind: Campaign,
+    par_time: 330.0, // seconds (0 = none)
     environment: (
         sky_color: (0.09, 0.025, 0.02),
         fog_color: (0.15, 0.04, 0.03),
@@ -823,6 +824,8 @@
         // encounter 1: Rendering Floor — husks
         (
             trigger: (min: (-20.0, -1.0, -63.0), max: (20.0, 12.0, -31.0)),
+            arena: Some((min: (-20.0, -1.0, -63.0), max: (20.0, 12.0, -23.0))),
+            rally: Some((position: (0.0, 0.0, -25.5), yaw: 0.0)),
             lock_doors: [1],
             unlock_doors: [2],
             waves: [
@@ -845,6 +848,8 @@
         // encounter 2: Bleeding Cloister — husks + spitters on the mezzanine
         (
             trigger: (min: (-30.0, -4.0, -141.0), max: (30.0, 14.0, -98.0)),
+            arena: Some((min: (-30.0, -4.0, -141.0), max: (30.0, 14.0, -91.0))),
+            rally: Some((position: (0.0, 0.0, -93.5), yaw: 0.0)),
             lock_doors: [3],
             unlock_doors: [4],
             waves: [
@@ -870,6 +875,8 @@
         // encounter 3: Bell Loft — gnats circling the bell, husks below, spitters on the tiers
         (
             trigger: (min: (-44.0, -5.0, -215.0), max: (0.0, 46.0, -180.0)),
+            arena: Some((min: (-44.0, -5.0, -215.0), max: (0.0, 46.0, -173.0))),
+            rally: Some((position: (-22.5, 10.0, -175.5), yaw: 0.0)),
             lock_doors: [5],
             unlock_doors: [6],
             waves: [
@@ -896,6 +903,8 @@
         // encounter 4: Crucible Heart — a bastion on the island, then a mixed wave
         (
             trigger: (min: (73.0, -4.0, -233.0), max: (116.0, 18.0, -183.0)),
+            arena: Some((min: (66.0, -4.0, -233.0), max: (116.0, 18.0, -183.0))),
+            rally: Some((position: (68.5, 0.0, -208.5), yaw: -90.0)),
             lock_doors: [7],
             unlock_doors: [8],
             waves: [
@@ -921,6 +930,8 @@
         // encounter 5: Furnace Cathedral — finale, four waves of everything
         (
             trigger: (min: (60.0, -22.0, -330.0), max: (122.0, 28.0, -270.0)),
+            arena: Some((min: (60.0, -22.0, -330.0), max: (122.0, 28.0, -263.0))),
+            rally: Some((position: (91.0, 0.0, -265.5), yaw: 0.0)),
             lock_doors: [9],
             unlock_doors: [10],
             waves: [

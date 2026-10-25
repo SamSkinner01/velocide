@@ -55,7 +55,8 @@ around `docs/movement.md`:
 | ceilings | 6 m corridors … 36 m (Bell Loft) | room for rocket jumps |
 
 Lava (unlit `lava` material) always kills: every exposed lava surface has a kill volume
-starting at its bottom and ending 0.25–2.5 m above the surface (below any standable rim). Lava
+starting at its bottom and ending 0.25–2.5 m above the surface (below any standable rim).
+Contract (`LevelDef::kill_volumes`): a player dies when their *feet position* is inside. Lava
 behind grilles (furnaces, gutters) is decoration and is never reachable. Both levels have a
 kill volume under the whole world.
 
@@ -126,6 +127,12 @@ encounter trigger. Respawning players therefore always come back *inside* the lo
 deep enough that a group running in together is inside before the doors shut. Entry doors
 start open and are locked by the encounter; exit doors start closed and open when it's won.
 
+Each encounter also sets **`arena`** = the room's whole interior (wall bottom/pit floor to
+ceiling, galleries and vestibule included, never the corridors) and **`rally`** = that same
+checkpoint spawn: when the doors lock, living players outside `arena` are pulled to `rally`, so
+a co-op teammate lagging in the corridor is never locked out. The generator derives both from
+the room description (`Gen::encounter(note, &room, …)`).
+
 | # | arena | checkpoint spawn | lock → unlock | wave 1 | wave 2 | wave 3 | wave 4 | total |
 |---|---|---|---|---|---|---|---|---|
 | 1 | Rendering Floor | (0, 0, -25.5) | 1 → 2 | 4 husk | 6 husk (2 on terraces) | | | 10 |
@@ -169,9 +176,10 @@ Alternate routes and rewards for good movement (all tested):
 
 ### Par (results grading)
 
-Bot traversal is ~35 s; fights are the bulk. Suggested `par` for the time grade:
-**5:30** (S ≤ 5:30, A ≤ 7:00, B ≤ 9:00, C ≤ 12:00, else D). A first playthrough lands around
-6–8 minutes. Kills: 86 total in single player.
+Bot traversal is ~35 s; fights are the bulk. `par_time: 330.0` (**5:30**) is set in the level
+file; suggested time grades: S ≤ 5:30, A ≤ 7:00, B ≤ 9:00, C ≤ 12:00, else D. A first
+playthrough lands around 6–8 minutes. Kills: 86 total in single player. (Cistern Nine has
+`par_time: 0.0` — no par in deathmatch.)
 
 ## Cistern Nine (deathmatch arena)
 
@@ -229,6 +237,11 @@ Suggested match settings: frag limit 20 / 10 minutes (gameplay.md defaults) for 
   outside the encounter trigger, lock doors start open / unlock doors start closed, every door
   used; husks-only first arena, spitters in arena 2, gnats introduced in a ≥ 25 m tall room,
   a bastion before the finale, a finale with all four types over ≥ 3 waves.
+- Encounter arenas: every campaign encounter has `arena` and `rally`; the trigger and all its
+  enemy spawns lie inside `arena`; `rally` is its checkpoint spawn and a valid standing spot
+  (doors open and closed) inside `arena`; the arena excludes the far side of its own doors,
+  other rooms' checkpoints, the player spawns and the exit; arenas don't overlap. Par time set
+  for the campaign (3–15 min), 0 for the arena.
 - Arena structure: ≥ 8 spawns, ≥ 10 m apart, every quadrant, 3+ heights, no doors/encounters.
 - Player/checkpoint spawns (doors open and closed): ground within 0.3 m, capsule free, head room
   for a jump, not in a kill volume, and the real movement code settles there without drifting.
@@ -257,15 +270,11 @@ All of it is deterministic (same inputs, same results) and runs in well under a 
 
 ## Level-format wishes
 
-Things the format can't express yet (worked around or left to game code):
+Already added (and used by these levels): `Encounter::arena` / `Encounter::rally` (co-op
+lock-out fix), `LevelDef::par_time`, and the feet-position kill-volume contract. Still missing
+(worked around or left to game code):
 
-- **Encounter arena volume / straggler pull-in**: when an encounter locks, co-op players still
-  in the corridor are locked out. An `Encounter::arena: Option<Volume>` (or "teleport players
-  outside the trigger to checkpoint N on lock") would solve it.
-- **`par_time` / grading data on `LevelDef`** (and maybe `display_name`, `description`) so the
-  results screen doesn't hardcode them.
-- **Kill-volume contract**: document whether the feet point or the capsule is tested (these
-  levels assume the feet point; volumes start at the hazard bottom).
+- **`display_name` / `description`** on `LevelDef` for the lobby.
 - **Per-area environment** (fog/ambient zones) — one `Environment` per level today.
 - **Door motion** (slide offset + speed) instead of popping; door sounds.
 - **Wedge/prism brushes** for ramps and slopes (rotated boxes work but need care at joints).
