@@ -332,6 +332,9 @@ impl MainMenu {
     ) -> Option<PageResult> {
         let mut result = None;
         ui.panel(panel, "SINGLE PLAYER", |ui| {
+            // Opening the page focuses the selected level (not the first row: two highlighted
+            // rows made it unclear which one PLAY starts).
+            let focus_selected = ui.state().focused().is_none();
             ui.default_focus();
             ui.heading("SELECT LEVEL");
             let h = ui.available_rect().height() - 40.0;
@@ -339,6 +342,9 @@ impl MainMenu {
             ui.scroll_area("levels", h, |ui| {
                 for (i, name) in self.levels.iter().enumerate() {
                     let label = format!("{}##lvl{i}", level_display_name(name));
+                    if focus_selected && i == self.level {
+                        ui.request_focus(&label);
+                    }
                     if ui.selectable(&label, i == self.level) {
                         if i == self.level {
                             chosen = Some(i); // second click / Enter on the selected row plays

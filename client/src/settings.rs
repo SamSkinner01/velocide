@@ -86,7 +86,8 @@ impl Default for Settings {
             host_port: shared::DEFAULT_PORT,
             host_max_players: 4,
             host_mode: shared::lobby::GameMode::Campaign,
-            last_level: shared::sim::BUILTIN_LEVEL.into(),
+            // New players start on the campaign (the sandboxes are in the list too).
+            last_level: "crucible_of_veins".into(),
             show_fps: true,
             show_ping: true,
             show_speed: true,
