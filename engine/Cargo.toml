@@ -38,9 +38,18 @@ kira = { workspace = true, optional = true }
 gltf = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
-egui = { workspace = true, optional = true }
+egui = { workspace = true, optional = true, features = ["default_fonts"] }
 egui-wgpu = { workspace = true, optional = true }
 egui-winit = { workspace = true, optional = true }
 
 [dev-dependencies]
 env_logger.workspace = true
+
+# Renderer examples need the windowing/rendering stack.
+[[example]]
+name = "render_demo"
+required-features = ["client"]
+
+[[example]]
+name = "render_gen_models"
+required-features = ["client"]
