@@ -1,5 +1,6 @@
-//! Projectiles, pickups and level props: simple static models (all parts at the model
+//! Enemy projectiles, pickups and level props: simple static models (all parts at the model
 //! origin) plus a few pose helpers for props with moving parts (doors, checkpoint, jump pad).
+//! The players' projectiles and the Thorn live in `projectiles.rs`.
 //!
 //! Projectiles are centred on the origin and fly along -Z (orient them with a look rotation
 //! towards the velocity). Props stand on the origin (floor) and face -Z.
@@ -18,10 +19,6 @@ const BODY_GLOW: [JointDef; 2] = [
     static_part("body", Shade::Lit),
     static_part("glow", Shade::Glow),
 ];
-const SAWBLADE: [JointDef; 2] = [
-    static_part("blade", Shade::Lit),
-    static_part("edge", Shade::Glow),
-];
 const SPITTER_ORB: [JointDef; 2] = [
     static_part("core", Shade::Glow),
     static_part("shell", Shade::Glow),
@@ -29,10 +26,6 @@ const SPITTER_ORB: [JointDef; 2] = [
 const GNAT_BOLT: [JointDef; 2] = [
     static_part("bolt", Shade::Glow),
     static_part("core", Shade::Glow),
-];
-const PRISM: [JointDef; 2] = [
-    static_part("shard", Shade::Core),
-    static_part("rim", Shade::Glow),
 ];
 const BLOOD_CORE: [JointDef; 1] = [static_part("core", Shade::Glow)];
 const JUMP_PAD: [JointDef; 3] = [
@@ -71,46 +64,32 @@ pub mod door {
 /// Part table of a projectile / prop model.
 pub(crate) fn joints(id: ModelId) -> &'static [JointDef] {
     match id {
-        ModelId::Rivet
-        | ModelId::Rocket
-        | ModelId::FlakGrenade
-        | ModelId::StickyCharge
-        | ModelId::MortarShell => &BODY_GLOW,
-        ModelId::Sawblade => &SAWBLADE,
         ModelId::SpitterOrb => &SPITTER_ORB,
         ModelId::GnatBolt => &GNAT_BOLT,
-        ModelId::Prism => &PRISM,
         ModelId::BloodCore => &BLOOD_CORE,
         ModelId::JumpPad => &JUMP_PAD,
         ModelId::Checkpoint => &CHECKPOINT,
         ModelId::ExitGate => &EXIT_GATE,
         ModelId::Door => &DOOR,
-        // Characters / weapons are handled by their own modules.
+        // Characters, weapons and player projectiles are handled by their own modules.
         _ => &BODY_GLOW,
     }
 }
 
 pub(crate) fn build(id: ModelId) -> Vec<ModelPart> {
     match id {
-        ModelId::Rivet => rivet(),
-        ModelId::Sawblade => sawblade(),
-        ModelId::Rocket => rocket(),
-        ModelId::FlakGrenade => flak(),
-        ModelId::StickyCharge => sticky(),
-        ModelId::MortarShell => mortar(),
         ModelId::SpitterOrb => spitter_orb(),
         ModelId::GnatBolt => gnat_bolt(),
-        ModelId::Prism => prism(),
         ModelId::BloodCore => blood_core(),
         ModelId::JumpPad => jump_pad(),
         ModelId::Checkpoint => checkpoint(),
         ModelId::ExitGate => exit_gate(),
         ModelId::Door => door_model(),
         other => {
-            // Characters / weapons are built by their own modules; never reached through
-            // `ModelId::build`.
+            // Characters, weapons and player projectiles are built by their own modules; never
+            // reached through `ModelId::build`.
             log::error!("props::build called for non-prop model {other:?}");
-            rivet()
+            blood_core()
         }
     }
 }
@@ -125,374 +104,6 @@ fn finish_lit(p: &mut PartSet) {
 }
 
 // ---- projectiles --------------------------------------------------------------------------
-
-fn rivet() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BODY_GLOW);
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.0, 0.07),
-            Vec3::new(0.0, 0.0, -0.05),
-            0.009,
-            0.009,
-            5,
-            CHROME,
-        ),
-    );
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.0, 0.08),
-            Vec3::new(0.0, 0.0, 0.065),
-            0.024,
-            0.024,
-            6,
-            GUNMETAL,
-        ),
-    );
-    p.add(
-        1,
-        kit::spike(
-            Vec3::new(0.0, 0.0, -0.05),
-            Vec3::new(0.0, 0.0, -0.1),
-            0.011,
-            5,
-            Vec4::new(1.0, 0.55, 0.15, 1.0),
-        ),
-    );
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_chrome());
-    p.finish()
-}
-
-fn sawblade() -> Vec<ModelPart> {
-    // Horizontal disc (spin it around its Y axis).
-    let mut p = PartSet::new(&SAWBLADE);
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, -0.014, 0.0),
-            Vec3::new(0.0, 0.014, 0.0),
-            0.15,
-            0.15,
-            12,
-            CHROME,
-        ),
-    );
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, -0.02, 0.0),
-            Vec3::new(0.0, 0.02, 0.0),
-            0.04,
-            0.04,
-            6,
-            BLACK_STEEL,
-        ),
-    );
-    for k in 0..3 {
-        let a = k as f32 / 3.0 * std::f32::consts::TAU;
-        let d = Vec3::new(a.cos(), 0.0, a.sin());
-        p.add(
-            0,
-            block(
-                d * 0.09 + Vec3::Y * 0.01,
-                Vec3::new(0.03, 0.004, 0.012),
-                Quat::from_rotation_y(-a),
-                BLACK_STEEL,
-            ),
-        );
-    }
-    for k in 0..12 {
-        let a = k as f32 / 12.0 * std::f32::consts::TAU;
-        let d = Vec3::new(a.cos(), 0.0, a.sin());
-        let t = Vec3::new(-a.sin(), 0.0, a.cos());
-        p.add(
-            1,
-            kit::plate(
-                &[
-                    d * 0.145 - t * 0.035,
-                    d * 0.145 + t * 0.035,
-                    d * 0.21 + t * 0.03,
-                ],
-                0.022,
-                Vec4::new(1.0, 0.75, 0.4, 1.0),
-            ),
-        );
-    }
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_chrome());
-    p.finish()
-}
-
-fn rocket() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BODY_GLOW);
-    let olive = rgb(0x5a5a40);
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.0, 0.2),
-            Vec3::new(0.0, 0.0, -0.14),
-            0.045,
-            0.045,
-            8,
-            olive,
-        ),
-    );
-    p.add(
-        0,
-        kit::spike(
-            Vec3::new(0.0, 0.0, -0.14),
-            Vec3::new(0.0, 0.0, -0.27),
-            0.045,
-            8,
-            rgb(0xb02a1a),
-        ),
-    );
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.0, -0.06),
-            Vec3::new(0.0, 0.0, -0.1),
-            0.047,
-            0.047,
-            8,
-            rgb(0xe0aa1a),
-        ),
-    );
-    for k in 0..4 {
-        let a = k as f32 / 4.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_4;
-        let d = Vec3::new(a.cos(), a.sin(), 0.0);
-        p.add(
-            0,
-            kit::plate(
-                &[
-                    d * 0.04 + Vec3::Z * 0.08,
-                    d * 0.11 + Vec3::Z * 0.2,
-                    d * 0.04 + Vec3::Z * 0.2,
-                ],
-                0.01,
-                BLACK_STEEL,
-            ),
-        );
-    }
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.0, 0.2),
-            Vec3::new(0.0, 0.0, 0.23),
-            0.035,
-            0.03,
-            8,
-            BLACK_STEEL,
-        ),
-    );
-    // Exhaust flame.
-    p.add(
-        1,
-        kit::loft(
-            &[
-                kit::ngon_ring(
-                    Vec3::new(0.0, 0.0, 0.23),
-                    Vec3::X,
-                    Vec3::Y,
-                    Vec2::splat(0.03),
-                    6,
-                    0.0,
-                ),
-                kit::ngon_ring(
-                    Vec3::new(0.0, 0.0, 0.3),
-                    Vec3::X,
-                    Vec3::Y,
-                    Vec2::splat(0.05),
-                    6,
-                    0.5,
-                ),
-                vec![Vec3::new(0.0, 0.0, 0.48)],
-            ],
-            Vec4::new(1.0, 0.6, 0.15, 1.0),
-            false,
-            (true, false),
-            kit::Uv::PerFace,
-        ),
-    );
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_plate());
-    p.finish()
-}
-
-fn flak() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BODY_GLOW);
-    p.add(
-        0,
-        kit::ellipsoid(
-            Vec3::ZERO,
-            Vec3::splat(0.1),
-            Quat::IDENTITY,
-            4,
-            8,
-            rgb(0x6a6a5a),
-            false,
-        ),
-    );
-    for k in 0..6 {
-        let a = k as f32 / 6.0 * std::f32::consts::TAU;
-        let d = Quat::from_rotation_y(a) * Quat::from_rotation_z(0.6) * Vec3::Y;
-        p.add(0, spike(d * 0.09, d * 0.15, 0.022, 4, BLACK_STEEL));
-    }
-    // Hot band + fuse light (parryable: it has to stand out).
-    p.add(
-        1,
-        kit::band(
-            Vec3::ZERO,
-            Vec3::Y,
-            0.102,
-            0.035,
-            0.014,
-            10,
-            Vec4::new(1.0, 0.6, 0.15, 1.0),
-        ),
-    );
-    p.add(
-        1,
-        gem(
-            Vec3::new(0.0, 0.105, 0.0),
-            0.035,
-            0,
-            Vec4::new(1.0, 0.4, 0.15, 1.0),
-        ),
-    );
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_grime());
-    p.finish()
-}
-
-fn sticky() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BODY_GLOW);
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, -0.03, 0.0),
-            Vec3::new(0.0, 0.03, 0.0),
-            0.075,
-            0.065,
-            8,
-            GUNMETAL,
-        ),
-    );
-    // Adhesive barbs underneath.
-    for k in 0..5 {
-        let a = k as f32 / 5.0 * std::f32::consts::TAU;
-        let d = Vec3::new(a.cos(), 0.0, a.sin());
-        p.add(
-            0,
-            spike(
-                d * 0.06 - Vec3::Y * 0.025,
-                d * 0.1 - Vec3::Y * 0.07,
-                0.014,
-                3,
-                rgb(0x5aa02a),
-            ),
-        );
-    }
-    p.add(
-        0,
-        tube(
-            Vec3::new(0.0, 0.03, 0.0),
-            Vec3::new(0.0, 0.045, 0.0),
-            0.04,
-            0.035,
-            6,
-            BLACK_STEEL,
-        ),
-    );
-    p.add(
-        1,
-        tube(
-            Vec3::new(0.0, 0.045, 0.0),
-            Vec3::new(0.0, 0.06, 0.0),
-            0.025,
-            0.02,
-            6,
-            Vec4::new(1.0, 0.2, 0.12, 1.0),
-        ),
-    );
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_plate());
-    p.finish()
-}
-
-fn mortar() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BODY_GLOW);
-    let body = rgb(0x4a4a42);
-    p.add(
-        0,
-        kit::loft(
-            &[
-                vec![Vec3::new(0.0, 0.0, -0.22)],
-                kit::ngon_ring(
-                    Vec3::new(0.0, 0.0, -0.12),
-                    Vec3::X,
-                    Vec3::Y,
-                    Vec2::splat(0.065),
-                    8,
-                    0.0,
-                ),
-                kit::ngon_ring(
-                    Vec3::new(0.0, 0.0, 0.08),
-                    Vec3::X,
-                    Vec3::Y,
-                    Vec2::splat(0.07),
-                    8,
-                    0.0,
-                ),
-                kit::ngon_ring(
-                    Vec3::new(0.0, 0.0, 0.16),
-                    Vec3::X,
-                    Vec3::Y,
-                    Vec2::splat(0.04),
-                    8,
-                    0.0,
-                ),
-            ],
-            body,
-            false,
-            (false, true),
-            kit::Uv::PerFace,
-        ),
-    );
-    for k in 0..4 {
-        let a = k as f32 / 4.0 * std::f32::consts::TAU;
-        let d = Vec3::new(a.cos(), a.sin(), 0.0);
-        p.add(
-            0,
-            kit::plate(
-                &[
-                    d * 0.035 + Vec3::Z * 0.12,
-                    d * 0.09 + Vec3::Z * 0.2,
-                    d * 0.03 + Vec3::Z * 0.22,
-                ],
-                0.01,
-                BLACK_STEEL,
-            ),
-        );
-    }
-    p.add(
-        1,
-        kit::band(
-            Vec3::new(0.0, 0.0, -0.06),
-            Vec3::Z,
-            0.07,
-            0.03,
-            0.01,
-            10,
-            Vec4::new(1.0, 0.85, 0.3, 1.0),
-        ),
-    );
-    finish_lit(&mut p);
-    p.texture(0, kit::tex_grime());
-    p.finish()
-}
 
 fn spitter_orb() -> Vec<ModelPart> {
     let mut p = PartSet::new(&SPITTER_ORB);
@@ -552,63 +163,6 @@ fn gnat_bolt() -> Vec<ModelPart> {
     );
     p.color(0, Vec4::new(1.0, 1.0, 1.0, 0.75));
     p.texture(0, kit::tex_glow());
-    p.texture(1, kit::tex_glow());
-    p.finish()
-}
-
-fn prism() -> Vec<ModelPart> {
-    // Mirrored ricochet shard standing along Y, ~0.5 m.
-    let mut p = PartSet::new(&PRISM);
-    p.add(
-        0,
-        kit::crystal(
-            Vec3::ZERO,
-            Vec3::Y,
-            (0.2, 0.3),
-            0.11,
-            6,
-            Vec4::new(0.8, 0.95, 1.0, 1.0),
-        ),
-    );
-    p.add(
-        0,
-        kit::crystal(
-            Vec3::new(0.06, -0.05, 0.03),
-            Quat::from_rotation_z(-0.6) * Vec3::Y,
-            (0.06, 0.12),
-            0.04,
-            4,
-            Vec4::new(0.65, 0.85, 1.0, 1.0),
-        ),
-    );
-    p.add(
-        0,
-        kit::crystal(
-            Vec3::new(-0.05, 0.05, -0.02),
-            Quat::from_rotation_z(0.7) * Vec3::Y,
-            (0.05, 0.1),
-            0.035,
-            4,
-            Vec4::new(0.7, 0.9, 1.0, 1.0),
-        ),
-    );
-    p.add(
-        1,
-        kit::band(
-            Vec3::ZERO,
-            Vec3::Y,
-            0.112,
-            0.022,
-            0.012,
-            6,
-            Vec4::new(0.45, 0.95, 1.0, 1.0),
-        ),
-    );
-    p.add(1, gem(Vec3::new(0.0, 0.3, 0.0), 0.02, 0, Vec4::ONE));
-    p.add(1, gem(Vec3::new(0.0, -0.2, 0.0), 0.016, 0, Vec4::ONE));
-    // Self-lit mirror: facet shading is baked so it reads as polished glass in any light.
-    p.mesh(0).shade_by_normal(1.0, 0.72, 0.42);
-    p.texture(0, kit::tex_chrome());
     p.texture(1, kit::tex_glow());
     p.finish()
 }

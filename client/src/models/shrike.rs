@@ -1,8 +1,10 @@
-//! The Shrike: the players' chrome / blood-red combat automaton (third person, ~1.8 m).
+//! The Shrike: the players' masked hunter (third person, ~1.85 m).
 //!
-//! Silhouette: bird-skull helm with a swept crest and a glowing V visor, keeled chest with a
-//! blood core, two back-swept blades over the shoulders, talon feet. Team colour slot: crest,
-//! pauldrons + back blades (`trim`) and the visor.
+//! Silhouette: a beaked porcelain mask with glowing eye slits under a leather hood with a
+//! swept plume, a high-collared leather coat with two long tails, layered pauldrons, a brass
+//! harness holding the chest lantern where the **wick** burns, wrapped forearms with brass
+//! bracers, gloves and tall boots. Team colour: the wick flame and eye slits (`TeamGlow`), the
+//! mask's ridge and plume (`crest`) and the scarf / pauldron edging (`trim`).
 //!
 //! Model space: feet at the origin, facing -Z, right = +X.
 
@@ -11,14 +13,19 @@ use engine::assets::meshgen::MeshBuilder;
 use engine::glam::{EulerRot, Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::PartSet;
-use super::kit::{self, BLOOD, CHROME, GUNMETAL, add, add_mirrored, block, gem, limb, spike};
+use super::kit::{
+    self, BRASS, DARK_LEATHER, FLAME, LEATHER, PORCELAIN, WRAP, add, add_mirrored, block, gem,
+    limb, rgb,
+};
 use super::rig::{JointDef, Pose, ROOT, Shade, joint};
 
 pub const PELVIS: usize = 0;
 pub const TORSO: usize = 1;
-pub const CORE: usize = 2;
+/// The wick flame in the chest lantern (team-tinted, flickers with `Pose::glow`).
+pub const WICK: usize = 2;
 pub const TRIM: usize = 3;
 pub const HEAD: usize = 4;
+/// Eye slits of the mask, lit by the wick (`TeamGlow`).
 pub const VISOR: usize = 5;
 pub const CREST: usize = 6;
 pub const UPPER_ARM_L: usize = 7;
@@ -33,6 +40,14 @@ pub const FOOT_L: usize = 15;
 pub const THIGH_R: usize = 16;
 pub const SHIN_R: usize = 17;
 pub const FOOT_R: usize = 18;
+pub const COAT_L: usize = 19;
+pub const COAT_R: usize = 20;
+/// The wick's white-hot heart (`Core`, `Pose::core`).
+pub const EMBER: usize = 21;
+
+/// Other players' Shrikes are drawn this much larger than the movement capsule (visual only,
+/// easier to read at a distance): pass it to `ModelLibrary::draw_player_scaled`.
+pub const REMOTE_SCALE: f32 = 1.1;
 
 const HIP_Y: f32 = 0.92;
 const KNEE_Y: f32 = 0.50;
@@ -40,11 +55,17 @@ const ANKLE_Y: f32 = 0.09;
 const SHOULDER: [f32; 3] = [0.25, 1.41, 0.0];
 const ELBOW: [f32; 3] = [0.27, 1.14, 0.0];
 const WRIST: [f32; 3] = [0.28, 0.89, 0.0];
+/// Centre of the chest lantern.
+const LANTERN: [f32; 3] = [0.0, 1.29, -0.185];
+/// Base of the wick flame (its pivot: the flame flickers in height around it).
+const WICK_BASE: [f32; 3] = [LANTERN[0], LANTERN[1] - 0.06, LANTERN[2]];
+/// Where the coat tails hang from (right side; the left is mirrored).
+const COAT_HANG: [f32; 3] = [0.085, 1.03, 0.1];
 
-pub const JOINTS: [JointDef; 19] = [
+pub const JOINTS: [JointDef; 22] = [
     joint("pelvis", ROOT, [0.0, 0.95, 0.0], Shade::Lit),
     joint("torso", PELVIS, [0.0, 1.02, 0.0], Shade::Lit),
-    joint("core", TORSO, [0.0, 1.31, -0.17], Shade::Core),
+    joint("wick", TORSO, WICK_BASE, Shade::TeamGlow),
     joint("trim", TORSO, [0.0, 1.02, 0.0], Shade::Team),
     joint("head", TORSO, [0.0, 1.52, 0.0], Shade::Lit),
     joint("visor", HEAD, [0.0, 1.52, 0.0], Shade::TeamGlow),
@@ -76,6 +97,14 @@ pub const JOINTS: [JointDef; 19] = [
     joint("thigh_r", PELVIS, [0.11, HIP_Y, 0.0], Shade::Lit),
     joint("shin_r", THIGH_R, [0.12, KNEE_Y, 0.0], Shade::Lit),
     joint("foot_r", SHIN_R, [0.12, ANKLE_Y, 0.0], Shade::Lit),
+    joint(
+        "coat_l",
+        PELVIS,
+        [-COAT_HANG[0], COAT_HANG[1], COAT_HANG[2]],
+        Shade::Lit,
+    ),
+    joint("coat_r", PELVIS, COAT_HANG, Shade::Lit),
+    joint("ember", WICK, WICK_BASE, Shade::Core),
 ];
 
 /// Metres travelled per full locomotion cycle (two steps) at low speed.
@@ -87,74 +116,101 @@ fn v3(a: [f32; 3]) -> Vec3 {
     Vec3::new(a[0], a[1], a[2])
 }
 
+/// Dark cloth of the trousers and the waist.
+const CLOTH: Vec4 = Vec4::new(0.33, 0.3, 0.32, 1.0);
+
 // ---------------------------------------------------------------------------------------------
 // Geometry
 
-/// One side's arm / leg pieces built on the right (+X) and mirrored for the left.
+/// One side's arm pieces built on the right (+X) and mirrored for the left: leather sleeve,
+/// wrapped forearm with a brass bracer, gloved hand.
 fn right_arm() -> [MeshBuilder; 3] {
     let (s, e, w) = (v3(SHOULDER), v3(ELBOW), v3(WRIST));
     let mut upper = limb(
         s + Vec3::new(0.01, -0.02, 0.0),
         e,
-        Vec2::new(0.05, 0.055),
-        Vec2::new(0.04, 0.045),
-        CHROME,
+        Vec2::new(0.055, 0.06),
+        Vec2::new(0.045, 0.05),
+        LEATHER,
     );
-    add(&mut upper, gem(s, 0.068, 0, GUNMETAL));
+    add(&mut upper, gem(s, 0.066, 0, DARK_LEATHER));
+    // Strap round the upper arm.
+    let mid = s.lerp(e, 0.55);
+    add(
+        &mut upper,
+        limb(
+            mid + Vec3::Y * 0.02,
+            mid - Vec3::Y * 0.02,
+            Vec2::new(0.052, 0.057),
+            Vec2::new(0.052, 0.057),
+            DARK_LEATHER,
+        ),
+    );
 
-    let mut fore = gem(e, 0.048, 0, GUNMETAL);
+    let mut fore = gem(e, 0.046, 0, DARK_LEATHER);
     add(
         &mut fore,
         limb(
             e + Vec3::new(0.0, -0.02, 0.0),
             w + Vec3::new(0.0, 0.02, 0.0),
-            Vec2::new(0.042, 0.048),
-            Vec2::new(0.056, 0.06),
-            CHROME,
+            Vec2::new(0.042, 0.047),
+            Vec2::new(0.044, 0.048),
+            WRAP,
         ),
     );
-    // Blood-red blade fin along the outside of the forearm.
+    // Brass bracer with a leather edge.
     add(
         &mut fore,
-        kit::plate(
-            &[
-                Vec3::new(0.325, 1.09, 0.02),
-                Vec3::new(0.355, 0.98, 0.05),
-                Vec3::new(0.34, 0.93, 0.03),
-                Vec3::new(0.325, 0.95, 0.0),
-            ],
-            0.016,
-            BLOOD,
+        limb(
+            w + Vec3::new(0.0, 0.03, 0.0),
+            w + Vec3::new(-0.002, 0.13, 0.0),
+            Vec2::new(0.053, 0.057),
+            Vec2::new(0.05, 0.055),
+            BRASS,
+        ),
+    );
+    add(
+        &mut fore,
+        limb(
+            w + Vec3::new(-0.002, 0.13, 0.0),
+            w + Vec3::new(-0.003, 0.15, 0.0),
+            Vec2::new(0.055, 0.059),
+            Vec2::new(0.055, 0.059),
+            DARK_LEATHER,
         ),
     );
 
+    // Gloved hand with a flared cuff.
     let mut hand = block(
-        w + Vec3::new(0.0, -0.055, -0.008),
-        Vec3::new(0.04, 0.052, 0.05),
+        w + Vec3::new(0.0, -0.058, -0.008),
+        Vec3::new(0.042, 0.054, 0.052),
         Quat::IDENTITY,
-        GUNMETAL,
+        DARK_LEATHER,
     );
     add(
         &mut hand,
-        block(
-            w + Vec3::new(0.0, -0.075, -0.054),
-            Vec3::new(0.043, 0.032, 0.012),
-            Quat::IDENTITY,
-            BLOOD,
+        limb(
+            w,
+            w + Vec3::new(0.0, 0.035, 0.0),
+            Vec2::new(0.05, 0.054),
+            Vec2::new(0.058, 0.062),
+            LEATHER,
         ),
     );
     add(
         &mut hand,
         block(
-            w + Vec3::new(-0.045, -0.04, -0.03),
+            w + Vec3::new(-0.047, -0.04, -0.03),
             Vec3::new(0.012, 0.03, 0.018),
             Quat::IDENTITY,
-            GUNMETAL,
+            DARK_LEATHER,
         ),
     );
     [upper, fore, hand]
 }
 
+/// One side's leg pieces (right; the left is mirrored): trousers with a thigh strap, tall boot
+/// with a folded cuff, wraps and buckles.
 fn right_leg() -> [MeshBuilder; 3] {
     let hip = Vec3::new(0.11, HIP_Y, 0.0);
     let knee = Vec3::new(0.12, KNEE_Y, 0.0);
@@ -162,103 +218,112 @@ fn right_leg() -> [MeshBuilder; 3] {
     let mut thigh = limb(
         hip + Vec3::Y * 0.01,
         knee + Vec3::Y * 0.03,
-        Vec2::new(0.078, 0.082),
-        Vec2::new(0.052, 0.056),
-        CHROME,
+        Vec2::new(0.08, 0.085),
+        Vec2::new(0.058, 0.062),
+        CLOTH,
     );
-    add(&mut thigh, gem(hip, 0.07, 0, GUNMETAL));
-    // Armour flap on the outside of the thigh.
+    add(&mut thigh, gem(hip, 0.07, 0, CLOTH));
+    let strap = hip.lerp(knee, 0.45);
     add(
         &mut thigh,
         limb(
-            hip + Vec3::new(0.07, 0.0, 0.0),
-            hip + Vec3::new(0.085, -0.2, 0.0),
-            Vec2::new(0.012, 0.07),
-            Vec2::new(0.01, 0.05),
-            GUNMETAL,
+            strap + Vec3::Y * 0.025,
+            strap - Vec3::Y * 0.02,
+            Vec2::new(0.074, 0.078),
+            Vec2::new(0.072, 0.076),
+            DARK_LEATHER,
+        ),
+    );
+    add(
+        &mut thigh,
+        block(
+            strap + Vec3::new(0.072, 0.0, 0.0),
+            Vec3::new(0.01, 0.022, 0.02),
+            Quat::IDENTITY,
+            BRASS,
         ),
     );
 
-    let mut shin = gem(knee, 0.052, 0, GUNMETAL);
+    let mut shin = gem(knee, 0.05, 0, DARK_LEATHER);
     add(
         &mut shin,
         limb(
             knee + Vec3::new(0.0, -0.02, 0.005),
             ankle + Vec3::new(0.0, 0.02, 0.01),
-            Vec2::new(0.05, 0.062),
-            Vec2::new(0.036, 0.042),
-            CHROME,
+            Vec2::new(0.056, 0.064),
+            Vec2::new(0.045, 0.052),
+            DARK_LEATHER,
         ),
     );
-    // Blood-red knee spike pointing forward-up.
-    add(
-        &mut shin,
-        spike(
-            knee + Vec3::new(0.0, -0.02, -0.035),
-            knee + Vec3::new(0.0, 0.11, -0.12),
-            0.04,
-            4,
-            BLOOD,
-        ),
-    );
-    // Shin guard.
+    // Folded boot cuff below the knee.
     add(
         &mut shin,
         limb(
-            knee + Vec3::new(0.0, -0.06, -0.05),
-            ankle + Vec3::new(0.0, 0.08, -0.035),
-            Vec2::new(0.035, 0.012),
-            Vec2::new(0.026, 0.01),
-            GUNMETAL,
+            knee + Vec3::new(0.0, -0.01, 0.0),
+            knee + Vec3::new(0.0, -0.09, 0.0),
+            Vec2::new(0.068, 0.076),
+            Vec2::new(0.064, 0.072),
+            LEATHER,
         ),
     );
+    // Wraps and two buckles down the outside.
+    add(
+        &mut shin,
+        limb(
+            knee + Vec3::new(0.0, -0.2, 0.004),
+            knee + Vec3::new(0.0, -0.26, 0.006),
+            Vec2::new(0.056, 0.063),
+            Vec2::new(0.054, 0.061),
+            WRAP,
+        ),
+    );
+    for y in [-0.15, -0.3] {
+        add(
+            &mut shin,
+            block(
+                knee + Vec3::new(0.055, y, 0.0),
+                Vec3::new(0.008, 0.012, 0.016),
+                Quat::IDENTITY,
+                BRASS,
+            ),
+        );
+    }
 
-    let mut foot = gem(ankle, 0.042, 0, GUNMETAL);
+    let mut foot = gem(ankle, 0.044, 0, DARK_LEATHER);
     add(
         &mut foot,
         limb(
-            Vec3::new(0.12, 0.05, 0.06),
-            Vec3::new(0.12, 0.04, -0.12),
-            Vec2::new(0.052, 0.045),
-            Vec2::new(0.05, 0.03),
-            GUNMETAL,
+            Vec3::new(0.12, 0.06, 0.07),
+            Vec3::new(0.12, 0.045, -0.15),
+            Vec2::new(0.052, 0.05),
+            Vec2::new(0.05, 0.032),
+            DARK_LEATHER,
         ),
     );
-    // Talons.
+    // Sole and a brass toe cap.
     add(
         &mut foot,
-        spike(
-            Vec3::new(0.095, 0.03, -0.11),
-            Vec3::new(0.085, 0.0, -0.21),
-            0.022,
-            4,
-            CHROME,
-        ),
-    );
-    add(
-        &mut foot,
-        spike(
-            Vec3::new(0.145, 0.03, -0.11),
-            Vec3::new(0.16, 0.0, -0.2),
-            0.022,
-            4,
-            CHROME,
+        limb(
+            Vec3::new(0.12, 0.012, 0.08),
+            Vec3::new(0.12, 0.012, -0.16),
+            Vec2::new(0.055, 0.012),
+            Vec2::new(0.052, 0.012),
+            rgb(0x1a1414),
         ),
     );
     add(
         &mut foot,
-        spike(
-            Vec3::new(0.12, 0.05, 0.06),
-            Vec3::new(0.12, 0.01, 0.15),
-            0.02,
-            4,
-            CHROME,
+        block(
+            Vec3::new(0.12, 0.04, -0.15),
+            Vec3::new(0.04, 0.018, 0.016),
+            Quat::IDENTITY,
+            BRASS,
         ),
     );
     [thigh, shin, foot]
 }
 
-/// Keeled 8-point chest ring at height `y`.
+/// 8-point chest ring at height `y` with a soft front keel.
 fn chest_ring(y: f32, hw: f32, front: f32, keel: f32, back: f32) -> Vec<Vec3> {
     vec![
         Vec3::new(-hw, y, 0.0),
@@ -272,245 +337,423 @@ fn chest_ring(y: f32, hw: f32, front: f32, keel: f32, back: f32) -> Vec<Vec3> {
     ]
 }
 
-pub fn build() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&JOINTS);
-
-    // Pelvis.
-    let pelvis = kit::loft(
+/// A coat tail hanging from [`COAT_HANG`] (right side).
+fn coat_tail() -> MeshBuilder {
+    let top = v3(COAT_HANG);
+    let ring = |offset: Vec3, half: Vec2| kit::rect_ring(top + offset, Vec3::X, Vec3::Z, half);
+    let mut m = kit::loft(
         &[
-            kit::rect_ring(
-                Vec3::new(0.0, 0.84, 0.0),
-                Vec3::X,
-                Vec3::Z,
-                Vec2::new(0.12, 0.085),
-            ),
-            kit::rect_ring(
-                Vec3::new(0.0, 0.96, 0.0),
-                Vec3::X,
-                Vec3::Z,
-                Vec2::new(0.16, 0.1),
-            ),
-            kit::rect_ring(
-                Vec3::new(0.0, 1.03, 0.0),
-                Vec3::X,
-                Vec3::Z,
-                Vec2::new(0.1, 0.075),
-            ),
+            ring(Vec3::ZERO, Vec2::new(0.085, 0.012)),
+            ring(Vec3::new(0.012, -0.3, 0.02), Vec2::new(0.095, 0.011)),
+            ring(Vec3::new(0.03, -0.62, 0.035), Vec2::new(0.11, 0.01)),
         ],
-        GUNMETAL,
+        LEATHER,
         false,
         (true, true),
         kit::Uv::PerFace,
     );
-    p.add(PELVIS, pelvis);
+    // Dark hem.
+    add(
+        &mut m,
+        limb(
+            top + Vec3::new(0.03, -0.6, 0.036),
+            top + Vec3::new(0.03, -0.66, 0.036),
+            Vec2::new(0.112, 0.012),
+            Vec2::new(0.112, 0.012),
+            DARK_LEATHER,
+        ),
+    );
+    m
+}
+
+pub fn build() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&JOINTS);
+    let rect = |y: f32, half: Vec2| kit::rect_ring(Vec3::new(0.0, y, 0.0), Vec3::X, Vec3::Z, half);
+
+    // Pelvis: trousers, belt with a brass buckle and two pouches.
     p.add(
         PELVIS,
-        kit::plate(
-            &[
-                Vec3::new(-0.085, 0.99, -0.1),
-                Vec3::new(0.085, 0.99, -0.1),
-                Vec3::new(0.0, 0.82, -0.085),
-            ],
-            0.025,
-            CHROME,
-        ),
-    );
-
-    // Torso: waist, keeled chest, neck.
-    p.add(
-        TORSO,
-        kit::tube(
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 1.18, 0.0),
-            0.075,
-            0.09,
-            6,
-            GUNMETAL,
-        ),
-    );
-    for y in [1.06, 1.12] {
-        p.add(
-            TORSO,
-            kit::tube(
-                Vec3::new(0.0, y, 0.0),
-                Vec3::new(0.0, y + 0.025, 0.0),
-                0.095,
-                0.095,
-                6,
-                kit::BLACK_STEEL,
-            ),
-        );
-    }
-    p.add(
-        TORSO,
         kit::loft(
             &[
-                chest_ring(1.15, 0.12, -0.075, -0.1, 0.075),
-                chest_ring(1.28, 0.2, -0.12, -0.2, 0.11),
-                chest_ring(1.4, 0.235, -0.12, -0.16, 0.12),
-                chest_ring(1.5, 0.15, -0.075, -0.085, 0.085),
+                rect(0.84, Vec2::new(0.125, 0.09)),
+                rect(0.96, Vec2::new(0.165, 0.105)),
+                rect(1.03, Vec2::new(0.115, 0.085)),
             ],
-            CHROME,
+            CLOTH,
             false,
             (true, true),
             kit::Uv::PerFace,
         ),
     );
     p.add(
-        TORSO,
-        kit::tube(
-            Vec3::new(0.0, 1.47, 0.0),
-            Vec3::new(0.0, 1.57, -0.01),
-            0.055,
-            0.045,
-            6,
-            GUNMETAL,
+        PELVIS,
+        kit::loft(
+            &[
+                rect(0.94, Vec2::new(0.172, 0.112)),
+                rect(1.0, Vec2::new(0.15, 0.1)),
+            ],
+            DARK_LEATHER,
+            false,
+            (true, true),
+            kit::Uv::PerFace,
         ),
     );
-    // Spine ridge / exhaust between the back blades.
+    p.add(
+        PELVIS,
+        block(
+            Vec3::new(0.0, 0.97, -0.112),
+            Vec3::new(0.035, 0.028, 0.008),
+            Quat::IDENTITY,
+            BRASS,
+        ),
+    );
+    let pouch = block(
+        Vec3::new(0.17, 0.92, -0.02),
+        Vec3::new(0.025, 0.045, 0.05),
+        Quat::IDENTITY,
+        LEATHER,
+    );
+    add_mirrored(p.mesh(PELVIS), &pouch);
+
+    // Torso: waist, layered leather jerkin, coat lapels and back, high collar.
+    p.add(
+        TORSO,
+        kit::tube(
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.18, 0.0),
+            0.085,
+            0.1,
+            6,
+            CLOTH,
+        ),
+    );
+    p.add(
+        TORSO,
+        kit::loft(
+            &[
+                chest_ring(1.12, 0.13, -0.08, -0.1, 0.085),
+                chest_ring(1.27, 0.2, -0.12, -0.15, 0.115),
+                chest_ring(1.4, 0.23, -0.12, -0.14, 0.125),
+                chest_ring(1.49, 0.15, -0.08, -0.085, 0.09),
+            ],
+            LEATHER,
+            false,
+            (true, true),
+            kit::Uv::PerFace,
+        ),
+    );
+    let lapel = kit::plate(
+        &[
+            Vec3::new(0.06, 1.48, -0.1),
+            Vec3::new(0.2, 1.4, -0.105),
+            Vec3::new(0.19, 1.1, -0.09),
+            Vec3::new(0.09, 1.12, -0.115),
+        ],
+        0.02,
+        DARK_LEATHER,
+    );
+    add_mirrored(p.mesh(TORSO), &lapel);
     p.add(
         TORSO,
         limb(
-            Vec3::new(0.0, 1.2, 0.11),
             Vec3::new(0.0, 1.46, 0.12),
-            Vec2::new(0.035, 0.03),
-            Vec2::new(0.03, 0.04),
-            GUNMETAL,
+            Vec3::new(0.0, 1.03, 0.115),
+            Vec2::new(0.21, 0.025),
+            Vec2::new(0.16, 0.025),
+            LEATHER,
         ),
     );
-
-    // Blood core in the keel.
-    p.add(
-        CORE,
-        kit::crystal(
-            Vec3::new(0.0, 1.3, -0.19),
-            Vec3::Y,
-            (0.065, 0.06),
-            0.04,
-            4,
-            Vec4::new(1.0, 0.28, 0.16, 1.0),
-        ),
-    );
-
-    // Team trim: pauldrons and the back blades.
-    let mut pauldron = kit::ellipsoid(
-        Vec3::new(0.285, 1.46, 0.0),
-        Vec3::new(0.105, 0.075, 0.115),
-        Quat::from_rotation_z(-0.4),
-        3,
-        6,
-        kit::WHITE,
-        false,
-    );
-    add(
-        &mut pauldron,
-        kit::plate(
-            &[
-                Vec3::new(0.24, 1.52, -0.06),
-                Vec3::new(0.31, 1.6, 0.02),
-                Vec3::new(0.25, 1.52, 0.08),
-            ],
-            0.02,
-            kit::WHITE,
-        ),
-    );
-    let blade = kit::plate(
-        &[
-            Vec3::new(0.08, 1.44, 0.1),
-            Vec3::new(0.08, 1.27, 0.13),
-            Vec3::new(0.3, 1.84, 0.44),
-        ],
-        0.022,
-        kit::WHITE,
-    );
-    let mut trim = MeshBuilder::new();
-    add_mirrored(&mut trim, &pauldron);
-    add_mirrored(&mut trim, &blade);
-    // Lacquered V plate over the keel (around the core).
-    let chest_plate = kit::plate(
-        &[
-            Vec3::new(0.025, 1.43, -0.155),
-            Vec3::new(0.16, 1.4, -0.13),
-            Vec3::new(0.06, 1.24, -0.17),
-            Vec3::new(0.02, 1.2, -0.12),
-        ],
-        0.02,
-        kit::WHITE,
-    );
-    add_mirrored(&mut trim, &chest_plate);
-    p.add(TRIM, trim);
-
-    // Helm: bird skull with a beak.
-    let helm_axis_side = Vec3::X;
-    let helm_axis_up = Vec3::Y;
-    let ring = |z: f32, y: f32, r: Vec2| {
+    let collar_ring = |y: f32, r: f32| {
         kit::ngon_ring(
-            Vec3::new(0.0, y, z),
-            helm_axis_side,
-            helm_axis_up,
-            r,
-            6,
+            Vec3::new(0.0, y, 0.015),
+            Vec3::X,
+            Vec3::Z,
+            Vec2::new(r, r * 0.95),
+            8,
             0.0,
         )
     };
     p.add(
-        HEAD,
+        TORSO,
         kit::loft(
-            &[
-                ring(0.11, 1.66, Vec2::new(0.055, 0.06)),
-                ring(0.03, 1.665, Vec2::new(0.095, 0.1)),
-                ring(-0.07, 1.645, Vec2::new(0.088, 0.085)),
-                ring(-0.15, 1.61, Vec2::new(0.035, 0.04)),
-                vec![Vec3::new(0.0, 1.585, -0.215)],
-            ],
-            CHROME,
+            &[collar_ring(1.46, 0.105), collar_ring(1.62, 0.128)],
+            DARK_LEATHER,
             false,
-            (true, false),
+            (false, false),
             kit::Uv::PerFace,
         ),
     );
-    // Jaw guard.
+    // Layered leather pauldrons with brass studs.
+    let mut pauldron = kit::ellipsoid(
+        Vec3::new(0.28, 1.46, 0.0),
+        Vec3::new(0.11, 0.07, 0.12),
+        Quat::from_rotation_z(-0.45),
+        3,
+        6,
+        DARK_LEATHER,
+        false,
+    );
+    add(
+        &mut pauldron,
+        kit::ellipsoid(
+            Vec3::new(0.31, 1.41, 0.0),
+            Vec3::new(0.1, 0.055, 0.115),
+            Quat::from_rotation_z(-0.6),
+            3,
+            6,
+            LEATHER,
+            false,
+        ),
+    );
+    add(&mut pauldron, gem(Vec3::new(0.27, 1.53, -0.05), 0.014, 0, BRASS));
+    add(&mut pauldron, gem(Vec3::new(0.27, 1.53, 0.05), 0.014, 0, BRASS));
+    add_mirrored(p.mesh(TORSO), &pauldron);
+    // Harness: straps from the shoulders to the lantern and on to the belt, brass buckles.
+    let lantern = v3(LANTERN);
+    let strap_top = limb(
+        Vec3::new(0.15, 1.47, -0.105),
+        lantern + Vec3::new(0.055, 0.05, 0.03),
+        Vec2::new(0.022, 0.008),
+        Vec2::new(0.02, 0.008),
+        DARK_LEATHER,
+    );
+    let strap_low = limb(
+        lantern + Vec3::new(0.05, -0.07, 0.035),
+        Vec3::new(0.1, 1.04, -0.118),
+        Vec2::new(0.02, 0.008),
+        Vec2::new(0.022, 0.008),
+        DARK_LEATHER,
+    );
+    let buckle = block(
+        Vec3::new(0.12, 1.42, -0.125),
+        Vec3::new(0.02, 0.02, 0.008),
+        Quat::from_rotation_z(0.4),
+        BRASS,
+    );
+    for m in [&strap_top, &strap_low, &buckle] {
+        add_mirrored(p.mesh(TORSO), m);
+    }
+    // Lantern cage: brass caps and bars round the wick, a sooty back plate.
     p.add(
-        HEAD,
-        limb(
-            Vec3::new(0.0, 1.575, -0.02),
-            Vec3::new(0.0, 1.565, -0.14),
-            Vec2::new(0.06, 0.03),
-            Vec2::new(0.022, 0.02),
-            GUNMETAL,
+        TORSO,
+        kit::tube(
+            lantern + Vec3::Y * 0.075,
+            lantern + Vec3::Y * 0.1,
+            0.062,
+            0.045,
+            8,
+            BRASS,
+        ),
+    );
+    p.add(
+        TORSO,
+        kit::tube(
+            lantern - Vec3::Y * 0.1,
+            lantern - Vec3::Y * 0.075,
+            0.05,
+            0.064,
+            8,
+            BRASS,
+        ),
+    );
+    for k in 0..5 {
+        let a = std::f32::consts::PI + k as f32 / 4.0 * std::f32::consts::PI;
+        let d = Vec3::new(a.cos(), 0.0, a.sin());
+        p.add(
+            TORSO,
+            limb(
+                lantern + d * 0.056 - Vec3::Y * 0.08,
+                lantern + d * 0.056 + Vec3::Y * 0.08,
+                Vec2::splat(0.007),
+                Vec2::splat(0.007),
+                BRASS,
+            ),
+        );
+    }
+    p.add(
+        TORSO,
+        block(
+            lantern + Vec3::new(0.0, 0.0, 0.035),
+            Vec3::new(0.05, 0.075, 0.012),
+            Quat::IDENTITY,
+            rgb(0x141010),
         ),
     );
 
-    // Visor: angry V of two glowing slits.
+    // The wick: a tall flame with a forked tip, and its hot heart.
+    let base = v3(WICK_BASE);
+    let flame_ring = |y: f32, r: f32, phase: f32| {
+        kit::ngon_ring(base + Vec3::Y * y, Vec3::X, Vec3::Z, Vec2::splat(r), 6, phase)
+    };
+    p.add(
+        WICK,
+        kit::loft(
+            &[
+                vec![base],
+                flame_ring(0.03, 0.03, 0.0),
+                flame_ring(0.07, 0.034, 0.3),
+                flame_ring(0.105, 0.018, 0.6),
+                vec![base + Vec3::new(0.008, 0.145, 0.0)],
+            ],
+            FLAME,
+            true,
+            (false, false),
+            kit::Uv::PerFace,
+        ),
+    );
+    p.add(
+        WICK,
+        kit::spike(
+            base + Vec3::new(-0.01, 0.085, 0.0),
+            base + Vec3::new(-0.03, 0.13, 0.0),
+            0.012,
+            4,
+            FLAME,
+        ),
+    );
+    p.add(
+        EMBER,
+        kit::ellipsoid(
+            base + Vec3::Y * 0.04,
+            Vec3::new(0.016, 0.03, 0.016),
+            Quat::IDENTITY,
+            2,
+            6,
+            Vec4::new(1.0, 0.95, 0.8, 1.0),
+            false,
+        ),
+    );
+
+    // Team trim: a scarf round the collar with a trailing end, and pauldron edging.
+    let mut trim = kit::band(
+        Vec3::new(0.0, 1.475, 0.01),
+        Vec3::Y,
+        0.11,
+        0.045,
+        0.03,
+        8,
+        kit::WHITE,
+    );
+    add(
+        &mut trim,
+        kit::plate(
+            &[
+                Vec3::new(-0.06, 1.47, 0.12),
+                Vec3::new(-0.11, 1.47, 0.11),
+                Vec3::new(-0.15, 1.18, 0.16),
+                Vec3::new(-0.1, 1.16, 0.17),
+            ],
+            0.016,
+            kit::WHITE,
+        ),
+    );
+    let edge = kit::ellipsoid(
+        Vec3::new(0.335, 1.385, 0.0),
+        Vec3::new(0.022, 0.018, 0.118),
+        Quat::from_rotation_z(-0.6),
+        2,
+        6,
+        kit::WHITE,
+        false,
+    );
+    add_mirrored(&mut trim, &edge);
+    p.add(TRIM, trim);
+
+    // Head: leather hood with a peak, the porcelain mask with its long hooked beak.
+    p.add(
+        HEAD,
+        kit::ellipsoid(
+            Vec3::new(0.0, 1.665, 0.025),
+            Vec3::new(0.108, 0.125, 0.118),
+            Quat::IDENTITY,
+            4,
+            8,
+            DARK_LEATHER,
+            false,
+        ),
+    );
+    p.add(
+        HEAD,
+        kit::spike(
+            Vec3::new(0.0, 1.73, 0.1),
+            Vec3::new(0.0, 1.76, 0.2),
+            0.045,
+            4,
+            DARK_LEATHER,
+        ),
+    );
+    kit::finish(p.mesh(HEAD));
+    let mask_ring = |z: f32, y: f32, w: f32, h: f32| {
+        kit::ngon_ring(Vec3::new(0.0, y, z), Vec3::X, Vec3::Y, Vec2::new(w, h), 8, 0.0)
+    };
+    let mut mask = kit::loft(
+        &[
+            mask_ring(-0.03, 1.665, 0.098, 0.106),
+            mask_ring(-0.08, 1.668, 0.088, 0.097),
+            mask_ring(-0.125, 1.654, 0.058, 0.07),
+            mask_ring(-0.165, 1.632, 0.034, 0.046),
+            mask_ring(-0.215, 1.604, 0.021, 0.03),
+            mask_ring(-0.255, 1.575, 0.012, 0.018),
+            vec![Vec3::new(0.0, 1.535, -0.272)],
+        ],
+        PORCELAIN,
+        false,
+        (true, false),
+        kit::Uv::PerFace,
+    );
+    // Porcelain stays bright: a gentler bake than leather.
+    mask.shade_by_normal(1.0, 0.92, 0.72);
+    kit::add(p.mesh(HEAD), mask);
+
+    // Eye slits on the mask (lit from inside by the wick).
     let slit = limb(
-        Vec3::new(0.083, 1.68, -0.05),
-        Vec3::new(0.012, 1.645, -0.128),
-        Vec2::new(0.012, 0.016),
-        Vec2::new(0.01, 0.012),
+        Vec3::new(0.079, 1.703, -0.074),
+        Vec3::new(0.034, 1.687, -0.122),
+        Vec2::new(0.009, 0.012),
+        Vec2::new(0.007, 0.01),
         kit::WHITE,
     );
     let mut visor = MeshBuilder::new();
     add_mirrored(&mut visor, &slit);
     p.add(VISOR, visor);
 
-    // Crest blade sweeping back.
-    p.add(
-        CREST,
-        kit::plate(
-            &[
-                Vec3::new(0.0, 1.735, -0.07),
-                Vec3::new(0.0, 1.77, 0.04),
-                Vec3::new(0.0, 1.88, 0.26),
-                Vec3::new(0.0, 1.7, 0.13),
-            ],
-            0.028,
-            kit::WHITE,
-        ),
-    );
+    // Crest: the painted ridge down the beak and a swept plume from the hood.
+    // The ridge follows the beak in convex segments (top edge, then 1.7 cm below it).
+    let ridge = [
+        Vec3::new(0.0, 1.775, -0.02),
+        Vec3::new(0.0, 1.732, -0.125),
+        Vec3::new(0.0, 1.69, -0.168),
+        Vec3::new(0.0, 1.648, -0.215),
+    ];
+    let mut crest = MeshBuilder::new();
+    for w in ridge.windows(2) {
+        let drop = Vec3::new(0.0, -0.017, 0.0);
+        add(
+            &mut crest,
+            kit::plate(&[w[0], w[1], w[1] + drop, w[0] + drop], 0.02, kit::WHITE),
+        );
+    }
+    for (k, side) in [(0.0f32, 0.0f32), (1.0, 0.035), (1.0, -0.035)] {
+        add(
+            &mut crest,
+            kit::plate(
+                &[
+                    Vec3::new(side, 1.775, 0.0),
+                    Vec3::new(side * 1.4, 1.83 - k * 0.03, 0.12),
+                    Vec3::new(side * 1.8, 1.86 - k * 0.05, 0.26 - k * 0.04),
+                    Vec3::new(side * 1.3, 1.79 - k * 0.03, 0.15),
+                ],
+                0.014,
+                kit::WHITE,
+            ),
+        );
+    }
+    p.add(CREST, crest);
 
-    // Limbs (right built, left mirrored).
+    // Limbs (right built, left mirrored) and the coat tails.
     let [upper, fore, hand] = right_arm();
     let [thigh, shin, foot] = right_leg();
+    let tail = coat_tail();
     for (right, left, mesh) in [
         (UPPER_ARM_R, UPPER_ARM_L, upper),
         (FOREARM_R, FOREARM_L, fore),
@@ -518,13 +761,14 @@ pub fn build() -> Vec<ModelPart> {
         (THIGH_R, THIGH_L, thigh),
         (SHIN_R, SHIN_L, shin),
         (FOOT_R, FOOT_L, foot),
+        (COAT_R, COAT_L, tail),
     ] {
         p.add(left, kit::mirrored_x(&mesh));
         p.add(right, mesh);
     }
 
     p.for_each_mesh(|i, m| {
-        if !JOINTS[i].shade.is_emissive() {
+        if !JOINTS[i].shade.is_emissive() && i != HEAD {
             kit::finish(m);
         }
     });
@@ -532,7 +776,11 @@ pub fn build() -> Vec<ModelPart> {
         let tex = if j.shade.is_emissive() {
             kit::tex_glow()
         } else {
-            kit::tex_chrome()
+            match i {
+                HEAD => kit::tex_porcelain(),
+                FOREARM_L | FOREARM_R => kit::tex_wrap(),
+                _ => kit::tex_leather(),
+            }
         };
         p.texture(i, tex);
     }
@@ -574,7 +822,7 @@ pub struct PlayerAnim {
     pub dead: bool,
     /// Seconds (any monotonically increasing clock).
     pub time: f64,
-    /// Held weapon index (0 Lancet, 1 Thresher, 2 Riveter, 3 Cinderbox).
+    /// Held weapon index (0 Quill (one-handed), 1 Bellows, 2 Arclash, 3 Tumbler).
     pub weapon: u8,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
@@ -597,6 +845,17 @@ fn rx(a: f32) -> Quat {
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn wave(time: f64, hz: f64) -> f32 {
+    ((time * hz).fract() as f32 * std::f32::consts::TAU).sin()
+}
+
+/// The wick flame's local transform for a flicker level (~0.75..1.25): taller and thinner
+/// when it flares.
+fn flame_scale(flick: f32) -> Mat4 {
+    let h = flick.clamp(0.1, 2.0);
+    Mat4::from_scale(Vec3::new(1.0 / h.sqrt(), h, 1.0 / h.sqrt()))
 }
 
 /// Punch extension curve: fast out (first 25 %), slower return.
@@ -627,12 +886,12 @@ struct Limb {
 pub fn pose(a: &PlayerAnim) -> Pose {
     let mut pose = Pose::rest(JOINTS.len());
     let t = a.time;
-    // Heartbeat on the blood core.
-    let beat = ((t * 1.6).fract() as f32 * std::f32::consts::TAU)
-        .sin()
-        .max(0.0);
-    let core = 0.85 + beat * 0.35;
-    pose.core = Vec4::new(core, core, core, 1.0);
+    // The wick flickers (a few incommensurate wobbles); the eye slits flicker with it.
+    let flick = 1.0 + 0.12 * wave(t, 6.3) + 0.08 * wave(t + 0.37, 13.7) + 0.05 * wave(t, 23.1);
+    pose.glow = Vec4::new(flick, flick, flick, 1.0);
+    let heat = 1.1 * flick;
+    pose.core = Vec4::new(heat, heat * 0.95, heat * 0.85, 1.0);
+    pose.set(WICK, flame_scale(flick));
 
     if a.dead {
         return dead_pose(pose);
@@ -673,7 +932,10 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         end: 0.0,
     };
     let mut arm_l_out = 0.12f32; // sideways raise of the left arm (+ = outward)
-    let mut two_handed = a.weapon != 0;
+    let mut two_handed = super::weapons::WeaponKind::from_index(a.weapon).two_handed();
+    // World swing of the coat tails (radians about X, - = streaming back).
+    let coat: f32;
+    let mut flutter = 0.0f32;
     // Ground locomotion keeps the legs world-aligned even though the pelvis leans.
     let mut legs_upright = false;
 
@@ -681,6 +943,8 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         leg_axis = Vec3::X;
     }
     if a.sliding {
+        coat = -1.3;
+        flutter = 0.5;
         // Leaning back on the folded left leg, right leg stretched out in front. Leg angles
         // are relative to the leaning pelvis (world angle = lean + local).
         pelvis_offset.y = -0.6;
@@ -703,6 +967,8 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         arm_l_out = 0.55;
         two_handed = false;
     } else if a.slamming {
+        coat = -2.3;
+        flutter = 1.0;
         pelvis_offset.y = 0.1;
         lean = -0.3;
         leg_l = Limb {
@@ -722,6 +988,8 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         };
         two_handed = false;
     } else if a.dashing {
+        coat = -1.15;
+        flutter = 1.0;
         lean = -0.55;
         leg_l = Limb {
             upper: -0.75,
@@ -741,6 +1009,7 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         arm_l_out = 0.3;
         two_handed = false;
     } else if let Some(normal) = a.wall_cling {
+        coat = -0.3;
         let n = Quat::from_rotation_y(-a.yaw) * normal;
         let side = if n.x >= 0.0 { 1.0 } else { -1.0 }; // + = wall on the left
         roll = -0.3 * side;
@@ -767,6 +1036,9 @@ pub fn pose(a: &PlayerAnim) -> Pose {
     } else if !a.on_ground {
         // Rising: one knee tucked. Falling: legs reach down, arms rise for balance.
         let rise = smoothstep(local_v.y / 6.0 * 0.5 + 0.5);
+        // Rising: the tails trail below; falling: they lift and flap.
+        coat = -0.25 - (1.0 - rise) * 0.95;
+        flutter = 0.6;
         leg_l = Limb {
             upper: 0.4 + rise * 0.9,
             lower: -0.5 - rise * 1.2,
@@ -803,6 +1075,8 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         lean = -0.32 * k;
         roll = 0.12 * residual.sin() * k;
         legs_upright = true;
+        coat = -(0.08 + 0.75 * k) + 0.07 * amp * s;
+        flutter = k * 0.5;
         // Idle breathing.
         if speed <= 0.3 {
             let breathe = ((t * 0.5).fract() as f32 * std::f32::consts::TAU).sin();
@@ -818,6 +1092,16 @@ pub fn pose(a: &PlayerAnim) -> Pose {
                 end: 0.1,
             };
         }
+    }
+
+    // Coat tails: world swing minus the pelvis lean (they hang from it), a flutter at speed,
+    // splayed a little apart; the two tails are slightly out of phase.
+    for (part, side, phase) in [(COAT_L, -1.0f32, 0.0f64), (COAT_R, 1.0, 0.31)] {
+        let flap = flutter * 0.1 * wave(t + phase, 11.0);
+        pose.rotate(
+            part,
+            rx(coat + flap - lean) * Quat::from_rotation_z(side * (0.06 + 0.05 * flutter)),
+        );
     }
 
     // Pelvis: lower / lean / roll, legs turn towards the movement direction.
@@ -897,7 +1181,7 @@ pub fn pose(a: &PlayerAnim) -> Pose {
 }
 
 fn dead_pose(mut pose: Pose) -> Pose {
-    // Flat on its back, limbs splayed, visor dark.
+    // Flat on its back, limbs splayed.
     pose.rotate_move(PELVIS, rx(1.45), Vec3::new(0.0, -0.8, 0.0));
     pose.rotate(TORSO, rx(0.1) * Quat::from_rotation_z(0.15));
     pose.rotate(HEAD, Quat::from_rotation_y(0.7) * rx(0.3));
@@ -909,14 +1193,15 @@ fn dead_pose(mut pose: Pose) -> Pose {
     pose.rotate(SHIN_L, rx(-0.5));
     pose.rotate(THIGH_R, Quat::from_rotation_z(0.15));
     pose.rotate(FOOT_R, rx(0.6));
-    pose.glow = Vec4::new(0.15, 0.15, 0.15, 1.0);
-    pose.core = pose.glow;
+    // The wick is snuffed: no flame, dark eye slits, a dull smoulder in the lantern.
+    pose.hide(WICK);
+    pose.glow = Vec4::new(0.05, 0.05, 0.05, 1.0);
+    pose.core = Vec4::new(0.35, 0.12, 0.06, 1.0);
     pose
 }
 
 fn downed_pose(mut pose: Pose, t: f64) -> Pose {
-    // Kneeling on the right knee, slumped, left hand braced on the left knee; the core
-    // flickers weakly.
+    // Kneeling on the right knee, slumped, left hand braced on the left knee.
     let sway = ((t * 0.7).fract() as f32 * std::f32::consts::TAU).sin() * 0.05;
     pose.rotate_move(PELVIS, rx(-0.1), Vec3::new(0.0, -0.4, 0.0));
     pose.rotate(THIGH_R, rx(-0.15));
@@ -931,9 +1216,13 @@ fn downed_pose(mut pose: Pose, t: f64) -> Pose {
     pose.rotate(FOREARM_L, rx(0.55));
     pose.rotate(UPPER_ARM_R, Quat::from_rotation_z(0.2) * rx(0.35));
     pose.rotate(FOREARM_R, rx(0.4));
+    // The wick gutters: a small, sputtering flame.
     let flicker = if (t * 9.0).fract() < 0.3 { 0.25 } else { 0.6 };
     pose.glow = Vec4::new(flicker, flicker, flicker, 1.0);
-    pose.core = pose.glow;
+    pose.core = Vec4::new(flicker, flicker * 0.8, flicker * 0.6, 1.0);
+    pose.set(WICK, flame_scale(0.35 + flicker * 0.3));
+    pose.rotate(COAT_L, rx(-0.5) * Quat::from_rotation_z(-0.1));
+    pose.rotate(COAT_R, rx(-0.45) * Quat::from_rotation_z(0.1));
     pose
 }
 

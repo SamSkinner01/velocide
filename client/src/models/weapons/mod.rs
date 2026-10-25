@@ -1,16 +1,16 @@
 //! Weapons: first-person viewmodels (also held by the third-person Shrike), the right arm that
-//! grips them, the punching left fist and the prism throw.
+//! grips them, the punching left fist and the Thorn throw.
 //!
 //! Weapon model space: the grip (where the hand closes) is at the origin, the barrel points
 //! down -Z, top is +Y, units are metres. Glow parts are white; their colour comes from
 //! `Pose::glow` (weapon colour per alt mode, brighter while charging / firing).
 
+pub mod arclash;
 pub mod arm;
-pub mod cinderbox;
+pub mod bellows;
 pub mod fist;
-pub mod lancet;
-pub mod riveter;
-pub mod thresher;
+pub mod quill;
+pub mod tumbler;
 
 use engine::gfx::DrawItem;
 use engine::glam::{EulerRot, Mat4, Quat, Vec2, Vec3, Vec4};
@@ -23,70 +23,92 @@ use super::shrike::punch_extension;
 /// The four guns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WeaponKind {
-    Lancet,
-    Thresher,
-    Riveter,
-    Cinderbox,
+    /// Slot 1: precision spike-caster (hitscan).
+    Quill,
+    /// Slot 2: twin-barrel blast cannon.
+    Bellows,
+    /// Slot 3: arc caster.
+    Arclash,
+    /// Slot 4: bouncing-bomb launcher.
+    Tumbler,
 }
 
 impl WeaponKind {
     pub const ALL: [WeaponKind; 4] = [
-        WeaponKind::Lancet,
-        WeaponKind::Thresher,
-        WeaponKind::Riveter,
-        WeaponKind::Cinderbox,
+        WeaponKind::Quill,
+        WeaponKind::Bellows,
+        WeaponKind::Arclash,
+        WeaponKind::Tumbler,
     ];
 
-    /// Weapon index (0 Lancet, 1 Thresher, 2 Riveter, 3 Cinderbox); out of range = Lancet.
+    /// Weapon index (0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler); out of range = Quill.
     pub fn from_index(index: u8) -> WeaponKind {
         Self::ALL
             .get(index as usize)
             .copied()
-            .unwrap_or(WeaponKind::Lancet)
+            .unwrap_or(WeaponKind::Quill)
     }
 
     pub fn model(self) -> ModelId {
         match self {
-            WeaponKind::Lancet => ModelId::Lancet,
-            WeaponKind::Thresher => ModelId::Thresher,
-            WeaponKind::Riveter => ModelId::Riveter,
-            WeaponKind::Cinderbox => ModelId::Cinderbox,
+            WeaponKind::Quill => ModelId::Quill,
+            WeaponKind::Bellows => ModelId::Bellows,
+            WeaponKind::Arclash => ModelId::Arclash,
+            WeaponKind::Tumbler => ModelId::Tumbler,
         }
     }
 
     /// Muzzle point in weapon model space.
     pub fn muzzle(self) -> Vec3 {
         match self {
-            WeaponKind::Lancet => lancet::MUZZLE,
-            WeaponKind::Thresher => thresher::MUZZLE,
-            WeaponKind::Riveter => riveter::MUZZLE,
-            WeaponKind::Cinderbox => cinderbox::MUZZLE,
+            WeaponKind::Quill => quill::MUZZLE,
+            WeaponKind::Bellows => bellows::MUZZLE,
+            WeaponKind::Arclash => arclash::MUZZLE,
+            WeaponKind::Tumbler => tumbler::MUZZLE,
         }
+    }
+
+    /// Held with both hands by the third-person Shrike (the Quill is one-handed).
+    pub fn two_handed(self) -> bool {
+        self != WeaponKind::Quill
     }
 
     /// Where the grip sits in view space (lower right of the screen).
     fn view_offset(self) -> Vec3 {
         match self {
-            WeaponKind::Lancet => Vec3::new(0.12, -0.112, -0.31),
-            WeaponKind::Thresher => Vec3::new(0.125, -0.122, -0.32),
-            WeaponKind::Riveter => Vec3::new(0.125, -0.12, -0.32),
-            WeaponKind::Cinderbox => Vec3::new(0.13, -0.13, -0.33),
+            WeaponKind::Quill => Vec3::new(0.118, -0.112, -0.3),
+            WeaponKind::Bellows => Vec3::new(0.13, -0.13, -0.31),
+            WeaponKind::Arclash => Vec3::new(0.13, -0.122, -0.31),
+            WeaponKind::Tumbler => Vec3::new(0.14, -0.148, -0.32),
         }
     }
 
-    /// Glow colour for an alt-fire mode (0 = first alt mode, 1 = second).
+    /// Glow colour for an alt-fire mode (0 = alt A, 1 = alt B): Quill Brand crimson / Splinter
+    /// ice; Bellows Gust sky / Both Barrels orange; Arclash Wisp violet / Discharge blue;
+    /// Tumbler Breach orange-red / Gravewell green.
     pub fn glow_color(self, alt_mode: u8) -> Vec4 {
         let c = match (self, alt_mode % 2) {
-            (WeaponKind::Lancet, 0) => Vec3::new(0.35, 1.0, 0.95),
-            (WeaponKind::Lancet, _) => Vec3::new(0.75, 0.45, 1.0),
-            (WeaponKind::Thresher, 0) => Vec3::new(1.0, 0.62, 0.2),
-            (WeaponKind::Thresher, _) => Vec3::new(1.0, 0.3, 0.15),
-            (WeaponKind::Riveter, 0) => Vec3::new(1.0, 0.5, 0.12),
-            (WeaponKind::Riveter, _) => Vec3::new(0.45, 1.0, 0.35),
-            (WeaponKind::Cinderbox, 0) => Vec3::new(1.0, 0.45, 0.08),
-            (WeaponKind::Cinderbox, _) => Vec3::new(1.0, 0.85, 0.25),
+            (WeaponKind::Quill, 0) => Vec3::new(1.0, 0.22, 0.38),
+            (WeaponKind::Quill, _) => Vec3::new(0.55, 0.95, 1.0),
+            (WeaponKind::Bellows, 0) => Vec3::new(0.72, 0.9, 1.0),
+            (WeaponKind::Bellows, _) => Vec3::new(1.0, 0.5, 0.15),
+            (WeaponKind::Arclash, 0) => Vec3::new(0.75, 0.5, 1.0),
+            (WeaponKind::Arclash, _) => Vec3::new(0.4, 0.8, 1.0),
+            (WeaponKind::Tumbler, 0) => Vec3::new(1.0, 0.4, 0.1),
+            (WeaponKind::Tumbler, _) => Vec3::new(0.45, 1.0, 0.55),
         };
         c.extend(1.0)
+    }
+
+    /// Colour of the primary fire (tracers, beams, muzzle flashes): Quill pale gold, Bellows
+    /// amber, Arclash blue-white, Tumbler fuse orange.
+    pub fn primary_color(self) -> Vec4 {
+        match self {
+            WeaponKind::Quill => Vec4::new(1.0, 0.9, 0.6, 1.0),
+            WeaponKind::Bellows => Vec4::new(1.0, 0.7, 0.3, 1.0),
+            WeaponKind::Arclash => Vec4::new(0.6, 0.85, 1.0, 1.0),
+            WeaponKind::Tumbler => Vec4::new(1.0, 0.55, 0.15, 1.0),
+        }
     }
 }
 
@@ -97,15 +119,18 @@ pub struct ViewmodelAnim {
     pub weapon: u8,
     /// Selected alt-fire mode (0 or 1): changes the weapon's glow colour.
     pub alt_mode: u8,
-    /// Recoil 0..1 (set to 1 on fire, decay over ~0.15–0.4 s depending on the weapon).
+    /// Recoil 0..1 (set to 1 on fire, decay over ~0.15–0.4 s depending on the weapon). Also
+    /// folds the Quill's crest flat and pumps the Bellows.
     pub fire_kick: f32,
-    /// Alt-fire charge 0..1 (Lancet overcharge: the cell and coils glow and the gun shakes).
+    /// Alt-fire charge 0..1 (Arclash Discharge: the capacitor brightens towards white, arcs
+    /// jump between the prongs and the gun shakes above 0.6).
     pub alt_charge: f32,
     /// Weapon raise 0..1 after a switch (0 = just switched, below the screen; 1 = ready).
     pub switch: f32,
     /// Punch progress 0..1 (0 = not punching): the left fist thrusts forward.
     pub punch: f32,
-    /// Prism throw progress 0..1 (0 = not throwing): the left hand flicks a spinning prism.
+    /// Thorn throw progress 0..1 (0 = not throwing): the left hand raises a thorn between
+    /// its knuckles and flicks it away.
     pub throw: f32,
     /// Walk bob phase in radians (advance by ~speed * 1.2 per second while grounded).
     pub bob_phase: f32,
@@ -114,28 +139,61 @@ pub struct ViewmodelAnim {
     /// Smoothed look velocity (radians per second-ish, x = yaw right, y = pitch up); the
     /// weapon lags behind it.
     pub sway: Vec2,
-    /// Riveter barrel rotation in radians (see [`BarrelSpin`]).
+    /// Tumbler drum angle in radians (see [`DrumTurn`]).
     pub spin: f32,
     pub time: f64,
 }
 
-/// Spin-up / spin-down of the Riveter's barrel cluster (keep one per local player).
+/// The Tumbler's drum: turns one chamber per shot, easing in with a little overshoot (keep
+/// one per local player; [`DrumTurn::kick`] on every Tumbler shot, [`DrumTurn::update`] every
+/// frame, feed [`DrumTurn::angle`] into [`ViewmodelAnim::spin`]).
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct BarrelSpin {
-    /// Accumulated angle (radians), feed into [`ViewmodelAnim::spin`].
-    pub angle: f32,
-    /// Current angular speed (radians per second).
-    pub speed: f32,
+pub struct DrumTurn {
+    angle: f32,
+    target: f32,
+    velocity: f32,
 }
 
-impl BarrelSpin {
-    pub const MAX_SPEED: f32 = 30.0;
+impl DrumTurn {
+    /// One chamber.
+    pub const STEP: f32 = std::f32::consts::TAU / tumbler::CHAMBERS as f32;
+    /// Spring stiffness (1/s²) and damping ratio: settles in ~0.15 s, ~10 % overshoot.
+    const STIFFNESS: f32 = 1400.0;
+    const DAMPING: f32 = 0.6;
 
-    pub fn update(&mut self, firing: bool, dt: f32) {
-        let target = if firing { Self::MAX_SPEED } else { 0.0 };
-        let rate = if firing { 90.0 } else { 25.0 };
-        self.speed += (target - self.speed).clamp(-rate * dt, rate * dt);
-        self.angle = (self.angle + self.speed * dt).rem_euclid(std::f32::consts::TAU * 64.0);
+    /// Advances the drum by one chamber (a shot).
+    pub fn kick(&mut self) {
+        self.target += Self::STEP;
+        // Keep the numbers small; whole turns look the same.
+        let turns = std::f32::consts::TAU * 16.0;
+        if self.target > turns {
+            self.target -= turns;
+            self.angle -= turns;
+        }
+    }
+
+    /// Eases the angle towards the target (damped spring, fixed sub-steps).
+    pub fn update(&mut self, dt: f32) {
+        let mut left = dt.clamp(0.0, 0.25);
+        let c = 2.0 * Self::DAMPING * Self::STIFFNESS.sqrt();
+        while left > 0.0 {
+            let h = left.min(1.0 / 240.0);
+            let acc = Self::STIFFNESS * (self.target - self.angle) - c * self.velocity;
+            self.velocity += acc * h;
+            self.angle += self.velocity * h;
+            left -= h;
+        }
+        if !self.angle.is_finite() || !self.velocity.is_finite() {
+            *self = Self {
+                angle: self.target,
+                ..Self::default()
+            };
+        }
+    }
+
+    /// Current drum angle (radians).
+    pub fn angle(&self) -> f32 {
+        self.angle
     }
 }
 
@@ -144,7 +202,8 @@ fn wave(time: f64, hz: f64) -> f32 {
 }
 
 /// Pose of a weapon model: glow colour / intensity and moving parts.
-/// `kick` = recoil 0..1, `charge` = alt charge 0..1, `spin` = Riveter barrel angle.
+/// `kick` = recoil 0..1, `charge` = alt charge 0..1 (Arclash Discharge), `spin` = Tumbler drum
+/// angle.
 pub fn weapon_pose(
     weapon: WeaponKind,
     alt_mode: u8,
@@ -153,56 +212,71 @@ pub fn weapon_pose(
     spin: f32,
     time: f64,
 ) -> Pose {
-    let base = weapon.glow_color(alt_mode);
+    let base = weapon.glow_color(alt_mode).truncate();
+    let kick = kick.clamp(0.0, 1.0);
+    let charge = charge.clamp(0.0, 1.0);
     let pulse = 0.85 + 0.15 * wave(time, 1.3);
     let mut glow = 0.9 * pulse + kick * 0.8;
+    let mut color = base;
     let mut pose = match weapon {
-        WeaponKind::Lancet => {
-            let mut pose = Pose::rest(lancet::JOINTS.len());
-            // Overcharge: brighter and flickering; full charge shimmers white.
-            glow += charge * (1.6 + 0.5 * wave(time, 14.0));
-            pose.glow = (base.truncate() + Vec3::splat(charge * charge * 0.6)).extend(1.0);
-            pose
-        }
-        WeaponKind::Thresher => {
-            let mut pose = Pose::rest(thresher::JOINTS.len());
-            // Pump racks back after the shot.
-            let rack = (std::f32::consts::PI * (1.0 - kick).clamp(0.0, 1.0)).sin()
-                * (kick > 0.0) as u8 as f32;
-            pose.set(
-                thresher::PUMP,
-                Mat4::from_translation(Vec3::new(0.0, 0.0, 0.07 * rack)),
-            );
-            pose.glow = base;
-            pose
-        }
-        WeaponKind::Riveter => {
-            let mut pose = Pose::rest(riveter::JOINTS.len());
-            pose.rotate(riveter::BARRELS, Quat::from_rotation_z(spin));
-            pose.rotate(riveter::DRUM, Quat::from_rotation_x(-spin * 0.2));
+        WeaponKind::Quill => {
+            let mut pose = Pose::rest(quill::JOINTS.len());
+            // The crest folds flat front to back on the shot, then rises again.
+            for i in 0..quill::CREST_COUNT {
+                let f = smoothstep(kick * 1.7 - i as f32 * 0.14);
+                let rest = quill::crest_rest_angle(i);
+                let angle = (quill::CREST_FLAT_ANGLE - rest) * f;
+                pose.rotate(quill::QUILL + i, Quat::from_rotation_x(angle));
+            }
             glow += kick * 0.6;
-            pose.glow = base;
             pose
         }
-        WeaponKind::Cinderbox => {
-            let mut pose = Pose::rest(cinderbox::JOINTS.len());
-            glow = 0.8 + 0.35 * wave(time, 0.9) + kick * 1.5;
-            pose.glow = base;
+        WeaponKind::Bellows => {
+            let mut pose = Pose::rest(bellows::JOINTS.len());
+            // Pump between shots: squeeze shut half way through the recoil, refill after.
+            let pump = if kick > 0.0 {
+                (std::f32::consts::PI * (1.0 - kick)).sin()
+            } else {
+                0.0
+            };
+            let (board, squash) = bellows::pump_transforms(pump);
+            pose.rotate(bellows::BOARD, board);
+            pose.set(
+                bellows::PLEATS,
+                Mat4::from_scale(Vec3::new(1.0 + 0.04 * pump, squash, 1.0)),
+            );
+            glow += pump * 0.5;
+            pose
+        }
+        WeaponKind::Arclash => {
+            let mut pose = Pose::rest(arclash::JOINTS.len());
+            // Light crawls round the capacitor, faster and brighter while charging.
+            let crawl = ((time * (2.2 + charge as f64 * 12.0)) % 1000.0) as f32;
+            pose.rotate(arclash::CRAWL, Quat::from_rotation_z(crawl));
+            let crackle = 0.12 * wave(time, 7.3) * wave(time, 2.9);
+            glow += crackle + charge * (1.6 + 0.5 * wave(time, 17.0));
+            color = base + Vec3::splat(charge * charge * 0.7);
+            let flicker = (time * 23.0).fract() < 0.65;
+            let arcing = (charge > 0.08 && flicker) || kick > 0.6;
+            if !arcing {
+                pose.hide(arclash::ARCS);
+            }
+            pose
+        }
+        WeaponKind::Tumbler => {
+            let mut pose = Pose::rest(tumbler::JOINTS.len());
+            pose.rotate(tumbler::DRUM, Quat::from_rotation_z(-spin));
+            glow = 0.8 + 0.3 * wave(time, 1.1) + kick * 1.4;
             pose
         }
     };
-    pose.glow = (pose.glow.truncate() * glow).extend(1.0);
+    pose.glow = (color * glow).extend(1.0);
     pose
 }
 
 /// Pose of the weapon held by a third-person Shrike (`firing` = recoil 0..1).
 pub fn third_person_pose(weapon: WeaponKind, firing: f32, time: f64) -> Pose {
-    let spin = if firing > 0.0 {
-        (time * 25.0 % 1000.0) as f32
-    } else {
-        0.0
-    };
-    weapon_pose(weapon, 0, firing, 0.0, spin, time)
+    weapon_pose(weapon, 0, firing, 0.0, 0.0, time)
 }
 
 fn smoothstep(t: f32) -> f32 {
@@ -219,10 +293,10 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
     let w = WeaponKind::from_index(anim.weapon);
     let kick = anim.fire_kick.clamp(0.0, 1.0);
     let (kick_back, kick_pitch) = match w {
-        WeaponKind::Lancet => (0.035, 0.18),
-        WeaponKind::Thresher => (0.075, 0.42),
-        WeaponKind::Riveter => (0.018, 0.05),
-        WeaponKind::Cinderbox => (0.09, 0.3),
+        WeaponKind::Quill => (0.04, 0.2),
+        WeaponKind::Bellows => (0.085, 0.45),
+        WeaponKind::Arclash => (0.016, 0.05),
+        WeaponKind::Tumbler => (0.09, 0.32),
     };
     let lowered = (1.0 - smoothstep(anim.switch)).powi(2);
     let punch = punch_extension(anim.punch).max(throw_extension(anim.throw) * 0.6);
@@ -231,9 +305,9 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
     let bob_offset = Vec3::new(s * 0.008, -(c * c) * 0.009 + 0.0045, 0.0) * bob;
     let sway = anim.sway.clamp(Vec2::splat(-3.0), Vec2::splat(3.0));
     let sway_offset = Vec3::new(-sway.x * 0.006, -sway.y * 0.006, 0.0);
-    // Overcharge shake.
-    let shake = if w == WeaponKind::Lancet && anim.alt_charge > 0.6 {
-        let a = (anim.alt_charge - 0.6) / 0.4;
+    // Discharge shake near full charge.
+    let shake = if w == WeaponKind::Arclash && anim.alt_charge > 0.6 {
+        let a = (anim.alt_charge.min(1.0) - 0.6) / 0.4;
         Vec3::new(wave(anim.time, 31.0), wave(anim.time, 37.0), 0.0) * 0.0025 * a
     } else {
         Vec3::ZERO
@@ -325,23 +399,27 @@ pub(crate) fn draw_viewmodel(
     if let Some(fist) = fist_transform(anim) {
         let mut pose = Pose::rest(fist::JOINTS.len());
         let punch = punch_extension(anim.punch);
-        // Knuckle studs flare at full extension (parry window feedback).
+        // The knuckle embers flare with the wick's light at full extension (parry window).
         let flare = 0.6 + punch * 2.0;
-        pose.glow = Vec4::new(flare, flare, flare, 1.0);
+        pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
         lib.get(ModelId::Fist).draw(&pose, fist, tint, out);
         fist_point = Some(fist.transform_point3(Vec3::new(0.0, 0.0, -0.02)));
         if anim.throw > 0.0 && anim.throw < 0.55 {
-            // The prism hovers spinning above the knuckles until it is flicked away.
-            let spin = Quat::from_rotation_y((anim.time * 9.0 % 1000.0) as f32)
-                * Quat::from_rotation_z(0.35);
-            let prism = fist
+            // A thorn held point-forward between the knuckles until it is flicked away.
+            let wobble = Quat::from_rotation_y(0.12 * wave(anim.time, 3.0))
+                * Quat::from_rotation_x(-0.2 + 0.05 * wave(anim.time, 4.3));
+            let thorn = fist
                 * Mat4::from_scale_rotation_translation(
-                    Vec3::splat(0.32),
-                    spin,
-                    Vec3::new(0.0, 0.11, 0.02),
+                    Vec3::splat(0.42),
+                    wobble,
+                    Vec3::new(0.0, 0.055, 0.02),
                 );
-            lib.get(ModelId::Prism).draw_static(prism, tint, out);
-            fist_point = Some(prism.transform_point3(Vec3::ZERO));
+            lib.get(ModelId::Thorn).draw_static(thorn, tint, out);
+            fist_point = Some(thorn.transform_point3(Vec3::new(
+                0.0,
+                0.0,
+                -super::projectiles::THORN_TIP,
+            )));
         }
     }
     ViewmodelDrawInfo {
