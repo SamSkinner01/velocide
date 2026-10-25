@@ -1134,6 +1134,7 @@ impl Renderer {
 
         // Post + output uniforms.
         let bits = s.color_bits.clamp(1, 8);
+        let cvd = s.color_vision.correction_matrix().transpose();
         let post = PostUniform {
             flash: frame.screen_flash.to_array(),
             params: [
@@ -1143,9 +1144,10 @@ impl Renderer {
                     ((1u32 << bits) - 1) as f32
                 },
                 s.dithering as u32 as f32,
-                0.0,
+                s.color_vision.filter_active() as u32 as f32,
                 0.0,
             ],
+            cvd: [cvd.x_axis, cvd.y_axis, cvd.z_axis].map(|row| row.extend(0.0).to_array()),
         };
         self.queue
             .write_buffer(&self.post_buffer, 0, bytemuck::bytes_of(&post));
@@ -1774,6 +1776,56 @@ mod tests {
         let image = render_quad(&mut r, Vec4::new(0.45, 0.45, 0.45, 1.0), Vec4::ZERO);
         // 2 bits = levels 0, 85, 170, 255; 0.45 rounds to 1/3.
         assert_eq!(pixel(&image, 32, 24), [85, 85, 85, 255]);
+    }
+
+    #[test]
+    fn gpu_colour_vision_correction_matches_cpu() {
+        use crate::color_vision::{self, ColorVision, ColorVisionMode};
+        let Some(mut r) = headless(&clean_settings()) else {
+            return;
+        };
+        let tint = Vec4::new(0.85, 0.3, 0.1, 1.0);
+        let plain = render_quad(&mut r, tint, Vec4::ZERO);
+        for mode in [
+            ColorVisionMode::Protanopia,
+            ColorVisionMode::Deuteranopia,
+            ColorVisionMode::Tritanopia,
+        ] {
+            let cv = ColorVision::new(mode, 1.0);
+            r.apply_settings(&RetroSettings {
+                color_vision: cv,
+                ..clean_settings()
+            });
+            let image = render_quad(&mut r, tint, Vec4::ZERO);
+            let expected = color_vision::correct(tint.truncate(), cv) * 255.0;
+            let got = pixel(&image, 32, 24);
+            for c in 0..3 {
+                assert!(
+                    (got[c] as f32 - expected[c]).abs() <= 1.5,
+                    "{mode:?}: gpu {got:?}, cpu {expected}"
+                );
+            }
+            assert_ne!(pixel(&plain, 32, 24), got, "{mode:?} changes the colour");
+            // Neutral colours (the blue clear colour is not neutral; use a grey quad) stay.
+            let grey = render_quad(&mut r, Vec4::new(0.5, 0.5, 0.5, 1.0), Vec4::ZERO);
+            let g = pixel(&grey, 32, 24);
+            assert!(
+                g[0].abs_diff(128) <= 1 && g[1] == g[0] && g[2] == g[0],
+                "{g:?}"
+            );
+            // The flash is mixed in after the correction: a full flash shows its own colour.
+            let flashed = render_quad(&mut r, tint, Vec4::new(1.0, 0.0, 0.0, 1.0));
+            assert_eq!(pixel(&flashed, 32, 24), [255, 0, 0, 255], "{mode:?}");
+        }
+        // Strength 0 is a no-op.
+        r.apply_settings(&RetroSettings {
+            color_vision: ColorVision::new(ColorVisionMode::Deuteranopia, 0.0),
+            ..clean_settings()
+        });
+        assert_eq!(
+            pixel(&render_quad(&mut r, tint, Vec4::ZERO), 32, 24),
+            pixel(&plain, 32, 24)
+        );
     }
 
     #[test]

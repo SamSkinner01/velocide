@@ -81,6 +81,8 @@ pub(crate) struct UiVertex {
 pub(crate) struct PostUniform {
     pub flash: [f32; 4],
     pub params: [f32; 4],
+    /// Rows of the colour-vision correction matrix (linear RGB; `w` unused).
+    pub cvd: [[f32; 4]; 3],
 }
 
 /// `Output` in `blit.wgsl`.
