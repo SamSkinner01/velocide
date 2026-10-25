@@ -445,7 +445,8 @@ impl Server {
     }
 
     /// Spawns `count` enemies of definition `name` spread around `position` (on the ground
-    /// below it when there is one). Returns their ids (empty if the name is unknown).
+    /// below it when there is one). Returns their ids (empty if the name is unknown; fewer
+    /// than `count` at the world's enemy limit, `shared::sim::MAX_ENEMIES`).
     pub fn spawn_enemies(
         &mut self,
         name: &str,

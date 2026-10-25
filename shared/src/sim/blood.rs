@@ -100,7 +100,7 @@ impl SimWorld {
             existing.expire_tick = existing.expire_tick.max(now + life);
             return Some(existing.id);
         }
-        let id = self.alloc_net_id();
+        let id = self.alloc_net_id()?;
         self.blood.insert(
             id,
             BloodBurst {

@@ -243,11 +243,17 @@ impl SimWorld {
                     }
                     ids.push(id);
                 }
+                // The wave just has one enemy fewer (it still clears when the rest die).
                 None => log::warn!(
-                    "encounter {} wave {}: unknown enemy '{}'",
+                    "encounter {} wave {}: '{}' not spawned ({})",
                     index + 1,
                     wave_index + 1,
-                    spawn.enemy
+                    spawn.enemy,
+                    if self.enemy_defs.get(&spawn.enemy).is_some() {
+                        "enemy limit reached"
+                    } else {
+                        "unknown enemy"
+                    }
                 ),
             }
         }

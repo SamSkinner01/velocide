@@ -26,18 +26,21 @@ fn incoming_orb(view_lag: f64) -> (Arena, PlayerId, NetId, NetId) {
     let husk = a.husk(Vec3::new(0.0, 0.0, -60.0), PI);
     a.ticks(30);
     let t = a.tuning.clone();
-    let orb = a.world.spawn_enemy_projectile(
-        &t,
-        ProjectileKind::SpitterOrb,
-        husk,
-        Attack::Enemy {
-            kind: 16,
-            attack: 0,
-        },
-        Vec3::new(0.0, 1.4, -20.0),
-        Vec3::new(0.0, 0.0, 22.0),
-        20.0,
-    );
+    let orb = a
+        .world
+        .spawn_enemy_projectile(
+            &t,
+            ProjectileKind::SpitterOrb,
+            husk,
+            Attack::Enemy {
+                kind: 16,
+                attack: 0,
+            },
+            Vec3::new(0.0, 1.4, -20.0),
+            Vec3::new(0.0, 0.0, 22.0),
+            20.0,
+        )
+        .expect("orb");
     (a, p, husk, orb)
 }
 

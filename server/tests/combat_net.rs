@@ -421,18 +421,22 @@ fn net_parry(one_way_ms: f32, punch_at: Option<f32>, late_ms: f32) -> (bool, f32
         .world_mut()
         .spawn_enemy("husk", Vec3::new(0.0, 0.0, -50.0), 0.0)
         .unwrap();
-    let orb = n.server.world_mut().spawn_enemy_projectile(
-        &tuning,
-        ProjectileKind::SpitterOrb,
-        owner,
-        Attack::Enemy {
-            kind: kind::HUSK,
-            attack: 0,
-        },
-        Vec3::new(0.0, 1.4, -25.0),
-        Vec3::new(0.0, 0.0, 22.0),
-        20.0,
-    );
+    let orb = n
+        .server
+        .world_mut()
+        .spawn_enemy_projectile(
+            &tuning,
+            ProjectileKind::SpitterOrb,
+            owner,
+            Attack::Enemy {
+                kind: kind::HUSK,
+                attack: 0,
+            },
+            Vec3::new(0.0, 1.4, -25.0),
+            Vec3::new(0.0, 0.0, 22.0),
+            20.0,
+        )
+        .expect("orb");
     let mut punched_at: Option<f64> = None;
     let mut touched_at: Option<f64> = None;
     let mut time = 0.0;

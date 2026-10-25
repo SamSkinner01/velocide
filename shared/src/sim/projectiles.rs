@@ -305,7 +305,8 @@ impl SimWorld {
     }
 
     /// Spawns a projectile with its kind's defaults from tuning (damage, radius, lifetime,
-    /// explosion). Returns its id; callers may adjust fields afterwards.
+    /// explosion). Returns its id; callers may adjust fields afterwards. `None` (nothing
+    /// spawned) while [`super::MAX_PROJECTILES`] are in flight.
     pub fn spawn_projectile(
         &mut self,
         t: &Tuning,
@@ -313,8 +314,12 @@ impl SimWorld {
         owner: Owner,
         position: Vec3,
         velocity: Vec3,
-    ) -> NetId {
-        let id = self.alloc_net_id();
+    ) -> Option<NetId> {
+        if self.projectiles.len() >= super::MAX_PROJECTILES {
+            log::debug!("projectile limit reached: {kind:?} not spawned");
+            return None;
+        }
+        let id = self.alloc_net_id()?;
         let c = &t.combat;
         let now = self.tick;
         let damage = match kind {
@@ -354,7 +359,7 @@ impl SimWorld {
             contacts: Vec::new(),
         };
         self.projectiles.insert(id, p);
-        id
+        Some(id)
     }
 
     /// Steps every projectile one tick (after player inputs, before enemies act).
@@ -755,7 +760,8 @@ impl SimWorld {
         }
     }
 
-    /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit.
+    /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit. `None` when
+    /// the projectile limit is reached.
     #[allow(clippy::too_many_arguments)]
     pub fn spawn_enemy_projectile(
         &mut self,
@@ -766,13 +772,13 @@ impl SimWorld {
         position: Vec3,
         velocity: Vec3,
         damage: f32,
-    ) -> NetId {
-        let id = self.spawn_projectile(t, kind, Owner::Enemy(enemy), position, velocity);
+    ) -> Option<NetId> {
+        let id = self.spawn_projectile(t, kind, Owner::Enemy(enemy), position, velocity)?;
         if let Some(p) = self.projectiles.get_mut(&id) {
             p.damage = damage;
             p.attack = attack;
         }
-        id
+        Some(id)
     }
 }
 

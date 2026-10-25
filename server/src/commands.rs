@@ -62,8 +62,14 @@ impl Server {
                 // Face the player.
                 let yaw = p.yaw + std::f32::consts::PI;
                 let ids = self.spawn_enemies(name, position, yaw, count);
-                if ids.is_empty() {
+                if self.world.enemy_defs.get(name).is_none() {
                     format!("unknown enemy '{name}' (try /enemies)")
+                } else if ids.len() < count as usize {
+                    format!(
+                        "spawned {} {name} (enemy limit {} reached)",
+                        ids.len(),
+                        shared::sim::MAX_ENEMIES
+                    )
                 } else {
                     format!("spawned {} {name}", ids.len())
                 }
@@ -114,20 +120,24 @@ impl Server {
                 let from = eye + look_dir(p.yaw, 0.0) * dist;
                 let speed = 22.0;
                 // A phantom enemy owns it (RETURN TO SENDER has nobody to hit).
-                let owner = self.world.alloc_net_id();
-                self.world.spawn_enemy_projectile(
-                    &tuning,
-                    ProjectileKind::SpitterOrb,
-                    owner,
-                    Attack::Enemy {
-                        kind: kind::SPITTER,
-                        attack: 0,
-                    },
-                    from,
-                    (eye - from).normalize_or(Vec3::Z) * speed,
-                    20.0,
-                );
-                format!("orb incoming from {dist:.0} m")
+                let spawned = self.world.alloc_net_id().and_then(|owner| {
+                    self.world.spawn_enemy_projectile(
+                        &tuning,
+                        ProjectileKind::SpitterOrb,
+                        owner,
+                        Attack::Enemy {
+                            kind: kind::SPITTER,
+                            attack: 0,
+                        },
+                        from,
+                        (eye - from).normalize_or(Vec3::Z) * speed,
+                        20.0,
+                    )
+                });
+                match spawned {
+                    Some(_) => format!("orb incoming from {dist:.0} m"),
+                    None => "too many projectiles in flight".into(),
+                }
             }
             "kill" => {
                 self.world.kill_player(&tuning, player, Attack::Dev);

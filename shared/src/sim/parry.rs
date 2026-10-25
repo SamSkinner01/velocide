@@ -486,13 +486,15 @@ mod tests {
         w.add_player(b, "B").movement.position = Vec3::new(0.0, 0.0, -10.0);
         w.players.get_mut(&a).unwrap().yaw = 0.0; // facing -Z, at B
         w.players.get_mut(&b).unwrap().yaw = std::f32::consts::PI;
-        let rocket = w.spawn_projectile(
-            &t,
-            ProjectileKind::Rocket,
-            Owner::World,
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 0.0, 45.0),
-        );
+        let rocket = w
+            .spawn_projectile(
+                &t,
+                ProjectileKind::Rocket,
+                Owner::World,
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 45.0),
+            )
+            .unwrap();
         let explosion = w.projectiles[&rocket].explosion.unwrap().damage;
         // Two players punching it back and forth: 1.5^n grew without bound, and the swept box
         // of every step soon covered billions of grid cells (seconds per tick).
@@ -518,13 +520,9 @@ mod tests {
         assert!(start.elapsed().as_secs_f32() < 2.0);
 
         // A projectile already beyond the caps keeps its values (parrying never weakens it).
-        let fast = w.spawn_projectile(
-            &t,
-            ProjectileKind::Rocket,
-            Owner::World,
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::ZERO,
-        );
+        let fast = w
+            .spawn_projectile(&t, ProjectileKind::Rocket, Owner::World, Vec3::Y, Vec3::ZERO)
+            .unwrap();
         {
             let p = w.projectiles.get_mut(&fast).unwrap();
             p.speed = 400.0;

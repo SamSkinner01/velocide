@@ -55,15 +55,16 @@ impl Prism {
 }
 
 impl SimWorld {
-    /// Throws a prism for `owner` (the charge was already spent by the weapon state).
+    /// Throws a prism for `owner` (the charge was already spent by the weapon state). `None`
+    /// if no entity id is free.
     pub fn spawn_prism(
         &mut self,
         t: &Tuning,
         owner: PlayerId,
         position: Vec3,
         velocity: Vec3,
-    ) -> NetId {
-        let id = self.alloc_net_id();
+    ) -> Option<NetId> {
+        let id = self.alloc_net_id()?;
         let launch_tick = self.launch_tick_now();
         let life = secs_to_ticks(t.combat.prism.lifetime, self.tick_rate, 1) as u32;
         // Don't start inside a wall right in front of the thrower.
@@ -95,7 +96,7 @@ impl SimWorld {
         );
         self.events
             .push(SimEvent::PrismThrown { player: owner, id });
-        id
+        Some(id)
     }
 
     pub(crate) fn step_prisms(&mut self, t: &Tuning) {
