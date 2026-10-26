@@ -75,6 +75,8 @@ pub enum StyleBonus {
     CloseCall,
     /// Informational: the gain was cut by staleness (`points` = how much was lost).
     Stale,
+    /// potg: a kill with a hitscan shot or an arrow from `longshot_distance` or farther.
+    Longshot,
 }
 
 impl StyleBonus {
@@ -95,6 +97,7 @@ impl StyleBonus {
             StyleBonus::Fisted => "FISTED",
             StyleBonus::CloseCall => "CLOSE CALL",
             StyleBonus::Stale => "STALE",
+            StyleBonus::Longshot => "LONGSHOT",
         }
     }
 }
@@ -442,7 +445,24 @@ pub fn kill_bonuses(
             multikill.min(u8::MAX as u32) as u8,
         ));
     }
+    // potg: LONGSHOT.
+    if is_longshot(kill, t.longshot_distance) {
+        out.push((StyleBonus::Longshot, t.longshot, 0));
+    }
     out
+}
+
+/// LONGSHOT (potg, also scored by `sim::highlight`): a player's kill from `min_distance` metres
+/// or more with a hitscan shot or one of their own non-explosive projectiles (arrows, rivets);
+/// not explosions, not a returned projectile.
+pub fn is_longshot(kill: &KillInfo, min_distance: f32) -> bool {
+    let f = kill.flags;
+    kill.killer.player().is_some()
+        && kill.distance >= min_distance
+        && (f.contains(DamageFlags::HITSCAN)
+            || (f.contains(DamageFlags::PROJECTILE)
+                && !f.contains(DamageFlags::EXPLOSIVE)
+                && !f.contains(DamageFlags::PARRIED)))
 }
 
 /// Is this kill a CLOSE CALL (the killer alive but under `close_call_health`)?

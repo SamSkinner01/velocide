@@ -74,6 +74,18 @@ impl InGame {
         }
     }
 
+    /// The results reveal starts over from `now` (after the play of the game, `replay.rs`).
+    pub(super) fn restart_results_reveal(&mut self, now: f64) {
+        if self.match_ui.results_since.is_some() {
+            self.match_ui.results_since = Some(now);
+        }
+        if let Some(screen) = self.modes.results.take() {
+            let screen =
+                crate::menus::results::ResultsScreen::new(screen.results, screen.local, now);
+            self.modes.results = Some(screen);
+        }
+    }
+
     /// The running session (tools / tests send server commands through it).
     pub fn session(&self) -> Option<&crate::net::Session> {
         self.session.as_ref()

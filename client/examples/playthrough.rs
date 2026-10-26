@@ -9,7 +9,8 @@
 //!   view, no weapon) → revive with USE, team wipe → checkpoint, extraction → co-op results →
 //!   CONTINUE TO LOBBY → a second match.
 //! * **Deathmatch** (host + guest + 2 server bots, Cistern Nine): frags, respawns, scoreboard
-//!   with pings, chat, name tags, frag limit → results → lobby.
+//!   with pings, chat, name tags, frag limit → the play of the game (card, replay, skipped) →
+//!   results → lobby.
 //! * **Robustness**: the host vanishes mid-match, a guest quits mid-match, a full server, a
 //!   bad address, a killed dedicated server, menu key spam.
 //! * **Settings**: every retro / view / HUD option changes the picture live; saved settings
@@ -1029,6 +1030,34 @@ fn deathmatch(rig: &mut Rig) {
     rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
         cs[1].game_ref().is_some_and(InGame::results_open)
     });
+    // The play of the game (docs/potg.md): the host's frags, on both screens; then skipped.
+    let potg = rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
+        cs.iter()
+            .all(|c| c.game_ref().is_some_and(InGame::potg_active))
+    });
+    rig.run(&mut [&mut host, &mut guest], 80);
+    rig.shot(&mut guest, "dm_05a_play_of_the_game_card");
+    let replay = rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
+        cs.iter().all(|c| {
+            c.game_ref()
+                .and_then(InGame::potg)
+                .is_some_and(|p| p.playback.is_some())
+        })
+    });
+    rig.run(&mut [&mut host, &mut guest], 40);
+    rig.shot(&mut guest, "dm_05b_play_of_the_game_replay");
+    rig.check(
+        potg && replay,
+        "DM: the play of the game plays for everyone (card, replay)",
+    );
+    host.keys = vec![UiKey::Escape];
+    guest.keys = vec![UiKey::Escape];
+    rig.run(&mut [&mut host, &mut guest], 2);
+    let skipped = rig.until(&mut [&mut host, &mut guest], 1.0, |cs| {
+        cs.iter()
+            .all(|c| c.game_ref().is_some_and(|g| !g.potg_active()))
+    });
+    rig.check(skipped, "DM: Esc skips the play of the game");
     rig.run(&mut [&mut host, &mut guest], 300);
     rig.shot(&mut host, "dm_05_results_host");
     rig.shot(&mut guest, "dm_06_results_guest");
