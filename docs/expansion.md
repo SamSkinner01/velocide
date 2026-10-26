@@ -300,6 +300,33 @@ New Moulds (net kinds 25–28; `assets/enemies/*.ron`, models, sounds, AI):
   `client/src/ingame/combat/enemy_fx.rs`, enemy kinds 25–31 and enemy projectile kinds 82–95,
   hazard kinds 140–143, enemy flag bits 8–12, `docs/enemies.md`.
 
+**As built** (full numbers, mechanics and tests in `docs/enemies.md` → "The third roster"):
+
+- **API for modes**: `SimWorld::spawn_enemy_with(name, position, yaw, SpawnOptions {
+  health_scale, elite, aware })` (the elite bonus, `EnemyDef::elite.health` ×2.5 by default,
+  multiplies on top of `health_scale`); `SimWorld::make_elite(id)` turns a live one into an
+  elite; `EnemyRegistry::wave_names()` lists every type allowed in waves (all but the Effigy);
+  `SimWorld::fury(&enemy)` is what an enemy acts with (`enemy_scale` × frenzy × elite).
+  `spawn_enemy` / `spawn_enemy_scaled` are unchanged. Wave spawns should set `aware`.
+- Replication: `enemy_flags::{FRENZIED 1 << 8, ELITE 1 << 9, LATCHED 1 << 10}`,
+  `AiState::Latched` = 8 (`owner` = the victim), hazard `kind::SLAG_LINE` 140 +
+  `slag_flags::{LIVE, COOLING}`. No new enemy projectiles (82–95 unused).
+- `SimWorld` gains `enemy_hazards` (slag lines; cleared by `restart_level` /
+  `clear_enemies`, replicated in `replicate`, counted by `alloc_net_id`).
+- Deviations / choices: the Smelter's close attack is named **heave** (sounds and the kill
+  feed key off attack names; the Censer already has a "swing"). The Bellwether's toll needs a
+  target within 40 m and an ally within 18 m but **no line of sight** (it hangs back; hunting it
+  down is the counterplay); 30 damage on the bell during the 1.6 s wind-up cracks it. The
+  Snuffer's slow is a **server-side** cap of the victim's horizontal speed (0.6 × ground speed,
+  ~75 % of a free run) applied between movement steps like knockback, so the victim's client
+  corrects towards it rather than predicting it; if **arsenal**'s player slow (PINNED) lands as
+  a predicted movement modifier, the latch should switch to it (`SimWorld::step_latched`).
+  The Effigy can't be killed (health stops at 1, hits still report their full damage).
+  Shared hunks outside the listed files: `client/src/models/mod.rs` (`ModelId` entries for the
+  four rigs and `SlagStrip`), `client/examples/models_view.rs` (pose sheets, a lineup),
+  `server/src/commands.rs` (`/spawn <enemy> [count] [elite]`), `docs/models.md`,
+  `docs/audio.md`, `docs/roster.md`; palette roles `frenzy`, `elite`, `hazard`.
+
 ## Shared files (several areas touch them; keep hunks small and local)
 
 `shared/src/sim/mod.rs`, `shared/src/protocol/{mod,snapshot}.rs`, `shared/src/tuning.rs`,

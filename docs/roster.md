@@ -162,6 +162,19 @@ the foundry: grey wax-flesh, slag, brass and chain, lit from inside.
 Net kinds 16–19 (the old four) are retired. Definition files: `assets/enemies/<name>.ron`
 (lower-case file stem = the name used by levels and `/spawn`).
 
+The expansion's third roster (`docs/expansion.md`) adds four more; they are documented in
+full in `docs/enemies.md` → "The third roster":
+
+| net kind | name | role | size (capsule r × h) | health | speed |
+|---|---|---|---|---|---|
+| 25 | **Bellwether** | support: its toll frenzies nearby Moulds; shoot the bell mid-swing | 0.7 × 3.1 | 220 | 5.5 |
+| 26 | **Snuffer** | skitterer: latches on, smothers the wick; punch or dash it off | 0.7 × 1.4 (2.2 m long) | 70 | 12.5 |
+| 27 | **Smelter** | slow heavy: pours slag lines (telegraph, then burning) | 1.1 × 3.4 | 420 | 3.6 |
+| 28 | **Effigy** | training dummy (warm-up only; never attacks, can't die, regenerates) | 0.5 × 2.2 | 1000 | 0 |
+
+Any of them (dummies aside) can also be an **elite**, and every enemy's damage, cooldowns and
+projectile speed follow the difficulty (`SimWorld::enemy_scale`).
+
 ### Gnawer — fodder melee (replaces Husk)
 A hunched knuckle-walker: runs on its oversized fists, wax-grey hide over a caged ribcage, a
 huge under-slung jaw of brass teeth. Head (with the jaw) is the weak point: big, low and
@@ -273,7 +286,7 @@ Shots should feel generous; being shot should feel fair.
 
 | range | entries |
 |---|---|
-| enemies | 20 Gnawer, 21 Censer, 22 Harrier, 23 Gaoler, 24 Heron (16–19 retired) |
+| enemies | 20 Gnawer, 21 Censer, 22 Harrier, 23 Gaoler, 24 Heron (16–19 retired); 25 Bellwether, 26 Snuffer, 27 Smelter, 28 Effigy (the expansion) |
 | player projectiles | 72 `BOMB`, 73 `GRAVEWELL`, 74 `WISP` (64–69 retired) |
 | enemy projectiles | 80 `EMBER_BOMB`, 81 `NEEDLE` (70–71 retired) |
 | relay | `THORN` takes over the prism's kind slot |
