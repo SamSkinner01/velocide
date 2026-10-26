@@ -410,7 +410,9 @@ impl LobbyPanel {
         let Some(menu) = &mut self.loadout else {
             return LoadoutResponse::default();
         };
-        settings_menu::dim(ui, 0.45);
+        // As dark as the pause menu's sub-screens: the warm-up world and its ready board would
+        // read through the panel's numbers otherwise.
+        settings_menu::dim(ui, 0.75);
         let canvas = ui.canvas();
         let resp = menu.ui(ui, s, loadout::panel_rect(canvas));
         if resp.back {

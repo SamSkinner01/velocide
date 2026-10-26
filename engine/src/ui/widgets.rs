@@ -667,6 +667,11 @@ impl<'a> Ui<'a> {
     /// Word-wrapped paragraph.
     pub fn label_wrapped(&mut self, text: &str) {
         let style = TextStyle::new(self.text_color(false)).scale(self.theme.text_scale);
+        self.text_wrapped(text, &style);
+    }
+
+    /// Word-wrapped paragraph with a full custom style.
+    pub fn text_wrapped(&mut self, text: &str, style: &TextStyle) {
         let width = self.available_rect().width() - 8.0;
         let lines = text::wrap_text(text, width, style.scale);
         let h = lines.len() as f32 * style.line_height();
@@ -675,7 +680,7 @@ impl<'a> Ui<'a> {
             self.list,
             rect.min + Vec2::new(6.0, 1.0),
             lines.into_iter(),
-            &style,
+            style,
         );
     }
 

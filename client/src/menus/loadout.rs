@@ -228,7 +228,7 @@ impl LoadoutMenu {
             return changed;
         };
         let w = build.weapon;
-        ui.text(
+        ui.text_wrapped(
             &format!("{} - {}", w.class().name(), w.blurb().to_uppercase()),
             &dim,
         );
@@ -262,7 +262,7 @@ impl LoadoutMenu {
                 .iter()
                 .map(|(_, t)| format!("{:.1}S", a.cooldown(t)))
                 .collect();
-            ui.text(
+            ui.text_wrapped(
                 &format!("{} ({})", a.blurb().to_uppercase(), cooldown.join(" / ")),
                 &dim,
             );
