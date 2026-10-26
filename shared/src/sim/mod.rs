@@ -45,6 +45,8 @@ pub mod projectiles;
 pub mod style;
 pub mod thorn;
 pub mod trail;
+// The lobby's warm-up on the hub level (docs/lobby.md).
+pub mod warmup;
 pub mod weapons;
 
 use std::collections::BTreeMap;
@@ -547,6 +549,8 @@ pub struct SimWorld {
     pub ai: enemy::AiWorld,
     /// Arena encounter states (`encounter.rs`); persist until `restart_level`.
     pub encounters: encounter::Encounters,
+    /// The lobby's warm-up rules and practice stations (`warmup.rs`); `None` in a match.
+    pub warmup: Option<warmup::Warmup>,
     /// Events of the tick being simulated.
     pub(crate) events: Vec<SimEvent>,
     /// The projectile step of the current tick has run.
@@ -597,6 +601,7 @@ impl SimWorld {
             style: StyleSystem::default(),
             ai: enemy::AiWorld::default(),
             encounters: encounter::Encounters::default(),
+            warmup: None,
             events: Vec::new(),
             projectiles_stepped: false,
             next_spawn: 0,
@@ -885,6 +890,8 @@ impl SimWorld {
         // 5. World rules, then arena encounters (triggers, waves, doors).
         self.apply_world_rules(tuning);
         self.step_encounters(tuning);
+        // The lobby's warm-up: practice consoles and range dummies (warmup.rs).
+        self.step_warmup(tuning);
 
         // 6. Game mode + style: scores this tick's events, checkpoints, revives, exit,
         //    deathmatch limits, scoreboard (modes.rs / style.rs).

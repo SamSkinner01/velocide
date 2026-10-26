@@ -44,6 +44,8 @@ pub mod scoreboard;
 pub mod style_hud;
 pub mod tuning_edit;
 pub mod viewmodel;
+// The lobby's warm-up on the game screen: overlay, HUD card, hub board (docs/lobby.md).
+pub mod warmup;
 pub mod world_render;
 
 use std::time::Duration;
@@ -65,7 +67,7 @@ use crate::bot::Bot;
 use crate::cli::StartMode;
 use crate::controls::{Action, Controls, WeaponChange};
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
-use crate::menus::lobby::Handoff;
+use crate::menus::lobby::{Handoff, LobbyPanel};
 use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, resolve_address,
@@ -128,6 +130,8 @@ pub struct InGame {
     last_snapshot_time: f64,
     /// Results screen / lobby phase bookkeeping (`match_flow`).
     match_ui: match_flow::MatchUi,
+    /// The lobby's warm-up: overlay, HUD card, the hub's board (`warmup.rs`).
+    pub warmup: warmup::WarmupUi,
 }
 
 impl InGame {
@@ -183,6 +187,7 @@ impl InGame {
             }
         };
         common.load_models(renderer);
+        let client = client.with_cosmetics(common.settings.cosmetics);
         let session = Session::start(spec, client)?;
         log::info!("session started: {target} as '{name}'");
         let mut game = Self::from_handoff(
@@ -210,6 +215,8 @@ impl InGame {
         common.load_models(renderer);
         let mut feedback = Feedback::new();
         feedback.apply_settings(&common.settings.retro);
+        let auto_ready = common.launch.ready || common.launch.bot;
+        let panel = LobbyPanel::for_session(&session, target.clone(), auto_ready);
         let mut game = InGame {
             kind: session.kind(),
             session: Some(session),
@@ -243,6 +250,7 @@ impl InGame {
             last_snapshot_count: 0,
             last_snapshot_time: 0.0,
             match_ui: match_flow::MatchUi::default(),
+            warmup: warmup::WarmupUi::new(panel, !common.launch.bot),
         };
         game.load_received_level(common, renderer);
         game
@@ -286,6 +294,7 @@ impl InGame {
         self.world.free(renderer);
         self.effects.free(renderer);
         self.combat.free(renderer);
+        self.warmup.free(renderer);
     }
 
     /// Loopback address of the in-process server (single-player / host), for tools and tests
@@ -309,6 +318,7 @@ impl InGame {
         common.audio.stop(Sfx::Slide);
         self.world.free(renderer);
         self.effects.free(renderer);
+        self.warmup.free(renderer);
         let session = self.session.take()?;
         self.chat.close();
         Some(Handoff {
@@ -369,6 +379,12 @@ impl InGame {
         common: &mut Common,
         renderer: &mut Renderer,
     ) -> Option<Transition> {
+        // The warm-up hub's practice console (warmup.rs).
+        if let NetEvent::Game(game) = &ev
+            && self.warmup_game_event(game, common)
+        {
+            return None;
+        }
         let t = &common.theme;
         let now = self.time;
         match ev {
@@ -461,11 +477,15 @@ impl InGame {
                 encounter_hud::on_event(ev, &mut self.hud, &mut common.audio, t, now);
             }
             NetEvent::LobbyChanged { phase, previous } => {
+                self.warmup
+                    .panel
+                    .on_lobby_changed(phase, previous, &mut common.audio);
                 return self.on_lobby_changed(phase, previous, common, now);
             }
             NetEvent::Notice { text } => {
                 self.chat
                     .system(&text.to_uppercase(), t.crimson_bright, now);
+                self.warmup.panel.notice(&text);
             }
             // Combat events (damage, hit confirms, kills, parries): `combat` module.
             NetEvent::Game(ev) => self.combat_game_event(ev, common),
@@ -561,12 +581,19 @@ impl InGame {
         let in_game = self.is_playing();
         // The results screen (match over) takes the keys and the cursor.
         let results = self.results_open();
+        // The warm-up: the lobby panel's clock and automation, the hub board (warmup.rs).
+        self.warmup_update(common, io.renderer, dt);
+        let warm = self.in_warmup();
 
         // 2. Hotkeys.
         let input = io.input;
+        if warm && in_game {
+            self.warmup_hotkeys(common, input);
+        }
+        let overlay = warm && self.warmup.open;
         let typing = common.ui_state.wants_text_input() || common.ui_state.is_capturing();
         let pressed = |a: Action| common.settings.bindings.pressed(input, a);
-        if !typing && !self.chat.is_open() && in_game {
+        if !typing && !self.chat.is_open() && in_game && !overlay {
             if self.pause.is_open() {
                 // Gamepad Start toggles back (Escape is handled by the pause menu itself).
                 if pressed(Action::Pause) && !input.key_pressed(Key::Escape) {
@@ -582,9 +609,12 @@ impl InGame {
                 self.restart();
             }
         }
-        let playing = in_game && !self.pause.is_open() && !self.chat.is_open() && !results;
+        let playing =
+            in_game && !self.pause.is_open() && !self.chat.is_open() && !results && !overlay;
+        // (In the warm-up the scoreboard key opens the lobby overlay instead.)
         let scoreboard = in_game
             && !results
+            && !warm
             && !self.chat.is_open()
             && !self.pause.is_open()
             && common.settings.bindings.is_down(input, Action::Scoreboard);
@@ -625,6 +655,7 @@ impl InGame {
 
         // 6. Draw the world and the UI.
         self.draw_world(common, out, dt, vdt);
+        self.warmup_draw_world(io.renderer.font_texture(), &mut out.draws);
         self.draw_ui(common, io, out, scoreboard, &mut transition);
 
         // 7. Audio.
@@ -764,8 +795,14 @@ impl InGame {
         self.world.draw(world, &mut out.draws, &mut out.lights);
         self.world.draw_props(lib, self.time, &mut out.draws);
         if let Some(net) = net {
+            let look = |id| {
+                net.players()
+                    .get(&id)
+                    .map(|p| p.cosmetics)
+                    .unwrap_or_default()
+            };
             self.remote
-                .draw(lib, net.remote_players(), dt, &mut out.draws);
+                .draw(lib, net.remote_players(), &look, dt, &mut out.draws);
         }
         // Enemies, projectiles, ember bursts, thorns, tracers.
         self.combat_draw(common, out);
@@ -864,7 +901,9 @@ impl InGame {
         let list = &mut out.ui;
         let canvas = Rect::from_min_size(Vec2::ZERO, list.canvas_size);
 
-        if in_game && !results {
+        // The warm-up's lobby overlay covers the HUD.
+        let lobby_up = self.warmup.open && self.in_warmup();
+        if in_game && !results && !lobby_up {
             // Name tags.
             if let Some(net) = self.net() {
                 let world = net.world().map(|w| &w.collision.world);
@@ -908,8 +947,9 @@ impl InGame {
                 now,
             );
             self.draw_mode_hud(common, list, now, io.dt);
+            self.warmup_hud(common, list);
         }
-        if in_game {
+        if in_game && !lobby_up {
             self.chat.draw_log(list, &common.theme, canvas, now);
         }
         if scoreboard {
@@ -925,6 +965,28 @@ impl InGame {
                 common.audio.active_voices(),
             );
             debug::text_overlay(list, &common.theme, &numbers);
+        }
+
+        // The warm-up's lobby overlay (its own Ui: the customise preview needs the viewmodel
+        // list), then the countdown on top of everything.
+        let overlay = in_game
+            && self.in_warmup()
+            && self.warmup.open
+            && !self.pause.is_open()
+            && !self.chat.is_open();
+        if overlay {
+            let fov = common.settings.viewmodel_fov;
+            let (t, sound) = self.warmup_overlay_ui(common, io, out, fov);
+            if t.is_some() {
+                *transition = t;
+            }
+            if let Some(s) = sound {
+                common.ui_sound(s);
+            }
+        }
+        self.warmup_banner(common, &mut out.ui);
+        if overlay {
+            return;
         }
 
         // Interactive layers (only build a Ui when something needs input).
@@ -949,10 +1011,13 @@ impl InGame {
         } else if self.pause.is_open() {
             let subtitle = self.target.clone();
             let single = self.kind == SessionKind::SinglePlayer;
+            // (Not in the warm-up: everyone is in the lobby already.)
             let lobby_host = !single
-                && self
-                    .net()
-                    .is_some_and(|n| n.is_host() && n.lobby().is_some_and(|l| l.lobby_enabled));
+                && self.net().is_some_and(|n| {
+                    n.is_host()
+                        && n.lobby()
+                            .is_some_and(|l| l.lobby_enabled && l.phase.level_running())
+                });
             let r = self.pause.ui(
                 &mut ui,
                 &mut common.settings,
@@ -1077,7 +1142,8 @@ impl InGame {
             stamina_max: tuning.dash_charges.round().max(1.0) as u32,
             weapons: &self.controls.weapons,
             speed,
-            timer: self.spawned.then_some(self.level_time),
+            // (No level timer in the warm-up.)
+            timer: (self.spawned && !self.in_warmup()).then_some(self.level_time),
             ping_ms: ping,
             fps: common.stats.fps,
             status,

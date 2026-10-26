@@ -11,6 +11,7 @@ pools are slag or bronze, walls are brick, stone, wax and brass — no blood or 
 | `cistern_nine.ron` | **Cistern Nine** | `Arena` | up to 8 | 115 | 15 | deathmatch, 10 spawns, no doors/encounters |
 | `knell_yard.ron` | **Knell Yard** | `Arena` | 2–5 (up to 8) | 272 | 26 | compact, vertical pinwheel; 12 spawns, 12 pads |
 | `ingot_run.ron` | **Ingot Run** | `Arena` | 4–8 | 122 | 21 | long, three lanes; 10 spawns, slide route end to end |
+| `vestry.ron` | **The Vestry** | `Hub` | the lobby | 94 | 24 | the warm-up hub, never a match level (below, `docs/lobby.md`) |
 
 Levels are scanned from `assets/levels/` by the menus and the lobby (`shared::lobby::scan_levels`),
 so a new file shows up in the single-player list and the host's level picker on its own; new
@@ -552,6 +553,27 @@ bridge and the duct roof (into the slag); Tumbler bombs bouncing round the racks
 corners; Thorns on the racks and walls to ricochet across lanes.
 
 Suggested match settings: 4–8 players, frag limit 20–25 / 10 minutes.
+
+## The Vestry (warm-up hub)
+
+Generator module: `client/examples/level_gen/vestry.rs`. Owned by the lobby area: lobby servers
+run it while players wait for a match (`docs/lobby.md` "The warm-up"); `LevelKind::Hub` keeps it
+out of every level picker and `MatchSettings::validate`.
+
+A candlelit stone hall, 64 × 48 m (x −32..32, z −24..24) under a beamed roof at 18 m:
+
+| area | where | what |
+|---|---|---|
+| Nave | centre | spawn dais, 8 spawns in two rows facing the **ready board** (prop `models/prop_ready_board.gltf` on a screen wall, scale 1.25; the client writes the ready list on it) with a brazier each side |
+| Firing range | north-west | a counter at x −13.6, two lane walls, a 3 m back platform; six **Effigy** dummies at 6, 10 and 16 m (encounter 0, a *fixture*: its trigger has no volume) |
+| Movement course | south-west | a 1.2 m slide tunnel (12 m), a 3.5 m-wide **wall-jump shaft** up a 9 m tower, a **slam-bounce** plate under a 5 m ledge, **dash gaps** along the south wall at 6 m (12 m and 11 m: jump + air dash) with a ramp up to the start |
+| Jump-pad tower | north-east | three tiers at 5 / 10 / 15 m, a pad on each (staggered so no pad lands you on the next), a brazier on the crown |
+| Practice pit | south-east | a pen sunk 4 m (x 12..30, z 6..22) with a kerb on the console side (the pack gathers under it; you look straight down) and a parapet on the west, an escape pad back to the rim; the **console** (prop `models/prop_console.gltf`, facing the nave) is encounter 1, a *console*: `USE` in its trigger summons the next of five packs into the pit (4 gnawers; 2 censers + 2 gnawers; a gaoler; a heron + 2 gnawers; gaoler + censer + 2 gnawers) |
+
+Hub markup conventions (read by `shared::sim::warmup` and the client's `ingame::warmup`):
+encounters are practice stations (fixtures: zero-volume trigger, always standing; consoles: USE
+zone + `arena` = the pen), props are found by model file name. `emit` writes `props` (only the
+Vestry has any). `shared/tests/levels.rs` accepts `effigy` spawns in hub levels.
 
 ## Tests (`shared/tests/levels.rs`)
 

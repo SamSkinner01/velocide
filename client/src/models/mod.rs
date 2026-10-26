@@ -12,7 +12,11 @@
 //! the glTF files hold each part's mesh in bind pose (model space), its texture and base
 //! colour. See `docs/models.md`.
 
+/// The Shrike's cosmetics kit: masks, crests, cloaks, emblems (`shared::cosmetics`).
+pub mod cosmetics;
 pub mod enemies;
+/// Warm-up hub props: the ready board and the practice console (docs/lobby.md).
+pub mod hub;
 pub mod kit;
 mod library;
 pub mod projectiles;
@@ -43,6 +47,8 @@ pub use weapons::{DrumTurn, ViewmodelAnim, WeaponKind};
 pub enum ModelId {
     /// Player character (third person).
     Shrike,
+    /// Every cosmetic part of the Shrike (`cosmetics`), attached to its joints when drawn.
+    ShrikeKit,
     // Enemies (docs/roster.md).
     Gnawer,
     Censer,
@@ -80,11 +86,15 @@ pub enum ModelId {
     Checkpoint,
     ExitGate,
     Door,
+    // Warm-up hub props (level props by file name).
+    ReadyBoard,
+    Console,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 24] = [
+    pub const ALL: [ModelId; 27] = [
         ModelId::Shrike,
+        ModelId::ShrikeKit,
         ModelId::Gnawer,
         ModelId::Censer,
         ModelId::Harrier,
@@ -108,6 +118,8 @@ impl ModelId {
         ModelId::Checkpoint,
         ModelId::ExitGate,
         ModelId::Door,
+        ModelId::ReadyBoard,
+        ModelId::Console,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -119,6 +131,7 @@ impl ModelId {
     pub fn file_name(self) -> &'static str {
         match self {
             ModelId::Shrike => "shrike.gltf",
+            ModelId::ShrikeKit => "shrike_kit.gltf",
             ModelId::Gnawer => "enemy_gnawer.gltf",
             ModelId::Censer => "enemy_censer.gltf",
             ModelId::Harrier => "enemy_harrier.gltf",
@@ -142,6 +155,8 @@ impl ModelId {
             ModelId::Checkpoint => "prop_checkpoint.gltf",
             ModelId::ExitGate => "prop_exit_gate.gltf",
             ModelId::Door => "prop_door.gltf",
+            ModelId::ReadyBoard => "prop_ready_board.gltf",
+            ModelId::Console => "prop_console.gltf",
         }
     }
 
@@ -149,6 +164,8 @@ impl ModelId {
     pub fn joints(self) -> &'static [JointDef] {
         match self {
             ModelId::Shrike => &shrike::JOINTS,
+            ModelId::ShrikeKit => &cosmetics::JOINTS,
+            ModelId::ReadyBoard | ModelId::Console => hub::joints(self),
             ModelId::Gnawer => &enemies::gnawer::JOINTS,
             ModelId::Censer => &enemies::censer::JOINTS,
             ModelId::Harrier => &enemies::harrier::JOINTS,
@@ -172,6 +189,8 @@ impl ModelId {
     pub fn build(self) -> Vec<ModelPart> {
         match self {
             ModelId::Shrike => shrike::build(),
+            ModelId::ShrikeKit => cosmetics::build(),
+            ModelId::ReadyBoard | ModelId::Console => hub::build(self),
             ModelId::Gnawer => enemies::gnawer::build(),
             ModelId::Censer => enemies::censer::build(),
             ModelId::Harrier => enemies::harrier::build(),

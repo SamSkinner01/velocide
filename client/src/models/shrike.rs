@@ -1,10 +1,14 @@
 //! The Shrike: the players' masked hunter (third person, ~1.85 m).
 //!
-//! Silhouette: a beaked porcelain mask with glowing eye slits under a leather hood with a
-//! swept plume, a high-collared leather coat with two long tails, layered pauldrons, a brass
-//! harness holding the chest lantern where the **wick** burns, wrapped forearms with brass
-//! bracers, gloves and tall boots. Team colour: the wick flame and eye slits (`TeamGlow`), the
-//! mask's ridge and plume (`crest`) and the scarf / pauldron edging (`trim`).
+//! Silhouette: a leather hood, a high-collared coat with two long tails and sleeves, layered
+//! pauldrons, a brass harness holding the chest lantern where the **wick** burns, wrapped
+//! forearms with brass bracers, gloves and tall boots. The mask, crest, cloak and lantern
+//! emblem are **cosmetics** (`models::cosmetics`, drawn on top of this rig).
+//!
+//! Colours: the player's *identity* colour (lobby slot, colour-vision palettes) is the scarf /
+//! pauldron edging (`trim`, `Team`) and the mask's eye slits (`TeamGlow`); the coat and sleeves
+//! are painted in the chosen coat colour (`Primary`), the wick burns in the chosen flame colour
+//! (`Flame`).
 //!
 //! Model space: feet at the origin, facing -Z, right = +X.
 
@@ -14,36 +18,36 @@ use engine::glam::{EulerRot, Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::PartSet;
 use super::kit::{
-    self, BRASS, DARK_LEATHER, FLAME, LEATHER, PORCELAIN, WRAP, add, add_mirrored, block, gem,
-    limb, rgb,
+    self, BRASS, DARK_LEATHER, FLAME, LEATHER, WRAP, add, add_mirrored, block, gem, limb, rgb,
 };
 use super::rig::{JointDef, Pose, ROOT, Shade, joint};
 
 pub const PELVIS: usize = 0;
 pub const TORSO: usize = 1;
-/// The wick flame in the chest lantern (team-tinted, flickers with `Pose::glow`).
+/// The wick flame in the chest lantern (flame colour, flickers with `Pose::glow`).
 pub const WICK: usize = 2;
+/// Identity colour: scarf and pauldron edging (`Team`).
 pub const TRIM: usize = 3;
+/// The hood (masks and crests attach here: `models::cosmetics`).
 pub const HEAD: usize = 4;
-/// Eye slits of the mask, lit by the wick (`TeamGlow`).
-pub const VISOR: usize = 5;
-pub const CREST: usize = 6;
-pub const UPPER_ARM_L: usize = 7;
-pub const FOREARM_L: usize = 8;
-pub const HAND_L: usize = 9;
-pub const UPPER_ARM_R: usize = 10;
-pub const FOREARM_R: usize = 11;
-pub const HAND_R: usize = 12;
-pub const THIGH_L: usize = 13;
-pub const SHIN_L: usize = 14;
-pub const FOOT_L: usize = 15;
-pub const THIGH_R: usize = 16;
-pub const SHIN_R: usize = 17;
-pub const FOOT_R: usize = 18;
-pub const COAT_L: usize = 19;
-pub const COAT_R: usize = 20;
+/// The coat body: jerkin, lapels and back (coat colour, `Primary`).
+pub const COAT: usize = 5;
+pub const UPPER_ARM_L: usize = 6;
+pub const FOREARM_L: usize = 7;
+pub const HAND_L: usize = 8;
+pub const UPPER_ARM_R: usize = 9;
+pub const FOREARM_R: usize = 10;
+pub const HAND_R: usize = 11;
+pub const THIGH_L: usize = 12;
+pub const SHIN_L: usize = 13;
+pub const FOOT_L: usize = 14;
+pub const THIGH_R: usize = 15;
+pub const SHIN_R: usize = 16;
+pub const FOOT_R: usize = 17;
+pub const COAT_L: usize = 18;
+pub const COAT_R: usize = 19;
 /// The wick's white-hot heart (`Core`, `Pose::core`).
-pub const EMBER: usize = 21;
+pub const EMBER: usize = 20;
 
 /// Other players' Shrikes are drawn this much larger than the movement capsule (visual only,
 /// easier to read at a distance): pass it to `ModelLibrary::draw_player_scaled`.
@@ -63,20 +67,27 @@ pub const LANTERN_HEIGHT: f32 = LANTERN[1];
 const WICK_BASE: [f32; 3] = [LANTERN[0], LANTERN[1] - 0.06, LANTERN[2]];
 /// Where the coat tails hang from (right side; the left is mirrored).
 const COAT_HANG: [f32; 3] = [0.085, 1.03, 0.1];
+/// The head joint (masks and crests attach here).
+pub const HEAD_PIVOT: [f32; 3] = [0.0, 1.52, 0.0];
+/// The torso joint (emblems attach here).
+pub const TORSO_PIVOT: [f32; 3] = [0.0, 1.02, 0.0];
+/// Where cloaks hang from: behind the collar, across the shoulder blades.
+pub const CLOAK_HANG: [f32; 3] = [0.0, 1.47, 0.13];
+/// Where a tassel crest hangs from (the top knot on the crown of the hood).
+pub const TASSEL_KNOT: [f32; 3] = [0.0, 1.8, 0.04];
 
-pub const JOINTS: [JointDef; 22] = [
+pub const JOINTS: [JointDef; 21] = [
     joint("pelvis", ROOT, [0.0, 0.95, 0.0], Shade::Lit),
-    joint("torso", PELVIS, [0.0, 1.02, 0.0], Shade::Lit),
-    joint("wick", TORSO, WICK_BASE, Shade::TeamGlow),
-    joint("trim", TORSO, [0.0, 1.02, 0.0], Shade::Team),
-    joint("head", TORSO, [0.0, 1.52, 0.0], Shade::Lit),
-    joint("visor", HEAD, [0.0, 1.52, 0.0], Shade::TeamGlow),
-    joint("crest", HEAD, [0.0, 1.52, 0.0], Shade::Team),
+    joint("torso", PELVIS, TORSO_PIVOT, Shade::Lit),
+    joint("wick", TORSO, WICK_BASE, Shade::Flame),
+    joint("trim", TORSO, TORSO_PIVOT, Shade::Team),
+    joint("head", TORSO, HEAD_PIVOT, Shade::Lit),
+    joint("coat", TORSO, TORSO_PIVOT, Shade::Primary),
     joint(
         "upper_arm_l",
         TORSO,
         [-SHOULDER[0], SHOULDER[1], SHOULDER[2]],
-        Shade::Lit,
+        Shade::Primary,
     ),
     joint(
         "forearm_l",
@@ -90,7 +101,7 @@ pub const JOINTS: [JointDef; 22] = [
         [-WRIST[0], WRIST[1], WRIST[2]],
         Shade::Lit,
     ),
-    joint("upper_arm_r", TORSO, SHOULDER, Shade::Lit),
+    joint("upper_arm_r", TORSO, SHOULDER, Shade::Primary),
     joint("forearm_r", UPPER_ARM_R, ELBOW, Shade::Lit),
     joint("hand_r", FOREARM_R, WRIST, Shade::Lit),
     joint("thigh_l", PELVIS, [-0.11, HIP_Y, 0.0], Shade::Lit),
@@ -103,9 +114,9 @@ pub const JOINTS: [JointDef; 22] = [
         "coat_l",
         PELVIS,
         [-COAT_HANG[0], COAT_HANG[1], COAT_HANG[2]],
-        Shade::Lit,
+        Shade::Primary,
     ),
-    joint("coat_r", PELVIS, COAT_HANG, Shade::Lit),
+    joint("coat_r", PELVIS, COAT_HANG, Shade::Primary),
     joint("ember", WICK, WICK_BASE, Shade::Core),
 ];
 
@@ -120,6 +131,10 @@ fn v3(a: [f32; 3]) -> Vec3 {
 
 /// Dark cloth of the trousers and the waist.
 const CLOTH: Vec4 = Vec4::new(0.33, 0.3, 0.32, 1.0);
+/// Painted parts (`Primary` / `Secondary`): the paint gives the hue; these keep the light
+/// and dark leather of the classic look (whose coat colour, HIDE, is `kit::LEATHER`).
+pub const PAINT: Vec4 = Vec4::new(1.0, 1.0, 1.0, 1.0);
+pub const PAINT_DARK: Vec4 = Vec4::new(0.58, 0.58, 0.58, 1.0);
 
 // ---------------------------------------------------------------------------------------------
 // Geometry
@@ -128,14 +143,15 @@ const CLOTH: Vec4 = Vec4::new(0.33, 0.3, 0.32, 1.0);
 /// wrapped forearm with a brass bracer, gloved hand.
 fn right_arm() -> [MeshBuilder; 3] {
     let (s, e, w) = (v3(SHOULDER), v3(ELBOW), v3(WRIST));
+    // The sleeve is part of the coat (painted).
     let mut upper = limb(
         s + Vec3::new(0.01, -0.02, 0.0),
         e,
         Vec2::new(0.055, 0.06),
         Vec2::new(0.045, 0.05),
-        LEATHER,
+        PAINT,
     );
-    add(&mut upper, gem(s, 0.066, 0, DARK_LEATHER));
+    add(&mut upper, gem(s, 0.066, 0, PAINT_DARK));
     // Strap round the upper arm.
     let mid = s.lerp(e, 0.55);
     add(
@@ -145,7 +161,7 @@ fn right_arm() -> [MeshBuilder; 3] {
             mid - Vec3::Y * 0.02,
             Vec2::new(0.052, 0.057),
             Vec2::new(0.052, 0.057),
-            DARK_LEATHER,
+            PAINT_DARK,
         ),
     );
 
@@ -349,7 +365,7 @@ fn coat_tail() -> MeshBuilder {
             ring(Vec3::new(0.012, -0.3, 0.02), Vec2::new(0.095, 0.011)),
             ring(Vec3::new(0.03, -0.62, 0.035), Vec2::new(0.11, 0.01)),
         ],
-        LEATHER,
+        PAINT,
         false,
         (true, true),
         kit::Uv::PerFace,
@@ -362,7 +378,7 @@ fn coat_tail() -> MeshBuilder {
             top + Vec3::new(0.03, -0.66, 0.036),
             Vec2::new(0.112, 0.012),
             Vec2::new(0.112, 0.012),
-            DARK_LEATHER,
+            PAINT_DARK,
         ),
     );
     m
@@ -429,8 +445,9 @@ pub fn build() -> Vec<ModelPart> {
             CLOTH,
         ),
     );
+    // The coat (painted): jerkin, lapels and back.
     p.add(
-        TORSO,
+        COAT,
         kit::loft(
             &[
                 chest_ring(1.12, 0.13, -0.08, -0.1, 0.085),
@@ -438,7 +455,7 @@ pub fn build() -> Vec<ModelPart> {
                 chest_ring(1.4, 0.23, -0.12, -0.14, 0.125),
                 chest_ring(1.49, 0.15, -0.08, -0.085, 0.09),
             ],
-            LEATHER,
+            PAINT,
             false,
             (true, true),
             kit::Uv::PerFace,
@@ -452,17 +469,17 @@ pub fn build() -> Vec<ModelPart> {
             Vec3::new(0.09, 1.12, -0.115),
         ],
         0.02,
-        DARK_LEATHER,
+        PAINT_DARK,
     );
-    add_mirrored(p.mesh(TORSO), &lapel);
+    add_mirrored(p.mesh(COAT), &lapel);
     p.add(
-        TORSO,
+        COAT,
         limb(
             Vec3::new(0.0, 1.46, 0.12),
             Vec3::new(0.0, 1.03, 0.115),
             Vec2::new(0.21, 0.025),
             Vec2::new(0.16, 0.025),
-            LEATHER,
+            PAINT,
         ),
     );
     let collar_ring = |y: f32, r: f32| {
@@ -698,79 +715,6 @@ pub fn build() -> Vec<ModelPart> {
         ),
     );
     kit::finish(p.mesh(HEAD));
-    let mask_ring = |z: f32, y: f32, w: f32, h: f32| {
-        kit::ngon_ring(
-            Vec3::new(0.0, y, z),
-            Vec3::X,
-            Vec3::Y,
-            Vec2::new(w, h),
-            8,
-            0.0,
-        )
-    };
-    let mut mask = kit::loft(
-        &[
-            mask_ring(-0.03, 1.665, 0.098, 0.106),
-            mask_ring(-0.08, 1.668, 0.088, 0.097),
-            mask_ring(-0.125, 1.654, 0.058, 0.07),
-            mask_ring(-0.165, 1.632, 0.034, 0.046),
-            mask_ring(-0.215, 1.604, 0.021, 0.03),
-            mask_ring(-0.255, 1.575, 0.012, 0.018),
-            vec![Vec3::new(0.0, 1.535, -0.272)],
-        ],
-        PORCELAIN,
-        false,
-        (true, false),
-        kit::Uv::PerFace,
-    );
-    // Porcelain stays bright: a gentler bake than leather.
-    mask.shade_by_normal(1.0, 0.92, 0.72);
-    kit::add(p.mesh(HEAD), mask);
-
-    // Eye slits on the mask (lit from inside by the wick).
-    let slit = limb(
-        Vec3::new(0.079, 1.703, -0.074),
-        Vec3::new(0.034, 1.687, -0.122),
-        Vec2::new(0.009, 0.012),
-        Vec2::new(0.007, 0.01),
-        kit::WHITE,
-    );
-    let mut visor = MeshBuilder::new();
-    add_mirrored(&mut visor, &slit);
-    p.add(VISOR, visor);
-
-    // Crest: the painted ridge down the beak and a swept plume from the hood.
-    // The ridge follows the beak in convex segments (top edge, then 1.7 cm below it).
-    let ridge = [
-        Vec3::new(0.0, 1.775, -0.02),
-        Vec3::new(0.0, 1.732, -0.125),
-        Vec3::new(0.0, 1.69, -0.168),
-        Vec3::new(0.0, 1.648, -0.215),
-    ];
-    let mut crest = MeshBuilder::new();
-    for w in ridge.windows(2) {
-        let drop = Vec3::new(0.0, -0.017, 0.0);
-        add(
-            &mut crest,
-            kit::plate(&[w[0], w[1], w[1] + drop, w[0] + drop], 0.02, kit::WHITE),
-        );
-    }
-    for (k, side) in [(0.0f32, 0.0f32), (1.0, 0.035), (1.0, -0.035)] {
-        add(
-            &mut crest,
-            kit::plate(
-                &[
-                    Vec3::new(side, 1.775, 0.0),
-                    Vec3::new(side * 1.4, 1.83 - k * 0.03, 0.12),
-                    Vec3::new(side * 1.8, 1.86 - k * 0.05, 0.26 - k * 0.04),
-                    Vec3::new(side * 1.3, 1.79 - k * 0.03, 0.15),
-                ],
-                0.014,
-                kit::WHITE,
-            ),
-        );
-    }
-    p.add(CREST, crest);
 
     // Limbs (right built, left mirrored) and the coat tails.
     let [upper, fore, hand] = right_arm();
@@ -799,7 +743,6 @@ pub fn build() -> Vec<ModelPart> {
             kit::tex_glow()
         } else {
             match i {
-                HEAD => kit::tex_porcelain(),
                 FOREARM_L | FOREARM_R => kit::tex_wrap(),
                 _ => kit::tex_leather(),
             }
@@ -848,6 +791,8 @@ pub struct PlayerAnim {
     pub weapon: u8,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
+    /// How this Shrike looks (mask, crest, cloak, emblem, paints: `models::cosmetics`).
+    pub cosmetics: shared::cosmetics::Cosmetics,
 }
 
 impl PlayerAnim {
@@ -904,8 +849,22 @@ struct Limb {
     end: f32,
 }
 
+/// How the cosmetics' cloth hangs this frame: swing angles (radians about X, - = streaming
+/// back) of a cloak (about [`CLOAK_HANG`], relative to the torso) and a tassel crest (about
+/// [`TASSEL_KNOT`], relative to the head). They swing with the coat tails.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Drape {
+    pub cloak: f32,
+    pub tassel: f32,
+}
+
 /// Computes the Shrike's pose.
 pub fn pose(a: &PlayerAnim) -> Pose {
+    pose_full(a).0
+}
+
+/// The Shrike's pose and how its cosmetics' cloth hangs.
+pub fn pose_full(a: &PlayerAnim) -> (Pose, Drape) {
     let mut pose = Pose::rest(JOINTS.len());
     let t = a.time;
     // The wick flickers (a few incommensurate wobbles); the eye slits flicker with it.
@@ -916,10 +875,14 @@ pub fn pose(a: &PlayerAnim) -> Pose {
     pose.set(WICK, flame_scale(flick));
 
     if a.dead {
-        return dead_pose(pose);
+        return (dead_pose(pose), Drape::default());
     }
     if a.downed {
-        return downed_pose(pose, t);
+        let drape = Drape {
+            cloak: 0.35,
+            tassel: 0.3,
+        };
+        return (downed_pose(pose, t), drape);
     }
 
     let local_v = Quat::from_rotation_y(-a.yaw) * a.velocity;
@@ -1199,7 +1162,17 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         pose.rotate(FOREARM_L, rx(arm_l.lower));
         pose.rotate(HAND_L, rx(arm_l.end));
     }
-    pose
+
+    // Cosmetic cloth: a cloak swings like the tails in world space (it hangs from the torso,
+    // so the torso's own pitch is taken back out), a tassel at half the swing.
+    let flap = flutter * 0.08 * wave(t + 0.17, 9.0);
+    let torso_x = torso_pitch + aim_torso - lean * 0.35;
+    let head_x = a.pitch.clamp(-1.2, 1.2) * 0.5 + lean * 0.4;
+    let drape = Drape {
+        cloak: (coat * 0.8 + flap - lean - torso_x).clamp(-2.0, 0.2),
+        tassel: (coat * 0.6 + flap * 2.0 - lean - torso_x - head_x).clamp(-1.6, 0.6),
+    };
+    (pose, drape)
 }
 
 fn dead_pose(mut pose: Pose) -> Pose {

@@ -47,7 +47,10 @@ cargo test -p client                            # mesh validity, glTF round trip
   | `Team` | lit | … × `Tint::team` (player / team colour slot, vertex colours near-white) |
   | `Glow` | **unlit** | … × `Pose::glow` × `Tint::glow` — **attack telegraphs**, weapon glow |
   | `Core` | **unlit** | … × `Pose::core` — steady emissive: weak points, lamps, the heart of the Shrike's wick |
-  | `TeamGlow` | **unlit** | … × `Tint::team` × `Pose::glow` (Shrike wick flame and eye slits, first-person knuckle embers) |
+  | `TeamGlow` | **unlit** | … × `Tint::team` × `Pose::glow` (the Shrike's eye slits, first-person knuckle embers) |
+  | `Primary` | lit | … × `Tint::primary` (the Shrike's coat, sleeves, coat tails, cloaks: the chosen coat colour) |
+  | `Secondary` | lit | … × `Tint::secondary` (masks, crests, cloak trims: the chosen mask colour) |
+  | `Flame` | **unlit** | … × `Tint::flame` × `Pose::glow` (the wick, the halo crest, lantern emblems: the chosen flame colour) |
 
   Emissive colours are not clamped before the framebuffer, so `glow` values > 1 push towards
   white (white-hot flashes). Translucent parts have base colour alpha < 1 (the aim laser's
@@ -60,10 +63,13 @@ cargo test -p client                            # mesh validity, glTF round trip
 let lib = ModelLibrary::load(&mut renderer)?;           // once at startup
 
 // third-person player (other players / spectating); body faces anim.yaw
+// (anim.cosmetics = the player's look; the tint's team colour is their identity colour)
 let info: PlayerDrawInfo = lib.draw_player(&player_anim, feet_pos, &Tint::team(color), &mut draws);
 // other players are drawn 10 % larger (visual only): shrike::REMOTE_SCALE
 let info = lib.draw_player_scaled(&player_anim, feet_pos, shrike::REMOTE_SCALE, &tint, &mut draws);
 // info.muzzle / info.muzzle_dir (world) for remote tracers & flashes, info.head for name tags
+// any root (e.g. view space for a preview in the viewmodel pass: menus::customize)
+let info = lib.draw_shrike(&player_anim, root, &tint, &mut draws);
 
 // enemies
 let root = EnemyAnim::root(position + Vec3::Y * kind.root_lift(), yaw); // feet (Harrier: hover centre)
@@ -120,6 +126,7 @@ changes, so the standard look keeps each model's own glow colours.
 | `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
 | `weapon` | 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler (`WeaponKind::two_handed`: the Quill is one-handed) |
 | `cycle` | locomotion phase — keep per player: `cycle = PlayerAnim::advance_cycle(cycle, velocity, dt)` (phase keeps legs continuous when speed changes; leg rate capped at 2.6 cycles/s) |
+| `cosmetics` | the look (`shared::cosmetics::Cosmetics`): mask, crest, cloak, emblem, coat / mask colours, flame (below) |
 
 ### `ViewmodelAnim` (first person)
 
@@ -176,7 +183,8 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 
 | model | file | parts (parents in brackets) |
 |---|---|---|
-| Shrike (~1.86 m incl. plume) | `shrike.gltf` | pelvis, torso[pelvis] (jerkin, coat lapels and back, collar, pauldrons, harness, lantern cage), wick[torso] *TeamGlow* (flame, flickers in height), trim[torso] *Team* (scarf, pauldron edging), head[torso] (hood + porcelain beaked mask), visor[head] *TeamGlow* (eye slits), crest[head] *Team* (beak ridge, plume), upper_arm_l/r[torso], forearm_l/r, hand_l/r, thigh_l/r[pelvis], shin_l/r, foot_l/r, coat_l/r[pelvis] (coat tails), ember[wick] *Core* (the wick's hot heart) |
+| Shrike (~1.86 m incl. plume) | `shrike.gltf` | pelvis, torso[pelvis] (waist, collar, pauldrons, harness, lantern cage), wick[torso] *Flame* (flame, flickers in height), trim[torso] *Team* (scarf, pauldron edging), head[torso] (the hood; masks and crests attach here), coat[torso] *Primary* (jerkin, lapels, back), upper_arm_l/r[torso] *Primary* (sleeves), forearm_l/r, hand_l/r, thigh_l/r[pelvis], shin_l/r, foot_l/r, coat_l/r[pelvis] *Primary* (coat tails), ember[wick] *Core* (the wick's hot heart) |
+| Shrike kit (cosmetics) | `shrike_kit.gltf` | 41 root parts, each attached to a Shrike joint when drawn (below): `mask_*` *Secondary* + `eyes_*` *TeamGlow* (8 each), `horns` / `grille_bars` / `crown_spikes` / `lantern_cage` (fixed colours), `crest_quills/fin/antlers` *Secondary*, `crest_tassel` *Secondary* (swings), `crest_halo` *Flame*, `cloak_short/long/tattered/scarf` *Primary* + `_trim` *Secondary* (swing), `emblem_plate` (brass medallion) + `emblem_bell/key/eye/spiral/fang/star/wing` *Flame* |
 | Gnawer (2.0 m to the hump, 1.8 m long) | `enemy_gnawer.gltf` | pelvis, chest, head, jaw[head], throat[head] *Glow*, eyes[head] *Core*, upper_arm_l/r[chest], forearm_l/r, fist_l/r, thigh_l/r[pelvis], shin_l/r |
 | Censer (2.7 m incl. the flue) | `enemy_censer.gltf` | robe, torso, head (brazier cage), coals[head] *Core*, flames[head] *Glow*, arm_l/r, forearm_l/r, chain[forearm_r], censer[chain], embers[censer] *Glow* |
 | Harrier (3.05 m wingspan) | `enemy_harrier.gltf` | body, neck, head, glare[head] *Glow*, heart[body] *Core*, wing_l/r, tip_l/r[wing], legs, tail |
@@ -191,6 +199,7 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
 | enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
+| hub props (`models::hub`) | `prop_ready_board.gltf`, `prop_console.gltf` | placed by the Vestry as level props: the ready board (frame, slate, brass header plate + candle sconces; 6 × 3.4 m, the client writes on the slate: `hub::board`), the practice console (stone lectern with a slanted desk, a summoning bell and a lever, panel *Glow*; a sign board: `hub::console`) |
 
 Prop poses: `door_pose(open 0..1, locked)` slides the panels apart (unit door
 `props::door::WIDTH` 3 m × `HEIGHT` 3.5 m — scale to the door brush; light red = locked,
@@ -202,6 +211,44 @@ Budget: ~1–2k triangles per character and weapon (the Shrike ~1.9k, Arclash / 
 20–650 per projectile / prop; ~2.5 MB of glTF in total (vertex data dominates: flat-shaded
 faces need their own vertices).
 
+## Cosmetics (`models::cosmetics`, `shared::cosmetics`)
+
+A player's look (`Cosmetics`: mask, crest, cloak, emblem, coat colour, mask colour, flame; saved
+in the client settings, shared through `PlayerInfo` — `docs/lobby.md`) is drawn by
+`ModelLibrary::draw_shrike` / `draw_player*` from `PlayerAnim::cosmetics`:
+
+- The **paints** go through `Tint::with_cosmetics` into the `Primary` (coat, sleeves, tails,
+  cloak bodies), `Secondary` (masks, crests, trims) and `Flame` (wick, halo, emblems) shades.
+  Painted meshes are near white with baked shading (`shrike::PAINT`, `PAINT_DARK` for straps and
+  lapels), so the classic look (coat HIDE = the old leather, mask BONE, flame AMBER:
+  `Cosmetics::default()`) matches the old model.
+- **Identity stays readable**: the player's slot colour (`Tint::team`, colour-vision palettes)
+  is never a cosmetic: it stays on the scarf / pauldron edging (`Team`) and on every mask's eye
+  slits (`TeamGlow`), and on name tags and markers. A test checks every mask has team-coloured
+  eyes.
+- The **kit** (`ModelId::ShrikeKit`) holds every option as a part; `cosmetics::parts(look)` picks
+  at most six (mask + eyes [+ detail], crest, cloak + trim, medallion + glyph) and
+  `cosmetics::draw` attaches each to the posed Shrike (`Attach`): masks / crests / the halo ride
+  the head, emblems the torso; cloaks hang from `shrike::CLOAK_HANG` behind the collar and a tassel
+  from `shrike::TASSEL_KNOT`, swinging with the coat tails (`shrike::pose_full` → `Drape`: the
+  tails' world swing with the torso's own pitch taken out; a shoulder mantle swings a quarter as
+  much). Parts are built in the Shrike's model space; a kit part's pivot is its attachment point.
+- **Masks** (each a different silhouette): SHRIKE (the long hooked porcelain beak with a ridge),
+  HOOKBILL (short raptor beak under a heavy brow), LANTERN (round globe face, one lens behind a
+  brass cage, a chimney cap), VISOR (flat helm face, one slit across, chin guard), HORNED (ram
+  snout, round eye holes, curling bone horns), WEEPER (long oval, downturned slits, tear
+  grooves), GRILLE (flat plate, glowing band behind iron bars), CROWN (serene full face, a brass
+  crown of spikes). **Crests**: NONE, QUILLS (the swept plume), FIN, ANTLERS, TASSEL (top knot,
+  swinging tassel), HALO (a burning ring in the flame colour). **Cloaks**: NONE, SHORT (shoulder
+  mantle), LONG (to the calves), TATTERED (torn strips), SCARF (two trailing tails). **Emblems**: a
+  brass medallion on the chest lantern with a glyph burning in the flame colour (BELL, KEY, EYE,
+  SPIRAL, FANG, STAR, WING).
+- Cosmetics never touch hit shapes or movement (purely visual). The death / respawn glows use
+  the flame colour too (`ingame::combat`).
+- `menus::customize::draw_preview` draws a turning Shrike on a dark card into the viewmodel pass
+  (any screen: the main menu, the lobby, the warm-up overlay); `look_swatch` is the 2D swatch
+  (coat | mask colour, flame dot) for lists.
+
 ## Visual verification
 
 `models_view` renders (1280×720 = the game's 640×360 internal image at 2×, retro settings
@@ -209,7 +256,8 @@ on): `lineup` / `lineup_back` (scale and silhouettes, back = the Gaoler's lanter
 `closeup_<enemy>` (front 3/4 + back), `shrike_0..3` + `shrike_closeup` (every movement state
 in profile, team colour), `gnawer_1/2`, `censer_1/2`, `harrier_1/2`, `gaoler_1/2/3`,
 `heron_1/2` (idle, walk, every attack's wind-up early / late and strike, recover, stunned,
-melting, dead), `vm_00..22` (each weapon rest / kick / alt mode, Quill crest folding, Bellows
+melting, dead), `look_masks` / `look_crests` / `look_cloaks` (from behind, standing and
+running) / `look_emblems` / `look_random` (cosmetics), `vm_00..22` (each weapon rest / kick / alt mode, Quill crest folding, Bellows
 pump, Arclash Discharge 40 % / full, Tumbler drum turning, switch, punch, thorn throw, bob +
 sway), `weapons` / `weapons_34` (the guns at real scale), `projectiles`, `thorns` (planted at
 angles, lying, in flight), `props`.

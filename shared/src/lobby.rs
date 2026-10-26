@@ -224,6 +224,11 @@ impl LevelInfo {
         ANY_MODE_LEVELS.contains(&self.name.as_str())
     }
 
+    /// The warm-up hub (`LevelKind::Hub`): never a match level.
+    pub fn is_hub(&self) -> bool {
+        self.kind == LevelKind::Hub
+    }
+
     /// Upper-case display name ("CISTERN NINE"), falling back to the file name.
     pub fn display_title(&self) -> String {
         if self.title.trim().is_empty() {
@@ -327,6 +332,12 @@ impl MatchSettings {
                 self.level
             ));
         };
+        if level.is_hub() {
+            return Err(format!(
+                "{} is the warm-up hall, not a match level",
+                level.display_title()
+            ));
+        }
         if !self.mode.accepts(level) {
             return Err(match self.mode {
                 GameMode::Campaign => format!(
@@ -447,6 +458,8 @@ pub struct LobbyPlayer {
     pub is_host: bool,
     /// Server-side bot (always ready, never host).
     pub bot: bool,
+    /// How their Shrike looks (lobby list swatch / portrait).
+    pub cosmetics: crate::cosmetics::Cosmetics,
 }
 
 /// Everything the lobby screen shows. Broadcast on change and once per second (pings).
@@ -464,6 +477,10 @@ pub struct LobbyState {
     pub autostart: bool,
     /// Seconds until the results screen returns to the lobby by itself (Results phase).
     pub results_timeout: Option<u16>,
+    /// In the `Lobby` / `Countdown` phases the server runs the warm-up hub
+    /// (`sim::warmup::WARMUP_LEVEL`): a level is loaded and everyone has a body. `false`: the
+    /// lobby has no world (players wait in the lobby screen).
+    pub warmup: bool,
 }
 
 impl LobbyState {
@@ -486,6 +503,16 @@ impl LobbyState {
 
     pub fn ping(&self, id: PlayerId) -> Option<u16> {
         self.player(id).map(|p| p.ping_ms)
+    }
+
+    /// A level is loaded and players have bodies: a match (or its results) or the warm-up.
+    pub fn world_running(&self) -> bool {
+        self.phase.level_running() || self.warmup
+    }
+
+    /// The players are in the warm-up hub (lobby / countdown with a world).
+    pub fn in_warmup(&self) -> bool {
+        self.warmup && self.phase.in_lobby()
     }
 }
 
@@ -562,6 +589,22 @@ mod tests {
         let err = ok(GameMode::Campaign, "cistern_nine").unwrap_err();
         assert!(err.contains("campaign"), "{err}");
         assert!(ok(GameMode::Campaign, "nope").is_err());
+        // The warm-up hub is never a match level, in any mode.
+        let mut with_hub = levels.clone();
+        with_hub.push(LevelInfo {
+            name: "vestry".into(),
+            title: "The Vestry".into(),
+            kind: LevelKind::Hub,
+        });
+        for mode in GameMode::ALL {
+            let err = MatchSettings::new(mode, "vestry")
+                .validate(&with_hub)
+                .unwrap_err();
+            assert!(err.contains("warm-up"), "{err}");
+            let mut s = MatchSettings::new(mode, "vestry");
+            s.fit_to(&with_hub);
+            assert_ne!(s.level, "vestry", "{mode:?}");
+        }
     }
 
     #[test]
@@ -640,11 +683,13 @@ mod tests {
                 ping_ms: 42,
                 is_host: true,
                 bot: false,
+                cosmetics: crate::cosmetics::Cosmetics::default(),
             }],
             host: Some(PlayerId(2)),
             lobby_enabled: true,
             autostart: false,
             results_timeout: None,
+            warmup: true,
         };
         let msg = crate::protocol::ServerMessage::Lobby(LobbyUpdate::State(state));
         let back: crate::protocol::ServerMessage =

@@ -6,11 +6,17 @@
 //! SLAMMING, WALL_CLING}`), the held weapon (`state`) and the wall normal (`aux`). The
 //! locomotion phase is kept per player here ([`PlayerAnim::advance_cycle`]); combat adds
 //! `firing` / `punching` / `downed` / `dead` from its events in [`PlayerVisual`].
+//!
+//! Every Shrike wears its player's cosmetics (`PlayerInfo::cosmetics`: mask, crest, cloak,
+//! emblem, coat / trim / flame colours) on top of the identity colour of its slot
+//! ([`player_color`]: scarf, pauldron edging, eye slits, name tag), which stays readable in
+//! every colour-vision palette whatever the player picked.
 
 use std::collections::HashMap;
 
 use glam::Vec3;
 use glam::Vec4;
+use shared::cosmetics::Cosmetics;
 use shared::input::look_dir;
 use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags};
 use shared::sim::PlayerId;
@@ -53,8 +59,8 @@ pub struct PlayerVisual {
     seen: bool,
 }
 
-/// The animation input for a replicated player entity.
-pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
+/// The animation input for a replicated player entity wearing `look`.
+pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics) -> PlayerAnim {
     let f = |bit: u32| e.flags & bit != 0;
     PlayerAnim {
         velocity: e.velocity,
@@ -73,6 +79,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
         time,
         weapon: (e.state & 0xF) as u8,
         cycle: v.cycle,
+        cosmetics: look,
     }
 }
 
@@ -104,11 +111,13 @@ impl RemotePlayers {
         }
     }
 
-    /// Advances animation by `dt` (real time) and appends every player.
+    /// Advances animation by `dt` (real time) and appends every player, each wearing
+    /// `look(id)`.
     pub fn draw<'a>(
         &mut self,
         lib: Option<&ModelLibrary>,
         players: impl Iterator<Item = &'a EntityState>,
+        look: &dyn Fn(PlayerId) -> Cosmetics,
         dt: f32,
         out: &mut Vec<DrawItem>,
     ) {
@@ -131,8 +140,9 @@ impl RemotePlayers {
                 v.head = name_tag_anchor(e) - Vec3::Y * 0.42;
                 continue;
             };
-            let color = e.id.as_player().map_or(PLAYER_COLORS[0], player_color);
-            let anim = player_anim(e, v, self.time);
+            let id = e.id.as_player();
+            let color = id.map_or(PLAYER_COLORS[0], player_color);
+            let anim = player_anim(e, v, self.time, id.map(look).unwrap_or_default());
             // Other Shrikes are drawn a little larger than life so they read at a distance
             // (visual only: hit shapes and movement are unchanged).
             let info =

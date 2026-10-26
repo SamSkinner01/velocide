@@ -363,6 +363,21 @@ original look (`STANDARD.theme() == Theme::default()`).
 Check the look with `cargo run -p client --release --example a11y_shots -- out/` (every mode,
 plus "as that viewer sees it" comparison strips).
 
+## Customise screen and look swatches
+
+`client::menus::customize` (docs/models.md "Cosmetics", docs/lobby.md): CUSTOMISE in the main
+menu, the lobby screen and the warm-up's lobby overlay. A 250-unit panel on the left with one
+`choice` row per `cosmetics::Slot` (MASK, CREST, CLOAK, EMBLEM, COAT COLOUR, MASK COLOUR, WICK
+FLAME; colour rows show an 8×8 swatch at the end of the label), RANDOMISE / CLASSIC, DONE, and a
+note that the slot colour stays on the eyes and trim. Left / right (keys, d-pad) or a click on
+either half of a row changes it; Esc / B or DONE closes it (and saves the settings). The preview
+Shrike turns on a dark card in the right half (drawn in the viewmodel pass, so it stands in front
+of any world): drag it with the mouse, PageUp / PageDown or the shoulder buttons turn it, and it
+spins by itself 2.5 s after the last turn. A lamp is added in front of the camera for it.
+
+`look_swatch` (coat | mask colour with the flame as a dot) follows the identity swatch in the
+lobby's player list and on the results rows.
+
 ## CPU rasteriser
 
 `ui::raster::rasterize(&list, &font::build_atlas(), w, h) -> TextureData` (transparent

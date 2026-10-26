@@ -1,7 +1,9 @@
-//! The real lobby and game screens, headless (GPU, no window): host a listen server in the
-//! lobby, autostart, hand the session to the game, join a match in progress from a second
-//! lobby screen, return to the lobby from the host's pause menu and start again. Skips
-//! without a GPU adapter.
+//! The real lobby and game screens, headless (GPU, no window): host a listen server, land in
+//! the warm-up (the lobby screen hands over as soon as the hub arrives), autostart a match in
+//! the same game screen, join it from a second lobby screen, return everyone to the warm-up
+//! from the host's pause menu and start again; the lobby overlay, the Ready key and the
+//! customise sub-screen (the look reaches the server); and the old lobby screen round trip on
+//! a server without a warm-up world. Skips without a GPU adapter.
 
 use std::time::Duration;
 
@@ -13,9 +15,10 @@ use client::menus::lobby::LobbyScreen;
 use client::settings::Settings;
 use engine::audio::Audio;
 use engine::gfx::{RetroSettings, UiDrawList};
-use engine::input::InputState;
+use engine::input::{GamepadButton, GamepadEvent, InputState};
 use engine::render::Renderer;
 use engine::ui::{UiInput, UiKey};
+use server::{LobbyCommand, LobbyConfig, ServerCommand, ServerConfig, ServerHandle};
 use shared::lobby::LobbyPhase;
 
 const W: u32 = 320;
@@ -73,7 +76,9 @@ impl Rig {
                 Screen::Game(g) => g.frame(common, &mut io, &mut self.buffers),
             }
         };
-        assert!(!out.grab_cursor, "lobby / bot never grab the cursor");
+        if common.launch.bot {
+            assert!(!out.grab_cursor, "bots never grab the cursor");
+        }
         self.renderer
             .render(&self.buffers.desc(&out.scene), None)
             .unwrap();
@@ -91,6 +96,7 @@ impl Rig {
         (0..max).find_map(|_| self.frame(common, Screen::Lobby(lobby), &[]).transition)
     }
 
+    /// Game frames until `done` (`None`) or a transition (returned), at most `max` frames.
     fn game_until(
         &mut self,
         common: &mut Common,
@@ -109,12 +115,22 @@ impl Rig {
         }
         None
     }
+
+    /// A gamepad button tap (two frames down, one up).
+    fn tap(&mut self, common: &mut Common, game: &mut InGame, button: GamepadButton) {
+        self.input
+            .handle_gamepad_event(GamepadEvent::Button(button, true));
+        self.frame(common, Screen::Game(game), &[]);
+        self.input
+            .handle_gamepad_event(GamepadEvent::Button(button, false));
+        self.frame(common, Screen::Game(game), &[]);
+    }
 }
 
-fn common(name: &str, autostart: bool) -> Common {
+fn common(name: &str, bot: bool, autostart: bool) -> Common {
     let launch = LaunchOptions {
-        bot: true,
-        ready: true,
+        bot,
+        ready: bot,
         autostart,
         ..Default::default()
     };
@@ -129,12 +145,27 @@ fn common(name: &str, autostart: bool) -> Common {
     Common::new(settings, path, Audio::disabled(), launch)
 }
 
+/// The game is in the warm-up hub and plays.
+fn warming_up(g: &InGame) -> bool {
+    g.is_playing() && g.in_warmup()
+}
+
+/// The game plays a match (not the hub).
+fn in_match(g: &InGame) -> bool {
+    g.is_playing()
+        && !g.in_warmup()
+        && g.net().and_then(|n| n.lobby_phase()) == Some(LobbyPhase::InMatch)
+        && g.net()
+            .and_then(|n| n.world())
+            .is_some_and(|w| w.level.kind != shared::level::LevelKind::Hub)
+}
+
 #[test]
-fn lobby_match_and_back_through_the_real_screens() {
+fn warmup_match_and_back_through_the_real_screens() {
     let Some(mut rig) = Rig::new() else {
         return;
     };
-    let mut host_common = common("Host", true);
+    let mut host_common = common("Host", true, true);
     let mut lobby = LobbyScreen::start(
         &StartMode::Host {
             port: Some(0),
@@ -146,31 +177,29 @@ fn lobby_match_and_back_through_the_real_screens() {
     .unwrap();
     let port = lobby.session().unwrap().hosted_port().unwrap();
 
-    // Autostart: the host readies itself, the countdown runs, the match starts.
-    for _ in 0..120 {
-        rig.frame(&mut host_common, Screen::Lobby(&mut lobby), &[]);
-        // The host claim takes one round trip after the first lobby state.
-        if lobby.is_ready() && lobby.net().is_some_and(|n| n.is_host()) {
-            break;
-        }
-    }
-    assert!(lobby.is_ready(), "lobby state arrived");
-    let net = lobby.net().unwrap();
-    assert!(net.is_host(), "the listen server's player hosts");
-    assert!(net.in_lobby());
-    assert!(!rig.buffers.ui.quads.is_empty(), "lobby UI drawn");
-    let t = rig.lobby_until(&mut host_common, &mut lobby, 600);
-    assert_eq!(t, Some(Transition::EnterMatch));
+    // The hub arrives with the first messages: straight on to the game screen.
+    let t = rig.lobby_until(&mut host_common, &mut lobby, 300);
+    assert_eq!(t, Some(Transition::EnterMatch), "the warm-up is a world");
     let handoff = lobby.into_handoff(&mut rig.renderer).unwrap();
     // Like the app: a new screen starts with fresh UI focus.
     host_common.ui_state.reset_interaction();
     let mut game = InGame::from_handoff(handoff, &mut host_common, &mut rig.renderer);
-    let t = rig.game_until(&mut host_common, &mut game, 300, InGame::is_playing);
+    let t = rig.game_until(&mut host_common, &mut game, 300, warming_up);
     assert_eq!(t, None);
-    assert!(game.is_playing(), "the host plays");
+    assert!(warming_up(&game), "the host warms up");
+    assert!(
+        game.net().unwrap().is_host(),
+        "the listen server's player hosts"
+    );
+    assert!(!game.lobby_overlay_open(), "bots don't get the overlay");
+
+    // Autostart: the host readies itself, the countdown runs, the match loads in place.
+    let t = rig.game_until(&mut host_common, &mut game, 900, in_match);
+    assert_eq!(t, None, "the match starts on the same game screen");
+    assert!(in_match(&game), "the host plays the match");
 
     // A second player joins the running match through their own lobby screen.
-    let mut guest_common = common("Guest", false);
+    let mut guest_common = common("Guest", true, false);
     let mut guest = LobbyScreen::start(
         &StartMode::Join {
             address: format!("127.0.0.1:{port}"),
@@ -186,60 +215,187 @@ fn lobby_match_and_back_through_the_real_screens() {
     for _ in 0..300 {
         rig.frame(&mut guest_common, Screen::Game(&mut guest_game), &[]);
         rig.frame(&mut host_common, Screen::Game(&mut game), &[]);
-        if guest_game.is_playing() {
+        if in_match(&guest_game) {
             break;
         }
     }
-    assert!(guest_game.is_playing(), "the guest plays");
+    assert!(in_match(&guest_game), "the guest plays");
     let (_, rows) = game.score_rows();
     assert_eq!(rows.len(), 2, "scoreboard lists both");
     assert!(rows.iter().all(|r| r.ping_ms.is_some()), "pings known");
     assert!(rows.iter().any(|r| r.is_host));
 
-    // Host pause menu: RESUME, RETURN TO LOBBY... -> everyone back in the lobby.
+    // Host pause menu: RESUME, RETURN TO LOBBY... -> everyone back in the warm-up, on the
+    // same game screens.
     game.open_pause();
     rig.frame(&mut host_common, Screen::Game(&mut game), &[]);
     rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Down]);
     rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Enter]);
-    let mut host_t = None;
-    let mut guest_t = None;
-    for _ in 0..300 {
-        if host_t.is_none() {
-            host_t = rig
-                .frame(&mut host_common, Screen::Game(&mut game), &[])
-                .transition;
-        }
-        if guest_t.is_none() {
-            guest_t = rig
-                .frame(&mut guest_common, Screen::Game(&mut guest_game), &[])
-                .transition;
-        }
-        if host_t.is_some() && guest_t.is_some() {
+    let mut back = (false, false);
+    for _ in 0..400 {
+        let h = rig
+            .frame(&mut host_common, Screen::Game(&mut game), &[])
+            .transition;
+        let g = rig
+            .frame(&mut guest_common, Screen::Game(&mut guest_game), &[])
+            .transition;
+        assert_eq!(
+            (h, g),
+            (None, None),
+            "no screen change: the warm-up is the lobby"
+        );
+        // (Each on its own: autostart may already be counting down the next match.)
+        back.0 |= warming_up(&game);
+        back.1 |= warming_up(&guest_game);
+        if back == (true, true) {
             break;
         }
     }
-    assert_eq!(host_t, Some(Transition::ReturnToLobby));
-    assert_eq!(guest_t, Some(Transition::ReturnToLobby));
-    let handoff = guest_game
-        .into_handoff(&mut rig.renderer, &mut guest_common)
-        .unwrap();
-    let guest = LobbyScreen::from_handoff(handoff, &guest_common, &mut rig.renderer);
-    let handoff = game
-        .into_handoff(&mut rig.renderer, &mut host_common)
-        .unwrap();
-    let mut lobby = LobbyScreen::from_handoff(handoff, &host_common, &mut rig.renderer);
-    rig.frame(&mut host_common, Screen::Lobby(&mut lobby), &[]);
+    assert_eq!(
+        back,
+        (true, true),
+        "everyone back in the warm-up: {:?} {:?} {} {:?}",
+        game.net().and_then(|n| n.lobby_phase()),
+        game.net().map(|n| n.state()),
+        game.in_warmup(),
+        game.net()
+            .and_then(|n| n.world())
+            .map(|w| w.level_name.clone()),
+    );
+
+    // The guest leaves; autostart brings the host into a second match.
+    guest_game.shutdown(&mut rig.renderer, &mut guest_common);
+    let t = rig.game_until(&mut host_common, &mut game, 900, in_match);
+    assert_eq!(t, None);
+    assert!(in_match(&game), "second match");
+    game.shutdown(&mut rig.renderer, &mut host_common);
+}
+
+#[test]
+fn the_overlay_ready_key_and_customise() {
+    let Some(mut rig) = Rig::new() else {
+        return;
+    };
+    let mut c = common("Player", false, false);
+    let mut lobby = LobbyScreen::start(
+        &StartMode::Host {
+            port: Some(0),
+            level: Some(shared::sim::BUILTIN_LEVEL.into()),
+        },
+        &mut c,
+        &mut rig.renderer,
+    )
+    .unwrap();
+    let t = rig.lobby_until(&mut c, &mut lobby, 300);
+    assert_eq!(t, Some(Transition::EnterMatch));
+    let handoff = lobby.into_handoff(&mut rig.renderer).unwrap();
+    c.ui_state.reset_interaction();
+    let mut game = InGame::from_handoff(handoff, &mut c, &mut rig.renderer);
+    rig.game_until(&mut c, &mut game, 300, |g| {
+        warming_up(g) && g.net().is_some_and(|n| n.lobby().is_some())
+    });
+    rig.game_until(&mut c, &mut game, 10, |_| false);
+    // First arrival: the overlay opens by itself, the cursor is free.
+    assert!(game.lobby_overlay_open(), "the overlay opens on arrival");
+    let out = rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    assert!(!out.grab_cursor);
+    let me = game.net().unwrap().local_player_id().unwrap();
+    let ready = |g: &InGame| {
+        g.net()
+            .and_then(|n| n.lobby())
+            .and_then(|l| l.player(me))
+            .is_some_and(|p| p.ready)
+    };
+
+    // TAB / Select closes it (the cursor is grabbed again) and opens it again.
+    rig.tap(&mut c, &mut game, GamepadButton::Select);
+    assert!(!game.lobby_overlay_open());
+    let out = rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    assert!(out.grab_cursor, "playing again");
+    rig.tap(&mut c, &mut game, GamepadButton::Select);
+    assert!(game.lobby_overlay_open());
+    // Esc closes it too.
+    rig.frame(&mut c, Screen::Game(&mut game), &[UiKey::Escape]);
+    assert!(!game.lobby_overlay_open());
+
+    // The Ready key toggles ready without opening anything.
+    rig.tap(&mut c, &mut game, GamepadButton::DPadDown);
+    rig.game_until(&mut c, &mut game, 60, ready);
+    assert!(ready(&game) && !game.lobby_overlay_open());
+    rig.tap(&mut c, &mut game, GamepadButton::DPadDown);
+    rig.game_until(&mut c, &mut game, 60, |g| !ready(g));
+    assert!(!ready(&game));
+
+    // CUSTOMISE: the first row (MASK) is focused; Right picks the next mask, the server
+    // shares it (debounced), DONE (Esc) closes it and saves.
+    game.open_customize();
+    rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    let before = c.settings.cosmetics;
+    rig.frame(&mut c, Screen::Game(&mut game), &[UiKey::Right]);
+    assert_eq!(c.settings.cosmetics.mask, (before.mask + 1) % 8);
+    rig.game_until(&mut c, &mut game, 120, |g| {
+        g.net()
+            .and_then(|n| n.players().get(&me))
+            .is_some_and(|p| p.cosmetics.mask == (before.mask + 1) % 8)
+    });
+    let shared_look = game.net().unwrap().players()[&me].cosmetics;
+    assert_eq!(shared_look, c.settings.cosmetics, "the server has our look");
+    rig.frame(&mut c, Screen::Game(&mut game), &[UiKey::Escape]);
+    assert!(c.settings_save, "closing customise saves the settings");
+    game.shutdown(&mut rig.renderer, &mut c);
+}
+
+#[test]
+fn the_lobby_screen_without_a_world() {
+    let Some(mut rig) = Rig::new() else {
+        return;
+    };
+    let mut config = ServerConfig::host(0, shared::sim::BUILTIN_LEVEL, 4);
+    config.bind = "127.0.0.1:0".parse().unwrap();
+    config.lobby = LobbyConfig {
+        warmup: false,
+        autostart: true,
+        ..LobbyConfig::enabled()
+    };
+    let server = ServerHandle::spawn(config).unwrap();
+    let mut c = common("Guest", true, false);
+    let mut lobby = LobbyScreen::start(
+        &StartMode::Join {
+            address: server.connect_addr().to_string(),
+        },
+        &mut c,
+        &mut rig.renderer,
+    )
+    .unwrap();
+    for _ in 0..60 {
+        rig.frame(&mut c, Screen::Lobby(&mut lobby), &[]);
+        if lobby.is_ready() {
+            break;
+        }
+    }
+    assert!(lobby.is_ready(), "lobby state arrived");
+    assert!(!rig.buffers.ui.quads.is_empty(), "lobby UI drawn");
+    assert!(
+        lobby.net().unwrap().world().is_none(),
+        "no world in this lobby"
+    );
+    // --ready + autostart: the match starts and the session moves to the game screen.
+    let t = rig.lobby_until(&mut c, &mut lobby, 600);
+    assert_eq!(t, Some(Transition::EnterMatch));
+    let handoff = lobby.into_handoff(&mut rig.renderer).unwrap();
+    let mut game = InGame::from_handoff(handoff, &mut c, &mut rig.renderer);
+    rig.game_until(&mut c, &mut game, 300, in_match);
+    assert!(in_match(&game));
+    // Back to a lobby without a world: back to the lobby screen.
+    server.send(ServerCommand::Lobby(LobbyCommand::ReturnToLobby));
+    let t = rig.game_until(&mut c, &mut game, 300, |_| false);
+    assert_eq!(t, Some(Transition::ReturnToLobby));
+    let handoff = game.into_handoff(&mut rig.renderer, &mut c).unwrap();
+    let mut lobby = LobbyScreen::from_handoff(handoff, &c, &mut rig.renderer);
+    rig.frame(&mut c, Screen::Lobby(&mut lobby), &[]);
     let net = lobby.net().unwrap();
     assert_eq!(net.lobby_phase(), Some(LobbyPhase::Lobby));
     assert!(net.world().is_none() && !net.is_in_game());
-
-    // The guest leaves; autostart brings the host into a second match.
-    guest.shutdown(&mut rig.renderer);
-    let t = rig.lobby_until(&mut host_common, &mut lobby, 600);
-    assert_eq!(t, Some(Transition::EnterMatch), "second match");
-    let handoff = lobby.into_handoff(&mut rig.renderer).unwrap();
-    let mut game = InGame::from_handoff(handoff, &mut host_common, &mut rig.renderer);
-    rig.game_until(&mut host_common, &mut game, 300, InGame::is_playing);
-    assert!(game.is_playing());
-    game.shutdown(&mut rig.renderer, &mut host_common);
+    lobby.shutdown(&mut rig.renderer);
+    server.stop();
 }

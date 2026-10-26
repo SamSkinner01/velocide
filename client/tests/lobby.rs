@@ -1,20 +1,23 @@
 //! Lobby and match flow end to end (docs/lobby.md): a real server and real clients over UDP
-//! loopback on the shared virtual clock (see `common`). Host rules, settings validation,
-//! ready-up → countdown → match on every client, join-in-progress, host migration, return to
-//! the lobby (level state reset), results, autostart, pings, disconnects and spam.
+//! loopback on the shared virtual clock (see `common`). Host rules, settings validation, the
+//! warm-up around every match, ready-up → countdown → match on every client,
+//! join-in-progress, host migration, return to the lobby (level state reset; with and without
+//! the warm-up), results, autostart, pings, disconnects and spam.
 
 mod common;
 
 use client::net::{ClientConfig, NetEvent, NetSimConfig};
 use common::*;
 use server::{LobbyConfig, ServerConfig};
+use shared::level::LevelKind;
 use shared::lobby::{GameMode, LobbyPhase, LobbyRequest, MAX_FRAG_LIMIT, MatchSettings};
 use shared::sim::PlayerId;
 
 const TOKEN: u64 = 0x5EC2_E7E5;
 
-/// A lobby server; `token` = listen server (the client with the token hosts; dev commands on
-/// for it, like `ServerConfig::host`), `None` = dedicated rules (no `--dev-commands`).
+/// A lobby server with the warm-up (like every real one); `token` = listen server (the client
+/// with the token hosts; dev commands on for it, like `ServerConfig::host`), `None` = dedicated
+/// rules (no `--dev-commands`).
 fn lobby_config(token: Option<u64>) -> ServerConfig {
     let mut config = server_config();
     config.lobby = LobbyConfig {
@@ -23,6 +26,13 @@ fn lobby_config(token: Option<u64>) -> ServerConfig {
         ..LobbyConfig::enabled()
     };
     config.dev_commands = token.is_some();
+    config
+}
+
+/// A lobby server without a world in its lobby (`--no-warmup`).
+fn empty_lobby_config(token: Option<u64>) -> ServerConfig {
+    let mut config = lobby_config(token);
+    config.lobby.warmup = false;
     config
 }
 
@@ -71,6 +81,28 @@ fn all_in_game(h: &Harness) -> bool {
     h.clients.iter().all(|c| c.net.is_in_game())
 }
 
+/// Every client plays the match (not the warm-up hub).
+fn all_in_match(h: &Harness) -> bool {
+    h.clients.iter().all(|c| {
+        c.net.lobby_phase() == Some(LobbyPhase::InMatch)
+            && c.net.is_in_game()
+            && c.net
+                .world()
+                .is_some_and(|w| w.level.kind != LevelKind::Hub)
+    })
+}
+
+/// Every client is in the warm-up hub with a body.
+fn all_in_warmup(h: &Harness) -> bool {
+    h.clients.iter().all(|c| {
+        c.net.in_warmup()
+            && c.net.is_in_game()
+            && c.net
+                .world()
+                .is_some_and(|w| w.level.kind == LevelKind::Hub)
+    })
+}
+
 #[test]
 fn host_controls_the_lobby_and_the_match_starts_everywhere() {
     let mut h = Harness::new(lobby_config(Some(TOKEN)));
@@ -84,12 +116,11 @@ fn host_controls_the_lobby_and_the_match_starts_everywhere() {
     assert!(!h.clients[a].net.is_host() && !h.clients[b].net.is_host());
     assert_eq!(h.server.lobby_host(), Some(host_id));
     assert_eq!(h.server.lobby_phase(), LobbyPhase::Lobby);
-    assert!(
-        h.server.world().players.is_empty(),
-        "no bodies in the lobby"
-    );
+    // The lobby is the warm-up: everyone has a body in the hub.
+    wait(&mut h, 5.0, "everyone in the warm-up", all_in_warmup);
+    assert_eq!(h.server.world().players.len(), 3, "bodies in the warm-up");
     for c in &h.clients {
-        assert!(c.net.in_lobby() && !c.net.is_in_game() && c.net.world().is_none());
+        assert!(c.net.in_lobby() && c.net.lobby().unwrap().warmup);
         assert!(
             c.net.levels().iter().any(|l| l.name == "cistern_nine"),
             "the server's level catalog arrives"
@@ -140,8 +171,11 @@ fn host_controls_the_lobby_and_the_match_starts_everywhere() {
             .all(|c| matches!(c.net.lobby_phase(), Some(LobbyPhase::Countdown { .. })))
     });
     let countdown_start = h.time;
-    assert!(h.server.world().players.is_empty());
-    wait(&mut h, 6.0, "match on every client", all_in_game);
+    assert!(
+        h.server.world().in_warmup(),
+        "the warm-up runs through the countdown"
+    );
+    wait(&mut h, 6.0, "match on every client", all_in_match);
     let waited = h.time - countdown_start;
     assert!(
         (2.5..4.5).contains(&waited),
@@ -232,10 +266,10 @@ fn players_join_a_match_in_progress() {
         .set_match_settings(MatchSettings::new(GameMode::Campaign, "movement_test"));
     h.run_for(0.3, |_| {});
     h.clients[host].net.start_match(true);
-    wait(&mut h, 6.0, "host in the match", all_in_game);
+    wait(&mut h, 6.0, "host in the match", all_in_match);
 
     let late = h.add_client("Late", None, script_strafer);
-    wait(&mut h, 5.0, "late joiner in the match", all_in_game);
+    wait(&mut h, 5.0, "late joiner in the match", all_in_match);
     assert_eq!(h.clients[late].net.lobby_phase(), Some(LobbyPhase::InMatch));
     assert_eq!(
         h.clients[late].net.world().unwrap().level_name,
@@ -306,8 +340,75 @@ fn dedicated_host_migrates_when_the_host_leaves() {
 }
 
 #[test]
-fn return_to_lobby_resets_the_level_and_ready_state() {
+fn the_warmup_comes_back_after_every_match() {
     let mut h = Harness::new(lobby_config(Some(TOKEN)));
+    let host = h.add_client_with(host_client("Host"), script_runner);
+    let guest = h.add_client("Guest", None, script_strafer);
+    wait_lobby(&mut h, 2);
+    wait(&mut h, 5.0, "warm-up", all_in_warmup);
+    // Running around the hub: prediction stays exact there too.
+    let start = h.clients[host].net.local_state().unwrap().position;
+    h.run_for(2.0, |_| {});
+    let moved = h.clients[host]
+        .net
+        .local_state()
+        .unwrap()
+        .position
+        .distance(start);
+    assert!(moved > 3.0, "the host runs in the warm-up ({moved:.1} m)");
+    for c in &mut h.clients {
+        c.net.set_ready(true);
+    }
+    wait(&mut h, 2.0, "ready", |h| {
+        h.clients[host].net.lobby().is_some_and(|l| l.all_ready())
+    });
+    h.clients[host].net.start_match(false);
+    wait(&mut h, 6.0, "first match", all_in_match);
+    h.run_for(1.0, |_| {});
+    h.server.world_mut().collision.set_door_open(1, false);
+
+    // Back in the lobby = back in a fresh warm-up, un-readied, still on the game screen.
+    h.clients[host].net.return_to_lobby();
+    wait(&mut h, 4.0, "everyone back in the warm-up", all_in_warmup);
+    assert_eq!(h.server.lobby_phase(), LobbyPhase::Lobby);
+    assert_eq!(h.server.world().players.len(), 2);
+    wait(&mut h, 2.0, "ready reset", |h| {
+        h.clients.iter().all(|c| {
+            c.net
+                .lobby()
+                .is_some_and(|l| l.ready_count() == 0 && l.players.len() == 2)
+        })
+    });
+    // Second match: a fresh level (the door is open again), inputs flow, prediction exact.
+    h.clients[host].net.start_match(true);
+    wait(&mut h, 6.0, "second match", all_in_match);
+    assert!(h.server.world().collision.is_door_open(1));
+    let start = h.clients[guest].net.local_state().unwrap().position;
+    h.run_for(2.0, |_| {});
+    let moved = h.clients[guest]
+        .net
+        .local_state()
+        .unwrap()
+        .position
+        .distance(start);
+    assert!(
+        moved > 3.0,
+        "guest moves in the second match ({moved:.1} m)"
+    );
+    for c in &h.clients {
+        let s = c.net.stats();
+        assert!(
+            s.corrections <= 2,
+            "{}: {} corrections",
+            c.id(),
+            s.corrections
+        );
+    }
+}
+
+#[test]
+fn return_to_an_empty_lobby_resets_the_level_and_ready_state() {
+    let mut h = Harness::new(empty_lobby_config(Some(TOKEN)));
     let host = h.add_client_with(host_client("Host"), script_runner);
     let guest = h.add_client("Guest", None, script_strafer);
     wait_lobby(&mut h, 2);
@@ -318,7 +419,7 @@ fn return_to_lobby_resets_the_level_and_ready_state() {
         h.clients[host].net.lobby().is_some_and(|l| l.all_ready())
     });
     h.clients[host].net.start_match(false);
-    wait(&mut h, 6.0, "first match", all_in_game);
+    wait(&mut h, 6.0, "first match", all_in_match);
     h.run_for(1.0, |_| {});
 
     // Change level state (the proving ground's door starts open) and try a guest return.
@@ -350,7 +451,7 @@ fn return_to_lobby_resets_the_level_and_ready_state() {
 
     // Second match: inputs flow again and prediction stays exact.
     h.clients[host].net.start_match(true);
-    wait(&mut h, 6.0, "second match", all_in_game);
+    wait(&mut h, 6.0, "second match", all_in_match);
     let start = h.clients[guest].net.local_state().unwrap().position;
     h.run_for(2.0, |_| {});
     let moved = h.clients[guest]
@@ -382,7 +483,7 @@ fn end_match_shows_results_then_returns_to_the_lobby() {
     let guest = h.add_client("Guest", None, script_idle);
     wait_lobby(&mut h, 2);
     h.clients[host].net.start_match(true);
-    wait(&mut h, 6.0, "match", all_in_game);
+    wait(&mut h, 6.0, "match", all_in_match);
 
     h.server.end_match();
     wait(&mut h, 2.0, "results everywhere", |h| {
@@ -401,7 +502,7 @@ fn end_match_shows_results_then_returns_to_the_lobby() {
 
     // Nobody continues: the results screen times out by itself.
     h.clients[host].net.start_match(true);
-    wait(&mut h, 6.0, "second match", all_in_game);
+    wait(&mut h, 6.0, "second match", all_in_match);
     h.server.end_match();
     let ended = h.time;
     wait(
@@ -436,7 +537,7 @@ fn autostart_starts_when_everyone_is_ready() {
     });
     wait_lobby(&mut h, 3);
     h.clients[c].net.set_ready(true);
-    wait(&mut h, 6.0, "autostarted match", all_in_game);
+    wait(&mut h, 6.0, "autostarted match", all_in_match);
     assert_eq!(h.server.world().players.len(), 3);
 }
 
@@ -473,7 +574,7 @@ fn pings_reach_every_player() {
     );
     // Pings keep flowing during the match (scoreboard).
     h.clients[host].net.start_match(true);
-    wait(&mut h, 6.0, "match", all_in_game);
+    wait(&mut h, 6.0, "match", all_in_match);
     h.run_for(2.0, |_| {});
     let p = h.clients[host].net.player_ping(far_id).unwrap();
     assert!((90.0..250.0).contains(&p), "in-match ping {p}");
@@ -492,7 +593,7 @@ fn disconnects_during_countdown_and_match_are_handled() {
     });
     h.clients[b].net.disconnect();
     wait(&mut h, 6.0, "match with the one left", |h| {
-        h.clients[a].net.is_in_game()
+        h.clients[a].net.lobby_phase() == Some(LobbyPhase::InMatch) && h.clients[a].net.is_in_game()
     });
     assert_eq!(h.server.world().players.len(), 1);
 
@@ -610,15 +711,27 @@ fn combat_follows_the_match_settings() {
         .collect();
     assert!(!defs.is_empty());
 
-    // No combat in the lobby: nothing to spawn into, dev commands refuse.
+    // The warm-up is a world: the host's dev commands work there.
+    wait(&mut h, 5.0, "warm-up", all_in_warmup);
+    h.clients[host].net.send_chat("/spawn gnawer");
+    wait(&mut h, 2.0, "dev command in the warm-up", |h| {
+        h.clients[host].events.iter().any(
+            |e| matches!(e, NetEvent::Chat { from: None, text, .. } if text.contains("spawned 1")),
+        )
+    });
+    // A lobby without a world has nothing to spawn into: dev commands refuse.
+    let mut empty = Harness::new(empty_lobby_config(Some(TOKEN)));
+    let other = empty.add_client_with(host_client("Host"), script_idle);
+    wait_lobby(&mut empty, 1);
     assert!(
-        h.server
+        empty
+            .server
             .spawn_enemies("gnawer", glam::Vec3::ZERO, 0.0, 2)
             .is_empty()
     );
-    h.clients[host].net.send_chat("/spawn gnawer");
-    wait(&mut h, 2.0, "dev command refused", |h| {
-        h.clients[host].events.iter().any(
+    empty.clients[other].net.send_chat("/spawn gnawer");
+    wait(&mut empty, 2.0, "dev command refused", |h| {
+        h.clients[other].events.iter().any(
             |e| matches!(e, NetEvent::Chat { from: None, text, .. } if text.contains("no match")),
         )
     });
@@ -628,7 +741,7 @@ fn combat_follows_the_match_settings() {
     coop.friendly_fire = true;
     h.server.set_match_settings(coop).unwrap();
     h.server.start_match().unwrap();
-    wait(&mut h, 5.0, "co-op match", all_in_game);
+    wait(&mut h, 5.0, "co-op match", all_in_match);
     let w = h.server.world();
     assert!(w.rules.friendly_fire && w.rules.coop_enemy_scaling);
     let carried: Vec<String> = w.enemy_defs.names().map(str::to_owned).collect();
@@ -642,14 +755,22 @@ fn combat_follows_the_match_settings() {
     assert_eq!(spawned.len(), 2);
     assert_eq!(h.server.world().enemies.len(), 2);
 
-    // Back in the lobby the enemies are gone; deathmatch on the same sandbox level is PvP.
+    // Back in the lobby the match's enemies are gone; deathmatch on the same sandbox level is
+    // PvP.
     h.server.return_to_lobby();
-    assert!(h.server.world().enemies.is_empty());
+    assert!(h.server.world().in_warmup());
+    assert!(
+        !h.server
+            .world()
+            .enemies
+            .values()
+            .any(|e| spawned.contains(&e.id))
+    );
     h.server
         .set_match_settings(MatchSettings::new(GameMode::Deathmatch, "movement_test"))
         .unwrap();
     h.server.start_match().unwrap();
-    wait(&mut h, 5.0, "deathmatch", all_in_game);
+    wait(&mut h, 5.0, "deathmatch", all_in_match);
     let w = h.server.world();
     assert!(w.rules.friendly_fire && !w.rules.coop_enemy_scaling);
     assert!(w.enemies.is_empty());
@@ -683,7 +804,7 @@ fn dev_commands_are_host_only_and_teleports_work() {
         .set_match_settings(MatchSettings::new(GameMode::Campaign, "crucible_of_veins"))
         .unwrap();
     h.server.start_match().unwrap();
-    wait(&mut h, 5.0, "co-op match", all_in_game);
+    wait(&mut h, 5.0, "co-op match", all_in_match);
     h.run_for(0.5, |_| {});
     let guest_id = h.clients[guest].id();
     let host_id = h.clients[host].id();

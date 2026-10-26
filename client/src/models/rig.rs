@@ -32,11 +32,21 @@ pub enum Shade {
     Core,
     /// Emissive part in the team colour (Shrike visor): `Tint::team x Pose::glow`.
     TeamGlow,
+    /// Lit, painted in the player's chosen coat colour (`Tint::primary`, cosmetics).
+    Primary,
+    /// Lit, painted in the player's chosen mask / trim colour (`Tint::secondary`).
+    Secondary,
+    /// Emissive in the player's chosen wick-flame colour: `Tint::flame x Pose::glow` (the
+    /// Shrike's wick, halo crest, lantern emblem).
+    Flame,
 }
 
 impl Shade {
     pub fn is_emissive(self) -> bool {
-        matches!(self, Shade::Glow | Shade::Core | Shade::TeamGlow)
+        matches!(
+            self,
+            Shade::Glow | Shade::Core | Shade::TeamGlow | Shade::Flame
+        )
     }
 }
 
@@ -88,19 +98,34 @@ pub struct Tint {
     pub glow_color: Option<Vec4>,
     /// Same for [`Shade::Core`] parts (weak points), brightness from `Pose::core`.
     pub core_color: Option<Vec4>,
+    /// Decorative paints of the Shrike's cosmetics ([`Shade::Primary`], [`Shade::Secondary`],
+    /// [`Shade::Flame`]); separate from `team`, the player's identity colour. Defaults: the
+    /// classic look (`Cosmetics::default()`).
+    pub primary: Vec4,
+    pub secondary: Vec4,
+    pub flame: Vec4,
 }
 
 /// The Shrikes' default colour (single-player / co-op): ember red.
 pub const DEFAULT_TEAM_COLOR: Vec4 = Vec4::new(0.85, 0.07, 0.09, 1.0);
 
+/// An sRGB catalogue colour as an opaque tint.
+fn paint(c: [f32; 3]) -> Vec4 {
+    Vec4::new(c[0], c[1], c[2], 1.0)
+}
+
 impl Default for Tint {
     fn default() -> Self {
+        let look = shared::cosmetics::Cosmetics::default();
         Self {
             body: Vec4::ONE,
             team: DEFAULT_TEAM_COLOR,
             glow: Vec4::ONE,
             glow_color: None,
             core_color: None,
+            primary: paint(look.primary_rgb()),
+            secondary: paint(look.secondary_rgb()),
+            flame: paint(look.flame_rgb()),
         }
     }
 }
@@ -111,6 +136,16 @@ impl Tint {
         Self {
             team: color,
             ..Self::default()
+        }
+    }
+
+    /// The paints of a player's cosmetics (coat, mask / trim, wick flame).
+    pub fn with_cosmetics(self, c: &shared::cosmetics::Cosmetics) -> Self {
+        Self {
+            primary: paint(c.primary_rgb()),
+            secondary: paint(c.secondary_rgb()),
+            flame: paint(c.flame_rgb()),
+            ..self
         }
     }
 }
@@ -305,46 +340,65 @@ impl Rig {
             if pose.is_hidden(i) {
                 continue;
             }
-            // Palette recolouring (colour-blind modes): a greyscale copy in the role colour.
-            let recolour = match part.shade {
-                Shade::Glow => tint
-                    .glow_color
-                    .map(|c| (c, level(pose.glow) * level(tint.glow))),
-                Shade::Core => tint.core_color.map(|c| (c, level(pose.core))),
-                _ => None,
-            };
-            if let (Some((hue, brightness)), Some(mesh)) = (recolour, part.recolour_mesh) {
-                let alpha = part.base_color.w
-                    * tint.body.w
-                    * match part.shade {
-                        Shade::Glow => pose.glow.w * tint.glow.w,
-                        _ => pose.core.w,
-                    };
-                out.push(DrawItem {
-                    mesh,
-                    texture: part.texture,
-                    transform: world[i],
-                    tint: (hue.truncate() * brightness).extend(alpha),
-                    unlit: true,
-                });
-                continue;
-            }
-            let color = part.base_color * tint.body;
-            let (color, unlit) = match part.shade {
-                Shade::Lit => (color, false),
-                Shade::Team => (color * tint.team, false),
-                Shade::Glow => (color * pose.glow * tint.glow, true),
-                Shade::Core => (color * pose.core, true),
-                Shade::TeamGlow => (color * tint.team * pose.glow, true),
-            };
-            out.push(DrawItem {
-                mesh: part.mesh,
-                texture: part.texture,
-                transform: world[i],
-                tint: color,
-                unlit,
-            });
+            self.draw_part(i, world[i], pose, tint, out);
         }
+    }
+
+    /// Appends part `i` with its world transform (shading from `pose`'s glow / core and
+    /// `tint`). For parts attached by hand (the Shrike's cosmetics).
+    pub fn draw_part(
+        &self,
+        i: usize,
+        world: Mat4,
+        pose: &Pose,
+        tint: &Tint,
+        out: &mut Vec<DrawItem>,
+    ) {
+        let Some(part) = self.parts.get(i) else {
+            return;
+        };
+        // Palette recolouring (colour-blind modes): a greyscale copy in the role colour.
+        let recolour = match part.shade {
+            Shade::Glow => tint
+                .glow_color
+                .map(|c| (c, level(pose.glow) * level(tint.glow))),
+            Shade::Core => tint.core_color.map(|c| (c, level(pose.core))),
+            _ => None,
+        };
+        if let (Some((hue, brightness)), Some(mesh)) = (recolour, part.recolour_mesh) {
+            let alpha = part.base_color.w
+                * tint.body.w
+                * match part.shade {
+                    Shade::Glow => pose.glow.w * tint.glow.w,
+                    _ => pose.core.w,
+                };
+            out.push(DrawItem {
+                mesh,
+                texture: part.texture,
+                transform: world,
+                tint: (hue.truncate() * brightness).extend(alpha),
+                unlit: true,
+            });
+            return;
+        }
+        let color = part.base_color * tint.body;
+        let (color, unlit) = match part.shade {
+            Shade::Lit => (color, false),
+            Shade::Team => (color * tint.team, false),
+            Shade::Glow => (color * pose.glow * tint.glow, true),
+            Shade::Core => (color * pose.core, true),
+            Shade::TeamGlow => (color * tint.team * pose.glow, true),
+            Shade::Primary => (color * tint.primary, false),
+            Shade::Secondary => (color * tint.secondary, false),
+            Shade::Flame => (color * tint.flame * pose.glow, true),
+        };
+        out.push(DrawItem {
+            mesh: part.mesh,
+            texture: part.texture,
+            transform: world,
+            tint: color,
+            unlit,
+        });
     }
 
     /// Draws the bind pose (static props, projectiles).

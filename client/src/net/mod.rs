@@ -93,6 +93,8 @@ pub struct ClientConfig {
     /// Listen-server host: the secret the session gave its in-process server; presented after
     /// the welcome to become the lobby host (`LobbyRequest::ClaimHost`).
     pub host_token: Option<u64>,
+    /// How our Shrike looks: sent right after the welcome (`ClientMessage::SetCosmetics`).
+    pub cosmetics: shared::cosmetics::Cosmetics,
 }
 
 impl ClientConfig {
@@ -102,11 +104,17 @@ impl ClientConfig {
             netsim: None,
             protocol_version: PROTOCOL_VERSION,
             host_token: None,
+            cosmetics: shared::cosmetics::Cosmetics::default(),
         }
     }
 
     pub fn with_netsim(mut self, netsim: Option<NetSimConfig>) -> Self {
         self.netsim = netsim;
+        self
+    }
+
+    pub fn with_cosmetics(mut self, cosmetics: shared::cosmetics::Cosmetics) -> Self {
+        self.cosmetics = cosmetics.sanitized();
         self
     }
 }
@@ -252,6 +260,8 @@ pub struct NetClient {
     lobby: Option<LobbyState>,
     levels: Vec<LevelInfo>,
     host_token: Option<u64>,
+    /// Our look, (re)sent after the welcome and on change (`NetClient::set_cosmetics`).
+    cosmetics: shared::cosmetics::Cosmetics,
     /// Latest authoritative combat state of the local player (`OwnState::combat`).
     own_combat: Option<OwnCombat>,
     /// Cosmetic combat events received and not yet drained (de-duplicated by `seq`).
@@ -293,6 +303,7 @@ impl NetClient {
         )?;
         let mut client = Self::with_transport(Box::new(transport));
         client.host_token = config.host_token;
+        client.cosmetics = config.cosmetics;
         Ok(client)
     }
 
@@ -329,6 +340,7 @@ impl NetClient {
             lobby: None,
             levels: Vec::new(),
             host_token: None,
+            cosmetics: shared::cosmetics::Cosmetics::default(),
             own_combat: None,
             fx: Vec::new(),
             fx_seen: std::collections::BTreeSet::new(),
@@ -712,6 +724,7 @@ impl NetClient {
                 self.welcome = Some(welcome);
                 self.events.push_back(NetEvent::Connected { player_id });
                 self.claim_host();
+                self.send_cosmetics();
             }
             ServerMessage::Rejected { reason } => {
                 self.rejected = Some(reason.clone());

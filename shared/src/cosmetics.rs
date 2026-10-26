@@ -22,7 +22,7 @@ pub const EMBLEMS: [&str; 8] = [
 /// Body / trim colours (sRGB 0..1). The player's *team / identity* colour used for markers,
 /// the scoreboard and colour-vision palettes is separate (lobby colour index); these are
 /// purely decorative.
-pub const COLORS: [(&str, [f32; 3]); 16] = [
+pub const COLORS: [(&str, [f32; 3]); 18] = [
     ("ASH", [0.42, 0.40, 0.38]),
     ("SOOT", [0.16, 0.15, 0.16]),
     ("BONE", [0.86, 0.82, 0.72]),
@@ -39,6 +39,9 @@ pub const COLORS: [(&str, [f32; 3]); 16] = [
     ("HEATHER", [0.62, 0.42, 0.62]),
     ("CHALK", [0.92, 0.92, 0.90]),
     ("PITCH", [0.06, 0.06, 0.08]),
+    // The Shrike's own tanned coat and its darker straps.
+    ("HIDE", [0.58, 0.37, 0.21]),
+    ("UMBER", [0.34, 0.22, 0.15]),
 ];
 /// Wick flame colours (the chest lantern and the death / kindling effects).
 pub const FLAMES: [(&str, [f32; 3]); 8] = [
@@ -69,15 +72,92 @@ pub struct Cosmetics {
 }
 
 impl Default for Cosmetics {
+    /// The classic Shrike: beaked porcelain mask, swept quills, a short mantle over the tanned
+    /// coat, an amber wick.
     fn default() -> Self {
         Self {
             mask: 0,
             crest: 1,
             cloak: 1,
             emblem: 0,
-            primary: 0,
+            primary: 16,
             secondary: 2,
             flame: 0,
+        }
+    }
+}
+
+/// Which catalogue a [`Cosmetics`] field indexes (the customise screen's rows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Slot {
+    Mask,
+    Crest,
+    Cloak,
+    Emblem,
+    Primary,
+    Secondary,
+    Flame,
+}
+
+impl Slot {
+    pub const ALL: [Slot; 7] = [
+        Slot::Mask,
+        Slot::Crest,
+        Slot::Cloak,
+        Slot::Emblem,
+        Slot::Primary,
+        Slot::Secondary,
+        Slot::Flame,
+    ];
+
+    /// Menu label.
+    pub fn title(self) -> &'static str {
+        match self {
+            Slot::Mask => "MASK",
+            Slot::Crest => "CREST",
+            Slot::Cloak => "CLOAK",
+            Slot::Emblem => "EMBLEM",
+            Slot::Primary => "COAT COLOUR",
+            Slot::Secondary => "MASK COLOUR",
+            Slot::Flame => "WICK FLAME",
+        }
+    }
+
+    /// The catalogue's option names.
+    pub fn names(self) -> Vec<&'static str> {
+        match self {
+            Slot::Mask => MASKS.to_vec(),
+            Slot::Crest => CRESTS.to_vec(),
+            Slot::Cloak => CLOAKS.to_vec(),
+            Slot::Emblem => EMBLEMS.to_vec(),
+            Slot::Primary | Slot::Secondary => COLORS.iter().map(|(n, _)| *n).collect(),
+            Slot::Flame => FLAMES.iter().map(|(n, _)| *n).collect(),
+        }
+    }
+
+    /// Number of options.
+    pub fn len(self) -> usize {
+        match self {
+            Slot::Mask => MASKS.len(),
+            Slot::Crest => CRESTS.len(),
+            Slot::Cloak => CLOAKS.len(),
+            Slot::Emblem => EMBLEMS.len(),
+            Slot::Primary | Slot::Secondary => COLORS.len(),
+            Slot::Flame => FLAMES.len(),
+        }
+    }
+
+    /// Never empty (every catalogue has options).
+    pub fn is_empty(self) -> bool {
+        false
+    }
+
+    /// The swatch colour of option `index` (colour slots only).
+    pub fn color(self, index: u8) -> Option<[f32; 3]> {
+        match self {
+            Slot::Primary | Slot::Secondary => COLORS.get(index as usize).map(|(_, c)| *c),
+            Slot::Flame => FLAMES.get(index as usize).map(|(_, c)| *c),
+            _ => None,
         }
     }
 }
@@ -95,6 +175,61 @@ impl Cosmetics {
             secondary: wrap(self.secondary, COLORS.len()),
             flame: wrap(self.flame, FLAMES.len()),
         }
+    }
+
+    /// The value of one slot.
+    pub fn get(&self, slot: Slot) -> u8 {
+        match slot {
+            Slot::Mask => self.mask,
+            Slot::Crest => self.crest,
+            Slot::Cloak => self.cloak,
+            Slot::Emblem => self.emblem,
+            Slot::Primary => self.primary,
+            Slot::Secondary => self.secondary,
+            Slot::Flame => self.flame,
+        }
+    }
+
+    /// Sets one slot (wrapped into its catalogue).
+    pub fn set(&mut self, slot: Slot, value: u8) {
+        let v = (value as usize % slot.len()) as u8;
+        match slot {
+            Slot::Mask => self.mask = v,
+            Slot::Crest => self.crest = v,
+            Slot::Cloak => self.cloak = v,
+            Slot::Emblem => self.emblem = v,
+            Slot::Primary => self.primary = v,
+            Slot::Secondary => self.secondary = v,
+            Slot::Flame => self.flame = v,
+        }
+    }
+
+    /// A varied, deterministic look from a seed (server bots, the customise screen's
+    /// RANDOMISE). The coat and trim colours always differ.
+    pub fn from_seed(seed: u32) -> Cosmetics {
+        // A small integer hash (splitmix-style), one draw per slot.
+        let mut x = seed.wrapping_mul(0x9E37_79B9).wrapping_add(0x7F4A_7C15);
+        let mut next = |n: usize| {
+            x ^= x >> 16;
+            x = x.wrapping_mul(0x85EB_CA6B);
+            x ^= x >> 13;
+            x = x.wrapping_mul(0xC2B2_AE35);
+            x ^= x >> 16;
+            (x as usize % n) as u8
+        };
+        let mut c = Cosmetics {
+            mask: next(MASKS.len()),
+            crest: next(CRESTS.len()),
+            cloak: next(CLOAKS.len()),
+            emblem: next(EMBLEMS.len()),
+            primary: next(COLORS.len()),
+            secondary: next(COLORS.len()),
+            flame: next(FLAMES.len()),
+        };
+        if c.secondary == c.primary {
+            c.secondary = ((c.primary as usize + COLORS.len() / 2) % COLORS.len()) as u8;
+        }
+        c
     }
 
     pub fn primary_rgb(&self) -> [f32; 3] {
@@ -121,7 +256,7 @@ mod tests {
             crest: 6,
             cloak: 5,
             emblem: 9,
-            primary: 16,
+            primary: 34,
             secondary: 255,
             flame: 8,
         }
@@ -130,9 +265,28 @@ mod tests {
         assert_eq!(c.crest, 0);
         assert_eq!(c.cloak, 0);
         assert_eq!(c.emblem, 1);
-        assert_eq!(c.primary, 0);
+        assert_eq!(c.primary, 16);
         assert!((c.secondary as usize) < COLORS.len());
         assert_eq!(c.flame, 0);
         assert_eq!(Cosmetics::default().sanitized(), Cosmetics::default());
+    }
+
+    #[test]
+    fn slots_and_seeds() {
+        let mut c = Cosmetics::default();
+        for slot in Slot::ALL {
+            assert_eq!(slot.names().len(), slot.len());
+            c.set(slot, (slot.len() + 1) as u8);
+            assert_eq!(c.get(slot), 1, "{slot:?} wraps");
+        }
+        assert_eq!(c, c.sanitized());
+        let looks: Vec<Cosmetics> = (0..32).map(Cosmetics::from_seed).collect();
+        for l in &looks {
+            assert_eq!(*l, l.sanitized());
+            assert_ne!(l.primary, l.secondary);
+        }
+        assert_eq!(Cosmetics::from_seed(7), Cosmetics::from_seed(7));
+        let masks: std::collections::BTreeSet<u8> = looks.iter().map(|l| l.mask).collect();
+        assert!(masks.len() >= 5, "seeds vary the look: {masks:?}");
     }
 }

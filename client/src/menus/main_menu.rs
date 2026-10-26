@@ -1,7 +1,8 @@
 //! Main menu: SINGLE PLAYER (level select), HOST GAME (mode, level, port, max players), JOIN
-//! GAME (address, name), SETTINGS, QUIT. HOST and JOIN continue in the lobby screen
-//! (`menus::lobby`). A level renders behind it; messages (disconnect reasons,
-//! connection errors) appear in a modal box.
+//! GAME (address, name), CUSTOMISE (your Shrike's look, `menus::customize`), SETTINGS, QUIT.
+//! HOST and JOIN continue in the lobby (`menus::lobby`). A level renders behind it; messages
+//! (disconnect reasons, connection errors) appear in a modal box. The warm-up hub is never
+//! offered as a level.
 //!
 //! Adding a page: add a [`Page`] variant, a menu item in `root_items`, and a `fn xxx_page`
 //! drawing a panel that returns a [`Transition`] when it starts something.
@@ -14,11 +15,13 @@ use shared::level::LevelDef;
 use shared::lobby::{GameMode, LevelInfo};
 
 use super::backdrop::Backdrop;
+use super::customize::CustomizeMenu;
 use super::settings_menu::{self, SettingsMenu};
 use super::style;
 use crate::app::Common;
 use crate::cli::StartMode;
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
+use crate::models::DEFAULT_TEAM_COLOR;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -26,13 +29,15 @@ pub enum Page {
     SinglePlayer,
     Host,
     Join,
+    Customize,
     Settings,
 }
 
-const ROOT_ITEMS: [(&str, Page); 4] = [
+const ROOT_ITEMS: [(&str, Page); 5] = [
     ("SINGLE PLAYER", Page::SinglePlayer),
     ("HOST GAME", Page::Host),
     ("JOIN GAME", Page::Join),
+    ("CUSTOMISE", Page::Customize),
     ("SETTINGS", Page::Settings),
 ];
 
@@ -52,14 +57,19 @@ pub struct MainMenu {
     max_players: f32,
     address: String,
     settings: SettingsMenu,
+    customize: CustomizeMenu,
 }
 
-/// Available levels: `assets/levels/*.ron` plus the built-in level.
+/// Playable levels: `assets/levels/*.ron` plus the built-in level, without the warm-up hub
+/// (`LevelKind::Hub` is never a match level).
 pub fn level_list() -> Vec<String> {
     let mut levels = LevelDef::list();
     if !levels.iter().any(|l| l == shared::sim::BUILTIN_LEVEL) {
         levels.push(shared::sim::BUILTIN_LEVEL.to_string());
     }
+    levels.retain(|name| {
+        shared::sim::load_level(name).map_or(true, |l| l.kind != shared::level::LevelKind::Hub)
+    });
     levels
 }
 
@@ -102,6 +112,7 @@ impl MainMenu {
             max_players: 4.0,
             address: String::new(),
             settings: SettingsMenu::new(),
+            customize: CustomizeMenu::new(),
         }
     }
 
@@ -129,7 +140,11 @@ impl MainMenu {
         }
         if page == Page::Host {
             self.catalog = shared::lobby::scan_levels();
+            self.catalog.retain(|l| !l.is_hub());
             self.fit_host_level();
+        }
+        if page == Page::Customize {
+            self.customize = CustomizeMenu::new();
         }
         self.page = page;
     }
@@ -161,10 +176,42 @@ impl MainMenu {
         {
             let theme = &common.theme;
             let settings = &mut common.settings;
-            let mut ui = Ui::new(&mut out.ui, &mut common.ui_state, io.ui_input, theme);
+            let FrameBuffers {
+                ui: list,
+                viewmodel,
+                lights,
+                ..
+            } = out;
+            let mut ui = Ui::new(list, &mut common.ui_state, io.ui_input, theme);
             let canvas = ui.canvas();
 
-            if self.page == Page::Settings {
+            if self.page == Page::Customize {
+                // A lamp by the preview (in front of the camera, to its right).
+                let cam = scene.camera;
+                lights.push(engine::gfx::PointLight {
+                    position: cam.position + cam.rotation * glam::Vec3::new(1.2, 1.0, -1.0),
+                    color: glam::Vec3::new(1.3, 1.15, 1.0),
+                    radius: 9.0,
+                });
+                let resp = self.customize.ui(
+                    &mut ui,
+                    &mut settings.cosmetics,
+                    DEFAULT_TEAM_COLOR,
+                    common.models.as_ref(),
+                    viewmodel,
+                    scene.viewmodel_fov,
+                    io.dt,
+                );
+                if resp.changed {
+                    sound = Some(Sfx::UiMove);
+                    settings_resp.changed = true;
+                }
+                if resp.back {
+                    sound = Some(Sfx::UiBack);
+                    settings_resp.back = true;
+                    self.back();
+                }
+            } else if self.page == Page::Settings {
                 settings_menu::dim(&mut ui, 0.45);
                 settings_resp = self.settings.ui(
                     &mut ui,
@@ -220,7 +267,7 @@ impl MainMenu {
                 if !modal {
                     let mut name_changed = false;
                     let page_result = match self.page {
-                        Page::Root | Page::Settings => None,
+                        Page::Root | Page::Settings | Page::Customize => None,
                         Page::SinglePlayer => self.single_player_page(&mut ui, panel, settings),
                         Page::Host => self.host_page(&mut ui, panel, settings, &mut name_changed),
                         Page::Join => self.join_page(&mut ui, panel, settings, &mut name_changed),

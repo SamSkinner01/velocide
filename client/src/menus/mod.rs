@@ -6,6 +6,8 @@
 //! [`settings_menu::SettingsMenu`].
 
 pub mod backdrop;
+/// The CUSTOMISE screen: the Shrike's cosmetics with a turning preview.
+pub mod customize;
 pub mod lobby;
 pub mod main_menu;
 /// End-of-match results screens (campaign tally / co-op table / deathmatch standings).

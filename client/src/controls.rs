@@ -51,16 +51,19 @@ pub enum Action {
     /// Cycle the current weapon's alt-fire mode (gamepads; keyboard players press the slot key
     /// again).
     NextMode,
+    /// Hold: scoreboard. In the warm-up: opens / closes the lobby overlay.
     Scoreboard,
     Chat,
     Pause,
     Restart,
     DebugOverlay,
     Fullscreen,
+    /// Toggle ready in the lobby / the warm-up without opening the lobby (docs/lobby.md).
+    Ready,
 }
 
 impl Action {
-    pub const ALL: [Action; 25] = [
+    pub const ALL: [Action; 26] = [
         Action::MoveForward,
         Action::MoveBack,
         Action::MoveLeft,
@@ -86,6 +89,7 @@ impl Action {
         Action::Restart,
         Action::DebugOverlay,
         Action::Fullscreen,
+        Action::Ready,
     ];
 
     /// Label in the controls menu.
@@ -110,12 +114,13 @@ impl Action {
             Action::NextWeapon => "NEXT WEAPON",
             Action::PrevWeapon => "PREVIOUS WEAPON",
             Action::NextMode => "CYCLE FIRE MODE",
-            Action::Scoreboard => "SCOREBOARD",
+            Action::Scoreboard => "SCOREBOARD / LOBBY",
             Action::Chat => "CHAT",
             Action::Pause => "PAUSE",
             Action::Restart => "RESTART (SOLO)",
             Action::DebugOverlay => "DEBUG OVERLAY",
             Action::Fullscreen => "FULLSCREEN",
+            Action::Ready => "READY UP (LOBBY)",
         }
     }
 
@@ -163,6 +168,7 @@ impl Action {
             Action::Restart => vec![key(Key::KeyR)],
             Action::DebugOverlay => vec![key(Key::F3)],
             Action::Fullscreen => vec![key(Key::F11)],
+            Action::Ready => vec![key(Key::F1), pad(GamepadButton::DPadDown)],
         }
     }
 
@@ -244,6 +250,16 @@ impl Bindings {
         if let Some(list) = self.map.get_mut(&action) {
             list.retain(|b| is_gamepad_binding(b) != gamepad);
         }
+    }
+
+    /// Short name of the action's first binding for on-screen hints ("F1", "TAB"), preferring
+    /// keyboard / mouse; `None` when unbound.
+    pub fn hint(&self, action: Action) -> Option<String> {
+        let list = self.get(action);
+        list.iter()
+            .find(|b| !is_gamepad_binding(b))
+            .or_else(|| list.first())
+            .map(|b| b.name().to_uppercase())
     }
 
     /// Menu text: "Space / Pad A", "-" when unbound.

@@ -514,6 +514,18 @@ impl SimWorld {
         // This tick's events so far; everything emitted below is appended after them.
         let events = std::mem::take(&mut self.events);
         self.sync_mode_players(Some(t));
+        if self.in_warmup() {
+            // The lobby's warm-up: the style meter runs, nothing else is scored (warmup.rs).
+            for e in self.score_style(t, &events) {
+                self.push_style(e);
+            }
+            for e in self.decay_style(t) {
+                self.push_style(e);
+            }
+            let new = std::mem::replace(&mut self.events, events);
+            self.events.extend(new);
+            return;
+        }
         if self.frozen && self.mode.is_playing() {
             // Frozen from outside (the server's results phase): the match is over.
             self.end_match(t, EndReason::Host);
@@ -711,6 +723,8 @@ impl SimWorld {
         let void = kill.attack == Attack::World || kill.flags.contains(DamageFlags::ENVIRONMENT);
         let solo = self.is_solo();
         let (secs, life) = match (self.mode.rules.kind, self.mode.phase) {
+            // The lobby's warm-up: straight back in (warmup.rs).
+            _ if self.in_warmup() => (super::warmup::WARMUP_RESPAWN_SECS, LifeState::Dead),
             (_, MatchPhase::Ended) | (GameMode::Deathmatch | GameMode::GunGame, _) => {
                 (t.combat.respawn_delay, LifeState::Dead)
             }
@@ -756,6 +770,7 @@ impl SimWorld {
     pub(crate) fn mode_respawn_player(&mut self, t: &Tuning, id: PlayerId) {
         let was_dead = self.players.get(&id).is_some_and(|p| p.combat.dead);
         if self.mode.rules.kind == GameMode::Campaign
+            && !self.in_warmup()
             && self.mode.phase == MatchPhase::Playing
             && ((was_dead && self.is_solo()) || self.mode.wipe.take().is_some())
         {
@@ -798,6 +813,9 @@ impl SimWorld {
     /// the other living players; campaign → the last checkpoint, or the player's level start.
     pub fn mode_spawn_point(&self, id: PlayerId) -> SpawnPoint {
         let level = &self.level;
+        if self.in_warmup() {
+            return self.farthest_spawn(id);
+        }
         match self.mode.rules.kind {
             GameMode::Deathmatch | GameMode::GunGame => self.farthest_spawn(id),
             GameMode::Campaign | GameMode::Grind => {

@@ -44,6 +44,7 @@ use engine::hotreload::FileWatcher;
 use engine::time::FixedTimestep;
 use glam::Vec3;
 use renet::{ClientId, RenetServer, ServerEvent};
+use shared::cosmetics::Cosmetics;
 use shared::input::PlayerInput;
 use shared::protocol::{
     self, CHANNEL_RELIABLE, CHANNEL_UNRELIABLE, ClientMessage, ClientUnreliable, ConnectRequest,
@@ -57,7 +58,7 @@ pub use combat::FxLog;
 
 pub use input_queue::InputQueue;
 pub use lagcomp::{LagCompHistory, Rewound};
-pub use lobby::{LobbyCommand, LobbyConfig};
+pub use lobby::{LobbyCommand, LobbyConfig, WARMUP_LEVEL};
 pub use netsim::{NetSim, NetSimConfig};
 pub use transport::{
     NetcodeServerTransport, RateMeter, ServerTransport, TransportStats, UdpLink, connection_config,
@@ -245,6 +246,8 @@ struct ClientConn {
     player: Option<PlayerId>,
     name: String,
     ready: bool,
+    /// How their Shrike looks (`ClientMessage::SetCosmetics`, sanitised).
+    cosmetics: Cosmetics,
     inputs: InputQueue,
     ack_tick: Option<u32>,
     sent_frames: VecDeque<(u32, Arc<NetFrame>)>,
@@ -262,6 +265,7 @@ impl ClientConn {
             player: None,
             name: String::new(),
             ready: false,
+            cosmetics: Cosmetics::default(),
             inputs: InputQueue::new(),
             ack_tick: None,
             sent_frames: VecDeque::new(),
@@ -278,6 +282,7 @@ impl ClientConn {
             name: self.name.clone(),
             ready: self.ready,
             bot: false,
+            cosmetics: self.cosmetics,
         })
     }
 }
@@ -466,8 +471,8 @@ impl Server {
         count: u32,
     ) -> Vec<shared::protocol::NetId> {
         let mut ids = Vec::new();
-        // Nothing to spawn into while the server is in its lobby.
-        if !self.flow.phase.level_running() {
+        // Nothing to spawn into while the server is in a lobby without a world.
+        if !self.world_running() {
             return ids;
         }
         let n = count.clamp(1, 64);
@@ -505,6 +510,7 @@ impl Server {
             name: name.clone(),
             ready: true,
             bot: true,
+            cosmetics: lobby::bot_cosmetics(*id),
         }));
         infos.sort_by_key(|i| i.id);
         infos
@@ -536,8 +542,8 @@ impl Server {
     pub fn add_bot(&mut self, name: &str) -> Option<PlayerId> {
         let id = self.free_player_id()?;
         let name = self.unique_name(&protocol::sanitize_name(name));
-        // In the lobby bots wait without a body; `start_match` spawns them.
-        if self.flow.phase.level_running() {
+        // In a lobby without a world bots wait without a body; `start_match` spawns them.
+        if self.world_running() {
             self.world.add_player(id, &name);
         }
         self.bots.insert(id, name.clone());
@@ -546,6 +552,7 @@ impl Server {
             name,
             ready: true,
             bot: true,
+            cosmetics: lobby::bot_cosmetics(id),
         }));
         Some(id)
     }
@@ -667,8 +674,8 @@ impl Server {
         self.update_lobby();
 
         let ticks = self.timestep.advance(real_dt.as_secs_f64());
-        // No level is simulated in the lobby / countdown.
-        if !self.paused && self.flow.phase.level_running() {
+        // A lobby without a warm-up world simulates nothing.
+        if !self.paused && self.world_running() {
             for _ in 0..ticks {
                 self.run_tick();
             }
@@ -843,8 +850,9 @@ impl Server {
             return;
         };
         let name = self.unique_name(&request.name);
-        // Join-in-progress gets a body now; in the lobby bodies come with `start_match`.
-        let level_running = self.flow.phase.level_running();
+        // Join-in-progress (and the warm-up) gets a body now; in a lobby without a world
+        // bodies come with `start_match`.
+        let level_running = self.world_running();
         if level_running {
             self.world.add_player(player, &name);
         }
@@ -882,6 +890,7 @@ impl Server {
             name: name.clone(),
             ready: false,
             bot: false,
+            cosmetics: Cosmetics::default(),
         };
         let joined = protocol::encode(&ServerMessage::PlayerJoined(info));
         let others: Vec<ClientId> = self
@@ -993,9 +1002,9 @@ impl Server {
             }
             ClientMessage::SetReady { ready } => self.lobby_set_ready(client, player, ready),
             ClientMessage::Lobby(request) => self.handle_lobby_request(client, player, request),
-            // Accepted and ignored until the arsenal (loadouts) and cosmetics land
-            // (docs/expansion.md).
-            ClientMessage::SetLoadout(_) | ClientMessage::SetCosmetics(_) => {}
+            ClientMessage::SetCosmetics(c) => self.lobby_set_cosmetics(client, player, c),
+            // Accepted and ignored until the arsenal (loadouts) lands (docs/expansion.md).
+            ClientMessage::SetLoadout(_) => {}
         }
     }
 

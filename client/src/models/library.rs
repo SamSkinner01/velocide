@@ -11,7 +11,7 @@ use engine::glam::{Mat4, Vec3, Vec4};
 use engine::render::Renderer;
 
 use super::rig::{Rig, Shade, Tint, neutral_mesh, validate_joints};
-use super::{EnemyAnim, ModelId, PlayerAnim, ViewmodelAnim, enemies, shrike, weapons};
+use super::{EnemyAnim, ModelId, PlayerAnim, ViewmodelAnim, cosmetics, enemies, shrike, weapons};
 
 /// All models, uploaded and ready to draw.
 pub struct ModelLibrary {
@@ -164,16 +164,41 @@ impl ModelLibrary {
         tint: &Tint,
         out: &mut Vec<DrawItem>,
     ) -> PlayerDrawInfo {
-        let rig = self.get(ModelId::Shrike);
-        let pose = shrike::pose(anim);
         let scale = if scale.is_finite() && scale > 0.0 {
             scale
         } else {
             1.0
         };
         let root = shrike::root_transform(anim, feet) * Mat4::from_scale(Vec3::splat(scale));
+        self.draw_shrike(anim, root, tint, out)
+    }
+
+    /// Draws a Shrike posed from `anim` (and its cosmetics: `anim.cosmetics`, painted through
+    /// `Tint::with_cosmetics`; `tint.team` stays the identity colour) with its model origin
+    /// (feet) at `root` — world space, or view space for previews in the viewmodel pass.
+    pub fn draw_shrike(
+        &self,
+        anim: &PlayerAnim,
+        root: Mat4,
+        tint: &Tint,
+        out: &mut Vec<DrawItem>,
+    ) -> PlayerDrawInfo {
+        let rig = self.get(ModelId::Shrike);
+        let (pose, drape) = shrike::pose_full(anim);
+        let tint = &tint.with_cosmetics(&anim.cosmetics);
         rig.draw(&pose, root, tint, out);
-        let hand = rig.part_transform(&pose, root, shrike::HAND_R);
+        let mut world = Vec::with_capacity(rig.parts.len());
+        rig.world_transforms(&pose, root, &mut world);
+        cosmetics::draw(
+            self.get(ModelId::ShrikeKit),
+            &anim.cosmetics,
+            &world,
+            &pose,
+            &drape,
+            tint,
+            out,
+        );
+        let hand = world[shrike::HAND_R];
         let weapon = weapons::WeaponKind::from_index(anim.weapon);
         let gun_root = hand * shrike::grip_transform();
         let gun_pose = weapons::third_person_pose(weapon, anim.firing, anim.time);
@@ -181,7 +206,7 @@ impl ModelLibrary {
         if !anim.dead {
             gun.draw(&gun_pose, gun_root, tint, out);
         }
-        let head = rig.part_transform(&pose, root, shrike::HEAD);
+        let head = world[shrike::HEAD];
         PlayerDrawInfo {
             muzzle: gun_root.transform_point3(weapon.muzzle()),
             muzzle_dir: gun_root

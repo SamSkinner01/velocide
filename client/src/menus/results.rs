@@ -47,6 +47,8 @@ pub struct ResultsScreen {
     pub results: MatchResults,
     /// The local player (highlighted row, "VICTORY").
     pub local: Option<PlayerId>,
+    /// Everyone's look (`PlayerInfo::cosmetics`): a swatch next to each name.
+    pub looks: std::collections::BTreeMap<PlayerId, shared::cosmetics::Cosmetics>,
     opened: f64,
     /// Stamps already heard.
     stamps_played: usize,
@@ -95,6 +97,7 @@ impl ResultsScreen {
         Self {
             results,
             local,
+            looks: Default::default(),
             opened: now,
             stamps_played: 0,
         }
@@ -482,9 +485,20 @@ impl ResultsScreen {
                 fade(t.ink, 0.9 * a),
             );
             let xs = |x: f32| row.min.x + x * w / 600.0;
+            let mut name_x = row.min.x + 16.0;
+            if let Some(look) = self.looks.get(&p.player) {
+                crate::menus::customize::look_swatch(
+                    list,
+                    vec2(name_x, y + 2.0),
+                    7.0,
+                    look,
+                    fade(t.ink, 0.9 * a),
+                );
+                name_x += 9.0;
+            }
             let name = engine::ui::text::truncate(&p.name.to_uppercase(), 150.0, 1.0);
             list.text(
-                vec2(row.min.x + 16.0, y + 1.0),
+                vec2(name_x, y + 1.0),
                 &name,
                 &TextStyle::new(fade(t.bone, a)),
             );
@@ -719,8 +733,19 @@ impl ResultsScreen {
             fade(player_color(p.player), a),
             fade(t.ink, 0.9 * a),
         );
+        let mut name_x = x0 + 30.0;
+        if let Some(look) = self.looks.get(&p.player) {
+            crate::menus::customize::look_swatch(
+                list,
+                vec2(name_x, y),
+                7.0,
+                look,
+                fade(t.ink, 0.9 * a),
+            );
+            name_x += 9.0;
+        }
         let name = engine::ui::text::truncate(&p.name.to_uppercase(), 220.0, 1.0);
-        list.text(vec2(x0 + 30.0, y), &name, &TextStyle::new(fade(t.bone, a)));
+        list.text(vec2(name_x, y), &name, &TextStyle::new(fade(t.bone, a)));
         let xs = |x: f32| x0 + x * w / 520.0;
         let num = |c: Vec4| TextStyle::new(fade(c, a)).right();
         let frag_col = if p.stats.frags < 0 {

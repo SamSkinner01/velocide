@@ -3,7 +3,7 @@
 //! ```text
 //! velocide-server [--port 47420] [--bind 0.0.0.0] [--level proving_ground] [--max-players 8]
 //!                 [--mode campaign|deathmatch] [--frag-limit 20] [--time-limit 600]
-//!                 [--friendly-fire] [--autostart] [--no-lobby]
+//!                 [--friendly-fire] [--autostart] [--no-lobby] [--no-warmup]
 //!                 [--tick-rate 60] [--snapshot-rate 30] [--netsim 100,20,2] [--tuning PATH]
 //!                 [--no-watch] [--no-delta] [--name NAME] [--dev-commands]
 //! ```
@@ -41,6 +41,7 @@ OPTIONS:
     --friendly-fire          co-op: players can hurt each other
     --autostart              start the match when every connected player is ready
     --no-lobby               no lobby: run the level right away (old behaviour)
+    --no-warmup              no warm-up hub in the lobby (players wait without a body)
     --tick-rate <HZ>         simulation rate (default 60)
     --snapshot-rate <HZ>     snapshot rate (default: tuning.ron net.snapshot_rate, 30)
     --netsim <L,J,LOSS[,D]>  simulate latency ms, jitter ms, loss %, duplicate %
@@ -118,6 +119,7 @@ fn parse_args() -> Result<ServerConfig, String> {
             "--friendly-fire" => config.lobby.settings.friendly_fire = true,
             "--autostart" => config.lobby.autostart = true,
             "--no-lobby" => config.lobby.enabled = false,
+            "--no-warmup" => config.lobby.warmup = false,
             "--no-watch" => config.watch_tuning = false,
             "--no-delta" => config.delta_compression = false,
             "--name" => config.server_name = value("--name")?,

@@ -40,8 +40,8 @@ impl Server {
         let cmd = words.next().unwrap_or("").to_ascii_lowercase();
         let args: Vec<&str> = words.collect();
         let tuning = self.tuning.clone();
-        // In the lobby there is no level being simulated (docs/lobby.md).
-        if !self.flow.phase.level_running() && !matches!(cmd.as_str(), "help" | "" | "enemies") {
+        // A lobby without a warm-up world simulates nothing (docs/lobby.md).
+        if !self.world_running() && !matches!(cmd.as_str(), "help" | "" | "enemies") {
             return "no match is running".into();
         }
         match cmd.as_str() {

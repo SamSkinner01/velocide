@@ -546,7 +546,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // ---- Overviews: native resolution, fog off, roofs removed for indoor levels.
-    let top_level = if level.kind == LevelKind::Campaign {
+    let top_level = if level.kind != LevelKind::Arena {
         roofless(&level)
     } else {
         level.clone()
@@ -609,7 +609,7 @@ fn main() -> anyhow::Result<()> {
             };
             // Without whatever is stacked above the arena (vertical levels).
             let cut = e.arena.map_or(e.trigger.max.y, |a| a.max.y);
-            let area_scene = if level.kind == LevelKind::Campaign {
+            let area_scene = if level.kind != LevelKind::Arena {
                 Some(Scene::new(
                     &mut top,
                     roofless(&below(&level, cut)),

@@ -44,7 +44,8 @@ impl InGame {
         common.audio.set_music_intensity(0.2);
     }
 
-    /// `NetEvent::LobbyChanged`: leave for the lobby, or open / close the results screen.
+    /// `NetEvent::LobbyChanged`: leave for the lobby screen (a lobby without a world), stay in
+    /// the warm-up (its overlay is the lobby, `warmup.rs`), or open / close the results screen.
     pub(super) fn on_lobby_changed(
         &mut self,
         phase: LobbyPhase,
@@ -53,7 +54,19 @@ impl InGame {
         now: f64,
     ) -> Option<Transition> {
         match phase {
-            LobbyPhase::Lobby | LobbyPhase::Countdown { .. } => Some(Transition::ReturnToLobby),
+            LobbyPhase::Lobby | LobbyPhase::Countdown { .. } => {
+                let warmup = self
+                    .net()
+                    .and_then(NetClient::lobby)
+                    .is_some_and(shared::lobby::LobbyState::world_running);
+                if warmup {
+                    self.match_ui.results_since = None;
+                    self.modes.results = None;
+                    None
+                } else {
+                    Some(Transition::ReturnToLobby)
+                }
+            }
             LobbyPhase::Results => {
                 if previous != Some(LobbyPhase::Results) {
                     self.match_ui.results_since = Some(now);
@@ -235,6 +248,19 @@ impl InGame {
         ui: &mut Ui,
         now: f64,
     ) -> (Option<Sfx>, Option<Transition>) {
+        // Everyone's look next to their name (lobby: cosmetics).
+        let looks = self
+            .net()
+            .map(|n| {
+                n.players()
+                    .iter()
+                    .map(|(id, p)| (*id, p.cosmetics))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(screen) = &mut self.modes.results {
+            screen.looks = looks;
+        }
         // Game modes: the animated tally / standings (mode_hud.rs, menus/results.rs) with the
         // buttons in one row under it once the reveal is done.
         if let Some((sound, finished)) = self.draw_mode_results(ui, now) {

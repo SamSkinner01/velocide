@@ -1,16 +1,22 @@
 # Lobby and match flow
 
-Hosted and joined games gather in a **lobby** before each match: a player list with pings
-and ready state, mode / level / host settings, ready-up, chat. The host starts the match, the
-level loads on everyone, and at the end everyone returns to the lobby. Single-player never
-sees the lobby.
+Hosted and joined games gather in a **lobby** before each match: a player list with pings,
+ready state and everyone's look, mode / level / host settings, ready-up, chat. While they wait
+the players run around the **warm-up** hub, the Vestry (a movement course, a firing range, a
+practice pit, a jump-pad tower and a ready board); the lobby is an overlay over it. The host
+starts the match, the level loads on everyone, and at the end everyone returns to the warm-up.
+Single-player never sees the lobby.
 
 | where | what |
 |---|---|
 | `shared::lobby` | `GameMode`, `MatchSettings` (+ clamp / validate), `LevelInfo` + `scan_levels`, `LobbyPhase`, `LobbyPlayer`, `LobbyState`, messages `LobbyRequest` / `LobbyUpdate` |
-| `server::lobby` | `LobbyConfig`, `LobbyCommand`, the `MatchFlow` state and every match-flow method of `Server` |
-| `client::net::lobby` | `NetClient` side: lobby state, level catalog, pings, host commands |
-| `client::menus::lobby` | `LobbyScreen` (the UI) and `Handoff` (a session moving between screens) |
+| `server::lobby` | `LobbyConfig`, `LobbyCommand`, the `MatchFlow` state and every match-flow method of `Server` (incl. the warm-up world and cosmetics) |
+| `shared::sim::warmup` | the warm-up rules on a hub world: respawns, nothing scored, PvP by the next mode, practice consoles and range dummies |
+| `shared::cosmetics` | `Cosmetics` (mask, crest, cloak, emblem, colours, flame) and the catalogues |
+| `client::net::lobby` | `NetClient` side: lobby state, level catalog, pings, host commands, our look |
+| `client::menus::lobby` | `LobbyPanel` (the lobby UI and its state, used by both), `LobbyScreen` (menu-style, no world) and `Handoff` (a session moving between screens) |
+| `client::ingame::warmup` | the warm-up on the game screen: the lobby overlay, the HUD card, the countdown banner, the hub's ready board and console signs |
+| `client::menus::customize` | the CUSTOMISE screen (`CustomizeMenu`, turning preview), `LookSync`, look swatches |
 | `client::ingame::match_flow` | in-game side: phase changes, results screen, scoreboard rows |
 | `client::ingame::scoreboard` | scoreboard table with pluggable score columns |
 
@@ -32,14 +38,50 @@ sees the lobby.
 
 | phase | server | clients |
 |---|---|---|
-| `Lobby` | players connected, **no bodies**, no ticks (the world is kept but not simulated; the tick counter stands still) | lobby screen |
-| `Countdown { secs }` | settings locked, 3 → 1 broadcast as it changes | lobby screen with a countdown band |
+| `Lobby` | the **warm-up**: a `SimWorld` on the hub ([`WARMUP_LEVEL`] `vestry`) with every player and bot in it, ticking (see below). Without a warm-up: **no bodies**, no ticks (the world is kept but not simulated; the tick counter stands still) | game screen with the lobby overlay (without a warm-up: the lobby screen) |
+| `Countdown { secs }` | settings locked, 3 → 1 broadcast as it changes; the warm-up keeps running | the same, with a countdown banner |
 | `InMatch` | fresh `SimWorld` for `settings.level`, every player and bot spawned, `LoadLevel` to all | game screen |
 | `Results` | the level keeps running (so the world stays visible and connections healthy) | game screen with the results panel |
 
-`LobbyPhase::level_running()` is true for `InMatch` and `Results`. Joining during those goes
-straight in (a body at the next spawn point + `LoadLevel`); joining during `Lobby` /
-`Countdown` lands in the lobby (and is spawned when the match starts).
+`LobbyPhase::level_running()` is true for `InMatch` and `Results`; `LobbyState::warmup` says the
+server runs the warm-up in `Lobby` / `Countdown`, and `LobbyState::world_running()` is either.
+Joining while a world runs goes straight in (a body at the next spawn point + `LoadLevel`);
+joining a lobby without a world lands in the lobby screen (and is spawned when the match
+starts).
+
+### The warm-up
+
+Every lobby server runs it unless started with `--no-warmup` (`LobbyConfig::warmup`; also off
+when the hub file is missing or isn't `LevelKind::Hub`: then the lobby has no world, as
+before). The hub is loaded once at startup and a **fresh** warm-up world is built whenever the
+server enters its lobby: at startup, and on every return from a match (`Server::enter_warmup`:
+`replace_world` with the hub, `SimWorld::start_warmup(next settings)`, every member spawned in
+id order, `LoadLevel` to all — then the caller broadcasts the `Lobby` state). The match world
+replaces it at match start as before (`load_match_world`).
+
+Rules (`shared::sim::warmup`, hooked into the death / respawn rule and `step_modes`):
+
+- Deaths respawn after `WARMUP_RESPAWN_SECS` (1 s) at the hub spawn farthest from everyone; no
+  downed state, no checkpoint reset.
+- **Nothing is scored**: no stats, scoreboard, limits, `Ended` or results; the style meter still
+  runs (practice).
+- Players hurt each other only if the **selected next mode** is PvP (`MatchSettings::mode.is_pvp()`,
+  re-applied whenever the host changes the settings: `SimWorld::set_warmup_next`); otherwise
+  their hits only knock back. Practice Moulds get no co-op scaling.
+- The base tuning applies (when `Tuning::for_mode` lands, the warm-up should use the selected
+  mode's profile; see Known limitations). Loadout code can ask `SimWorld::in_warmup()`.
+- **Practice stations** read from the hub's encounters (`step_encounters` only runs campaign
+  levels): an encounter whose trigger has no volume is a **fixture** — its first wave stands from
+  the start (the firing range's Effigy dummies; names the registry doesn't know, e.g. `effigy`
+  before the enemies area lands, are skipped) and each dummy is back 3 s after it dies. Any other
+  encounter is a **console**: a living player *pressing* `USE` inside its trigger summons its
+  next wave (cycling; the previous pack is removed) into its `arena` (the pen), the Moulds aware
+  of the players; a Mould more than 2 m out of the pen is put back where it was summoned; each summon reports
+  `SimEvent::WaveStarted { index, wave, waves, enemies }` (clients name the pack).
+- Dev chat commands (host) work in the warm-up; `spawn_enemies` works there.
+
+The hub's props: the ready board (`models/prop_ready_board.gltf`) and the console
+(`models/prop_console.gltf`), found by the client by model name (`ingame::warmup::HubView`).
 
 **Match start** (`Server::start_match`): load the level from disk (validated again), build a
 new `SimWorld` (doors, encounters, everything level-side starts fresh), **carry the tick
@@ -48,10 +90,11 @@ counter over** (client snapshot ordering and clocks stay monotonic), store the s
 per-client delta baselines and queued inputs (`InputQueue::discard_pending` keeps the sequence
 position), send `LoadLevel`, then the `InMatch` state.
 
-**Return to lobby** (`Server::return_to_lobby`): a fresh, empty `SimWorld` of the same level
-(so nothing from the match lingers), bodies gone, everyone un-readied (bots stay ready),
-`Lobby` state broadcast. Clients unload their level copy and prediction when they see the
-lobby phase. If every human leaves during a match the server returns to the lobby by itself.
+**Return to lobby** (`Server::return_to_lobby`): a fresh warm-up (above) — or without one a
+fresh, empty `SimWorld` of the same level with every body gone — everyone un-readied (bots stay
+ready), `Lobby` state broadcast. Clients keep their world when the state says `warmup` (the hub
+arrived just before with `LoadLevel`), and unload their level copy and prediction otherwise. If
+every human leaves during a match the server returns to the lobby by itself.
 
 **No-lobby servers** (`LobbyConfig::enabled == false`: single-player, tests, `--no-lobby`)
 start in `InMatch` and still broadcast the state (pings, `lobby_enabled: false`); for them
@@ -75,15 +118,18 @@ settings.validate(&levels)?;              // level exists and suits the mode -> 
 settings.fit_to(&levels);                 // clamp + pick a level of the mode (UI after a mode change)
 settings.summary(&levels);                // "DEATHMATCH // CISTERN NINE // 20 FRAGS // 10 MIN"
 
-struct LevelInfo { name, title, kind: LevelKind }   // scan_levels(): assets/levels/*.ron + built-in
+struct LevelInfo { name, title, kind: LevelKind }   // scan_levels(): assets/levels/*.ron + built-in; is_hub()
 enum LobbyPhase { Lobby, Countdown { secs: u8 }, InMatch, Results }
-struct LobbyPlayer { id, name, ready, color: u8, ping_ms: u16, is_host, bot }
+struct LobbyPlayer { id, name, ready, color: u8, ping_ms: u16, is_host, bot, cosmetics: Cosmetics }
 struct LobbyState { phase, settings, players, host: Option<PlayerId>, lobby_enabled, autostart,
-                    results_timeout: Option<u16> }   // all_ready(), ready_count(), ping(id), player(id)
+                    results_timeout: Option<u16>, warmup: bool }
+// all_ready(), ready_count(), ping(id), player(id), world_running(), in_warmup()
 ```
 
 **Level rules**: campaign needs a `LevelKind::Campaign` level, deathmatch an `Arena`;
-`ANY_MODE_LEVELS` (`proving_ground`, `movement_test`) work in both. The server validates
+`ANY_MODE_LEVELS` (`proving_ground`, `movement_test`) work in both. A `LevelKind::Hub` level (the
+Vestry) is never a match level: `validate` refuses it in every mode ("… is the warm-up hall, not
+a match level"), `fit_to` never picks it, and the host / single-player pickers don't list it. The server validates
 against **its own** catalog, which it sends to clients on connect, so the lobby offers levels
 a joining client doesn't have installed (`LoadLevel` carries the whole level anyway).
 
@@ -100,18 +146,24 @@ All on the reliable channel, inside one new variant each (`PROTOCOL_VERSION` 3):
 | `…::CancelCountdown` | C→S | host | |
 | `…::ReturnToLobby` | C→S | host | during `InMatch` / `Results` |
 | `…::Kick { player }` | C→S | host | not yourself; the kicked client sees "kicked by the host" |
+| `ClientMessage::SetCosmetics(Cosmetics)` | C→S | anyone | sent right after `Welcome` (`ClientConfig::cosmetics`) and whenever the look changes (the client debounces: at most every 0.5 s); any phase; sanitised (`Cosmetics::sanitized`), rate-limited with the lobby requests, re-broadcast as `PlayerUpdated` |
 | `ServerMessage::Lobby(LobbyUpdate::State(LobbyState))` | S→C | all | on every change (checked at 30 Hz) and once per second (fresh pings) |
 | `…::Levels(Vec<LevelInfo>)` | S→C | joining client | once on connect |
 | `…::Notice(String)` | S→C | the sender | why a request was refused ("Only the host can do that", "… is a campaign level: deathmatch needs an arena", "Not everyone is ready (FORCE START starts anyway)") |
 
-Validation: lobby requests and ready toggles share a per-player token bucket (burst 10, then
-4/s; the rest is dropped silently, so a spamming client can't flood everyone with state
-broadcasts). Everything else (decode limits, per-update message caps) is the existing protocol
+Validation: lobby requests, ready toggles and look changes share a per-player token bucket
+(burst 10, then 4/s; the rest is dropped silently, so a spamming client can't flood everyone
+with state broadcasts).
+
+**Looks** travel in `PlayerInfo::cosmetics` (player list, joins, updates) and
+`LobbyPlayer::cosmetics`; new players start with the default look until their
+`SetCosmetics` arrives; server bots get a varied look of their own (`server::lobby::bot_cosmetics`). Everything else (decode limits, per-update message caps) is the existing protocol
 hardening (`docs/network.md`).
 
-On connect the order is `Welcome`, [`LoadLevel` if a level runs], `Tuning`, `PlayerList`,
-`Lobby(Levels)`, then the `Lobby(State)` broadcast. At match start `LoadLevel` always precedes
-the `InMatch` state.
+On connect the order is `Welcome`, [`LoadLevel` if a world runs: the match or the warm-up],
+`Tuning`, `PlayerList`, `Lobby(Levels)`, then the `Lobby(State)` broadcast. At match start
+`LoadLevel` always precedes the `InMatch` state, and on the way back the hub's `LoadLevel`
+precedes the `Lobby` state.
 
 ## Host rules
 
@@ -147,6 +199,7 @@ ServerConfig::host(port, level, max_players)        // lobby enabled (listen ser
 ServerConfig::default() / single_player(level)       // no lobby
 
 server.lobby_phase() -> LobbyPhase
+server.world_running() / in_warmup() -> bool         // a world runs / it's the warm-up
 server.match_settings() -> &MatchSettings
 server.lobby_host() -> Option<PlayerId>
 server.levels() -> &[LevelInfo]
@@ -168,6 +221,7 @@ Dedicated server (`velocide-server`) starts in the lobby:
 ```text
 velocide-server [--level cistern_nine] [--mode campaign|deathmatch] [--max-players 8]
                 [--frag-limit 20] [--time-limit 600] [--friendly-fire] [--autostart] [--no-lobby]
+                [--no-warmup]
 ```
 
 Without `--mode` the level's kind decides. An incompatible `--mode` / `--level` pair is an
@@ -187,20 +241,24 @@ player shows ~11–17 ms).
 ### Screens
 
 ```text
- MainMenu ─HOST / JOIN─▶ LobbyScreen ─(LevelLoaded / InMatch state)─▶ InGame
-    ▲  ▲                    ▲                                           │
-    │  └── LEAVE / errors ──┤◀──── Transition::ReturnToLobby (Handoff) ─┘
-    └─────── SINGLE PLAYER ─┴──────────────────────────────▶ InGame (no lobby)
+ MainMenu ─HOST / JOIN─▶ LobbyScreen ─(LevelLoaded: the hub or a match)─▶ InGame ◀─┐
+    ▲  ▲                    ▲   (connecting; lobby without a world)       │  warm-up ⇄ match
+    │  └── LEAVE / errors ──┤◀── Transition::ReturnToLobby (Handoff) ─────┤  in the same screen
+    │                            (only when the lobby has no world)        │
+    └─────── SINGLE PLAYER ─┴────────────────────────────────▶ InGame (no lobby)
 ```
 
 - `Transition::Start(Host | Join)` creates a `LobbyScreen` (`LobbyScreen::start` makes the
   session). It shows a connecting panel until the first lobby state, then the lobby.
-- When a level arrives (`NetEvent::LevelLoaded`, or a running-phase state) the lobby returns
-  `Transition::EnterMatch`; the app moves the session (`LobbyScreen::into_handoff` → `Handoff
-  { session, target, chat }`) into `InGame::from_handoff`, which builds the already received
-  level. Both screens take events **one at a time** and stop at the hand-over, so the game
-  screen still sees the `Spawned` that follows.
-- When the server goes back to the lobby the game screen returns
+- When a level arrives (`NetEvent::LevelLoaded` — with a warm-up that's the hub, right after
+  `Welcome` — or a running-phase state) the lobby returns `Transition::EnterMatch`; the app moves
+  the session (`LobbyScreen::into_handoff` → `Handoff { session, target, chat }`) into
+  `InGame::from_handoff`, which builds the already received level. Both screens take events
+  **one at a time** and stop at the hand-over, so the game screen still sees the `Spawned` that
+  follows.
+- With a warm-up the game screen never leaves: the match's `LoadLevel` replaces the hub, the
+  hub's `LoadLevel` replaces the match level after the results, and the lobby is the overlay.
+- When the server goes back to a lobby **without** a world the game screen returns
   `Transition::ReturnToLobby`; the app moves the session back (`InGame::into_handoff` →
   `LobbyScreen::from_handoff`). Chat history travels along.
 - Joining a match in progress goes through the lobby screen in one frame. A server without a
@@ -208,18 +266,50 @@ player shows ~11–17 ms).
 - `InGame::start(Join)` straight into a lobby server also works (it hands over on the first
   `Lobby` state).
 
+### The warm-up on the game screen (`ingame::warmup`)
+
+- **Lobby overlay**: the same `LobbyPanel` as the lobby screen (`PanelMode::Overlay`) over the
+  dimmed world: players (identity swatch, look swatch, crown, name, ping, status), chat, the
+  match panel (host settings or read-only rows, READY, START / FORCE / CANCEL, CUSTOMISE, WARM UP,
+  LEAVE LOBBY). It opens **by itself on the first arrival** in a session (not for `--bot`
+  clients); TAB / Select (the scoreboard binding: there is no scoreboard in the warm-up), Esc or
+  WARM UP close it, TAB opens it again. While it is open you stand still (neutral inputs), the
+  cursor is free and the HUD, name tags and chat log are hidden. With the overlay closed, Esc
+  opens the pause menu as usual (its RETURN TO LOBBY is hidden in the warm-up).
+- **Ready key**: `Action::Ready` (F1 / d-pad down) toggles ready from the world or the overlay
+  (and on the lobby screen), with a click.
+- **HUD card** (top left, overlay closed): WARM-UP, `NEXT: DEATHMATCH // CISTERN NINE`, one dot
+  per player in their identity colour (filled = ready) with `3/5 READY`, and your state with the
+  keys (`F1 READY UP   TAB LOBBY` / `READY (F1 CANCEL)`). No level timer.
+- **Countdown**: the MATCH STARTING band with the number and the summary, on top of the world and
+  of the overlay.
+- **The hub**: the ready board on the nave's screen wall lists the next match, every player in
+  their identity colour with `>` and READY / ... / BOT, and `3/5 READY` / `MATCH STARTS IN 3`
+  (world-space text meshes on the board prop, rebuilt only when the text changes); the practice
+  console's sign reads `PRACTICE PIT` / `NEXT: 2 CENSERS + 2 GNAWERS`; standing in its USE zone
+  shows `E SUMMON …` under the crosshair; a summon shows the banner `PRACTICE: 4 GNAWERS` with
+  the wave sound.
+- **CUSTOMISE** (from the overlay): the customise sub-screen with the preview in front of the
+  world (`docs/models.md` "Cosmetics").
+
 ### Lobby screen layout
+
+(Shown while connecting and on servers whose lobby has no world; the overlay has the same
+panels under a slim WARM-UP LOBBY header.)
 
 Title + `HOSTING ON PORT 47420` (or the server address); top right: who you are, **LOBBY**,
 and for hosts `FRIENDS JOIN WITH 192.168.1.20:47420 (UDP)` (`net::lan::local_lan_ip`: a UDP
 socket `connect`ed to 8.8.8.8 — no packet is sent — falling back to private ranges, then to a
-generic hint). Left: **PLAYERS n/max** (colour swatch, host crown, name, ping coloured by
-`hud::ping_color`, READY / ... / BOT, open slots; the host gets a mouse-only `X` kick column)
+generic hint). Left: **PLAYERS n/max** (identity colour swatch — the marker shape with shape
+cues — then a look swatch: coat colour, mask colour, flame dot; host crown, name, ping coloured
+by `hud::ping_color`, READY / ... / BOT, open slots; the host gets a mouse-only `X` kick column)
 and **CHAT** (log + field, Enter or SEND; `T` focuses it). Right: **MATCH** — for the host
 MODE / LEVEL (levels of the mode first, sandboxes marked TEST) / MAX PLAYERS / FRAG LIMIT +
 TIME LIMIT (deathmatch, presets incl. NONE) / FRIENDLY FIRE (co-op); everyone else sees the
-same as read-only rows. Then READY (default focus), START MATCH (enabled when all are ready) +
-FORCE START or CANCEL START (host), LEAVE LOBBY, and a status line. A countdown band (number
+same as read-only rows (`host_settings` / `settings_rows`: new settings go in both). Then READY
+(default focus), START MATCH (enabled when all are ready) + FORCE START or CANCEL START (host),
+the player's own buttons (`player_buttons`: CUSTOMISE; LOADOUT goes next to it), LEAVE LOBBY,
+and a status line. A countdown band (number
 pops in, settings summary) covers the lower screen. Esc while typing leaves the chat field;
 otherwise it asks "LEAVE LOBBY?" (hosts are warned everyone gets disconnected). Server notices
 appear bottom-left for 6 s.
@@ -238,7 +328,8 @@ explains why). Changing the mode re-fits the level and player limit (`MatchSetti
 - **Results** (`LobbyPhase::Results`): a MATCH OVER banner, the scoreboard with the match
   summary, and CONTINUE TO LOBBY / LEAVE GAME (host), "WAITING FOR THE HOST" + LEAVE GAME
   (others), RESTART / MAIN MENU (single-player). The countdown to the automatic return is
-  shown. Gameplay input stops, the cursor is released, Esc doesn't open the pause menu.
+  shown. Gameplay input stops, the cursor is released, Esc doesn't open the pause menu. Every
+  row shows the player's look swatch (`ResultsScreen::looks`).
 - `NetEvent::Notice` lines appear in the chat log in red.
 
 ### Command line
@@ -246,7 +337,7 @@ explains why). Changing the mode re-fits the level and player limit (`MatchSetti
 ```text
 velocide --host [PORT] [--level L] [--mode campaign|deathmatch] [--max-players N] [--autostart]
 velocide --connect IP:PORT [--ready]
-         --ready       ready up automatically 1 s after entering the lobby (--bot implies it)
+         --ready       ready up automatically 1 s after entering the lobby / the warm-up (--bot implies it)
          --autostart   hosting: the server starts once everyone is ready (implies --ready)
 ```
 
@@ -262,8 +353,11 @@ saved (`Settings::host_mode`).
 - **Fresh world per match**: `Server::replace_world` carries server configuration over (the
   enemy registry loaded from `assets/enemies/`, the tick counter), purges pending FX, resets lag
   compensation, delta baselines and queued inputs. Per-world dev toggles (`/god`, `/ff`) reset.
-  No ticks (so no combat, AI or FX) run in the lobby; dev chat commands answer "no match is
-  running" there and `spawn_enemies` returns nothing.
+  In a lobby **without** a world no ticks (so no combat, AI or FX) run; dev chat commands
+  answer "no match is running" there and `spawn_enemies` returns nothing. The warm-up is a
+  world with its own rules (above): game-mode code must not treat it as a match
+  (`SimWorld::in_warmup()`; `world.match_settings` is the hub's, Campaign; the next match's
+  settings are the lobby's).
 - **Match clock**: a new `SimWorld` is built for every match (`SimWorld::new` → your mode
   state starts fresh), but `world.tick` continues from the previous world. Count elapsed match
   time in your own state (e.g. ticks stepped since creation), not from `tick == 0`.
@@ -283,23 +377,38 @@ saved (`Settings::host_mode`).
 ## Tests and tools
 
 ```text
-cargo test -p client --test lobby          # 11 headless tests (virtual clock, real UDP)
+cargo test -p client --test lobby          # 14 headless tests (virtual clock, real UDP)
 cargo test -p client --test lobby_screen   # real lobby + game screens on a headless GPU
-cargo run -p client --release --example lobby_shots -- out/   # PNGs: host / guest lobby,
-        # countdown, match, scoreboard with pings, host pause menu, results, lobby after
+cargo test -p server --test warmup_net     # warm-up phases, rules, cosmetics over UDP
+cargo test -p shared --lib warmup          # practice stations, respawns, PvP by next mode
+cargo run -p client --release --example lobby_shots -- out/   # PNGs: the warm-up overlay (host
+        # / guest), the hub with the HUD card and the ready board, customise over the world, a
+        # practice pack, the countdown banner, match, scoreboard with pings, host pause menu,
+        # results, back in the warm-up, the lobby screen without a world + its leave dialog
 scripts/local_test.sh --release            # dedicated server (--autostart) + 2 clients (--ready)
 scripts/local_test.sh --lobby              # ... staying in the lobby (P1 hosts, starts by hand)
 ```
 
 `client/tests/lobby.rs` covers: host-only settings / start (guest requests refused with a
-notice), clamping, START needs all ready, 3 s countdown → the chosen level on every client
-with exact prediction; invalid level/mode pairs and too many players for co-op; settings
-locked outside the lobby; join-in-progress; dedicated host migration (+ listen servers never
-migrate, wrong tokens ignored); return to lobby (fresh level: door state reset, ready reset,
-second match with working inputs); results phase + timeout; autostart (cancelled by a
-not-ready joiner); ping propagation (≈120 ms RTT player shows 90–250 ms everywhere, also in
-match); disconnects during countdown and match (empty server returns to the lobby); server
-full + raising the limit; ready spam rate limit; no-lobby servers.
+notice), clamping, everyone in the warm-up with a body, START needs all ready, 3 s countdown
+(the warm-up running through it) → the chosen level on every client with exact prediction;
+invalid level/mode pairs and too many players for co-op; settings locked outside the lobby;
+join-in-progress; dedicated host migration (+ listen servers never migrate, wrong tokens
+ignored); the warm-up after every match (prediction exact in the hub, ready reset, a fresh
+match level) and the same return to a lobby without a world (no bodies, door state reset);
+results phase + timeout; autostart (cancelled by a not-ready joiner); ping propagation
+(≈120 ms RTT player shows 90–250 ms everywhere, also in match); disconnects during countdown
+and match (empty server returns to the lobby); server full + raising the limit; ready spam rate
+limit; no-lobby servers; dev commands in the warm-up and refused in an empty lobby.
+`client/tests/lobby_screen.rs` drives the real screens: the hub hands the session to the game
+screen at once, autostart → match → join-in-progress → the host's RETURN TO LOBBY brings both
+back to the warm-up without a screen change → second match; the overlay (opens on arrival,
+TAB / Esc / Select), the Ready key without the overlay, CUSTOMISE (the look reaches the server,
+DONE saves); and the old lobby screen round trip on a server without a warm-up.
+`server/tests/warmup_net.rs`: the warm-up around every match (bodies, bots, the hub refused as a
+match level, PvP only with a PvP next mode, ~1 s respawns, no scoreboard / results, the countdown
+keeps ticking, late joiners, the empty server returns to its warm-up), `--no-warmup`, and looks
+(shared with the welcome, sanitised, rate-limited, bots' own looks).
 
 ## Known limitations
 
@@ -310,5 +419,10 @@ full + raising the limit; ready spam rate limit; no-lobby servers.
 - The countdown is fixed at 3 s and can't be configured per server.
 - Chat history isn't sent to players who join later.
 - The first lobby state on a listen server can show no host for one round trip.
-- Player colours follow the slot (`PlayerId`); `LobbyPlayer::color` is there for a future
-  colour picker.
+- Player identity colours follow the slot (`PlayerId`); `LobbyPlayer::color` is there for a
+  future colour picker. (Cosmetic colours are separate: they never replace the identity colour.)
+- The warm-up runs the base tuning. When the arsenal's `Tuning::for_mode` exists, the warm-up
+  should use the selected mode's profile (and send it to clients).
+- A practice console remembers its next pack per world; a client that joins later shows pack 1
+  as next on the console's sign until someone summons.
+- The overlay opens by itself only on the first arrival in a session, not after every match.

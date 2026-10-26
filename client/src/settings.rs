@@ -113,6 +113,8 @@ pub struct Settings {
     pub show_viewmodel: bool,
     pub fullscreen: bool,
     pub accessibility: Accessibility,
+    /// How your Shrike looks (the CUSTOMISE screen; sent to servers, docs/lobby.md).
+    pub cosmetics: shared::cosmetics::Cosmetics,
 }
 
 impl Default for Settings {
@@ -145,6 +147,7 @@ impl Default for Settings {
             show_viewmodel: true,
             fullscreen: false,
             accessibility: Accessibility::default(),
+            cosmetics: shared::cosmetics::Cosmetics::default(),
         }
     }
 }
@@ -252,6 +255,7 @@ impl Settings {
         r.vertex_snap_strength = finite_or(r.vertex_snap_strength, 1.0).clamp(0.25, 8.0);
         r.color_bits = r.color_bits.clamp(2, 8);
         self.accessibility.color_vision = self.accessibility.color_vision.sanitized();
+        self.cosmetics = self.cosmetics.sanitized();
         self.bindings.fill_missing();
     }
 

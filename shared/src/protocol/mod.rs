@@ -234,6 +234,8 @@ pub struct PlayerInfo {
     pub ready: bool,
     /// Server-side bot (no connection).
     pub bot: bool,
+    /// How their Shrike looks (sanitised by the server; `ClientMessage::SetCosmetics`).
+    pub cosmetics: crate::cosmetics::Cosmetics,
 }
 
 /// Reliable gameplay events (`ServerMessage::Game`). Who receives each one and what the client

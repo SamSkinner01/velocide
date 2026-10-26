@@ -19,7 +19,8 @@ the debug overlay.
 | `ui_input` | `UiInputMapper`: `InputState` → `ui::UiInput` (keyboard + gamepad navigation with repeat) |
 | `bot` | `--bot` auto-pilot for multi-client testing |
 | `menus::main_menu` | main menu: single player (level select), host (mode, level, port, max players), join, settings, notices |
-| `menus::lobby` | `LobbyScreen`: the lobby of hosted / joined games, `Handoff` (docs/lobby.md) |
+| `menus::lobby` | `LobbyPanel` (the lobby UI, used by the lobby screen and the warm-up overlay), `LobbyScreen` (connecting / lobby without a world), `Handoff` (docs/lobby.md) |
+| `menus::customize` | the CUSTOMISE screen (cosmetics with a turning preview), `LookSync`, look swatches |
 | `menus::results` | `ResultsScreen`: animated campaign / co-op / deathmatch results (docs/style_modes.md) |
 | `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay, Accessibility with a palette preview), reused by the pause menu |
 | `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
@@ -35,6 +36,7 @@ the debug overlay.
 | `ingame::cues` | accessibility shape cues: player marker shapes (`player_swatch`, `draw_marker`), the parry icon over enemies in their parry window (`parry_icons`) |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
 | `ingame::match_flow` | lobby phase changes in game, results screen, scoreboard rows |
+| `ingame::warmup` | the lobby's warm-up on the game screen: lobby overlay, Ready key, HUD card, countdown banner, the hub's ready board and console signs (docs/lobby.md) |
 | `ingame::style_hud`, `ingame::mode_hud` | style meter + style feed + rank banner; game-mode state and HUD (checkpoints, downed / revive, extraction, deathmatch clock), score cells, results glue (docs/style_modes.md) |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
@@ -275,6 +277,8 @@ Music intensity: set it every frame from game state in `InGame::frame` (step 7).
 | pause | Esc | Start |
 | restart (solo) | R | — |
 | debug overlay / fullscreen | F3 / F11 | — |
+| ready up (lobby / warm-up) | F1 | d-pad down |
+| lobby overlay (warm-up) | Tab (the scoreboard key) | Select |
 
 Every action can hold several bindings; the rebinding UI keeps one keyboard/mouse and one
 gamepad binding per action (binding a key removes it from other actions). `PlayerInput::weapon`

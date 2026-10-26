@@ -1,10 +1,13 @@
 //! Lobby side of [`NetClient`]: the server's lobby state and level catalog, pings, and the
 //! host's commands (docs/lobby.md).
 //!
-//! When the lobby phase leaves the match (`Lobby` / `Countdown`) the client unloads its level
-//! copy and prediction (the server removed every body), so `is_in_game()` turns false and the
-//! game screen hands the session back to the lobby screen. The next `LoadLevel` + snapshot
-//! starts prediction again as on first connect.
+//! When the lobby phase leaves the match (`Lobby` / `Countdown`) on a server **without** a
+//! warm-up, the client unloads its level copy and prediction (the server removed every body),
+//! so `is_in_game()` turns false and the game screen hands the session back to the lobby
+//! screen. With the warm-up (`LobbyState::warmup`) the server has already sent the hub
+//! (`LoadLevel`) and everyone keeps a body: nothing is unloaded and the game screen stays,
+//! showing the lobby as an overlay. The next `LoadLevel` + snapshot starts prediction again as
+//! on first connect.
 
 use shared::lobby::{LevelInfo, LobbyPhase, LobbyRequest, LobbyState, LobbyUpdate, MatchSettings};
 use shared::protocol::ClientMessage;
@@ -22,9 +25,38 @@ impl NetClient {
         self.lobby.as_ref().map(|l| l.phase)
     }
 
-    /// The server is in its lobby (or counting down): show the lobby screen.
+    /// The server is in its lobby (or counting down): the lobby screen, or the warm-up with the
+    /// lobby overlay ([`NetClient::in_warmup`]).
     pub fn in_lobby(&self) -> bool {
         self.lobby_phase().is_some_and(LobbyPhase::in_lobby)
+    }
+
+    /// The server is in its lobby and runs the warm-up hub: we have a body there.
+    pub fn in_warmup(&self) -> bool {
+        self.lobby.as_ref().is_some_and(LobbyState::in_warmup)
+    }
+
+    /// Our look (what was last sent).
+    pub fn cosmetics(&self) -> shared::cosmetics::Cosmetics {
+        self.cosmetics
+    }
+
+    /// Changes our look: sent now if connected (the server sanitises, rate-limits and shares
+    /// it), else with the welcome. Callers debounce (the customise screen sends at most every
+    /// half second).
+    pub fn set_cosmetics(&mut self, cosmetics: shared::cosmetics::Cosmetics) {
+        let cosmetics = cosmetics.sanitized();
+        if cosmetics != self.cosmetics {
+            self.cosmetics = cosmetics;
+            if self.welcome().is_some() {
+                self.send_cosmetics();
+            }
+        }
+    }
+
+    pub(super) fn send_cosmetics(&mut self) {
+        let msg = ClientMessage::SetCosmetics(self.cosmetics);
+        self.send_reliable(&msg);
     }
 
     /// Levels the server can run.
@@ -89,7 +121,8 @@ impl NetClient {
             LobbyUpdate::State(state) => {
                 let previous = self.lobby_phase();
                 let phase = state.phase;
-                if !phase.level_running() {
+                // The warm-up keeps its world (the hub arrived with `LoadLevel`).
+                if !state.world_running() {
                     self.unload_level();
                 }
                 self.lobby = Some(state);

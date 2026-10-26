@@ -264,6 +264,17 @@ impl CombatClient {
 }
 
 /// Name of whoever caused something, for the kill feed.
+/// A player's wick flame colour (their cosmetics) for glows.
+fn wick_color(net: &NetClient, player: shared::sim::PlayerId) -> Vec4 {
+    let rgb = net
+        .players()
+        .get(&player)
+        .map(|p| p.cosmetics)
+        .unwrap_or_default()
+        .flame_rgb();
+    Vec4::new(rgb[0], rgb[1], rgb[2], 0.9)
+}
+
 fn owner_name(net: &NetClient, owner: Owner, attack: Attack) -> String {
     match owner {
         Owner::Player(id) if Some(id) == net.local_player_id() => "YOU".into(),
@@ -486,6 +497,13 @@ impl InGame {
                     || matches!(k.victim, HitTarget::Player(_));
                 let mine = k.killer.player() == local && local.is_some();
                 let me_dead = k.victim.player() == local && local.is_some();
+                // A Shrike's wick gutters out in its own flame colour (cosmetics).
+                if let HitTarget::Player(victim) = k.victim {
+                    let flame = wick_color(net, victim);
+                    self.effects
+                        .glow(k.position + Vec3::Y * 0.4, flame, 1.8, 0.6);
+                    self.effects.smoke(k.position + Vec3::Y * 0.5, 4);
+                }
                 if involves_player {
                     let color = if mine || me_dead {
                         theme.crimson_bright
@@ -545,8 +563,9 @@ impl InGame {
                     self.combat.killed_by = None;
                     self.combat.predictor.reset();
                 }
-                self.effects
-                    .glow(position + Vec3::Y, Vec4::new(1.0, 0.3, 0.3, 0.9), 2.5, 0.4);
+                // The wick relit, in the player's flame colour (cosmetics).
+                let flame = wick_color(net, player);
+                self.effects.glow(position + Vec3::Y, flame, 2.5, 0.4);
             }
             // Style and game-mode events are handled in `on_net_event` (style_hud / mode_hud).
             GameEvent::Style(_) | GameEvent::Mode(_) => {}

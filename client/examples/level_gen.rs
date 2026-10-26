@@ -35,6 +35,8 @@ mod ingot_run;
 mod knell_yard;
 #[path = "level_gen/spire.rs"]
 mod spire;
+#[path = "level_gen/vestry.rs"]
+mod vestry;
 
 // ------------------------------------------------------------------------------------------
 // Builder
@@ -622,7 +624,22 @@ fn emit(g: &Gen, header: &str) -> String {
         let _ = writeln!(s, "        {}, // {note}", volume(k));
     }
     s.push_str("    ],\n");
-    s.push_str("    props: [],\n");
+    if d.props.is_empty() {
+        s.push_str("    props: [],\n");
+    } else {
+        s.push_str("    props: [\n");
+        for p in &d.props {
+            let _ = writeln!(
+                s,
+                "        (model: {:?}, position: {}, rotation: {}, scale: {}),",
+                p.model,
+                v(p.position),
+                v(p.rotation),
+                f(p.scale)
+            );
+        }
+        s.push_str("    ],\n");
+    }
     s.push_str(")\n");
     s
 }
@@ -2583,6 +2600,11 @@ fn main() -> anyhow::Result<()> {
             "spire_of_wicks.ron",
             spire::spire(),
             "Spire of Wicks — co-op campaign level (1-4 players). See docs/levels.md.",
+        ),
+        (
+            "vestry.ron",
+            vestry::vestry(),
+            "The Vestry — the lobby's warm-up hub (never a match level). See docs/levels.md, docs/lobby.md.\nGenerator module: client/examples/level_gen/vestry.rs.",
         ),
     ] {
         let text = emit(&g, header);

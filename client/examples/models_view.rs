@@ -5,6 +5,8 @@
 //! - `closeup_*.png`: each enemy from the front three-quarter and from behind;
 //! - `shrike_*.png`, `gnawer_*.png`, `censer_*.png`, `harrier_*.png`, `gaoler_*.png`,
 //!   `heron_*.png`: animation states, every attack's wind-up and strike;
+//! - `look_masks.png`, `look_crests.png`, `look_cloaks.png` (from behind, running),
+//!   `look_emblems.png`, `look_random.png`: the Shrike's cosmetics (`models::cosmetics`);
 //! - `vm_*.png`: first-person viewmodels (rest, kick, alt modes, crest fold, bellows pump,
 //!   discharge charge, drum turn, switch, punch, thorn throw...);
 //! - `weapons.png`, `weapons_34.png`: the four guns at real scale (side, three-quarter front);
@@ -198,6 +200,124 @@ fn row(n: usize, spacing: f32) -> Vec<Vec3> {
 const FACE_CAMERA: f32 = std::f32::consts::PI - 0.45;
 /// Profile view (facing screen-left, turned slightly towards the camera).
 const FACE_SIDE: f32 = std::f32::consts::FRAC_PI_2 + 0.35;
+
+/// The cosmetics: every mask / crest (heads close up), cloak (from behind, running), emblem
+/// (chests close up), and a lineup of random looks in team colours.
+fn look_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
+    use shared::cosmetics::{CLOAKS, CRESTS, Cosmetics, EMBLEMS, MASKS};
+    let t = 2.1;
+    let mut shots = Vec::new();
+    let face = |cosmetics: Cosmetics| PlayerAnim {
+        yaw: FACE_CAMERA + 0.25,
+        cosmetics,
+        ..player(t)
+    };
+    // Masks and crests: a row of heads (camera at head height).
+    for (name, title, n, set) in [
+        ("look_masks", "MASKS", MASKS.len(), 0usize),
+        ("look_crests", "CRESTS", CRESTS.len(), 1),
+    ] {
+        let positions = row(n, 0.7);
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.8, 5.0),
+            Vec3::new(0.0, 1.6, 0.0),
+            40.0,
+        ));
+        for (i, pos) in positions.iter().enumerate() {
+            let mut look = Cosmetics {
+                crest: 0,
+                cloak: 0,
+                ..Default::default()
+            };
+            let label = if set == 0 {
+                look.mask = i as u8;
+                MASKS[i]
+            } else {
+                look.crest = i as u8;
+                CRESTS[i]
+            };
+            lib.draw_player(&face(look), *pos, &Tint::default(), &mut shot.draws);
+            shot.labels
+                .push((*pos + Vec3::new(0.0, 2.15, 0.0), label.into()));
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
+    // Cloaks: from behind, standing and running.
+    let positions = row(CLOAKS.len() * 2, 1.05);
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.7, 5.6),
+        Vec3::new(0.0, 1.0, 0.0),
+        55.0,
+    ));
+    for (i, pos) in positions.iter().enumerate() {
+        let look = Cosmetics {
+            cloak: (i / 2) as u8,
+            primary: 11,
+            secondary: 7,
+            ..Default::default()
+        };
+        let running = i % 2 == 1;
+        let anim = PlayerAnim {
+            yaw: -0.3,
+            velocity: if running {
+                Quat::from_rotation_y(-0.3) * Vec3::new(0.0, 0.0, -12.0)
+            } else {
+                Vec3::ZERO
+            },
+            cycle: 0.3,
+            cosmetics: look,
+            ..player(t)
+        };
+        lib.draw_player(&anim, *pos, &Tint::default(), &mut shot.draws);
+        let label = if running { "(RUN)" } else { CLOAKS[i / 2] };
+        shot.labels
+            .push((*pos + Vec3::new(0.0, -0.25, 0.0), label.into()));
+    }
+    shots.push(("look_cloaks".into(), "CLOAKS (BEHIND)".into(), shot));
+    // Emblems: chests close up.
+    let positions = row(EMBLEMS.len(), 0.62);
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.3, 2.7),
+        Vec3::new(0.0, 1.22, 0.0),
+        38.0,
+    ));
+    for (i, pos) in positions.iter().enumerate() {
+        let look = Cosmetics {
+            emblem: i as u8,
+            flame: i as u8,
+            cloak: 0,
+            ..Default::default()
+        };
+        let anim = PlayerAnim {
+            yaw: std::f32::consts::PI,
+            ..face(look)
+        };
+        lib.draw_player(&anim, *pos, &Tint::default(), &mut shot.draws);
+        shot.labels
+            .push((*pos + Vec3::new(0.0, 0.85, 0.0), EMBLEMS[i].into()));
+    }
+    shots.push(("look_emblems".into(), "EMBLEMS + FLAMES".into(), shot));
+    // Random looks in slot colours (identity markers must stay readable).
+    let positions = row(8, 1.15);
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.5, 6.4),
+        Vec3::new(0.0, 1.0, 0.0),
+        55.0,
+    ));
+    for (i, pos) in positions.iter().enumerate() {
+        let look = Cosmetics::from_seed(i as u32 * 7 + 3);
+        lib.draw_player(
+            &face(look),
+            *pos,
+            &Tint::team(client::palette::STANDARD.team[i]),
+            &mut shot.draws,
+        );
+        shot.labels
+            .push((*pos + Vec3::new(0.0, -0.25, 0.0), format!("SLOT {}", i + 1)));
+    }
+    shots.push(("look_random".into(), "RANDOM LOOKS".into(), shot));
+    shots
+}
 
 fn shrike_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
     let t = 3.3;
@@ -1067,6 +1187,7 @@ fn main() -> anyhow::Result<()> {
         ));
     }
     shots.extend(shrike_shots(&lib));
+    shots.extend(look_shots(&lib));
     for (name, title, kind, poses, spacing, dist, cam_y, target_y) in enemy_sheets() {
         shots.push((
             name.into(),

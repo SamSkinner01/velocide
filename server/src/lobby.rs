@@ -2,16 +2,21 @@
 //!
 //! The server is always in one [`LobbyPhase`] (`shared::lobby`):
 //!
-//! - **Lobby**: players are connected but have no body; no level is simulated (the world is
-//!   kept, empty, and the tick counter stands still). The host edits [`MatchSettings`],
-//!   players ready up and chat.
-//! - **Countdown**: [`shared::lobby::COUNTDOWN_SECS`] seconds, then [`Server::start_match`].
+//! - **Lobby**: the host edits [`MatchSettings`], players ready up and chat. With the
+//!   **warm-up** ([`LobbyConfig::warmup`], on by default) the server runs the hub level
+//!   ([`WARMUP_LEVEL`], `shared::sim::warmup`): everyone has a body, runs around and shoots,
+//!   deaths respawn in a second, nothing is scored, and players hurt each other only when the
+//!   selected next mode is PvP. Without it (or if the hub can't be loaded) players have no body
+//!   and nothing is simulated (the tick counter stands still).
+//! - **Countdown**: [`shared::lobby::COUNTDOWN_SECS`] seconds (the warm-up keeps running),
+//!   then [`Server::start_match`].
 //! - **InMatch**: a fresh `SimWorld` for the chosen level (doors, encounters... reset), every
 //!   connected player and bot gets a body, `LoadLevel` goes to everyone. Players joining now
 //!   go straight in (join-in-progress).
 //! - **Results**: [`Server::end_match`] (called by the game-mode rules when a match is won /
 //!   the exit is reached). The level keeps running behind the results screen until the host
-//!   continues ([`LobbyRequest::ReturnToLobby`]) or [`RESULTS_TIMEOUT_SECS`] pass.
+//!   continues ([`LobbyRequest::ReturnToLobby`]) or [`RESULTS_TIMEOUT_SECS`] pass; then
+//!   everyone is back in a fresh warm-up.
 //!
 //! **Host**: on a listen server the player whose client presents the session's secret
 //! ([`LobbyConfig::host_token`], `LobbyRequest::ClaimHost`); on a dedicated server the
@@ -29,12 +34,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use renet::ClientId;
-use shared::level::LevelDef;
+use shared::cosmetics::Cosmetics;
+use shared::level::{LevelDef, LevelKind};
 use shared::lobby::{
     COUNTDOWN_SECS, GameMode, LevelInfo, LobbyPhase, LobbyPlayer, LobbyRequest, LobbyState,
     LobbyUpdate, MatchSettings,
 };
 use shared::protocol::{self, CHANNEL_RELIABLE, ServerMessage};
+pub use shared::sim::warmup::WARMUP_LEVEL;
 use shared::sim::{PlayerId, SimWorld};
 
 use crate::{LAG_COMP_HISTORY_MS, LagCompHistory, Server, ServerConfig};
@@ -65,6 +72,10 @@ pub struct LobbyConfig {
     /// Listen servers: the secret the host's own client presents (`LobbyRequest::ClaimHost`)
     /// to become host. `None` = dedicated rules (first player to join is host, migrates).
     pub host_token: Option<u64>,
+    /// Run the warm-up hub ([`WARMUP_LEVEL`]) in the lobby phases: everyone gets a body and can
+    /// run around until the match starts. Without it (or if the hub can't be loaded) the lobby
+    /// has no world (`velocide-server --no-warmup`).
+    pub warmup: bool,
     /// Initial mode, limits and friendly fire. `level` and `max_players` are taken from
     /// `ServerConfig::level` / `ServerConfig::max_players`. If the mode doesn't suit the level,
     /// the level's natural mode is used.
@@ -72,13 +83,19 @@ pub struct LobbyConfig {
 }
 
 impl LobbyConfig {
-    /// A lobby with default settings.
+    /// A lobby with default settings and the warm-up.
     pub fn enabled() -> Self {
         Self {
             enabled: true,
+            warmup: true,
             ..Default::default()
         }
     }
+}
+
+/// The look of a server bot: varied, the same for a slot every time.
+pub fn bot_cosmetics(id: PlayerId) -> Cosmetics {
+    Cosmetics::from_seed(0xB07 + id.0 as u32)
 }
 
 /// Lobby control for whoever owns the server (`ServerCommand::Lobby`): no host check.
@@ -100,6 +117,10 @@ pub(crate) struct MatchFlow {
     pub(crate) settings: MatchSettings,
     pub(crate) host: Option<PlayerId>,
     pub(crate) levels: Vec<LevelInfo>,
+    /// The warm-up hub, loaded once at startup (`None`: no warm-up).
+    warmup_level: Option<Arc<LevelDef>>,
+    /// The world is the warm-up (Lobby / Countdown phases with `warmup_level`).
+    warmup_on: bool,
     enabled: bool,
     autostart: bool,
     host_token: Option<u64>,
@@ -140,6 +161,19 @@ impl MatchFlow {
         if lobby.enabled {
             settings.clamp();
         }
+        let warmup_level = (lobby.enabled && lobby.warmup)
+            .then(|| match shared::sim::load_level(WARMUP_LEVEL) {
+                Ok(def) if def.kind == LevelKind::Hub => Some(Arc::new(def)),
+                Ok(_) => {
+                    log::warn!("'{WARMUP_LEVEL}' is not a hub level: lobby without warm-up");
+                    None
+                }
+                Err(e) => {
+                    log::warn!("no warm-up hub ({e:#}): lobby without a world");
+                    None
+                }
+            })
+            .flatten();
         MatchFlow {
             phase: if lobby.enabled {
                 LobbyPhase::Lobby
@@ -149,6 +183,8 @@ impl MatchFlow {
             settings,
             host: None,
             levels,
+            warmup_level,
+            warmup_on: false,
             enabled: lobby.enabled,
             autostart: lobby.autostart,
             host_token: lobby.host_token,
@@ -189,6 +225,16 @@ impl Server {
         &self.flow.levels
     }
 
+    /// A level is loaded and players have bodies: a match, its results, or the warm-up.
+    pub fn world_running(&self) -> bool {
+        self.flow.phase.level_running() || self.flow.warmup_on
+    }
+
+    /// The players are in the warm-up hub (Lobby / Countdown with the warm-up world).
+    pub fn in_warmup(&self) -> bool {
+        self.flow.warmup_on && self.flow.phase.in_lobby()
+    }
+
     /// The lobby state as it is broadcast.
     pub fn lobby_state(&self) -> LobbyState {
         let mut players: Vec<LobbyPlayer> = self
@@ -204,6 +250,7 @@ impl Server {
                     ping_ms: self.flow.pings.get(&id).copied().unwrap_or(0),
                     is_host: self.flow.host == Some(id),
                     bot: false,
+                    cosmetics: c.cosmetics,
                 })
             })
             .collect();
@@ -215,6 +262,7 @@ impl Server {
             ping_ms: 0,
             is_host: false,
             bot: true,
+            cosmetics: bot_cosmetics(*id),
         }));
         players.sort_by_key(|p| p.id);
         LobbyState {
@@ -229,6 +277,7 @@ impl Server {
                 .results_end
                 .filter(|_| self.flow.phase == LobbyPhase::Results)
                 .map(|t| (t - self.time).max(0.0).ceil() as u16),
+            warmup: self.in_warmup(),
         }
     }
 
@@ -253,6 +302,8 @@ impl Server {
         }
         if settings != self.flow.settings {
             log::info!("match settings: {}", settings.summary(&self.flow.levels));
+            // The warm-up follows the next mode: PvP damage between players or not.
+            self.world.set_warmup_next(&settings);
             self.flow.settings = settings;
         }
         Ok(())
@@ -311,8 +362,9 @@ impl Server {
         self.broadcast_lobby_state();
     }
 
-    /// Ends the match (or the results screen) and brings everyone back to the lobby with a
-    /// fresh, empty level and everyone un-readied. Without a lobby: restarts the level.
+    /// Ends the match (or the results screen) and brings everyone back to the lobby, everyone
+    /// un-readied: into a fresh warm-up (everyone spawned in the hub), or without one a fresh,
+    /// empty copy of the level. Without a lobby: restarts the level.
     pub fn return_to_lobby(&mut self) {
         if !self.flow.enabled {
             let name = self.world.level_name.clone();
@@ -330,13 +382,15 @@ impl Server {
             LobbyPhase::InMatch | LobbyPhase::Results => {}
         }
         log::info!("returning to the lobby");
-        let world = SimWorld::new(
-            &self.world.level_name,
-            self.world.level.clone(),
-            self.config.tick_rate,
-        );
-        let settings = self.flow.settings.clone();
-        self.replace_world(world, settings);
+        if !self.enter_warmup() {
+            let world = SimWorld::new(
+                &self.world.level_name,
+                self.world.level.clone(),
+                self.config.tick_rate,
+            );
+            let settings = self.flow.settings.clone();
+            self.replace_world(world, settings);
+        }
         self.flow.phase = LobbyPhase::Lobby;
         self.flow.results_end = None;
         self.flow.countdown_end = None;
@@ -373,9 +427,13 @@ impl Server {
 
     // ---- hooks called from lib.rs ---------------------------------------------------------------
 
-    /// Applies the initial settings to the world (end of `Server::with_transport`).
+    /// Applies the initial settings to the world (end of `Server::with_transport`); lobby
+    /// servers with a warm-up start in the hub.
     pub(crate) fn init_match_flow(&mut self) {
         self.world.apply_match_settings(self.flow.settings.clone());
+        if self.flow.enabled && self.enter_warmup() {
+            log::info!("warm-up: '{WARMUP_LEVEL}'");
+        }
         if self.flow.enabled {
             log::info!(
                 "lobby open: {} ({} levels){}",
@@ -420,6 +478,29 @@ impl Server {
         };
         if conn.ready != ready {
             conn.ready = ready;
+            if let Some(info) = conn.info() {
+                self.broadcast(&ServerMessage::PlayerUpdated(info));
+            }
+        }
+    }
+
+    /// `ClientMessage::SetCosmetics` (sanitised, rate-limited with the lobby requests): stored
+    /// and shared with everyone (`PlayerUpdated`, lobby state).
+    pub(crate) fn lobby_set_cosmetics(
+        &mut self,
+        client: ClientId,
+        player: PlayerId,
+        cosmetics: Cosmetics,
+    ) {
+        if !self.lobby_rate_ok(player) {
+            return;
+        }
+        let cosmetics = cosmetics.sanitized();
+        let Some(conn) = self.clients.get_mut(&client) else {
+            return;
+        };
+        if conn.cosmetics != cosmetics {
+            conn.cosmetics = cosmetics;
             if let Some(info) = conn.info() {
                 self.broadcast(&ServerMessage::PlayerUpdated(info));
             }
@@ -500,6 +581,7 @@ impl Server {
                     if left <= 0.0 {
                         if let Err(e) = self.start_match() {
                             log::warn!("couldn't start the match: {e}");
+                            // Still in the warm-up (if any): back to the lobby phase.
                             self.flow.phase = LobbyPhase::Lobby;
                             self.flow.countdown_end = None;
                             if let Some(host) = self.flow.host {
@@ -577,6 +659,43 @@ impl Server {
     fn load_match_world(&mut self, name: &str, level: Arc<LevelDef>, settings: MatchSettings) {
         let world = SimWorld::new(name, level, self.config.tick_rate);
         self.replace_world(world, settings);
+        self.flow.warmup_on = false;
+        let members = self.spawn_members();
+        self.flow.phase = LobbyPhase::InMatch;
+        self.flow.countdown_end = None;
+        self.flow.results_end = None;
+        log::info!(
+            "match started: {} with {members} players",
+            self.world.match_settings.summary(&self.flow.levels),
+        );
+        self.broadcast_load_level();
+        self.broadcast_lobby_state();
+    }
+
+    /// Replaces the world with a fresh warm-up on the hub (everyone connected gets a body) and
+    /// sends it (`LoadLevel`); the caller sets and broadcasts the phase. False (nothing changed)
+    /// when there is no warm-up.
+    fn enter_warmup(&mut self) -> bool {
+        let Some(level) = self.flow.warmup_level.clone() else {
+            return false;
+        };
+        let world = SimWorld::new(WARMUP_LEVEL, level, self.config.tick_rate);
+        // The hub's own rules; `start_warmup` then follows the lobby's next mode.
+        let hub = MatchSettings {
+            friendly_fire: false,
+            ..MatchSettings::new(GameMode::Campaign, WARMUP_LEVEL)
+        };
+        self.replace_world(world, hub);
+        self.world.start_warmup(&self.flow.settings);
+        self.flow.warmup_on = true;
+        self.spawn_members();
+        self.broadcast_load_level();
+        true
+    }
+
+    /// Gives every connected player and bot a body in the (fresh) world, in id order. Returns
+    /// how many.
+    fn spawn_members(&mut self) -> usize {
         let mut members: Vec<(PlayerId, String)> = self
             .clients
             .values()
@@ -587,20 +706,15 @@ impl Server {
         for (id, name) in &members {
             self.world.add_player(*id, name);
         }
-        self.flow.phase = LobbyPhase::InMatch;
-        self.flow.countdown_end = None;
-        self.flow.results_end = None;
-        log::info!(
-            "match started: {} with {} players",
-            self.world.match_settings.summary(&self.flow.levels),
-            members.len()
-        );
+        members.len()
+    }
+
+    fn broadcast_load_level(&mut self) {
         let msg = ServerMessage::LoadLevel {
             name: self.world.level_name.clone(),
             level: Box::new((*self.world.level).clone()),
         };
         self.broadcast(&msg);
-        self.broadcast_lobby_state();
     }
 
     /// Swaps in a fresh world (match start / back to the lobby). Server-side configuration

@@ -5,11 +5,12 @@
 //!   stops); arena 1 (doors lock, waves, enemies hit back, cleared → doors open); checkpoint;
 //!   death in arena 2 → death view → back at the checkpoint with the encounter reset; instant
 //!   restart; the exit → graded results → MAIN MENU.
-//! * **Co-op** (host + a guest behind `--netsim 60,10,1`): lobby, start, rally pull, downed (low
-//!   view, no weapon) → revive with USE, team wipe → checkpoint, extraction → co-op results →
-//!   CONTINUE TO LOBBY → a second match.
+//! * **Co-op** (host + a guest behind `--netsim 60,10,1`): the warm-up lobby (the hub, its
+//!   overlay, the Ready key), start, rally pull, downed (low view, no weapon) → revive with USE,
+//!   team wipe → checkpoint, extraction → co-op results → CONTINUE TO LOBBY (back in the
+//!   warm-up) → a second match.
 //! * **Deathmatch** (host + guest + 2 server bots, Cistern Nine): frags, respawns, scoreboard
-//!   with pings, chat, name tags, frag limit → results → lobby.
+//!   with pings, chat, name tags, frag limit → results → back in the warm-up.
 //! * **Robustness**: the host vanishes mid-match, a guest quits mid-match, a full server, a
 //!   bad address, a killed dedicated server, menu key spam.
 //! * **Settings**: every retro / view / HUD option changes the picture live; saved settings
@@ -30,7 +31,7 @@ use client::frame::{FrameBuffers, FrameIo, Transition};
 use client::ingame::InGame;
 use client::menus::lobby::LobbyScreen;
 use client::menus::main_menu::MainMenu;
-use client::net::NetSimConfig;
+use client::net::{NetClient, NetSimConfig, Session};
 use client::settings::Settings;
 use engine::audio::Audio;
 use engine::gfx::{RetroSettings, UiDrawList};
@@ -86,15 +87,36 @@ impl Client {
         }
     }
 
-    fn lobby_ref(&self) -> Option<&LobbyScreen> {
+    fn playing(&self) -> bool {
+        self.game_ref().is_some_and(InGame::is_playing)
+    }
+
+    /// The session, on the lobby or the game screen.
+    fn session_ref(&self) -> Option<&Session> {
         match &self.screen {
-            Screen::Lobby(l) => Some(l),
+            Screen::Game(g) => g.session(),
+            Screen::Lobby(l) => l.session(),
             _ => None,
         }
     }
 
-    fn playing(&self) -> bool {
-        self.game_ref().is_some_and(InGame::is_playing)
+    fn net_ref(&self) -> Option<&NetClient> {
+        self.session_ref().map(Session::client)
+    }
+
+    /// In the warm-up hub with a body (the lobby of a server with a warm-up).
+    fn warming_up(&self) -> bool {
+        self.game_ref()
+            .is_some_and(|g| g.is_playing() && g.in_warmup())
+    }
+
+    /// Playing a match (not the warm-up hub).
+    fn in_match(&self) -> bool {
+        self.playing()
+            && self
+                .net_ref()
+                .and_then(NetClient::lobby)
+                .is_some_and(|l| l.phase.level_running())
     }
 
     fn chat(&mut self, text: &str) {
@@ -408,6 +430,11 @@ fn wait_playing(rig: &mut Rig, cs: &mut [&mut Client], secs: f32) -> bool {
     rig.until(cs, secs, |cs| cs.iter().all(|c| c.playing()))
 }
 
+/// Everyone plays the match (the warm-up doesn't count).
+fn wait_in_match(rig: &mut Rig, cs: &mut [&mut Client], secs: f32) -> bool {
+    rig.until(cs, secs, |cs| cs.iter().all(|c| c.in_match()))
+}
+
 /// Teleports (dev command) a client into encounter `i`'s trigger, 6 m past its rally point.
 fn walk_into_encounter(c: &mut Client, i: usize) {
     let Some(level) = c.level() else { return };
@@ -643,8 +670,7 @@ fn single_player(rig: &mut Rig) {
 // ---- co-op -----------------------------------------------------------------------------------------
 
 fn lobby_ready(c: &Client, players: usize) -> bool {
-    c.lobby_ref()
-        .and_then(LobbyScreen::net)
+    c.net_ref()
         .and_then(|n| n.lobby())
         .is_some_and(|l| l.players.len() == players && l.host.is_some())
 }
@@ -675,8 +701,7 @@ fn host_and_join(
     );
     rig.run(&mut [&mut host], 30);
     let port = host
-        .lobby_ref()
-        .and_then(LobbyScreen::session)
+        .session_ref()
         .and_then(|s| s.hosted_port())
         .unwrap_or(0);
     let mut guest = rig.client(
@@ -704,23 +729,56 @@ fn coop(rig: &mut Rig) {
         cs.iter().all(|c| lobby_ready(c, 2))
     });
     rig.check(ok, "co-op: both in the lobby");
+    // The lobby is the warm-up: both run around the hub; the overlay opened on arrival.
+    let warm = rig.until(&mut [&mut host, &mut guest], 8.0, |cs| {
+        cs.iter().all(|c| c.warming_up())
+    });
+    rig.check(
+        warm && host.game_ref().is_some_and(InGame::lobby_overlay_open),
+        "co-op: both in the warm-up, the lobby overlay open on arrival",
+    );
     // Both ready up automatically (--ready, 1 s).
     let ready = rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
         cs[0]
-            .lobby_ref()
-            .and_then(LobbyScreen::net)
+            .net_ref()
             .and_then(|n| n.lobby())
             .is_some_and(|l| l.all_ready())
     });
     rig.shot(&mut host, "coop_01_lobby_host");
     rig.shot(&mut guest, "coop_02_lobby_guest");
     rig.check(ready, "co-op: everyone ready");
-    // Host: READY is focused; START MATCH is below it.
+    // The guest closes the overlay (TAB / Select) and un-readies with the Ready key.
+    guest.pad(GamepadButton::Select, true);
+    rig.run(&mut [&mut host, &mut guest], 2);
+    guest.pad(GamepadButton::Select, false);
+    guest.pad(GamepadButton::DPadDown, true);
+    rig.run(&mut [&mut host, &mut guest], 2);
+    guest.pad(GamepadButton::DPadDown, false);
+    let unready = rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
+        cs[0]
+            .net_ref()
+            .and_then(|n| n.lobby())
+            .is_some_and(|l| l.ready_count() == 1)
+    });
+    rig.check(
+        unready && guest.game_ref().is_some_and(|g| !g.lobby_overlay_open()),
+        "co-op: TAB closes the overlay, the Ready key un-readies without it",
+    );
+    guest.pad(GamepadButton::DPadDown, true);
+    rig.run(&mut [&mut host, &mut guest], 2);
+    guest.pad(GamepadButton::DPadDown, false);
+    rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
+        cs[0]
+            .net_ref()
+            .and_then(|n| n.lobby())
+            .is_some_and(|l| l.all_ready())
+    });
+    // Host: READY is focused in the overlay; START MATCH is below it.
     host.keys = vec![UiKey::Down];
     rig.run(&mut [&mut host, &mut guest], 2);
     host.keys = vec![UiKey::Enter];
     rig.run(&mut [&mut host, &mut guest], 2);
-    let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    let ok = wait_in_match(rig, &mut [&mut host, &mut guest], 12.0);
     rig.check(ok, "co-op: START MATCH -> countdown -> both in the level");
     rig.run(&mut [&mut host, &mut guest], 60);
     rig.shot(&mut guest, "coop_03_guest_spawn");
@@ -838,16 +896,18 @@ fn coop(rig: &mut Rig) {
     host.keys = vec![UiKey::Enter];
     rig.run(&mut [&mut host, &mut guest], 2);
     let lobby = rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
-        cs.iter().all(|c| matches!(c.screen, Screen::Lobby(_)))
+        cs.iter().all(|c| c.warming_up())
     });
     rig.run(&mut [&mut host, &mut guest], 30);
     rig.shot(&mut host, "coop_14_back_in_lobby");
-    rig.check(lobby, "co-op: CONTINUE TO LOBBY brings everyone back");
+    rig.check(
+        lobby,
+        "co-op: CONTINUE TO LOBBY brings everyone back to the warm-up",
+    );
     // Second match.
     let ready = rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
         cs[0]
-            .lobby_ref()
-            .and_then(LobbyScreen::net)
+            .net_ref()
             .and_then(|n| n.lobby())
             .is_some_and(|l| l.all_ready())
     });
@@ -855,7 +915,7 @@ fn coop(rig: &mut Rig) {
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
         force: true,
     }));
-    let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    let ok = wait_in_match(rig, &mut [&mut host, &mut guest], 12.0);
     rig.run(&mut [&mut host, &mut guest], 60);
     let at_start = host.level().is_some_and(|l| {
         l.spawns
@@ -900,7 +960,7 @@ fn deathmatch(rig: &mut Rig) {
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
         force: true,
     }));
-    let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    let ok = wait_in_match(rig, &mut [&mut host, &mut guest], 12.0);
     rig.check(ok, "DM: both in Cistern Nine");
     rig.run(&mut [&mut host, &mut guest], 60);
 
@@ -1035,11 +1095,11 @@ fn deathmatch(rig: &mut Rig) {
     host.keys = vec![UiKey::Enter];
     rig.run(&mut [&mut host, &mut guest], 2);
     let lobby = rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
-        cs.iter().all(|c| matches!(c.screen, Screen::Lobby(_)))
+        cs.iter().all(|c| c.warming_up())
     });
     rig.run(&mut [&mut host, &mut guest], 20);
     rig.shot(&mut guest, "dm_07_back_in_lobby");
-    rig.check(lobby, "DM: results -> CONTINUE TO LOBBY");
+    rig.check(lobby, "DM: results -> CONTINUE TO LOBBY (the warm-up)");
 
     // Time limit: 8 s, no frag limit.
     let mut settings = MatchSettings::new(GameMode::Deathmatch, "cistern_nine");
@@ -1051,7 +1111,7 @@ fn deathmatch(rig: &mut Rig) {
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
         force: true,
     }));
-    let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    let ok = wait_in_match(rig, &mut [&mut host, &mut guest], 12.0);
     let started = Instant::now();
     let ended = rig.until(&mut [&mut host, &mut guest], 15.0, |cs| {
         cs.iter()
@@ -1067,14 +1127,14 @@ fn deathmatch(rig: &mut Rig) {
     host.keys = vec![UiKey::Enter];
     rig.run(&mut [&mut host, &mut guest], 2);
     rig.until(&mut [&mut host, &mut guest], 5.0, |cs| {
-        cs.iter().all(|c| matches!(c.screen, Screen::Lobby(_)))
+        cs.iter().all(|c| c.warming_up())
     });
 
     // Robustness: the host's game vanishes mid-match (process gone, no goodbye).
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
         force: true,
     }));
-    wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
+    wait_in_match(rig, &mut [&mut host, &mut guest], 12.0);
     rig.run(&mut [&mut host, &mut guest], 30);
     let started = Instant::now();
     rig.leave(&mut host);
@@ -1119,8 +1179,7 @@ fn robustness(rig: &mut Rig) {
     );
     rig.run(&mut [&mut host], 30);
     let port = host
-        .lobby_ref()
-        .and_then(LobbyScreen::session)
+        .session_ref()
         .and_then(|s| s.hosted_port())
         .unwrap_or(0);
     let mut late = rig.client("Late", LaunchOptions::default());
@@ -1220,7 +1279,7 @@ fn robustness(rig: &mut Rig) {
                     address: format!("127.0.0.1:{port}"),
                 }),
             );
-            let playing = wait_playing(rig, &mut [&mut joiner], 15.0);
+            let playing = wait_in_match(rig, &mut [&mut joiner], 15.0);
             rig.check(
                 playing,
                 "robustness: dedicated server --autostart puts a joiner in",

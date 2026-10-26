@@ -222,8 +222,10 @@ fn every_level_parses_with_consistent_markup() {
                     "{name}: encounter {i} has an empty wave"
                 );
                 for s in &w.spawns {
+                    // The warm-up hub's range also stands training dummies.
+                    let hub_only = level.kind == LevelKind::Hub && s.enemy == "effigy";
                     assert!(
-                        ENEMIES.contains(&s.enemy.as_str()),
+                        ENEMIES.contains(&s.enemy.as_str()) || hub_only,
                         "{name}: unknown enemy {:?}",
                         s.enemy
                     );
