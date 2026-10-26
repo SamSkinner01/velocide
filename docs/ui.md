@@ -378,6 +378,44 @@ spins by itself 2.5 s after the last turn. A lamp is added in front of the camer
 `look_swatch` (coat | mask colour with the flame as a dot) follows the identity swatch in the
 lobby's player list and on the results rows.
 
+## Loadout screen and the weapon HUD (arsenal)
+
+**LOADOUT** (`client::menus::loadout::LoadoutMenu`, `docs/expansion.md`): the main menu's
+LOADOUT page, a LOADOUT button next to CUSTOMISE in the lobby's match panel (a sub-screen of
+the panel, also in the warm-up's overlay; applies at once in the lobby / warm-up) and LOADOUT in
+the pause menu ("CHANGES APPLY AT YOUR NEXT RESPAWN"; in the warm-up "WARM-UP: CHANGES APPLY AT
+ONCE"). One panel
+(`loadout::panel_rect`, 560 × 334):
+
+- left: **SLOTS** 1–4 (key, weapon, its two abilities; selecting one edits it on the right) and
+  **PRESETS** (PRESET choice, LOAD / SAVE / NEW / DELETE, NAME field) with the note that gun game
+  hands out its own weapons;
+- right: **SLOT n**: WEAPON choice (the ten, or EMPTY), class and blurb, DAMAGE and RATE from the
+  tuning (`damage_text`, `rate_text`) in its PvE / PvP balance (`Tuning::for_mode`), ABILITY A /
+  B choices from the weapon's class pool, each with its blurb and cooldown;
+- foot: the hint (or the pause menu's note), DEFAULT LOADOUT, BACK.
+
+Rules while editing (`loadout::set_weapon`, `set_ability`): a weapon another slot holds swaps the
+two slots, the last weapon can't be emptied, picking a build's other ability swaps the two. Every
+control is a focusable widget, so arrows / d-pad, Enter / A and the mouse all work; Escape / B is
+BACK. The loadout and presets live in the settings file's `loadout` section as text per slot
+(`"Longwick: Ember Arrow, Brand"`, `"-"`; `settings::loadout_text`): an unknown weapon empties
+its slot, an unknown ability falls back to the weapon's default, the loadout is sanitised, and
+nothing else in the file is affected. `NetClient::set_loadout` sends it (`SetLoadout`) once per
+change and after every connect; the game and lobby screens call it each frame.
+
+**Weapon HUD** (`ingame::hud`, bottom right, from the predicted `WeaponState`, so it follows
+forced loadouts such as gun game's): the held build as the engine's `hud::weapon` block (slot
+key, weapon name, the two ability chips, the selected one lit), a bar under the chips while the
+slot's ability cools down, an armed bow ability's chip pulsing with an ARMED tag, the other
+slots on a line above (`2 LANCET  3 THRESHER  4 -`, dimmed while cooling down), and with a
+Limpet in hand LIMPETS pips (live / most). The slot keys and the wheel skip empty slots
+(`controls::WeaponSelect::set_loadout`); the slot actions are WEAPON SLOT 1–4. The combat layer
+(`ingame::combat::hud`) adds the charge / draw gauge beside the crosshair (blue for charges, wick
+gold for the bow's draw, FULL and the armed ability at full draw), BURNING (flickering ember
+screen edges) and PINNED (steel-blue edge bars) on you, and hides the THORN pips when the
+tuning has no thorns (PvP).
+
 ## CPU rasteriser
 
 `ui::raster::rasterize(&list, &font::build_atlas(), w, h) -> TextureData` (transparent

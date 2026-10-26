@@ -545,8 +545,9 @@ impl SimWorld {
             .and_then(|id| self.players.get(&id))
             .and_then(|p| {
                 let w = &p.combat.weapons;
-                let held = w.build();
-                if held.abilities.contains(&ability) {
+                if let Some(held) = w.held()
+                    && held.abilities.contains(&ability)
+                {
                     return Some(held.weapon);
                 }
                 w.loadout

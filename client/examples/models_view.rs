@@ -9,8 +9,12 @@
 //!   `look_emblems.png`, `look_random.png`: the Shrike's cosmetics (`models::cosmetics`);
 //! - `vm_*.png`: first-person viewmodels (rest, kick, alt modes, crest fold, bellows pump,
 //!   discharge charge, drum turn, switch, punch, thorn throw...);
-//! - `weapons.png`, `weapons_34.png`: the four guns at real scale (side, three-quarter front);
-//! - `projectiles.png`, `thorns.png` (planted in a wall, lying, in flight), `props.png`.
+//! - `vmx_*.png`: the expansion arsenal in first person (Lancet, Thresher, Riveter, Cinderbox,
+//!   Longwick, Kiln: rest, fire, abilities, the bow's draw, the salvo, the spray, the hose);
+//! - `weapons.png`, `weapons_34.png`: the four original guns at real scale (side, three-quarter
+//!   front); `weapons_x.png`, `weapons_x34.png`: the six expansion weapons;
+//! - `projectiles.png`, `projectiles_x.png` (the expansion's), `thorns.png` (planted in a wall,
+//!   lying, in flight), `props.png`.
 //!
 //! ```text
 //! cargo run -p client --example models_view -- [--out DIR] [--only PREFIX]
@@ -18,9 +22,10 @@
 
 use std::path::{Path, PathBuf};
 
+use client::models::weapons::{HeldWeapon, weapon_pose};
 use client::models::{
-    DrumTurn, EnemyAnim, EnemyKind, EnemyState, ModelId, ModelLibrary, PlayerAnim, Tint,
-    ViewmodelAnim, projectiles, props,
+    Ability, DrumTurn, EnemyAnim, EnemyKind, EnemyState, ModelId, ModelLibrary, PlayerAnim, Tint,
+    ViewmodelAnim, WeaponKind, WeaponLook, projectiles, props,
 };
 use engine::assets::meshgen::{self, BoxDesc, BoxUv, MeshBuilder};
 use engine::assets::procedural;
@@ -745,11 +750,22 @@ fn enemy_sheets() -> Vec<Sheet> {
 
 fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
     let mut shots = Vec::new();
-    let base = |weapon: u8| ViewmodelAnim {
-        weapon,
-        switch: 1.0,
-        time: 1.7,
-        ..Default::default()
+    let base = |id: u8| {
+        let weapon = WeaponKind::from_id(id).unwrap_or_default();
+        ViewmodelAnim {
+            weapon,
+            ability: weapon.default_build().abilities[0],
+            switch: 1.0,
+            time: 1.7,
+            ..Default::default()
+        }
+    };
+    let alt_b = |id: u8| {
+        let a = base(id);
+        ViewmodelAnim {
+            ability: a.weapon.default_build().abilities[1],
+            ..a
+        }
     };
     let names = ["QUILL", "BELLOWS", "ARCLASH", "TUMBLER"];
     let mut cases: Vec<(String, ViewmodelAnim)> = Vec::new();
@@ -766,9 +782,8 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         cases.push((
             format!("{n} ALT MODE"),
             ViewmodelAnim {
-                alt_mode: 1,
                 fire_kick: 0.4,
-                ..base(w)
+                ..alt_b(w)
             },
         ));
     }
@@ -783,25 +798,22 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         "BELLOWS PUMP".into(),
         ViewmodelAnim {
             fire_kick: 0.5,
-            alt_mode: 1,
-            ..base(1)
+            ..alt_b(1)
         },
     ));
     cases.push((
         "ARCLASH DISCHARGE .4".into(),
         ViewmodelAnim {
-            alt_mode: 1,
             alt_charge: 0.4,
-            ..base(2)
+            ..alt_b(2)
         },
     ));
     cases.push((
         "ARCLASH DISCHARGE FULL".into(),
         ViewmodelAnim {
-            alt_mode: 1,
             alt_charge: 1.0,
             time: 1.71,
-            ..base(2)
+            ..alt_b(2)
         },
     ));
     cases.push((
@@ -809,8 +821,7 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         ViewmodelAnim {
             spin: DrumTurn::STEP * 0.5,
             fire_kick: 0.6,
-            alt_mode: 1,
-            ..base(3)
+            ..alt_b(3)
         },
     ));
     cases.push((
@@ -866,6 +877,128 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         lib.draw_viewmodel(&anim, &Tint::default(), &mut shot.viewmodel);
         shots.push((format!("vm_{i:02}"), name, shot));
     }
+
+    // The expansion arsenal.
+    let x = |w: WeaponKind| base(w.id());
+    let with = |w: WeaponKind, a: Ability| ViewmodelAnim { ability: a, ..x(w) };
+    let cases: Vec<(&str, ViewmodelAnim)> = vec![
+        ("LANCET REST", x(WeaponKind::Lancet)),
+        (
+            "LANCET FIRE",
+            ViewmodelAnim {
+                fire_kick: 0.85,
+                ..x(WeaponKind::Lancet)
+            },
+        ),
+        (
+            "LANCET SKEWER CHARGED",
+            ViewmodelAnim {
+                alt_charge: 1.0,
+                ..with(WeaponKind::Lancet, Ability::Skewer)
+            },
+        ),
+        ("THRESHER REST", x(WeaponKind::Thresher)),
+        (
+            "THRESHER FIRE (DRUM TURNING)",
+            ViewmodelAnim {
+                fire_kick: 0.8,
+                spin: DrumTurn::STEP * 0.6,
+                ..with(WeaponKind::Thresher, Ability::Flak)
+            },
+        ),
+        ("RIVETER REST", x(WeaponKind::Riveter)),
+        (
+            "RIVETER FIRE (HOSE PULSE AT THE TANK)",
+            ViewmodelAnim {
+                fire_kick: 0.96,
+                ..x(WeaponKind::Riveter)
+            },
+        ),
+        (
+            "RIVETER HOSE PULSE AT THE TOOL",
+            ViewmodelAnim {
+                fire_kick: 0.8,
+                ..with(WeaponKind::Riveter, Ability::Wisp)
+            },
+        ),
+        ("CINDERBOX REST", x(WeaponKind::Cinderbox)),
+        (
+            "CINDERBOX SALVO: 1ST TUBE",
+            ViewmodelAnim {
+                salvo: Some(0.01),
+                ..x(WeaponKind::Cinderbox)
+            },
+        ),
+        (
+            "CINDERBOX SALVO: 3RD TUBE",
+            ViewmodelAnim {
+                salvo: Some(0.17),
+                ..with(WeaponKind::Cinderbox, Ability::Mortar)
+            },
+        ),
+        ("LONGWICK REST", x(WeaponKind::Longwick)),
+        (
+            "LONGWICK DRAW .5",
+            ViewmodelAnim {
+                draw: 0.5,
+                ..x(WeaponKind::Longwick)
+            },
+        ),
+        (
+            "LONGWICK FULL DRAW",
+            ViewmodelAnim {
+                draw: 1.0,
+                ..x(WeaponKind::Longwick)
+            },
+        ),
+        (
+            "LONGWICK RELEASE",
+            ViewmodelAnim {
+                fire_kick: 0.9,
+                ..with(WeaponKind::Longwick, Ability::EmberArrow)
+            },
+        ),
+        ("KILN REST", x(WeaponKind::Kiln)),
+        (
+            "KILN SPRAYING",
+            ViewmodelAnim {
+                spray: 1.0,
+                fire_kick: 0.6,
+                ..x(WeaponKind::Kiln)
+            },
+        ),
+        (
+            "KILN DISCHARGE CHARGING",
+            ViewmodelAnim {
+                alt_charge: 0.7,
+                ..with(WeaponKind::Kiln, Ability::Discharge)
+            },
+        ),
+        (
+            "UNARMED (FIST TIER)",
+            ViewmodelAnim {
+                unarmed: true,
+                ..x(WeaponKind::Quill)
+            },
+        ),
+        (
+            "UNARMED PUNCH",
+            ViewmodelAnim {
+                unarmed: true,
+                punch: 0.2,
+                ..x(WeaponKind::Quill)
+            },
+        ),
+    ];
+    for (i, (name, anim)) in cases.into_iter().enumerate() {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.7, 7.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            75.0,
+        ));
+        lib.draw_viewmodel(&anim, &Tint::default(), &mut shot.viewmodel);
+        shots.push((format!("vmx_{i:02}"), name.to_string(), shot));
+    }
     shots
 }
 
@@ -892,6 +1025,31 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             .push((pos + Vec3::new(0.0, 0.55, 0.0), name.to_string()));
     }
     let mut shots = vec![("projectiles".to_string(), "PROJECTILES".to_string(), shot)];
+
+    let projectiles = [
+        (ModelId::Arrow, "ARROW"),
+        (ModelId::PinningArrow, "PINNING"),
+        (ModelId::EmberArrow, "EMBER"),
+        (ModelId::Rivet, "RIVET"),
+        (ModelId::CinderRocket, "CINDER"),
+        (ModelId::FlakShell, "FLAK"),
+        (ModelId::Limpet, "LIMPET"),
+        (ModelId::MortarShell, "MORTAR"),
+        (ModelId::Flare, "FLARE"),
+    ];
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.4, 3.6),
+        Vec3::new(0.0, 0.9, 0.0),
+        60.0,
+    ));
+    for ((id, name), pos) in projectiles.iter().zip(row(projectiles.len(), 0.72)) {
+        let rot = Quat::from_rotation_y(-1.1) * Quat::from_rotation_x(0.35);
+        let root = Mat4::from_rotation_translation(rot, pos + Vec3::new(0.0, 1.0, 0.0));
+        lib.draw_model(*id, root, &Tint::default(), &mut shot.draws);
+        shot.labels
+            .push((pos + Vec3::new(0.0, 0.55, 0.0), name.to_string()));
+    }
+    shots.push(("projectiles_x".into(), "PROJECTILES (ARSENAL)".into(), shot));
 
     // Thorns: planted in the wall at different angles, lying on the floor, in flight.
     let mut shot = Shot::new(look_at(
@@ -928,36 +1086,75 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     ));
     shots.push(("thorns".into(), "THORNS".into(), shot));
 
-    // Weapons at real scale, side and three-quarter views.
-    for (name, title, cam, yaw) in [
+    // Weapons at real scale, side and three-quarter views: the original four, then the six
+    // expansion weapons (the Longwick, a tall bow, stands in the middle).
+    let (old, new) = WeaponKind::ALL.split_at(4);
+    for (name, title, cam, yaw, set) in [
         (
             "weapons",
             "WEAPONS (SIDE)",
             Vec3::new(0.0, 1.15, 1.75),
             std::f32::consts::FRAC_PI_2,
+            old,
         ),
         (
             "weapons_34",
             "WEAPONS (3/4 FRONT)",
             Vec3::new(0.0, 1.5, 1.6),
             2.4,
+            old,
+        ),
+        (
+            "weapons_x",
+            "ARSENAL (SIDE)",
+            Vec3::new(0.0, 1.1, 2.3),
+            std::f32::consts::FRAC_PI_2,
+            new,
+        ),
+        (
+            "weapons_x34",
+            "ARSENAL (3/4 FRONT)",
+            Vec3::new(0.0, 1.5, 2.1),
+            2.4,
+            new,
         ),
     ] {
         let mut shot = Shot::new(look_at(cam, Vec3::new(0.0, 1.08, 0.0), 50.0));
-        for (i, w) in client::models::WeaponKind::ALL.iter().enumerate() {
-            let pos = Vec3::new(
-                if i % 2 == 0 { -0.45 } else { 0.45 },
-                if i < 2 { 1.35 } else { 0.8 },
-                0.0,
-            );
+        let wide = set.len() > 4;
+        for (i, w) in set.iter().enumerate() {
+            let pos = if wide {
+                // Three guns on the left, the bow in the middle, two guns on the right.
+                match w {
+                    WeaponKind::Lancet => Vec3::new(-0.72, 1.62, 0.0),
+                    WeaponKind::Riveter => Vec3::new(-0.72, 1.05, 0.0),
+                    WeaponKind::Kiln => Vec3::new(-0.72, 0.48, 0.0),
+                    WeaponKind::Thresher => Vec3::new(0.7, 1.45, 0.0),
+                    WeaponKind::Cinderbox => Vec3::new(0.7, 0.72, 0.0),
+                    _ => Vec3::new(0.0, 1.08, 0.0),
+                }
+            } else {
+                Vec3::new(
+                    if i % 2 == 0 { -0.45 } else { 0.45 },
+                    if i < 2 { 1.35 } else { 0.8 },
+                    0.0,
+                )
+            };
             let root = Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), pos);
-            let pose = client::models::weapons::weapon_pose(*w, 0, 0.0, 0.0, 0.0, t);
+            let pose = weapon_pose(&HeldWeapon {
+                weapon: *w,
+                ability: w.default_build().abilities[0],
+                time: t,
+                ..HeldWeapon::default()
+            });
             lib.get(w.model())
                 .draw(&pose, root, &Tint::default(), &mut shot.draws);
-            shot.labels.push((
-                pos + Vec3::new(0.0, -0.22, 0.0),
-                format!("{w:?}").to_uppercase(),
-            ));
+            let label_y = if *w == WeaponKind::Longwick {
+                -0.62
+            } else {
+                -0.22
+            };
+            shot.labels
+                .push((pos + Vec3::new(0.0, label_y, 0.0), w.name().to_uppercase()));
         }
         shots.push((name.into(), title.into(), shot));
     }

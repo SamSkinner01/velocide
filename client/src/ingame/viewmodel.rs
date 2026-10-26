@@ -9,15 +9,18 @@
 //! clock (hitstop freezes it).
 //!
 //! Combat hooks: [`Viewmodel::fire`] (recoil kick), [`Viewmodel::punch`],
-//! [`Viewmodel::throw_thorn`], [`Viewmodel::set_charge`] (Arclash Discharge),
-//! [`Viewmodel::turn_drum`] (a Tumbler shot) and [`Viewmodel::last_draw`] (view-space muzzle /
-//! fist for tracers and sparks).
+//! [`Viewmodel::throw_thorn`], [`Viewmodel::set_charge`] (Discharge / Skewer charge),
+//! [`Viewmodel::turn_drum`] (a Tumbler or Thresher shot), [`Viewmodel::set_draw`] (Longwick
+//! draw), [`Viewmodel::salvo`] (a Cinderbox salvo), [`Viewmodel::spray`] (the Kiln firing)
+//! and [`Viewmodel::last_draw`] (view-space muzzle / fist for tracers and sparks).
 
 use engine::gfx::DrawItem;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::movement::{MoveMode, MoveState};
 
-use crate::models::{DrumTurn, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo};
+use crate::models::{
+    Ability, DrumTurn, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo, WeaponKind,
+};
 
 const SWITCH_TIME: f32 = 0.12;
 /// Ground speed giving full bob.
@@ -35,6 +38,8 @@ pub struct Viewmodel {
     slide: f32,
     dash: f32,
     last_angles: Option<(f32, f32)>,
+    /// Kiln: seconds since the last spray tick (the spray fades out after it).
+    since_spray: f32,
     time: f64,
     last_draw: Option<ViewmodelDrawInfo>,
 }
@@ -46,6 +51,7 @@ impl Viewmodel {
                 switch: 1.0,
                 ..Default::default()
             },
+            since_spray: f32::INFINITY,
             ..Default::default()
         }
     }
@@ -75,9 +81,33 @@ impl Viewmodel {
         self.drum.kick();
     }
 
-    /// Arclash Discharge charge 0..1.
+    /// Alt charge 0..1 (Arclash Discharge, Skewer).
     pub fn set_charge(&mut self, charge: f32) {
         self.anim.alt_charge = charge.clamp(0.0, 1.0);
+    }
+
+    /// Longwick draw 0..1.
+    pub fn set_draw(&mut self, draw: f32) {
+        self.anim.draw = if draw.is_finite() {
+            draw.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+    }
+
+    /// A Cinderbox salvo starts: its tubes fire in turn.
+    pub fn salvo(&mut self) {
+        self.anim.salvo = Some(0.0);
+    }
+
+    /// No weapon at all (gun game's Fist tier): fists only.
+    pub fn set_unarmed(&mut self, unarmed: bool) {
+        self.anim.unarmed = unarmed;
+    }
+
+    /// One Kiln spray tick (every ~0.08 s while the trigger is held).
+    pub fn spray(&mut self) {
+        self.since_spray = 0.0;
     }
 
     /// View-space muzzle / fist of the last drawn frame.
@@ -123,6 +153,20 @@ impl Viewmodel {
         }
         self.drum.update(dt);
         a.spin = self.drum.angle();
+        if let Some(s) = &mut a.salvo {
+            *s += dt;
+            if *s > 1.0 {
+                a.salvo = None;
+            }
+        }
+        self.since_spray += dt;
+        let spraying = self.since_spray < 0.16;
+        a.spray = approach(
+            a.spray,
+            spraying as u8 as f32,
+            if spraying { 14.0 } else { 5.0 },
+            dt,
+        );
         a.time = self.time;
         let sliding = state.mode == MoveMode::Slide;
         self.slide = approach(self.slide, sliding as u8 as f32, 12.0, dt);
@@ -136,8 +180,8 @@ impl Viewmodel {
     pub fn draw(
         &mut self,
         lib: Option<&ModelLibrary>,
-        weapon: u8,
-        mode: u8,
+        weapon: WeaponKind,
+        ability: Ability,
         team: Vec4,
         dip: f32,
         camera_roll: f32,
@@ -146,8 +190,14 @@ impl Viewmodel {
         let Some(lib) = lib else {
             return;
         };
+        if weapon != self.anim.weapon {
+            // Another gun in the hand: no draw, salvo or spray carries over.
+            self.anim.draw = 0.0;
+            self.anim.salvo = None;
+            self.anim.spray = 0.0;
+        }
         self.anim.weapon = weapon;
-        self.anim.alt_mode = mode;
+        self.anim.ability = ability;
         let start = out.len();
         self.last_draw = Some(lib.draw_viewmodel(&self.anim, &Tint::team(team), out));
         // Movement feel on top of the model's own animation.

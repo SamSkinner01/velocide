@@ -135,6 +135,79 @@ fn forced_loadouts_win_until_lifted() {
 }
 
 #[test]
+fn only_a_forced_loadout_can_leave_a_player_unarmed() {
+    let mut a = Arena::pvp();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    // A request for nothing (any client) is sanitised to the default loadout ...
+    a.world.request_loadout(p, Loadout::unarmed());
+    assert_eq!(a.world.loadout(p), Loadout::default());
+    assert_eq!(a.world.loadout_requests[&p], Loadout::default());
+    // ... a forced one is kept: fists only, and through respawns.
+    a.select(p, 2, 0);
+    a.world.force_loadout(p, Some(Loadout::unarmed()));
+    let w = a.world.players[&p].combat.weapons;
+    assert!(w.is_unarmed() && w.held().is_none());
+    a.world.kill_player(&a.tuning.clone(), p, Attack::Dev);
+    a.world.respawn_player(&a.tuning.clone(), p);
+    assert_eq!(a.world.loadout(p), Loadout::unarmed());
+    // Replicated as unarmed (the weapon id sentinel); the charge level stays empty.
+    let e = player_entity(&a, p);
+    assert!(!shared::protocol::player_armed(e.state));
+    assert_eq!(player_weapon(e.state).2, 0);
+    assert_eq!(
+        e.flags & (player_flags::CHARGING | player_flags::DRAWING),
+        0
+    );
+    // Lifting it arms the player at the next spawn.
+    a.world.force_loadout(p, None);
+    a.world.kill_player(&a.tuning.clone(), p, Attack::Dev);
+    a.world.respawn_player(&a.tuning.clone(), p);
+    assert_eq!(a.world.loadout(p), Loadout::default());
+    assert!(shared::protocol::player_armed(player_entity(&a, p).state));
+}
+
+#[test]
+fn unarmed_players_punch_and_their_prediction_stays_exact() {
+    let mut a = Arena::pvp();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    let v = a.player(1, Vec3::new(0.0, 0.0, -1.8), 0.0);
+    a.world.players.get_mut(&p).unwrap().combat.god = true;
+    // A branding arrow still in flight when the weapons go: its kill names the bow, never
+    // the default build an unarmed state falls back to.
+    let bow = WeaponBuild {
+        weapon: WeaponKind::Longwick,
+        abilities: [Ability::Brand, Ability::TripleNock],
+    };
+    a.world.force_loadout(p, Some(Loadout::single(bow)));
+    a.world.force_loadout(p, Some(Loadout::unarmed()));
+    assert_eq!(
+        a.world
+            .attack_weapon(shared::sim::Owner::Player(p), Attack::Brand),
+        Attack::Brand.weapon()
+    );
+    let chest = a.world.players[&v].movement.position + Vec3::Y * 1.2;
+    a.aim(p, chest);
+    let t = a.tuning.clone();
+    let mut predicted = a.world.players[&p].combat.weapons;
+    let mut events = Vec::new();
+    for i in 0..240u32 {
+        let input = a.held.get_mut(&p).unwrap();
+        input.weapon = (i / 20 % 5) as u8;
+        input.weapon_mode = (i / 30 % 2) as u8;
+        let mut b = Buttons::FIRE | Buttons::ALT_FIRE;
+        b.set(Buttons::PUNCH, i % 25 == 0);
+        input.buttons = b;
+        let sent: PlayerInput = *input;
+        events.extend(a.tick());
+        step_weapons(&mut predicted, &sent, true, &t.combat, 60);
+        assert_eq!(a.world.players[&p].combat.weapons, predicted, "input {i}");
+    }
+    assert!(!events.iter().any(|e| matches!(e, SimEvent::Shot(_))));
+    let punches = damage_to(&events, shared::sim::HitTarget::Player(v));
+    assert!(punches > 0.0, "the fist still lands");
+}
+
+#[test]
 fn players_without_a_body_keep_their_request_and_leaving_forgets_it() {
     let mut a = Arena::coop();
     let id = PlayerId(5);

@@ -11,6 +11,7 @@ use engine::glam::{Mat4, Vec3, Vec4};
 use engine::render::Renderer;
 
 use super::rig::{Rig, Shade, Tint, neutral_mesh, validate_joints};
+use super::weapons::WeaponLook as _;
 use super::{EnemyAnim, ModelId, PlayerAnim, ViewmodelAnim, cosmetics, enemies, shrike, weapons};
 
 /// All models, uploaded and ready to draw.
@@ -199,11 +200,22 @@ impl ModelLibrary {
             out,
         );
         let hand = world[shrike::HAND_R];
-        let weapon = weapons::WeaponKind::from_index(anim.weapon);
+        let weapon = weapons::weapon_kind(anim.weapon);
         let gun_root = hand * shrike::grip_transform();
-        let gun_pose = weapons::third_person_pose(weapon, anim.firing, anim.time);
+        let ability = weapons::Ability::from_id(anim.ability)
+            .filter(|a| a.fits(weapon))
+            .unwrap_or(weapon.default_build().abilities[0]);
+        let gun_pose = weapons::weapon_pose(&weapons::HeldWeapon {
+            weapon,
+            ability,
+            kick: anim.firing,
+            charge: anim.charge,
+            draw: anim.draw,
+            time: anim.time,
+            ..Default::default()
+        });
         let gun = self.get(weapon.model());
-        if !anim.dead {
+        if !anim.dead && !anim.unarmed {
             gun.draw(&gun_pose, gun_root, tint, out);
         }
         let head = world[shrike::HEAD];

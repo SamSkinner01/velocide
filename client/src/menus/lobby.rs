@@ -37,6 +37,7 @@ use shared::sim::PlayerId;
 
 use super::backdrop::Backdrop;
 use super::customize::{self, CustomizeMenu, CustomizeResponse, LookSync};
+use super::loadout::{self, LoadoutMenu, LoadoutResponse};
 use super::settings_menu;
 use super::style;
 use crate::app::Common;
@@ -52,6 +53,7 @@ use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, lan, resolve_address,
 };
+use crate::settings::LoadoutSettings;
 
 /// The host's settings edits are sent at most this often (seconds).
 const SETTINGS_SEND_INTERVAL: f64 = 0.15;
@@ -95,6 +97,8 @@ pub enum LobbyAction {
     Chat(String),
     /// Open the CUSTOMISE sub-screen.
     Customize,
+    /// Open the LOADOUT sub-screen.
+    Loadout,
     /// Overlay: back to the warm-up.
     Close,
     Leave,
@@ -138,6 +142,8 @@ pub struct LobbyPanel {
     /// Countdown number on screen and when it appeared (banner animation).
     countdown: Option<(u8, f64)>,
     customize: Option<CustomizeMenu>,
+    /// The LOADOUT sub-screen, while open.
+    loadout: Option<LoadoutMenu>,
     look_sync: LookSync,
     time: f64,
 }
@@ -168,6 +174,7 @@ impl LobbyPanel {
             entered_at: in_lobby.then_some(0.0),
             countdown: None,
             customize: None,
+            loadout: None,
             look_sync: LookSync::default(),
             time: 0.0,
         }
@@ -205,12 +212,31 @@ impl LobbyPanel {
 
     /// Opens the CUSTOMISE sub-screen.
     pub fn open_customize(&mut self) {
+        self.loadout = None;
         self.customize = Some(CustomizeMenu::new());
+    }
+
+    /// The LOADOUT sub-screen is open.
+    pub fn is_loadout_open(&self) -> bool {
+        self.loadout.is_some()
+    }
+
+    /// Opens the LOADOUT sub-screen (`menus::loadout`; in the lobby and its warm-up a change
+    /// applies at once).
+    pub fn open_loadout(&mut self) {
+        self.customize = None;
+        self.loadout = Some(LoadoutMenu::new());
+    }
+
+    /// A sub-screen (CUSTOMISE, LOADOUT) replaces the panel.
+    pub fn in_sub_screen(&self) -> bool {
+        self.customize.is_some() || self.loadout.is_some()
     }
 
     /// Closes sub-screens and dialogs (the overlay closed, a match started).
     pub fn close_dialogs(&mut self) {
         self.customize = None;
+        self.loadout = None;
         self.confirm_leave = false;
     }
 
@@ -338,6 +364,10 @@ impl LobbyPanel {
                 self.open_customize();
                 audio.play_2d(Sfx::UiSelect);
             }
+            LobbyAction::Loadout => {
+                self.open_loadout();
+                audio.play_2d(Sfx::UiSelect);
+            }
             // The overlay's owner closes it.
             LobbyAction::Close => {}
             LobbyAction::Leave => {
@@ -368,6 +398,23 @@ impl LobbyPanel {
         let resp = menu.ui(ui, look, team, lib, viewmodel, viewmodel_fov, dt);
         if resp.back {
             self.customize = None;
+            self.focus_ready = true;
+        }
+        resp
+    }
+
+    /// The LOADOUT sub-screen (call instead of [`LobbyPanel::ui`] while
+    /// [`LobbyPanel::is_loadout_open`]). Closing it focuses READY again; the caller saves the
+    /// settings when `back` is set (the loadout itself is sent by the screen's update).
+    pub fn loadout_ui(&mut self, ui: &mut Ui, s: &mut LoadoutSettings) -> LoadoutResponse {
+        let Some(menu) = &mut self.loadout else {
+            return LoadoutResponse::default();
+        };
+        settings_menu::dim(ui, 0.45);
+        let canvas = ui.canvas();
+        let resp = menu.ui(ui, s, loadout::panel_rect(canvas));
+        if resp.back {
+            self.loadout = None;
             self.focus_ready = true;
         }
         resp
@@ -863,12 +910,16 @@ impl LobbyPanel {
     }
 }
 
-/// The player's own buttons in the match panel: CUSTOMISE (the arsenal's LOADOUT goes next to
-/// it).
+/// The player's own buttons in the match panel: CUSTOMISE and LOADOUT.
 fn player_buttons(ui: &mut Ui, actions: &mut Vec<LobbyAction>) {
-    if ui.button("CUSTOMISE") {
-        actions.push(LobbyAction::Customize);
-    }
+    ui.row(2, |ui| {
+        if ui.button("CUSTOMISE") {
+            actions.push(LobbyAction::Customize);
+        }
+        if ui.button("LOADOUT") {
+            actions.push(LobbyAction::Loadout);
+        }
+    });
 }
 
 /// The countdown band across the lower screen: MATCH STARTING, the number popping in, the
@@ -1071,6 +1122,8 @@ impl LobbyScreen {
         // 1. Network. Stop taking events once a level arrives: the game screen gets the rest.
         if let Some(s) = &mut self.session {
             s.client_mut().update(Duration::from_secs_f32(io.dt));
+            // The loadout to carry (sent once per change and after connecting).
+            s.client_mut().set_loadout(common.settings.loadout.current);
         }
         while transition.is_none()
             && let Some(ev) = self
@@ -1095,7 +1148,7 @@ impl LobbyScreen {
             let net = s.client_mut();
             self.panel.update(net, common.settings.cosmetics);
             if !typing
-                && !self.panel.is_customizing()
+                && !self.panel.in_sub_screen()
                 && common.settings.bindings.pressed(io.input, Action::Ready)
             {
                 LobbyPanel::toggle_ready(net);
@@ -1143,6 +1196,20 @@ impl LobbyScreen {
                 common.ui_sound(Sfx::UiMove);
             }
             if resp.back {
+                common.settings_save = true;
+                common.ui_sound(Sfx::UiBack);
+            }
+        } else if self.panel.is_loadout_open() {
+            let mut ui = Ui::new(
+                &mut out.ui,
+                &mut common.ui_state,
+                io.ui_input,
+                &common.theme,
+            );
+            let r = self.panel.loadout_ui(&mut ui, &mut common.settings.loadout);
+            drop(ui);
+            common.settings_changed |= r.changed;
+            if r.back {
                 common.settings_save = true;
                 common.ui_sound(Sfx::UiBack);
             }

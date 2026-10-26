@@ -8,6 +8,8 @@
 pub mod backdrop;
 /// The CUSTOMISE screen: the Shrike's cosmetics with a turning preview.
 pub mod customize;
+/// The LOADOUT screen (the arsenal: weapons per slot, abilities, presets).
+pub mod loadout;
 pub mod lobby;
 pub mod main_menu;
 /// End-of-match results screens (campaign tally / co-op table / deathmatch standings).

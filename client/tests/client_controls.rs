@@ -3,7 +3,7 @@
 //! engine input events constructible outside winit).
 
 use client::controls::{
-    Action, Bindings, Controls, MODES_PER_WEAPON, WEAPONS, WeaponChange, WeaponSelect,
+    Action, Bindings, Controls, MODES_PER_WEAPON, SLOTS, WeaponChange, WeaponSelect,
     apply_mouse_look,
 };
 use client::menus::settings_menu::SettingsMenu;
@@ -31,14 +31,45 @@ fn slot_selects_then_cycles_the_alt_mode() {
     assert_eq!(w.mode(), 0);
     w.press_slot(2);
     assert_eq!(w.mode(), 1);
-    assert_eq!(w.info().name, WEAPONS[2].name);
+}
+
+#[test]
+fn empty_loadout_slots_are_skipped() {
+    use shared::loadout::{Loadout, WeaponKind};
+    let mut w = WeaponSelect::default();
+    w.press_slot(1);
+    let loadout = Loadout {
+        slots: [
+            None,
+            None,
+            Some(WeaponKind::Longwick.default_build()),
+            Some(WeaponKind::Kiln.default_build()),
+        ],
+    };
+    assert!(
+        w.set_loadout(&loadout),
+        "slot 2 emptied: the first weapon is selected"
+    );
+    assert_eq!(w.current, 2);
+    assert_eq!(w.press_slot(0), WeaponChange::None);
+    assert_eq!(w.current, 2);
+    w.next();
+    assert_eq!(w.current, 3);
+    w.next();
+    assert_eq!(w.current, 2, "wraps past the empty slots");
+    w.prev();
+    assert_eq!(w.current, 3);
+    assert_eq!(w.press_slot(9), WeaponChange::None);
+    // A loadout with nothing in it changes nothing.
+    assert!(!w.set_loadout(&Loadout { slots: [None; 4] }));
+    assert_eq!(w.current, 3);
 }
 
 #[test]
 fn wheel_cycles_weapons_and_wraps() {
     let mut w = WeaponSelect::default();
     w.prev();
-    assert_eq!(w.current as usize, WEAPONS.len() - 1);
+    assert_eq!(w.current as usize, SLOTS - 1);
     w.next();
     assert_eq!(w.current, 0);
     w.next();

@@ -1,8 +1,8 @@
 //! Main menu: SINGLE PLAYER (campaign / grind, difficulty, level), HOST GAME (mode, level, port,
 //! max players), JOIN GAME (address, name), CUSTOMISE (your Shrike's look, `menus::customize`),
-//! SETTINGS, QUIT. HOST and JOIN continue in the lobby (`menus::lobby`). A level renders behind
-//! it; messages (disconnect reasons, connection errors) appear in a modal box. The warm-up hub
-//! is never offered as a level.
+//! LOADOUT (`menus::loadout`), SETTINGS, QUIT. HOST and JOIN continue in the lobby
+//! (`menus::lobby`). A level renders behind it; messages (disconnect reasons, connection errors)
+//! appear in a modal box. The warm-up hub is never offered as a level.
 //!
 //! Adding a page: add a [`Page`] variant, a menu item in `root_items`, and a `fn xxx_page`
 //! drawing a panel that returns a [`Transition`] when it starts something.
@@ -16,6 +16,7 @@ use shared::lobby::{Difficulty, GameMode, LevelInfo};
 
 use super::backdrop::Backdrop;
 use super::customize::CustomizeMenu;
+use super::loadout::{self, LoadoutMenu};
 use super::settings_menu::{self, SettingsMenu};
 use super::style;
 use crate::app::Common;
@@ -30,14 +31,16 @@ pub enum Page {
     Host,
     Join,
     Customize,
+    Loadout,
     Settings,
 }
 
-const ROOT_ITEMS: [(&str, Page); 5] = [
+const ROOT_ITEMS: [(&str, Page); 6] = [
     ("SINGLE PLAYER", Page::SinglePlayer),
     ("HOST GAME", Page::Host),
     ("JOIN GAME", Page::Join),
     ("CUSTOMISE", Page::Customize),
+    ("LOADOUT", Page::Loadout),
     ("SETTINGS", Page::Settings),
 ];
 
@@ -61,6 +64,8 @@ pub struct MainMenu {
     address: String,
     settings: SettingsMenu,
     customize: CustomizeMenu,
+    /// The LOADOUT page (made when it opens: it reads the tuning file for its numbers).
+    loadout: Option<LoadoutMenu>,
 }
 
 /// Playable levels: `assets/levels/*.ron` plus the built-in level, without the warm-up hub
@@ -120,6 +125,7 @@ impl MainMenu {
             address: String::new(),
             settings: SettingsMenu::new(),
             customize: CustomizeMenu::new(),
+            loadout: None,
         }
     }
 
@@ -156,6 +162,9 @@ impl MainMenu {
         }
         if page == Page::Customize {
             self.customize = CustomizeMenu::new();
+        }
+        if page == Page::Loadout {
+            self.loadout = Some(LoadoutMenu::new());
         }
         self.page = page;
     }
@@ -222,6 +231,15 @@ impl MainMenu {
                     settings_resp.back = true;
                     self.back();
                 }
+            } else if let (Page::Loadout, Some(menu)) = (self.page, &mut self.loadout) {
+                settings_menu::dim(&mut ui, 0.45);
+                let r = menu.ui(&mut ui, &mut settings.loadout, loadout::panel_rect(canvas));
+                settings_resp.changed |= r.changed;
+                if r.back {
+                    settings_resp.back = true;
+                    sound = Some(Sfx::UiBack);
+                    self.back();
+                }
             } else if self.page == Page::Settings {
                 settings_menu::dim(&mut ui, 0.45);
                 settings_resp = self.settings.ui(
@@ -278,7 +296,7 @@ impl MainMenu {
                 if !modal {
                     let mut name_changed = false;
                     let page_result = match self.page {
-                        Page::Root | Page::Settings | Page::Customize => None,
+                        Page::Root | Page::Settings | Page::Customize | Page::Loadout => None,
                         Page::SinglePlayer => self.single_player_page(&mut ui, panel, settings),
                         Page::Host => self.host_page(&mut ui, panel, settings, &mut name_changed),
                         Page::Join => self.join_page(&mut ui, panel, settings, &mut name_changed),

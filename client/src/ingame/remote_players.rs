@@ -18,7 +18,9 @@ use glam::Vec3;
 use glam::Vec4;
 use shared::cosmetics::Cosmetics;
 use shared::input::look_dir;
-use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags, player_weapon};
+use shared::protocol::{
+    EntityState, NetId, dequantize_yaw, player_armed, player_flags, player_weapon,
+};
 use shared::sim::PlayerId;
 
 use crate::models::shrike::REMOTE_SCALE;
@@ -77,9 +79,21 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
         downed: v.downed,
         dead: v.dead,
         time,
-        weapon: crate::models::WeaponKind::for_weapon(player_weapon(e.state).0).index(),
+        weapon: player_weapon(e.state).0.id(),
+        ability: player_weapon(e.state).1.id(),
+        draw: if f(player_flags::DRAWING) {
+            player_weapon(e.state).2 as f32 / 255.0
+        } else {
+            0.0
+        },
+        charge: if f(player_flags::CHARGING) {
+            player_weapon(e.state).2 as f32 / 255.0
+        } else {
+            0.0
+        },
         cycle: v.cycle,
         cosmetics: look,
+        unarmed: !player_armed(e.state),
     }
 }
 

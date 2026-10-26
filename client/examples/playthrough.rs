@@ -1094,7 +1094,7 @@ fn gun_game(rig: &mut Rig) {
     host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
         force: true,
     }));
-    let ok = wait_playing(rig, &mut [&mut host], 12.0);
+    let ok = wait_in_match(rig, &mut [&mut host], 12.0);
     rig.check(ok, "GG: in Cistern Nine");
     rig.run(&mut [&mut host], 60);
     let ladder = host

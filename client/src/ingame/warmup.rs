@@ -516,7 +516,8 @@ impl InGame {
             b.pressed(input, Action::Scoreboard),
             b.pressed(input, Action::Ready),
         );
-        let customizing = self.warmup.panel.is_customizing();
+        // (A sub-screen, CUSTOMISE or LOADOUT, takes the keys while open.)
+        let customizing = self.warmup.panel.in_sub_screen();
         if toggle && !customizing {
             let open = !self.warmup.open;
             self.set_lobby_overlay(open);
@@ -676,8 +677,8 @@ impl InGame {
         }
     }
 
-    /// The interactive lobby overlay (or its CUSTOMISE sub-screen). Returns a transition
-    /// (LEAVE) and a UI sound.
+    /// The interactive lobby overlay (or its CUSTOMISE / LOADOUT sub-screen). Returns a
+    /// transition (LEAVE) and a UI sound.
     pub(super) fn warmup_overlay_ui(
         &mut self,
         common: &mut Common,
@@ -721,6 +722,26 @@ impl InGame {
                 sound = Some(Sfx::UiMove);
             }
             if resp.back {
+                common.settings_save = true;
+                sound = Some(Sfx::UiBack);
+            }
+            return (None, sound);
+        }
+        if self.warmup.panel.is_loadout_open() {
+            // Sent by the screen's update; the warm-up applies it at once (docs/arsenal.md).
+            let mut ui = Ui::new(
+                &mut out.ui,
+                &mut common.ui_state,
+                io.ui_input,
+                &common.theme,
+            );
+            let r = self
+                .warmup
+                .panel
+                .loadout_ui(&mut ui, &mut common.settings.loadout);
+            drop(ui);
+            common.settings_changed |= r.changed;
+            if r.back {
                 common.settings_save = true;
                 sound = Some(Sfx::UiBack);
             }

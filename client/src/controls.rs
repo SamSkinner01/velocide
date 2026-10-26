@@ -4,7 +4,7 @@
 //! - [`Bindings`]: action → bindings (several per action: typically one keyboard/mouse binding
 //!   and one gamepad binding), serialised in the settings file.
 //! - [`WeaponSelect`]: the weapon selection rule (slot key = select, same slot again = cycle
-//!   alt-fire mode, wheel = next/previous weapon).
+//!   the build's ability, wheel = next/previous weapon; empty loadout slots are skipped).
 //! - [`Controls`]: per-session input state. Mouse look is applied **every frame**
 //!   ([`Controls::look`]) so the camera is as responsive as the display allows; button presses
 //!   are latched every frame ([`Controls::latch`]) and the input sent each fixed tick
@@ -107,10 +107,10 @@ impl Action {
             Action::Punch => "PUNCH / PARRY",
             Action::ThrowThorn => "THROW THORN",
             Action::Use => "USE / REVIVE",
-            Action::Weapon1 => "QUILL",
-            Action::Weapon2 => "BELLOWS",
-            Action::Weapon3 => "ARCLASH",
-            Action::Weapon4 => "TUMBLER",
+            Action::Weapon1 => "WEAPON SLOT 1",
+            Action::Weapon2 => "WEAPON SLOT 2",
+            Action::Weapon3 => "WEAPON SLOT 3",
+            Action::Weapon4 => "WEAPON SLOT 4",
             Action::NextWeapon => "NEXT WEAPON",
             Action::PrevWeapon => "PREVIOUS WEAPON",
             Action::NextMode => "CYCLE FIRE MODE",
@@ -276,36 +276,10 @@ impl Bindings {
 // ---------------------------------------------------------------------------------------------
 // Weapons
 
-/// Display data of one weapon (names are original, see DESIGN.md).
-#[derive(Clone, Copy, Debug)]
-pub struct WeaponInfo {
-    pub name: &'static str,
-    /// Alt-fire modes, cycled by pressing the slot again.
-    pub modes: [&'static str; MODES_PER_WEAPON],
-}
-
-/// Alt-fire modes per weapon.
-pub const MODES_PER_WEAPON: usize = 2;
-
-/// The four weapons, indexed by `PlayerInput::weapon` (0-based slot).
-pub const WEAPONS: [WeaponInfo; 4] = [
-    WeaponInfo {
-        name: "QUILL",
-        modes: ["BRAND", "SPLINTER"],
-    },
-    WeaponInfo {
-        name: "BELLOWS",
-        modes: ["GUST", "BOTH BARRELS"],
-    },
-    WeaponInfo {
-        name: "ARCLASH",
-        modes: ["WISP", "DISCHARGE"],
-    },
-    WeaponInfo {
-        name: "TUMBLER",
-        modes: ["BREACH", "GRAVEWELL"],
-    },
-];
+/// Abilities (alt-fire modes) per build, cycled by pressing the slot again.
+pub const MODES_PER_WEAPON: usize = shared::loadout::BUILD_ABILITIES;
+/// Weapon slots on the number keys (`PlayerInput::weapon` = slot index).
+pub const SLOTS: usize = shared::loadout::LOADOUT_SLOTS;
 
 /// What a selection input changed (for the switch sound and viewmodel animation).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -315,26 +289,54 @@ pub enum WeaponChange {
     Mode,
 }
 
-/// Weapon selection state. Each weapon remembers its own alt-fire mode.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Weapon selection state: the selected slot, and each slot's selected ability. Slots the
+/// carried loadout leaves empty are skipped ([`WeaponSelect::set_loadout`]); what the slots
+/// hold comes from the loadout, not from here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WeaponSelect {
     pub current: u8,
-    pub modes: [u8; WEAPONS.len()],
+    pub modes: [u8; SLOTS],
+    /// Slots holding a weapon (every slot until a loadout says otherwise).
+    pub filled: [bool; SLOTS],
+}
+
+impl Default for WeaponSelect {
+    fn default() -> Self {
+        Self {
+            current: 0,
+            modes: [0; SLOTS],
+            filled: [true; SLOTS],
+        }
+    }
 }
 
 impl WeaponSelect {
     pub fn mode(&self) -> u8 {
-        self.modes[self.current as usize % WEAPONS.len()]
+        self.modes[self.current as usize % SLOTS]
     }
 
-    pub fn info(&self) -> &'static WeaponInfo {
-        &WEAPONS[self.current as usize % WEAPONS.len()]
+    /// Follows the carried loadout: its empty slots are skipped, and if the selected slot
+    /// emptied the first weapon is selected. Returns whether the selection moved.
+    pub fn set_loadout(&mut self, loadout: &shared::loadout::Loadout) -> bool {
+        let filled: [bool; SLOTS] = std::array::from_fn(|i| loadout.slots[i].is_some());
+        if !filled.contains(&true) {
+            return false;
+        }
+        self.filled = filled;
+        if self.filled[self.current as usize % SLOTS] {
+            return false;
+        }
+        self.current = self.filled.iter().position(|f| *f).unwrap_or(0) as u8;
+        true
     }
 
-    /// Slot key: selects the weapon instantly; pressing the selected weapon's slot again cycles
-    /// its alt-fire mode.
+    /// Slot key: selects the slot's weapon instantly; pressing the selected slot again cycles
+    /// its ability. An empty slot does nothing.
     pub fn press_slot(&mut self, slot: u8) -> WeaponChange {
-        let slot = slot % WEAPONS.len() as u8;
+        let i = slot as usize;
+        if i >= SLOTS || !self.filled[i] {
+            return WeaponChange::None;
+        }
         if slot == self.current {
             self.cycle_mode();
             WeaponChange::Mode
@@ -345,17 +347,29 @@ impl WeaponSelect {
     }
 
     pub fn cycle_mode(&mut self) {
-        let m = &mut self.modes[self.current as usize % WEAPONS.len()];
+        let m = &mut self.modes[self.current as usize % SLOTS];
         *m = (*m + 1) % MODES_PER_WEAPON as u8;
     }
 
+    /// The next slot holding a weapon (wraps).
     pub fn next(&mut self) {
-        self.current = (self.current + 1) % WEAPONS.len() as u8;
+        self.step(1);
     }
 
+    /// The previous slot holding a weapon (wraps).
     pub fn prev(&mut self) {
-        let n = WEAPONS.len() as u8;
-        self.current = (self.current + n - 1) % n;
+        self.step(SLOTS - 1);
+    }
+
+    fn step(&mut self, by: usize) {
+        let mut slot = self.current as usize % SLOTS;
+        for _ in 0..SLOTS {
+            slot = (slot + by) % SLOTS;
+            if self.filled[slot] {
+                break;
+            }
+        }
+        self.current = slot as u8;
     }
 }
 

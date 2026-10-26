@@ -22,15 +22,16 @@ the debug overlay.
 | `menus::lobby` | `LobbyPanel` (the lobby UI, used by the lobby screen and the warm-up overlay), `LobbyScreen` (connecting / lobby without a world), `Handoff` (docs/lobby.md) |
 | `menus::customize` | the CUSTOMISE screen (cosmetics with a turning preview), `LookSync`, look swatches |
 | `menus::results` | `ResultsScreen`: animated campaign / co-op / deathmatch results (docs/style_modes.md) |
+| `menus::loadout` | LOADOUT screen: weapons on slots 1–4, two abilities per build, base numbers, presets (main menu page, lobby overlay, pause menu; docs/ui.md "Loadout screen") |
 | `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay, Accessibility with a palette preview), reused by the pause menu |
 | `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
 | `ingame` (`mod.rs`) | `InGame`: one `net::Session` + everything while playing |
 | `ingame::camera` | `CameraRig`: eye height, FOV kick, view roll, landing dip, stair smoothing, shake |
 | `ingame::feedback` | `Feedback`: screen shake (trauma), hitstop / visual time scale, screen flashes |
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
-| `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / thorn throw, Tumbler drum turn, Discharge charge, plus landing dip / slide tilt / dash pull-back |
+| `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / thorn throw, Tumbler / Thresher drum turn, Discharge / Skewer charge, the Longwick's draw, the Cinderbox salvo, the Kiln's spray, plus landing dip / slide tilt / dash pull-back |
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
-| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / Discharge gauge / BRANDED) |
+| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / charge and draw gauge / BRANDED / BURNING / PINNED), `arsenal` (the expansion arsenal: the held build, local weapon feel, projectiles, blasts, the flak burst, burning patches, Burn / Pinned visuals, `InGame::preview_arsenal` for tools) |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags, `+N`/`-N` health popups (shape cues) |
 | `ingame::cues` | accessibility shape cues: player marker shapes (`player_swatch`, `draw_marker`), the parry icon over enemies in their parry window (`parry_icons`) |
@@ -182,7 +183,38 @@ rival client shooting at you, and writes PNGs (`combat_quill`, `combat_brand_sig
 `combat_gravewell_pull`, `combat_gravewell_implode`, `combat_thorn_planted`,
 `combat_ricochet`, `combat_deflect`, `combat_parry`, `combat_low_health`, `combat_kindling`
 (punching a Mould at low health: the spark stream into your lantern), `combat_death`, ...) and
-frame-time numbers.
+frame-time numbers. The arsenal adds `arsenal_*` (its projectiles, blasts, patch and statuses
+staged client-side with `InGame::preview_arsenal`) and `weapon_*` (every new weapon and some
+abilities fired for real after `/loadout`: `weapon_lancet`, `weapon_lancet_skewer`,
+`weapon_thresher`, `weapon_thresher_flak`, `weapon_riveter`, `weapon_riveter_flare_patch`,
+`weapon_cinderbox_salvo`, `weapon_cinderbox_limpets`, `weapon_cinderbox_mortar`,
+`weapon_longwick_full_draw`, `weapon_longwick_pinned`, `weapon_kiln_burning`, ...).
+
+### The expansion arsenal (`ingame::combat::arsenal`)
+
+What the player sees and hears of the ten weapons is keyed on small enums, so the replicated
+kinds and flags map onto them in one place:
+
+- `projectile_kind(kind)` → `ArsenalProjectile` (arrows: taper / pinning / ember / brand,
+  rivet, cinder rocket, flak shell, limpet, mortar shell, flare): `entities.rs` draws them
+  with `draw_projectile` (model, light, stuck arrows sinking their tips, stuck limpets gripping
+  the nearest surface and blinking faster as they sit, flares sputtering) and their
+  `projectile_trail`; arrows and rivets that vanish leave `projectile_impact` where they were
+  last seen.
+- `Blast` (cinder, limpet, mortar, ember arrow) for `Fx::Explosion` of those attacks;
+  `flak_burst` for `Fx::Burst` (tracers to the pellets' ends, a shock ring in their plane).
+- `Hazard::BurningPatch` for `BURNING_PATCH` entities (flames, embers, smoke, flickering
+  light, a scorch and `Sfx::FlareBurn` when one appears).
+- `Status::{Burning, Pinned}` from the `BURNING` / `PINNED` flags of enemies and players
+  (flames and embers on the body plus an ember body tint on Moulds; a steel-blue shackle ring
+  with chains to stakes), and `BurnSizzle` while something burns.
+- The local feel (`ArsenalView::local_shot` / `local_feel`): the Thresher's drum, the Cinderbox
+  salvo, the Kiln's spray / ignite / roar, the bow's draw creak, full-draw ring and release,
+  the Discharge / Skewer charge whine; the viewmodel and the HUD follow the predicted
+  `WeaponState` (so forced loadouts too).
+
+`InGame::preview_arsenal(ArsenalPreview)` stages any of it client-side (no simulation), for
+tools and screenshots.
 
 ### React to gameplay events (damage, kills, parries...)
 

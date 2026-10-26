@@ -227,11 +227,14 @@ hides the thorn pips (and the "Q" hint) when charges are 0.
   you up a tier (via `force_loadout`); a kill with the Fist on the last tier wins. A punch kill
   on someone (any tier) knocks the victim **down** a tier. Thorns are off (PvP profile).
 - Respawns are quick (deathmatch respawn rules). A time limit still applies (most tiers wins).
-- *As built (modes)*: the Fist tier keeps the last ladder build in hand and only a punch kill
-  counts there, because `force_loadout` turns an empty loadout into the default one and the
-  client would show / replicate it as the Quill. A real fists-only tier needs an unarmed
-  loadout from **arsenal** / **arsenal-client**; `sim::gungame::tier_loadout` is the one place
-  to switch to it.
+- *As built*: the Fist tier is **fists only**: `sim::gungame::tier_loadout` forces
+  `Loadout::unarmed()` (no weapon; `force_loadout` keeps it, requests from clients are still
+  sanitised to at least one weapon). Unarmed, `step_weapons` fires nothing but the fist (and
+  the thorn, per tuning), `WeaponState::is_unarmed()` / `held() == None` tell the owner, and
+  the player entity's `state` carries the sentinel weapon id `UNARMED_WEAPON_ID` (15):
+  `protocol::player_armed(state)` is false (`player_weapon` keeps its signature and decodes
+  the defaults then). Drawing the fists-only viewmodel / third-person pose is
+  **arsenal-client**'s.
 - HUD: your tier, the next weapon, the leader's tier. Results: winner, tiers reached.
 
 **modes** owns `shared/src/sim/modes.rs`, `shared/src/sim/encounter.rs`, new

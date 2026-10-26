@@ -63,6 +63,10 @@ pub struct CombatHudInfo<'a> {
     pub killed_by: Option<&'a str>,
     /// Someone branded you (you take extra damage).
     pub branded: bool,
+    /// You are burning (Burn status): ember-orange flickering screen edges.
+    pub burning: bool,
+    /// You are pinned (slowed): steel-blue bars at the screen edges and PINNED.
+    pub pinned: bool,
     pub time: f64,
 }
 
@@ -268,15 +272,19 @@ impl CombatHud {
             );
             list.fill(bar.expand(1.0), fade(t.ink, 0.7));
             let full = f >= 1.0 && (now * 10.0).fract() < 0.5;
-            let color = if full {
-                Vec4::ONE
+            // The bow's draw in wick gold, charges in arc blue.
+            let (cold, hot) = if w.draw > 0 {
+                (
+                    Vec4::new(1.0, 0.6, 0.25, 1.0),
+                    Vec4::new(1.0, 0.92, 0.6, 1.0),
+                )
             } else {
-                mix(
+                (
                     Vec4::new(0.35, 0.65, 1.0, 1.0),
                     Vec4::new(0.8, 0.95, 1.0, 1.0),
-                    f,
                 )
             };
+            let color = if full { Vec4::ONE } else { mix(cold, hot, f) };
             list.fill(
                 Rect::new(vec2(bar.min.x, bar.max.y - h * f), bar.max),
                 color,
@@ -294,7 +302,49 @@ impl CombatHud {
             }
         }
 
-        // Thorns above the weapon block (bottom right).
+        // The bow at full draw (and the ability it will loose).
+        if w.draw > 0 && w.draw_fraction(info.tuning, info.tick_rate) >= 1.0 {
+            let text = match w.armed_ability() {
+                Some(a) => format!("FULL - {}", a.name().to_uppercase()),
+                None => "FULL".into(),
+            };
+            list.text(
+                vec2(center.x + 21.0, center.y - 4.0),
+                &text,
+                &TextStyle::new(fade(t.bone, 0.9)).outline(outline),
+            );
+        }
+
+        // Burn: flickering ember edges; Pinned: steel-blue bars and the word.
+        if info.burning && !info.dead {
+            let flicker =
+                0.7 + 0.2 * ((now * 13.0).sin() as f32) + 0.1 * ((now * 31.0).sin() as f32);
+            vignette(list, c, Vec4::new(1.0, 0.45, 0.08, 1.0), 0.55 * flicker);
+            list.text(
+                vec2(c.center().x, center.y + 40.0),
+                "BURNING",
+                &TextStyle::new(fade(Vec4::new(1.0, 0.6, 0.2, 1.0), flicker))
+                    .centered()
+                    .outline(outline),
+            );
+        }
+        if info.pinned && !info.dead {
+            let steel = Vec4::new(0.55, 0.75, 1.0, 1.0);
+            for x in [c.min.x + 6.0, c.max.x - 10.0] {
+                list.fill(
+                    Rect::new(vec2(x, c.min.y + 40.0), vec2(x + 4.0, c.max.y - 40.0)),
+                    fade(steel, 0.5),
+                );
+            }
+            list.text(
+                vec2(c.center().x, center.y + 50.0),
+                "PINNED",
+                &TextStyle::new(steel).centered().outline(outline),
+            );
+        }
+
+        // Thorns above the weapon block (bottom right); none in PvP (the PvP balance has no
+        // thorns): no pips, no THORN label.
         let charges = info.tuning.thorn.charges;
         let avail = w.thorns(info.tuning);
         let recharge =
@@ -303,20 +353,22 @@ impl CombatHud {
         let pw = hud::pips_width(pip, 3.0, charges);
         let px = c.max.x - 12.0 - pw;
         let py = c.max.y - 66.0;
-        hud::pips(
-            list,
-            t,
-            vec2(px, py),
-            pip,
-            3.0,
-            avail as f32 + if avail < charges { recharge } else { 0.0 },
-            charges,
-        );
-        list.text(
-            vec2(px - 4.0, py - 2.0),
-            "THORN",
-            &TextStyle::new(t.bone_dim).right().outline(outline),
-        );
+        if charges > 0 {
+            hud::pips(
+                list,
+                t,
+                vec2(px, py),
+                pip,
+                3.0,
+                avail as f32 + if avail < charges { recharge } else { 0.0 },
+                charges,
+            );
+            list.text(
+                vec2(px - 4.0, py - 2.0),
+                "THORN",
+                &TextStyle::new(t.bone_dim).right().outline(outline),
+            );
+        }
         if info.branded && !info.dead {
             let pulse = 0.65 + 0.35 * ((now * 6.0).sin() as f32);
             list.text(

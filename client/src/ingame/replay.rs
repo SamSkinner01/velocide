@@ -38,9 +38,11 @@ use engine::ui::hud::{self as hud_draw, CrosshairStyle, TextFeed};
 use engine::ui::text::line_width;
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt, UiKey};
 use glam::{Vec2, Vec3, Vec4, vec2};
+use shared::loadout::{Ability, WeaponKind};
 use shared::movement::{MoveMode, MoveState};
 use shared::protocol::{
-    EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_flags, player_weapon,
+    EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_armed, player_flags,
+    player_weapon,
 };
 use shared::sim::{Attack, FireIntent, Highlight, HitPart, HitShape, KillInfo, Owner, PlayerId};
 
@@ -407,23 +409,15 @@ pub fn display_text(s: &str) -> String {
         .to_string()
 }
 
-/// What a replicated player holds, for the viewmodel: the weapon model (as the third-person
-/// model picks it, `remote_players::player_anim`), the glow of the selected ability (its place
-/// in the weapon class's pool: A / B of a default build) and the charge / draw level 0..1 while
-/// charging or drawing (`shared::protocol::player_weapon`).
-fn held_weapon(e: &EntityState) -> (u8, u8, f32) {
+/// What a replicated player holds, for the viewmodel: the weapon, the selected ability (its
+/// glow) and the charge / draw level 0..1 while charging or drawing
+/// (`shared::protocol::player_weapon`).
+fn held_weapon(e: &EntityState) -> (WeaponKind, Ability, f32) {
     let (weapon, ability, charge) = player_weapon(e.state);
-    let model = crate::models::WeaponKind::for_weapon(weapon).index();
-    let mode = weapon
-        .abilities()
-        .iter()
-        .position(|a| *a == ability)
-        .unwrap_or(0) as u8
-        % 2;
     let charging = e.flags & (player_flags::CHARGING | player_flags::DRAWING) != 0;
     (
-        model,
-        mode,
+        weapon,
+        ability,
         if charging { charge as f32 / 255.0 } else { 0.0 },
     )
 }
@@ -493,7 +487,7 @@ pub struct Playback {
     next_event: usize,
     others: Vec<EntityState>,
     present: Vec<EntityState>,
-    weapon: Option<(u8, u8)>,
+    weapon: Option<(WeaponKind, Ability)>,
     on_ground: bool,
     fall_speed: f32,
     dead: bool,
@@ -1000,11 +994,14 @@ impl InGame {
                 dt,
             });
             let (weapon, mode, charge) = held_weapon(&e);
+            let drawing = e.flags & player_flags::DRAWING != 0;
+            pb.viewmodel.set_draw(if drawing { charge } else { 0.0 });
             if pb.weapon.is_some_and(|w| w != (weapon, mode)) {
                 pb.viewmodel.on_switch();
             }
             pb.weapon = Some((weapon, mode));
-            pb.viewmodel.set_charge(charge);
+            pb.viewmodel.set_charge(if drawing { 0.0 } else { charge });
+            pb.viewmodel.set_unarmed(!player_armed(e.state));
             pb.viewmodel
                 .update(vdt, &state, e.yaw, e.pitch, common.settings.view_bob);
         }
@@ -1147,7 +1144,7 @@ impl InGame {
         effects.draw(&mut out.sprites, &mut out.decals);
         let alive = me.is_some_and(|e| e.flags & (player_flags::DEAD | player_flags::DOWNED) == 0);
         if common.settings.show_viewmodel && alive && !pb.dead {
-            let (weapon, mode) = pb.weapon.unwrap_or((0, 0));
+            let (weapon, mode) = pb.weapon.unwrap_or_default();
             pb.viewmodel.draw(
                 lib,
                 weapon,
@@ -1784,8 +1781,10 @@ mod tests {
         assert!((pose.position.x - at as f32 / RATE as f32 * 10.0).abs() < 0.01);
         // The Arclash with Discharge (its pool's second ability); no charge shown unless
         // CHARGING.
-        let arclash = crate::models::WeaponKind::Arclash.index();
-        assert_eq!(held_weapon(&pose), (arclash, 1, 0.0));
+        assert_eq!(
+            held_weapon(&pose),
+            (WeaponKind::Arclash, Ability::Discharge, 0.0)
+        );
         let charging = EntityState {
             flags: pose.flags | player_flags::CHARGING,
             ..pose

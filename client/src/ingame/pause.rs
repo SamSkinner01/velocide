@@ -1,5 +1,5 @@
 //! Pause menu (Esc / Start): RESUME, RESTART (single-player), RETURN TO LOBBY (multiplayer
-//! host), SETTINGS, LEAVE. In multiplayer the game keeps running behind it; in single-player
+//! host), LOADOUT (`menus::loadout`; changes apply at the next respawn), SETTINGS, LEAVE. In multiplayer the game keeps running behind it; in single-player
 //! the in-process server is paused (`ServerCommand::SetPaused`).
 
 use engine::audio::Sfx;
@@ -7,6 +7,7 @@ use engine::input::InputState;
 use engine::ui::{Rect, TextStyle, Ui};
 use glam::vec2;
 
+use crate::menus::loadout::{self, LoadoutMenu};
 use crate::menus::settings_menu::{self, SettingsMenu, SettingsResponse};
 use crate::settings::Settings;
 
@@ -24,8 +25,11 @@ pub enum PauseAction {
 pub struct PauseMenu {
     open: bool,
     settings: Option<SettingsMenu>,
+    loadout: Option<LoadoutMenu>,
     /// Opened this frame (the Escape that opened it must not close it again).
     fresh: bool,
+    /// Loadout changes apply at once (the lobby's warm-up), not at the next respawn.
+    pub instant_loadout: bool,
 }
 
 /// What the pause menu did this frame.
@@ -48,11 +52,13 @@ impl PauseMenu {
         self.open = true;
         self.fresh = true;
         self.settings = None;
+        self.loadout = None;
     }
 
     pub fn close(&mut self) {
         self.open = false;
         self.settings = None;
+        self.loadout = None;
     }
 
     pub fn ui(
@@ -74,11 +80,23 @@ impl PauseMenu {
         }
         let fresh = std::mem::take(&mut self.fresh);
         let canvas = ui.canvas();
-        settings_menu::dim(ui, if self.settings.is_some() { 0.75 } else { 0.5 });
+        let sub = self.settings.is_some() || self.loadout.is_some();
+        settings_menu::dim(ui, if sub { 0.75 } else { 0.5 });
         if let Some(menu) = &mut self.settings {
             out.settings = menu.ui(ui, s, input, settings_menu::panel_rect(canvas));
             if out.settings.back {
                 self.settings = None;
+                out.sound = Some(Sfx::UiBack);
+            }
+            return out;
+        }
+        if let Some(menu) = &mut self.loadout {
+            // The loadout lives in the settings file: report it like a settings change.
+            let r = menu.ui(ui, &mut s.loadout, loadout::panel_rect(canvas));
+            out.settings.changed = r.changed;
+            if r.back {
+                out.settings.back = true;
+                self.loadout = None;
                 out.sound = Some(Sfx::UiBack);
             }
             return out;
@@ -96,6 +114,14 @@ impl PauseMenu {
             }
             if lobby_host && ui.button("RETURN TO LOBBY") {
                 out.action = PauseAction::ReturnToLobby;
+            }
+            if ui.button("LOADOUT") {
+                self.loadout = Some(LoadoutMenu::new().with_note(if self.instant_loadout {
+                    "WARM-UP: CHANGES APPLY AT ONCE"
+                } else {
+                    "CHANGES APPLY AT YOUR NEXT RESPAWN"
+                }));
+                out.sound = Some(Sfx::UiSelect);
             }
             if ui.button("SETTINGS") {
                 self.settings = Some(SettingsMenu::new());

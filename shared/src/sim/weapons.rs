@@ -374,16 +374,27 @@ impl WeaponState {
         }
     }
 
-    /// The selected build.
-    pub fn build(&self) -> WeaponBuild {
+    /// The build in hand; `None` when unarmed (fists only: `Loadout::unarmed`).
+    pub fn held(&self) -> Option<WeaponBuild> {
         self.loadout
             .slot(self.slot)
             .or_else(|| self.loadout.builds().next())
             .copied()
-            .unwrap_or_default()
     }
 
-    /// The weapon in hand.
+    /// Carries no weapon: the primary and abilities fire nothing, only the fist (and the
+    /// thorn, per tuning).
+    pub fn is_unarmed(&self) -> bool {
+        self.loadout.is_unarmed()
+    }
+
+    /// The selected build (unarmed: the default build — check [`WeaponState::held`] or
+    /// [`WeaponState::is_unarmed`] where it matters).
+    pub fn build(&self) -> WeaponBuild {
+        self.held().unwrap_or_default()
+    }
+
+    /// The weapon in hand (unarmed: the default, see [`WeaponState::build`]).
     pub fn current(&self) -> WeaponKind {
         self.build().weapon
     }
@@ -422,6 +433,19 @@ impl WeaponState {
     pub fn armed_ability(&self) -> Option<Ability> {
         let mode = self.armed.checked_sub(1)?;
         Some(self.build().ability(mode))
+    }
+
+    /// Replicated `state` of the player entity: held weapon, ability and charge level, or the
+    /// unarmed marker ([`crate::protocol::player_armed`]).
+    pub fn replicated_state(&self, t: &CombatTuning, tick_rate: u32) -> u16 {
+        if self.is_unarmed() {
+            return crate::protocol::pack_player_unarmed();
+        }
+        crate::protocol::pack_player_weapon(
+            self.current(),
+            self.ability(),
+            self.charge_level(t, tick_rate),
+        )
     }
 
     /// Replicated charge level 0..=255: the draw while drawing, else the ability charge.
@@ -1711,6 +1735,39 @@ mod tests {
             fired.as_slice(),
             [FireIntent::Ability { charge, .. }] if *charge == 1.0
         ));
+    }
+
+    #[test]
+    fn unarmed_fires_only_the_fist_and_the_thorn() {
+        let t = CombatTuning::default();
+        let mut s = WeaponState::new(Loadout::unarmed());
+        assert!(s.is_unarmed() && s.held().is_none());
+        let mut fired = Vec::new();
+        for i in 0..120u8 {
+            let mut b = Buttons::FIRE | Buttons::ALT_FIRE;
+            b.set(Buttons::PUNCH, i % 30 == 0);
+            b.set(Buttons::THROW, i == 5);
+            // Every slot key and mode: there is nothing to select.
+            fired.extend(step_weapons(&mut s, &input(b, i % 5, i % 3), true, &t, 60));
+        }
+        assert!(fired.contains(&FireIntent::Punch));
+        assert!(fired.contains(&FireIntent::ThrowThorn));
+        assert!(
+            fired
+                .iter()
+                .all(|f| matches!(f, FireIntent::Punch | FireIntent::ThrowThorn)),
+            "{fired:?}"
+        );
+        assert_eq!((s.charge, s.draw, s.burst.left), (0, 0, 0));
+        let state = s.replicated_state(&t, 60);
+        assert!(!crate::protocol::player_armed(state));
+        // Armed again (a new loadout), everything works.
+        let mut s = s.with_loadout(Loadout::default());
+        assert!(!s.is_unarmed());
+        let out = step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+        assert!(out.is_empty());
+        let out = step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+        assert_eq!(out, vec![primary(WeaponKind::Quill)]);
     }
 
     #[test]

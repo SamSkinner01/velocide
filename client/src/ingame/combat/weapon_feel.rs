@@ -112,25 +112,49 @@ pub fn hitscan_dirs(
     let Some(attack) = intent.attack() else {
         return Vec::new();
     };
+    use shared::loadout::WeaponKind;
     use shared::sim::Attack;
+    let weapon = intent.weapon();
+    // Everything the bow looses is an arrow (a projectile), the Brand included.
+    if weapon == Some(WeaponKind::Longwick) {
+        return Vec::new();
+    }
+    let (right, up) = shared::sim::weapons::aim_basis(aim);
+    let mut cone = |count: u32, degrees: f32| -> Vec<Vec3> {
+        let half = (degrees * 0.5).to_radians().tan();
+        (0..count.max(1))
+            .map(|_| {
+                let r = rng.unit().sqrt() * half;
+                let a = rng.unit() * std::f32::consts::TAU;
+                (aim + right * (r * a.cos()) + up * (r * a.sin())).normalize_or(aim)
+            })
+            .collect()
+    };
+    let charge = match intent {
+        FireIntent::Primary { charge, .. } | FireIntent::Ability { charge, .. } => *charge,
+        _ => 0.0,
+    };
     match attack {
-        Attack::Quill | Attack::Brand | Attack::Splinter | Attack::Arc => vec![aim],
-        Attack::Blast | Attack::BothBarrels => {
-            let b = &t.bellows;
-            let (count, cone) = if attack == Attack::Blast {
-                (b.pellets, b.cone_degrees)
-            } else {
-                (b.both_pellets, b.both_cone_degrees)
-            };
-            let half = (cone * 0.5).to_radians().tan();
-            let (right, up) = shared::sim::weapons::aim_basis(aim);
-            (0..count.max(1))
-                .map(|_| {
-                    let r = rng.unit().sqrt() * half;
-                    let a = rng.unit() * std::f32::consts::TAU;
-                    (aim + right * (r * a.cos()) + up * (r * a.sin())).normalize_or(aim)
-                })
-                .collect()
+        Attack::Quill
+        | Attack::Brand
+        | Attack::Splinter
+        | Attack::Arc
+        | Attack::Skewer
+        | Attack::Slug => vec![aim],
+        // The Lancet's bloom (`charge`) widens its needles' spread.
+        Attack::Lancet => cone(1, t.lancet.bloom_degrees * charge * 2.0),
+        Attack::Flurry => cone(1, 1.0),
+        Attack::Blast => cone(t.bellows.pellets, t.bellows.cone_degrees),
+        Attack::BothBarrels => cone(t.bellows.both_pellets, t.bellows.both_cone_degrees),
+        Attack::Thresher => cone(t.thresher.pellets, t.thresher.cone_degrees),
+        // Ten of the weapon's own shots at once: rays for hitscan weapons (rivets fly).
+        Attack::Volley
+            if !matches!(
+                weapon,
+                Some(WeaponKind::Riveter | WeaponKind::Kiln | WeaponKind::Tumbler)
+            ) =>
+        {
+            cone(10, 6.0)
         }
         _ => Vec::new(),
     }

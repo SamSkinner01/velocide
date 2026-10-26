@@ -16,6 +16,26 @@
 //!   collar with three fletching vanes. The tip points -Z and sits [`THORN_TIP`] in front of
 //!   the origin, so a thorn drawn at its planted position with the flight direction sinks its
 //!   tip that far into the surface.
+//!
+//! The expansion arsenal (`docs/expansion.md`):
+//!
+//! - **Arrow** (Longwick): a taper arrow ~0.72 m long (drawn larger than life): slim wax
+//!   shaft, parchment fletching with one red vane, an iron head and the taper's flame burning
+//!   just behind it.
+//! - **Pinning arrow**: a dark shaft, a heavy barbed steel head with a short chain wound
+//!   behind it, steel-blue glowing rings.
+//! - **Ember arrow**: the head is an iron cage round a bulb of live coals; ember fletching.
+//! - **Rivet** (Riveter): a red-hot rivet, domed head at the back, ~0.17 m.
+//! - **Cinder rocket** (Cinderbox): a short clay-red rocket, brass nose, four fins and a
+//!   glowing cinder exhaust, ~0.42 m.
+//! - **Flak shell** (Flak): a brass case with an iron nose, a glowing timer band and a ring of
+//!   pellet tips round its shoulder.
+//! - **Limpet** (Limpet): a squat iron dome on four gripping claws (the claws face -Z: it
+//!   flies base first and sticks that way), a lamp on top the client blinks through
+//!   `Tint::glow`.
+//! - **Mortar shell** (Mortar): a fat iron teardrop with four tail fins, a lilac band and a
+//!   glowing fuse nose, ~0.55 m.
+//! - **Flare** (Flare): a brass-capped tube with a big sputtering flame head at the front.
 
 use engine::assets::gltf::ModelPart;
 use engine::glam::{Quat, Vec2, Vec3, Vec4};
@@ -62,6 +82,15 @@ pub(crate) fn build(id: ModelId) -> Vec<ModelPart> {
         ModelId::Gravewell => gravewell(),
         ModelId::Wisp => wisp(),
         ModelId::Thorn => thorn(),
+        ModelId::Arrow => arrow(ArrowHead::Taper),
+        ModelId::PinningArrow => arrow(ArrowHead::Pinning),
+        ModelId::EmberArrow => arrow(ArrowHead::Ember),
+        ModelId::Rivet => rivet(),
+        ModelId::CinderRocket => cinder_rocket(),
+        ModelId::FlakShell => flak_shell(),
+        ModelId::Limpet => limpet(),
+        ModelId::MortarShell => mortar_shell(),
+        ModelId::Flare => flare(),
         _ => bomb(),
     }
 }
@@ -294,5 +323,523 @@ fn thorn() -> Vec<ModelPart> {
     p.texture(0, kit::tex_glow());
     p.texture(1, kit::tex_glow());
     p.texture(2, kit::tex_plate());
+    p.finish()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The expansion arsenal's projectiles
+
+/// Wax shafts and parchment fletching.
+const WAX: Vec4 = Vec4::new(0.88, 0.7, 0.42, 1.0);
+const PARCHMENT: Vec4 = Vec4::new(0.9, 0.84, 0.68, 1.0);
+/// The taper's flame, a red-hot rivet, cinders.
+const FLAME: Vec4 = Vec4::new(1.0, 0.72, 0.32, 1.0);
+const RED_HOT: Vec4 = Vec4::new(1.0, 0.42, 0.16, 1.0);
+const CLAY: Vec4 = Vec4::new(0.66, 0.3, 0.2, 1.0);
+
+#[derive(Clone, Copy, PartialEq)]
+enum ArrowHead {
+    Taper,
+    Pinning,
+    Ember,
+}
+
+/// Point `z` on the flight axis.
+fn on_axis(z: f32) -> Vec3 {
+    Vec3::new(0.0, 0.0, z)
+}
+
+fn arrow(head: ArrowHead) -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    let (nock, tip) = (0.36f32, -0.36f32);
+    let shaft = match head {
+        ArrowHead::Pinning => kit::GUNMETAL,
+        _ => WAX,
+    };
+    p.add(
+        0,
+        tube(on_axis(nock), on_axis(tip + 0.08), 0.009, 0.0075, 6, shaft),
+    );
+    p.add(
+        0,
+        tube(
+            on_axis(nock + 0.012),
+            on_axis(nock - 0.02),
+            0.011,
+            0.011,
+            6,
+            kit::BLACK_STEEL,
+        ),
+    );
+    // Fletching: three vanes, one coloured.
+    let (vane, cock) = match head {
+        ArrowHead::Taper => (PARCHMENT, Vec4::new(0.78, 0.12, 0.1, 1.0)),
+        ArrowHead::Pinning => (
+            Vec4::new(0.55, 0.6, 0.7, 1.0),
+            Vec4::new(0.3, 0.45, 0.8, 1.0),
+        ),
+        ArrowHead::Ember => (
+            Vec4::new(0.45, 0.16, 0.08, 1.0),
+            Vec4::new(0.95, 0.45, 0.1, 1.0),
+        ),
+    };
+    for k in 0..3 {
+        let a = k as f32 / 3.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_2;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        p.add(
+            0,
+            kit::plate(
+                &[
+                    on_axis(nock - 0.03) + d * 0.008,
+                    on_axis(nock - 0.05) + d * 0.04,
+                    on_axis(nock - 0.14) + d * 0.036,
+                    on_axis(nock - 0.16) + d * 0.008,
+                ],
+                0.003,
+                if k == 0 { cock } else { vane },
+            ),
+        );
+    }
+    match head {
+        ArrowHead::Taper => {
+            p.add(0, spike(on_axis(tip + 0.06), on_axis(tip), 0.02, 4, IRON));
+            p.add(
+                0,
+                tube(
+                    on_axis(tip + 0.06),
+                    on_axis(tip + 0.08),
+                    0.013,
+                    0.011,
+                    6,
+                    BRASS,
+                ),
+            );
+            p.add(
+                1,
+                kit::crystal(
+                    on_axis(tip + 0.12),
+                    Vec3::NEG_Z,
+                    (0.022, 0.04),
+                    0.016,
+                    5,
+                    FLAME,
+                ),
+            );
+            p.add(1, gem(on_axis(nock + 0.014), 0.012, 0, FLAME));
+        }
+        ArrowHead::Pinning => {
+            // Heavy barbed head and a short chain wound behind it.
+            p.add(
+                0,
+                spike(
+                    on_axis(tip + 0.08),
+                    on_axis(tip - 0.02),
+                    0.024,
+                    4,
+                    kit::MIRROR_STEEL,
+                ),
+            );
+            for side in [-1.0f32, 1.0] {
+                p.add(
+                    0,
+                    spike(
+                        on_axis(tip + 0.03) + Vec3::X * side * 0.012,
+                        on_axis(tip + 0.1) + Vec3::X * side * 0.05,
+                        0.01,
+                        4,
+                        kit::MIRROR_STEEL,
+                    ),
+                );
+            }
+            for k in 0..4 {
+                let z = tip + 0.1 + k as f32 * 0.022;
+                let axis = if k % 2 == 0 { Vec3::X } else { Vec3::Y };
+                p.add(0, kit::band(on_axis(z), axis, 0.012, 0.006, 0.005, 6, IRON));
+            }
+            let steel_blue = Vec4::new(0.55, 0.75, 1.0, 1.0);
+            for z in [tip + 0.2, nock - 0.18] {
+                p.add(
+                    1,
+                    kit::band(on_axis(z), Vec3::Z, 0.011, 0.012, 0.006, 6, steel_blue),
+                );
+            }
+            p.add(
+                1,
+                gem(
+                    on_axis(tip + 0.085),
+                    0.014,
+                    0,
+                    Vec4::new(0.8, 0.9, 1.0, 1.0),
+                ),
+            );
+        }
+        ArrowHead::Ember => {
+            // An iron cage of four ribs round a bulb of coals.
+            let c = on_axis(tip + 0.07);
+            for k in 0..4 {
+                let a = k as f32 / 4.0 * std::f32::consts::TAU;
+                let d = Vec3::new(a.cos(), a.sin(), 0.0);
+                p.add(
+                    0,
+                    limb(
+                        c + Vec3::Z * 0.06 + d * 0.012,
+                        c + d * 0.034,
+                        Vec2::splat(0.004),
+                        Vec2::splat(0.004),
+                        IRON,
+                    ),
+                );
+                p.add(
+                    0,
+                    limb(
+                        c + d * 0.034,
+                        on_axis(tip) + d * 0.004,
+                        Vec2::splat(0.004),
+                        Vec2::splat(0.003),
+                        IRON,
+                    ),
+                );
+            }
+            p.add(1, gem(c, 0.03, 1, RED_HOT));
+            p.add(1, gem(c - Vec3::Z * 0.025, 0.018, 0, FLAME));
+        }
+    }
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_bone());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn rivet() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    // Shank (front) and the domed head (back), all red-hot; a dark scale ring between.
+    p.add(
+        1,
+        tube(on_axis(0.03), on_axis(-0.1), 0.022, 0.02, 8, RED_HOT),
+    );
+    p.add(1, spike(on_axis(-0.1), on_axis(-0.12), 0.02, 8, FLAME));
+    p.add(
+        1,
+        kit::ellipsoid(
+            on_axis(0.05),
+            Vec3::new(0.042, 0.042, 0.03),
+            Quat::IDENTITY,
+            3,
+            8,
+            RED_HOT,
+            false,
+        ),
+    );
+    p.add(
+        0,
+        tube(
+            on_axis(0.034),
+            on_axis(0.022),
+            0.03,
+            0.026,
+            8,
+            kit::BLACK_STEEL,
+        ),
+    );
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_grime());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn cinder_rocket() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    p.add(
+        0,
+        tube(on_axis(0.16), on_axis(-0.12), 0.042, 0.042, 8, CLAY),
+    );
+    p.add(0, spike(on_axis(-0.12), on_axis(-0.24), 0.044, 8, BRASS));
+    for z in [-0.1, 0.1] {
+        p.add(
+            0,
+            tube(on_axis(z + 0.01), on_axis(z - 0.01), 0.046, 0.046, 8, IRON),
+        );
+    }
+    for k in 0..4 {
+        let a = k as f32 / 4.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_4;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        p.add(
+            0,
+            kit::plate(
+                &[
+                    d * 0.04 + on_axis(0.08),
+                    d * 0.08 + on_axis(0.15),
+                    d * 0.08 + on_axis(0.19),
+                    d * 0.04 + on_axis(0.17),
+                ],
+                0.006,
+                IRON,
+            ),
+        );
+    }
+    p.add(
+        0,
+        tube(
+            on_axis(0.15),
+            on_axis(0.18),
+            0.036,
+            0.03,
+            8,
+            kit::BLACK_STEEL,
+        ),
+    );
+    // Cinder exhaust: a glowing throat and a short tongue of flame.
+    p.add(1, gem(on_axis(0.18), 0.03, 1, RED_HOT));
+    p.add(1, spike(on_axis(0.18), on_axis(0.3), 0.028, 5, FLAME));
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_grime());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn flak_shell() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    p.add(
+        0,
+        tube(on_axis(0.14), on_axis(-0.04), 0.05, 0.05, 10, BRASS),
+    );
+    p.add(
+        0,
+        kit::loft(
+            &[
+                kit::ngon_ring(on_axis(-0.04), Vec3::X, Vec3::Y, Vec2::splat(0.05), 10, 0.0),
+                kit::ngon_ring(on_axis(-0.1), Vec3::X, Vec3::Y, Vec2::splat(0.04), 10, 0.0),
+                vec![on_axis(-0.17)],
+            ],
+            IRON,
+            false,
+            (false, false),
+            kit::Uv::PerFace,
+        ),
+    );
+    p.add(
+        0,
+        tube(
+            on_axis(0.145),
+            on_axis(0.125),
+            0.054,
+            0.054,
+            10,
+            kit::BLACK_STEEL,
+        ),
+    );
+    // Timer band (rose, the Flak colour) and the ring of pellet tips round the shoulder.
+    let rose = Vec4::new(1.0, 0.42, 0.68, 1.0);
+    p.add(
+        1,
+        kit::band(on_axis(0.03), Vec3::Z, 0.051, 0.02, 0.006, 10, rose),
+    );
+    for k in 0..10 {
+        let a = k as f32 / 10.0 * std::f32::consts::TAU;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        p.add(
+            1,
+            gem(
+                on_axis(-0.045) + d * 0.046,
+                0.009,
+                0,
+                Vec4::new(1.0, 0.85, 0.55, 1.0),
+            ),
+        );
+    }
+    p.add(1, gem(on_axis(-0.17), 0.012, 0, rose));
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_plate());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn limpet() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    // Squat iron dome, its base towards -Z (the side that sticks), four gripping claws.
+    p.add(
+        0,
+        kit::ellipsoid(
+            on_axis(0.0),
+            Vec3::new(0.13, 0.13, 0.07),
+            Quat::IDENTITY,
+            4,
+            10,
+            IRON,
+            false,
+        ),
+    );
+    p.add(
+        0,
+        kit::band(on_axis(-0.02), Vec3::Z, 0.13, 0.03, 0.014, 10, BRASS),
+    );
+    for k in 0..4 {
+        let a = k as f32 / 4.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_4;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        let knee = d * 0.17 + on_axis(-0.06);
+        p.add(
+            0,
+            limb(
+                d * 0.1 + on_axis(-0.02),
+                knee,
+                Vec2::splat(0.014),
+                Vec2::splat(0.011),
+                kit::BLACK_STEEL,
+            ),
+        );
+        p.add(
+            0,
+            limb(
+                knee,
+                d * 0.15 + on_axis(-0.1),
+                Vec2::splat(0.011),
+                Vec2::splat(0.006),
+                kit::BLACK_STEEL,
+            ),
+        );
+    }
+    p.add(
+        0,
+        tube(
+            on_axis(0.05),
+            on_axis(0.085),
+            0.04,
+            0.034,
+            8,
+            kit::BLACK_STEEL,
+        ),
+    );
+    // The lamp on top (blinks) and a ring of tell-tale slits round the brass band.
+    let lamp = Vec4::new(1.0, 0.95, 0.4, 1.0);
+    p.add(1, gem(on_axis(0.095), 0.03, 1, lamp));
+    for k in 0..6 {
+        let a = k as f32 / 6.0 * std::f32::consts::TAU;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        p.add(
+            1,
+            kit::block(
+                d * 0.132 + on_axis(-0.02),
+                Vec3::splat(0.006),
+                Quat::IDENTITY,
+                lamp,
+            ),
+        );
+    }
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_grime());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn mortar_shell() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    let ring =
+        |z: f32, r: f32| kit::ngon_ring(on_axis(z), Vec3::X, Vec3::Y, Vec2::splat(r), 10, 0.0);
+    p.add(
+        0,
+        kit::loft(
+            &[
+                vec![on_axis(-0.27)],
+                ring(-0.2, 0.075),
+                ring(-0.06, 0.11),
+                ring(0.08, 0.09),
+                ring(0.2, 0.035),
+            ],
+            IRON,
+            false,
+            (false, true),
+            kit::Uv::PerFace,
+        ),
+    );
+    p.add(
+        0,
+        tube(
+            on_axis(0.18),
+            on_axis(0.3),
+            0.035,
+            0.035,
+            8,
+            kit::BLACK_STEEL,
+        ),
+    );
+    for k in 0..4 {
+        let a = k as f32 / 4.0 * std::f32::consts::TAU;
+        let d = Vec3::new(a.cos(), a.sin(), 0.0);
+        p.add(
+            0,
+            kit::plate(
+                &[
+                    d * 0.03 + on_axis(0.18),
+                    d * 0.09 + on_axis(0.24),
+                    d * 0.09 + on_axis(0.3),
+                    d * 0.03 + on_axis(0.3),
+                ],
+                0.008,
+                IRON,
+            ),
+        );
+    }
+    let lilac = Vec4::new(0.82, 0.6, 1.0, 1.0);
+    p.add(
+        1,
+        kit::band(on_axis(-0.06), Vec3::Z, 0.11, 0.03, 0.008, 10, lilac),
+    );
+    p.add(
+        1,
+        kit::band(on_axis(0.07), Vec3::Z, 0.092, 0.014, 0.006, 10, lilac),
+    );
+    p.add(
+        1,
+        gem(on_axis(-0.27), 0.03, 1, Vec4::new(1.0, 0.9, 0.7, 1.0)),
+    );
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_grime());
+    p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+fn flare() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&BODY_GLOW);
+    p.add(
+        0,
+        tube(
+            on_axis(0.17),
+            on_axis(-0.06),
+            0.03,
+            0.03,
+            8,
+            Vec4::new(0.7, 0.18, 0.14, 1.0),
+        ),
+    );
+    p.add(
+        0,
+        tube(on_axis(0.18), on_axis(0.13), 0.034, 0.034, 8, BRASS),
+    );
+    p.add(
+        0,
+        tube(on_axis(-0.04), on_axis(-0.07), 0.034, 0.034, 8, BRASS),
+    );
+    // The burning head: a hot white core in a sputtering crown of flame.
+    let signal = Vec4::new(1.0, 0.35, 0.25, 1.0);
+    p.add(
+        1,
+        gem(on_axis(-0.11), 0.05, 1, Vec4::new(1.0, 0.9, 0.8, 1.0)),
+    );
+    for k in 0..6 {
+        let d = Quat::from_rotation_z(k as f32 * 1.047) * Quat::from_rotation_x(0.6) * Vec3::NEG_Z;
+        p.add(
+            1,
+            spike(
+                on_axis(-0.11) + d * 0.03,
+                on_axis(-0.11) + d * 0.11,
+                0.022,
+                4,
+                signal,
+            ),
+        );
+    }
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_plate());
+    p.texture(1, kit::tex_glow());
     p.finish()
 }
