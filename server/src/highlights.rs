@@ -37,7 +37,8 @@ impl Server {
     /// tick's mode events, so `PlayOfTheGame` arrives before `ModeEvent::Ended`).
     pub(crate) fn update_highlights(&mut self, events: &[SimEvent]) {
         let mode = &self.world.mode;
-        if !mode.rules.kind.is_pvp() {
+        // PvP matches only: not co-op, not a world running in the lobby phase (warm-up).
+        if !mode.rules.kind.is_pvp() || !self.lobby_phase().level_running() {
             self.highlights.match_start = None;
             return;
         }

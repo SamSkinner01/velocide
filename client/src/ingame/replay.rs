@@ -669,7 +669,12 @@ impl InGame {
     /// Records this frame's new snapshot frames (PvP matches only; the recording is dropped
     /// otherwise). Called after the network update.
     pub(super) fn potg_record(&mut self) {
-        let pvp = self.match_mode().is_pvp();
+        // PvP matches only (not co-op, not a world running in the lobby phase).
+        let running = self
+            .net()
+            .and_then(NetClient::lobby_phase)
+            .is_none_or(|p| p.level_running());
+        let pvp = self.match_mode().is_pvp() && running;
         let InGame { session, potg, .. } = self;
         let Some(net) = session.as_ref().map(Session::client) else {
             return;
