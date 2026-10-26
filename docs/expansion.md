@@ -147,6 +147,14 @@ it). An ability is one `Attack` on every weapon, so `Attack::weapon()` is `None`
 several weapons can carry: **`KillInfo::weapon`** (new field) names the weapon that fired the
 killing blow — use it for the kill feed's weapon and gun-game tiers.
 
+As built (milestone 2): **Limpet** — a tap throws a charge, holding the ability 0.25 s
+detonates every charge out, and a throw with 3 already out detonates them instead. Read
+literally ("using Limpet again while charges are out detonates them all") a second use would
+always detonate the first charge, so "up to 3 live" could never happen; tap / hold keeps both.
+Ability damage on another weapon of the class: × the carrier's `ability_power` / the home
+weapon's, never above the listed numbers (`docs/arsenal.md`). Pinned players are slowed through
+their predicted `MoveState` (`slow_time`, `slow_scale`).
+
 ### Balance per mode (**arsenal**)
 
 `assets/tuning.ron` keeps the weapons' base numbers in `combat` and gains a `balance` section

@@ -765,7 +765,7 @@ impl Default for LancetTuning {
             bloom_per_shot: 0.25,
             bloom_max: 0.6,
             bloom_degrees: 3.0,
-            ability_power: 1.0,
+            ability_power: 0.85,
         }
     }
 }
@@ -792,7 +792,7 @@ impl Default for ThresherTuning {
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
-            ability_power: 1.0,
+            ability_power: 0.9,
         }
     }
 }
@@ -823,7 +823,7 @@ impl Default for RiveterTuning {
             rivet_radius: 0.06,
             rivet_lifetime: 1.5,
             spread_degrees: 1.2,
-            ability_power: 1.0,
+            ability_power: 0.9,
         }
     }
 }
@@ -862,7 +862,7 @@ impl Default for CinderboxTuning {
             explosion_radius: 2.6,
             damage: 32.0,
             knockback: 14.0,
-            ability_power: 1.0,
+            ability_power: 0.95,
         }
     }
 }
@@ -912,8 +912,10 @@ pub struct KilnTuning {
     pub cone_degrees: f32,
     /// Seconds between sprays while held (0.08 s = 5 ticks at 60 Hz).
     pub interval: f32,
-    /// Per spray to everything in the cone (+ a Burn stack).
+    /// Per spray to everything in the cone ...
     pub damage: f32,
+    /// ... plus this many Burn stacks.
+    pub burn_stacks: u32,
     pub ability_power: f32,
 }
 
@@ -924,7 +926,8 @@ impl Default for KilnTuning {
             cone_degrees: 16.0,
             interval: 0.08,
             damage: 3.0,
-            ability_power: 1.0,
+            burn_stacks: 1,
+            ability_power: 0.85,
         }
     }
 }
@@ -1067,7 +1070,7 @@ pub struct FlareTuning {
     pub patch_radius: f32,
     pub patch_time: f32,
     /// Burn stacks the patch applies per second to every hostile inside (`burn`).
-    pub burn_scale: f32,
+    pub burn_rate: f32,
     pub cooldown: f32,
 }
 
@@ -1081,7 +1084,7 @@ impl Default for FlareTuning {
             flight_time: 4.0,
             patch_radius: 3.0,
             patch_time: 4.0,
-            burn_scale: 1.0,
+            burn_rate: 2.0,
             cooldown: 3.0,
         }
     }
@@ -1103,6 +1106,8 @@ pub struct LimpetTuning {
     pub knockback: f32,
     /// Seconds between two throws.
     pub cooldown: f32,
+    /// Holding the ability this long detonates every charge out (a tap throws one).
+    pub detonate_hold: f32,
 }
 
 impl Default for LimpetTuning {
@@ -1117,6 +1122,7 @@ impl Default for LimpetTuning {
             damage: 50.0,
             knockback: 14.0,
             cooldown: 0.4,
+            detonate_hold: 0.25,
         }
     }
 }
@@ -1214,18 +1220,25 @@ impl Default for PinningArrowTuning {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmberArrowTuning {
+    /// The arrow's own hit as a fraction of a plain arrow at the same draw ...
+    pub damage_scale: f32,
+    /// ... then it bursts: radius, damage (falloff like every explosion), knockback ...
     pub explosion_radius: f32,
     pub damage: f32,
     pub knockback: f32,
+    /// ... and sets everything in the burst alight with this many Burn stacks.
+    pub burn_stacks: u32,
     pub cooldown: f32,
 }
 
 impl Default for EmberArrowTuning {
     fn default() -> Self {
         Self {
+            damage_scale: 0.75,
             explosion_radius: 3.0,
             damage: 30.0,
             knockback: 8.0,
+            burn_stacks: 2,
             cooldown: 3.0,
         }
     }
@@ -1241,6 +1254,8 @@ pub struct BurnTuning {
     pub max_stacks: u32,
     /// Seconds a burn lasts; every new stack refreshes it.
     pub duration: f32,
+    /// Its damage is dealt in steps this far apart.
+    pub tick_interval: f32,
 }
 
 impl Default for BurnTuning {
@@ -1249,6 +1264,7 @@ impl Default for BurnTuning {
             dps: 4.0,
             max_stacks: 3,
             duration: 3.0,
+            tick_interval: 0.25,
         }
     }
 }
@@ -1386,6 +1402,10 @@ pub struct StyleTuning {
     pub freshness_min: f32,
     /// Below this the weapon / action is STALE (HUD indicator, "- STALE" in the feed).
     pub stale_threshold: f32,
+    // ---- potg (docs/potg.md) ----
+    /// LONGSHOT: a kill with a hitscan shot or an arrow from at least `longshot_distance` m.
+    pub longshot: f32,
+    pub longshot_distance: f32,
 }
 
 impl Default for StyleTuning {
@@ -1419,6 +1439,8 @@ impl Default for StyleTuning {
             freshness_regen: 0.02,
             freshness_min: 0.2,
             stale_threshold: 0.5,
+            longshot: 50.0,
+            longshot_distance: 40.0,
         }
     }
 }
@@ -1778,6 +1800,7 @@ impl KilnTuning {
         clamp!(self, d, 0.0, MAX_TIME; interval);
         clamp!(self, d, 0.0, MAX_DAMAGE; damage);
         clamp!(self, d, 0.0, MAX_MULT; ability_power);
+        clamp_count!(self; burn_stacks);
     }
 }
 
@@ -1842,7 +1865,7 @@ impl FlareTuning {
         clamp!(self, d, 0.0, 10.0; projectile_radius);
         clamp!(self, d, 0.0, MAX_TIME; flight_time, patch_time, cooldown);
         clamp!(self, d, 0.0, MAX_DIST; patch_radius);
-        clamp!(self, d, 0.0, MAX_MULT; burn_scale);
+        clamp!(self, d, 0.0, MAX_MULT; burn_rate);
     }
 }
 
@@ -1853,7 +1876,7 @@ impl LimpetTuning {
         clamp!(self, d, 0.0, MAX_SPEED; speed, knockback);
         clamp!(self, d, 0.0, MAX_ACCEL; gravity);
         clamp!(self, d, 0.0, 10.0; projectile_radius);
-        clamp!(self, d, 0.0, MAX_TIME; fuse, cooldown);
+        clamp!(self, d, 0.0, MAX_TIME; fuse, cooldown, detonate_hold);
         clamp!(self, d, 0.0, MAX_DIST; explosion_radius);
         clamp!(self, d, 0.0, MAX_DAMAGE; damage);
     }
@@ -1900,6 +1923,8 @@ impl EmberArrowTuning {
         clamp!(self, d, 0.0, MAX_DAMAGE; damage);
         clamp!(self, d, 0.0, MAX_SPEED; knockback);
         clamp!(self, d, 0.0, MAX_TIME; cooldown);
+        clamp!(self, d, 0.0, MAX_MULT; damage_scale);
+        clamp_count!(self; burn_stacks);
     }
 }
 
@@ -1907,7 +1932,7 @@ impl BurnTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
         clamp!(self, d, 0.0, MAX_DAMAGE; dps);
-        clamp!(self, d, 0.0, MAX_TIME; duration);
+        clamp!(self, d, 0.0, MAX_TIME; duration, tick_interval);
         clamp_count!(self; max_stacks);
     }
 }
@@ -1947,6 +1972,8 @@ impl StyleTuning {
         clamp!(self, d, 0.0, MAX_TIME; rank_grace, multikill_window);
         clamp!(self, d, 0.0, MAX_DAMAGE; close_call_health);
         clamp!(self, d, 0.0, MAX_MULT; close_call_multiplier);
+        clamp!(self, d, 0.0, MAX_POINTS; longshot);
+        clamp!(self, d, 0.0, MAX_DIST; longshot_distance);
     }
 }
 
@@ -2100,6 +2127,8 @@ mod tests {
             &mut expected.combat.limpet.max_live,
             &mut expected.combat.triple_nock.arrows,
             &mut expected.combat.burn.max_stacks,
+            &mut expected.combat.kiln.burn_stacks,
+            &mut expected.combat.ember_arrow.burn_stacks,
         ] {
             *n = 3;
         }

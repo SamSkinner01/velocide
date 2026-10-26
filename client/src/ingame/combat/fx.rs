@@ -981,6 +981,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             }
             ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
         }
+        // The Flak ring (or a Gust-deflected shell bursting): the arsenal's flak burst.
+        Fx::Burst { origin, ends, .. } => {
+            let ends: Vec<Vec3> = ends.iter().map(|e| q(*e)).collect();
+            arsenal::flak_burst(ctx, q(*origin), &ends);
+        }
         Fx::ArcChain { points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
             for (i, w) in pts.windows(2).enumerate() {

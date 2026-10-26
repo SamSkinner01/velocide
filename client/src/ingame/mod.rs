@@ -40,6 +40,7 @@ pub mod match_flow;
 pub mod mode_hud;
 pub mod pause;
 pub mod remote_players;
+pub mod replay; // play of the game: recording, title card, replay (docs/potg.md)
 pub mod scoreboard;
 pub mod style_hud;
 pub mod tuning_edit;
@@ -128,6 +129,8 @@ pub struct InGame {
     last_snapshot_time: f64,
     /// Results screen / lobby phase bookkeeping (`match_flow`).
     match_ui: match_flow::MatchUi,
+    /// Play of the game: recording, marked clip, the end-of-match replay (`replay.rs`).
+    potg: replay::PotgClient,
 }
 
 impl InGame {
@@ -243,6 +246,7 @@ impl InGame {
             last_snapshot_count: 0,
             last_snapshot_time: 0.0,
             match_ui: match_flow::MatchUi::default(),
+            potg: replay::PotgClient::new(),
         };
         game.load_received_level(common, renderer);
         game
@@ -552,6 +556,7 @@ impl InGame {
             .as_mut()
             .and_then(|s| s.client_mut().poll_event())
         {
+            self.potg_event(&ev, common);
             if let Some(t) = self.on_net_event(ev, common, io.renderer) {
                 let to_lobby = t == Transition::ReturnToLobby;
                 transition = Some(t);
@@ -559,6 +564,12 @@ impl InGame {
                     break;
                 }
             }
+        }
+        // Play of the game (replay.rs): recording; its title card and replay take over the
+        // screen until they end or are skipped, then the results.
+        self.potg_record();
+        if let Some(output) = self.potg_frame(common, io, out, &mut transition) {
+            return output;
         }
         let in_game = self.is_playing();
         // The results screen (match over) takes the keys and the cursor.
@@ -703,6 +714,7 @@ impl InGame {
             self.on_local_move_events(ev, feet, &tuning);
         }
         self.tick_events = events;
+        self.potg_record_local_shots();
         self.combat_after_ticks(common);
     }
 

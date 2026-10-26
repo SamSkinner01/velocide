@@ -127,16 +127,55 @@ pub struct BalanceTuning {
 }
 
 impl Default for BalanceTuning {
-    /// PvE is the reference (nothing changed). PvP: no Thorns. The numbers and reasoning:
-    /// `docs/arsenal.md`.
+    /// PvE is the reference (nothing changed). PvP: tuned for time-to-kill between players, no
+    /// Thorns. The numbers and their reasoning: `docs/arsenal.md`.
     fn default() -> Self {
-        let pvp = BalanceProfile {
-            overrides: BTreeMap::from([("thorn.charges".to_string(), 0.0)]),
-            ..Default::default()
-        };
+        let scale = |damage: f32| BalanceScale::damage(damage);
+        let weapons = BTreeMap::from([
+            (WeaponKind::Lancet, scale(0.85)),
+            (WeaponKind::Bellows, scale(0.7)),
+            (WeaponKind::Thresher, scale(0.8)),
+            (WeaponKind::Cinderbox, scale(0.75)),
+            (
+                WeaponKind::Longwick,
+                BalanceScale {
+                    interval: 0.85,
+                    ..scale(0.5)
+                },
+            ),
+            (WeaponKind::Kiln, scale(1.2)),
+        ]);
+        let abilities = BTreeMap::from([
+            (Ability::BothBarrels, scale(0.4)),
+            (Ability::Wisp, scale(0.7)),
+            (Ability::Discharge, scale(0.9)),
+            (Ability::Breach, scale(0.85)),
+            (Ability::Gravewell, scale(0.75)),
+            (Ability::Skewer, scale(0.58)),
+            (Ability::Flurry, scale(0.75)),
+            (Ability::Flak, scale(0.8)),
+            (Ability::Volley, scale(0.7)),
+            (Ability::Limpet, scale(0.6)),
+            (
+                Ability::Mortar,
+                BalanceScale {
+                    radius: 0.85,
+                    ..scale(0.75)
+                },
+            ),
+            (Ability::TripleNock, scale(0.5)),
+        ]);
+        let overrides = BTreeMap::from([
+            ("thorn.charges".to_string(), 0.0),
+            ("quill.brand_multiplier".to_string(), 1.25),
+        ]);
         Self {
             pve: BalanceProfile::default(),
-            pvp,
+            pvp: BalanceProfile {
+                weapons,
+                abilities,
+                overrides,
+            },
         }
     }
 }
@@ -342,7 +381,7 @@ impl CombatTuning {
             }
             Ability::Flare => {
                 let f = &mut self.flare;
-                f.burn_scale *= s.damage;
+                f.burn_rate *= s.damage;
                 f.cooldown *= s.interval;
                 f.patch_radius *= s.radius;
                 f.speed *= s.speed;
@@ -375,6 +414,7 @@ impl CombatTuning {
             }
             Ability::EmberArrow => {
                 let e = &mut self.ember_arrow;
+                e.damage_scale *= s.damage;
                 e.damage *= s.damage;
                 e.cooldown *= s.interval;
                 e.explosion_radius *= s.radius;

@@ -118,12 +118,14 @@ pub struct DamageInfo {
     source: Owner,        // World | Player(id) | Enemy(net id)
     attack: Attack,       // Quill, Brand, Splinter, Blast, Gust, BothBarrels, Arc, Wisp,
                           // Discharge, Tumble, Breach, Gravewell, Thorn, Fist, Slam,
-                          // Enemy{kind, attack}, World, Dev
+                          // Enemy{kind, attack}, World, Dev, then the expansion's
+                          // primaries and abilities (docs/arsenal.md)
     point: Vec3, dir: Vec3,   // where, and the direction the damage travels
     part: HitPart,        // Body | Head | Weak(i)
     knockback: Vec3,      // velocity change
     flags: DamageFlags,   // HITSCAN PROJECTILE EXPLOSIVE MELEE PARRIED RICOCHET SLAM HEADSHOT WEAK_POINT
                           // SELF CHAINED RETURNED ENVIRONMENT ARMOURED DIRECT BRANDED
+                          // BURN (status damage over time) PIERCED (Skewer past a target)
     ricochets: u8,        // thorn bounces before this hit
     projectile: Option<NetId>,
 }
@@ -167,6 +169,7 @@ pub struct KillInfo {
     parried_projectile: bool,     // RETURN TO SENDER (flags also carry RETURNED when it hit its original owner)
     killer_health: f32, killer_effective_max: f32,   // CLOSE CALL
     overkill: f32,                // how violently it breaks apart
+    distance: f32,                // killer to victim (m; 0 without a body): kill feed, LONGSHOT
     tick: u32,                    // MULTIKILL timing
 }
 ```
@@ -433,7 +436,7 @@ block each other (player movement must stay predictable).
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
 | `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BURNING 1<<12, PINNED 1<<13, DRAWING 1<<14, BRANDED 1<<15` | held weapon, selected ability, charge / draw: `protocol::player_weapon(state)` (`docs/arsenal.md`) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
-| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–14 enemies area), `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
+| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–12 enemies area), `BURNING 1<<13`, `PINNED 1<<14`, `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `EMBER_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
 | `THORN` 160 | thrower | **at launch tick**; while `PLANTED`: where it sits / its orientation (unit) | – | `PLANTED 1, LYING 2, DROPPING 4` | – | – | launch tick |
@@ -459,6 +462,7 @@ parry, stick), so flying projectiles cost nothing per snapshot; the reproduction
 | `HitConfirm(HitReport)` | the attacker only, **merged per target per tick** (10 pellets = 1) | target, target kind, attack, damage, hits, flags (union), point, killed |
 | `Killed(KillInfo)` | everyone | see the damage pipeline |
 | `Parried(ParryEvent)` | everyone | player, target (projectile id + kind / melee enemy), position, healed, late ticks |
+| `HighlightMark(Highlight)`, `PlayOfTheGame(Highlight)` | everyone (PvP) | play of the game: player, start / end tick, score, title (docs/potg.md) |
 
 ### Cosmetic events (`SnapshotMessage::fx: Vec<FxEvent>`, unreliable)
 
@@ -549,7 +553,7 @@ spawn protected; death screen.
 | **THORN** | flying: the glass spike along its path; `DROPPING`: tumbling; `PLANTED`: tip-first in the surface along `velocity` (quivers after landing), drawn ×1.5 with a steady halo and a pulse ring so the relay reads at a distance; `LYING`: flat on the floor; disappears on removal (shatter via `Ricochet` / `ThornExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
 | `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
-| `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
+| `Killed` | kill feed (`KILLER [ATTACK] VICTIM 38m HEADSHOT RETURNED RICOCHET xN AIR`: the distance whenever the killer has a body and it wasn't a suicide; only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
 | `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
 | `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers (jagged arcs for `Arc`) from the shooter's muzzle to each end, impact sparks/decals at the ends; `Gust` → the air puff along the muzzle direction |

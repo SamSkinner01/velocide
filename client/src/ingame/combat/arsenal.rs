@@ -270,23 +270,49 @@ pub fn projectile_view(
     position: Vec3,
     velocity: Vec3,
     age: f32,
+    world: Option<&CollisionWorld>,
 ) -> Option<ProjectileView> {
     let kind = projectile_kind(e.kind)?;
     let stuck = e.flags & shared::protocol::projectile_flags::STUCK != 0;
+    let flight = if e.velocity.length_squared() > 1e-6 {
+        e.velocity
+    } else {
+        Vec3::NEG_Y
+    };
+    // A stuck limpet grips the nearest surface (it may ride on a wall, a ceiling or a body);
+    // anything else that stuck keeps its flight direction.
+    let facing = if stuck && kind == ArsenalProjectile::Limpet {
+        surface_facing(world, position).unwrap_or(flight)
+    } else {
+        flight
+    };
     Some(ProjectileView {
         kind,
         position,
         velocity: if stuck { Vec3::ZERO } else { velocity },
         stuck,
-        // Stuck: the replicated velocity carries the orientation (the flight / the surface).
-        facing: if e.velocity.length_squared() > 1e-6 {
-            e.velocity
-        } else {
-            Vec3::NEG_Y
-        },
+        facing,
         age,
         seed: e.id.0,
     })
+}
+
+/// Direction from `at` to the nearest level surface within half a metre (probing the six
+/// axes), if there is one.
+pub fn surface_facing(world: Option<&CollisionWorld>, at: Vec3) -> Option<Vec3> {
+    let w = world?;
+    [
+        Vec3::NEG_Y,
+        Vec3::Y,
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ]
+    .into_iter()
+    .filter_map(|d| w.cast_ray(at, d, 0.5, MASK_SHOTS).map(|h| (h.distance, d)))
+    .min_by(|a, b| a.0.total_cmp(&b.0))
+    .map(|(_, d)| d)
 }
 
 /// A projectile of the expansion arsenal.
@@ -927,44 +953,65 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     ctx.audio.play(kind.sfx(), PlayParams::at(position));
 }
 
-/// The Flak shell's airburst: a flash and a ring of `pellets` hot tracers flung out
-/// perpendicular to its flight (`dir`), each ending in a little spark.
+/// The Flak shell's airburst for a staged / synthetic burst: a ring of `pellets` rays flung out
+/// perpendicular to its flight (`dir`), `range` long (stopped by the level); see [`flak_burst`].
 pub fn flak_airburst(ctx: &mut FxCtx, position: Vec3, dir: Vec3, pellets: usize, range: f32) {
     let axis = dir.normalize_or(Vec3::NEG_Z);
     let side = axis.any_orthonormal_vector();
     let up = axis.cross(side);
+    let n = pellets.max(1);
+    let ends: Vec<Vec3> = (0..n)
+        .map(|k| {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU + ctx.rng.range(-0.1, 0.1);
+            let out = (side * a.cos() + up * a.sin() + axis * 0.15).normalize();
+            ctx.world
+                .and_then(|w| w.cast_ray(position, out, range, MASK_SHOTS))
+                .map_or(position + out * range, |h| h.point)
+        })
+        .collect();
+    flak_burst(ctx, position, &ends);
+}
+
+/// A Flak shell bursting at `origin` into pellets that ended at `ends` (`Fx::Burst`): a rose
+/// flash, a shock ring in the plane of the pellets, a hot tracer to each end with sparks where
+/// it struck, smoke, light, a little shake and `Sfx::FlakBurst`.
+pub fn flak_burst(ctx: &mut FxCtx, origin: Vec3, ends: &[Vec3]) {
     let rose = ability_color(Ability::Flak);
     let tracer = Vec4::new(2.0, 1.4, 0.9, 0.9);
-    let n = pellets.max(1);
-    for k in 0..n {
-        let a = k as f32 / n as f32 * std::f32::consts::TAU + ctx.rng.range(-0.1, 0.1);
-        let out = (side * a.cos() + up * a.sin() + axis * 0.15).normalize();
-        let mut end = position + out * range;
-        if let Some(w) = ctx.world
-            && let Some(h) = w.cast_ray(position, out, range, MASK_SHOTS)
-        {
-            end = h.point;
-            ctx.effects.sparks(h.point + h.normal * 0.03, h.normal, 3);
-        }
-        ctx.beams.beam(position, end, 0.03, tracer, 0.12);
+    // The ring's axis: the normal of the pellets' fan (they fly out across the shell's path).
+    let dirs: Vec<Vec3> = ends
+        .iter()
+        .map(|e| (*e - origin).normalize_or_zero())
+        .collect();
+    let mut normal = Vec3::ZERO;
+    for (i, a) in dirs.iter().enumerate() {
+        let b = dirs[(i + 1) % dirs.len()];
+        let n = a.cross(b);
+        normal += if n.dot(normal) < 0.0 { -n } else { n };
+    }
+    let axis = normal.normalize_or(Vec3::Y);
+    let mut reach = 0.0f32;
+    for (end, dir) in ends.iter().zip(&dirs) {
+        ctx.beams.beam(origin, *end, 0.03, tracer, 0.14);
+        ctx.effects.sparks(*end - *dir * 0.05, -*dir, 3);
+        reach = reach.max(end.distance(origin));
     }
     ctx.effects
-        .glow(position, (rose.truncate() * 2.0).extend(1.0), 1.6, 0.15);
-    ctx.effects.smoke(position, 4);
+        .glow(origin, (rose.truncate() * 2.0).extend(1.0), 1.6, 0.15);
+    ctx.effects.smoke(origin, 4);
     ctx.beams.ring(
-        position,
+        origin,
         axis,
         0.2,
-        range * 0.5,
+        (reach * 0.5).clamp(2.0, 8.0),
         0.06,
         (rose.truncate() * 1.8).extend(0.9),
         0.18,
     );
-    ctx.beams
-        .light(position, Vec3::new(2.2, 1.0, 1.4), 6.0, 0.25);
-    let d = position.distance(ctx.listener);
+    ctx.beams.light(origin, Vec3::new(2.2, 1.0, 1.4), 6.0, 0.25);
+    let d = origin.distance(ctx.listener);
     ctx.feedback.shake(shake_at(d, 10.0, 0.3));
-    ctx.audio.play(Sfx::FlakBurst, PlayParams::at(position));
+    ctx.audio.play(Sfx::FlakBurst, PlayParams::at(origin));
 }
 
 // ---------------------------------------------------------------------------------------------

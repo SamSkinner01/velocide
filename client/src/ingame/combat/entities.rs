@@ -605,7 +605,7 @@ impl EntityView {
         // The expansion arsenal's projectiles have their own trails (arsenal.rs).
         if e.flags & projectile_flags::PARRIED == 0 {
             let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
-            if let Some(view) = super::arsenal::projectile_view(e, pos, vel, v.age) {
+            if let Some(view) = super::arsenal::projectile_view(e, pos, vel, v.age, f.world) {
                 super::arsenal::projectile_trail(effects, beams, rng, &view, dt);
                 return;
             }
@@ -894,7 +894,7 @@ impl EntityView {
             // white-hot way below.
             if !parried {
                 let age = self.projectiles.get(&e.id).map_or(0.0, |v| v.age);
-                if let Some(view) = super::arsenal::projectile_view(e, pos, vel, age) {
+                if let Some(view) = super::arsenal::projectile_view(e, pos, vel, age, f.world) {
                     super::arsenal::draw_projectile(lib, &view, self.time, draws, lights);
                     continue;
                 }

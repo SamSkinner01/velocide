@@ -315,6 +315,10 @@ its index, so generation is deterministic.
     clunk.
   - `Countdown` is a clean 880 Hz beep. `MatchStart` and `MatchEnd` are a stab and a falling
     horn with a gong.
+  - Play of the game (docs/potg.md): `PotgStinger` is the title card slamming in — a short
+    riser, then a sub boom, a detuned brass stab in D minor (add 9) closing down, the foundry
+    bell and a crash of sparks; `PotgWhoosh` the cut to the replay (rising air, a soft thud);
+    `PotgSlowmo` the drop into slow motion on the last kill (a deep falling tone over a rumble).
 
 ## Music
 

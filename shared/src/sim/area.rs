@@ -200,26 +200,24 @@ impl SimWorld {
         }
     }
 
-    /// Kiln spray: `damage` to every hostile whose (padded) shape is within `range` inside the
-    /// `cone_degrees` cone along the aim (line of sight from the eye). Embers don't ricochet
-    /// and have no weak-point bonus. Emits a `Shot` (no ray ends) for the remote spray.
-    #[allow(clippy::too_many_arguments)]
+    /// Kiln spray: `kiln.damage` and `kiln.burn_stacks` Burn stacks to every hostile whose
+    /// (padded) shape is within `kiln.range` inside the `kiln.cone_degrees` cone along the aim
+    /// (line of sight from the eye). Embers don't ricochet and have no weak-point bonus. Emits
+    /// a `Shot` (no ray ends) for the remote spray.
     pub(crate) fn kiln_spray(
         &mut self,
         t: &Tuning,
         history: Option<&dyn HitboxHistory>,
         id: PlayerId,
         input: &PlayerInput,
-        range: f32,
-        cone_degrees: f32,
-        damage: f32,
     ) {
         let Some(p) = self.players.get(&id) else {
             return;
         };
+        let k = &t.combat.kiln;
         let eye = p.movement.eye_position(&t.movement);
         let aim = input.look_dir();
-        let half_cone = (cone_degrees * 0.5).to_radians();
+        let half_cone = (k.cone_degrees * 0.5).to_radians();
         let me = Owner::Player(id);
         let view = self.shot_view(t, history, id, input);
         let world = &self.collision.world;
@@ -229,13 +227,13 @@ impl SimWorld {
                 continue;
             }
             let pads = self.hit_pads(t, me, h.target);
-            let Some((_, _, point)) = in_cone(h, pads, eye, aim, range, half_cone) else {
+            let Some((_, _, point)) = in_cone(h, pads, eye, aim, k.range, half_cone) else {
                 continue;
             };
             if world.line_blocked(eye, point, MASK_SHOTS) {
                 continue;
             }
-            let info = DamageInfo::new(damage, me, Attack::Kiln)
+            let info = DamageInfo::new(k.damage, me, Attack::Kiln)
                 .at(point, aim)
                 .part(HitPart::Body)
                 .flags(DamageFlags::HITSCAN);
@@ -243,6 +241,7 @@ impl SimWorld {
         }
         for (target, info) in hits {
             self.apply_damage(t, target, info);
+            self.apply_burn(t, me, Attack::Kiln, target, k.burn_stacks);
         }
         self.push_fired(id, Attack::Kiln, eye);
     }

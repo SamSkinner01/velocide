@@ -58,8 +58,9 @@ pub enum AbilityStyle {
     Charge,
     /// A burst of shots over several ticks (Flurry).
     Burst,
-    /// Once per press (Limpet: each press throws, or detonates).
-    Press,
+    /// Tap or hold (Limpet): released before the hold time it fires with `charge` 0 (throw),
+    /// held to it with `charge` 1 (detonate).
+    Hold,
 }
 
 impl WeaponKind {
@@ -145,7 +146,7 @@ impl Ability {
         match self {
             Ability::Discharge | Ability::Skewer => AbilityStyle::Charge,
             Ability::Flurry => AbilityStyle::Burst,
-            Ability::Limpet => AbilityStyle::Press,
+            Ability::Limpet => AbilityStyle::Hold,
             _ => AbilityStyle::Instant,
         }
     }
@@ -175,13 +176,20 @@ impl Ability {
         }
     }
 
-    /// Seconds to a full charge (charging abilities; 1 s for the others).
+    /// Seconds to a full charge (charging abilities, the Limpet's hold; 1 s for the others).
     pub fn charge_time(self, t: &CombatTuning) -> f32 {
         match self {
             Ability::Skewer => t.skewer.charge_time,
             Ability::Discharge => t.arclash.discharge_charge_time,
+            Ability::Limpet => t.limpet.detonate_hold,
             _ => 1.0,
         }
+    }
+
+    /// Made of the carrying weapon's own shots (Flurry, Volley): their damage comes from its
+    /// primary, so `ability_power` doesn't scale them again.
+    pub fn uses_primary(self) -> bool {
+        matches!(self, Ability::Flurry | Ability::Volley)
     }
 }
 
@@ -682,13 +690,37 @@ fn step_build(
                 };
             }
         }
-        AbilityStyle::Press | AbilityStyle::Instant => {
-            let trigger = if ability.style() == AbilityStyle::Press {
-                held.pressed(prev, Buttons::ALT_FIRE)
+        AbilityStyle::Hold => {
+            let hold = s.charge_ticks(t, tick_rate);
+            if alt_held {
+                if s.charge < hold {
+                    s.charge += 1;
+                    if s.charge == hold {
+                        out.push(FireIntent::Ability {
+                            weapon: w,
+                            ability,
+                            charge: 1.0,
+                        });
+                    }
+                }
             } else {
-                alt_held
-            };
-            if trigger && s.alt_cooldown[si] == 0 {
+                if held.released(prev, Buttons::ALT_FIRE)
+                    && s.charge > 0
+                    && s.charge < hold
+                    && s.alt_cooldown[si] == 0
+                {
+                    out.push(FireIntent::Ability {
+                        weapon: w,
+                        ability,
+                        charge: 0.0,
+                    });
+                    s.alt_cooldown[si] = alt_cd;
+                }
+                s.charge = 0;
+            }
+        }
+        AbilityStyle::Instant => {
+            if alt_held && s.alt_cooldown[si] == 0 {
                 out.push(FireIntent::Ability {
                     weapon: w,
                     ability,
@@ -758,12 +790,14 @@ pub(crate) const SPLINTER_SALT: u32 = 0x5911_7E00;
 const ABILITY_SALT: u32 = 0xAB11_0000;
 
 /// The tuning an ability fired from `weapon` uses: its damage scaled by the carrier's
-/// `ability_power` relative to the ability's home weapon (unchanged on the home weapon).
+/// `ability_power` relative to the ability's home weapon, never above the listed numbers
+/// (unchanged on the home weapon, on a weapon at least as powerful and for abilities made of
+/// the weapon's own shots).
 pub fn ability_tuning(t: &Tuning, weapon: WeaponKind, ability: Ability) -> Cow<'_, Tuning> {
     let c = &t.combat;
     let home = ability.home().ability_power(c);
-    let power = weapon.ability_power(c) / home.max(1e-3);
-    if (power - 1.0).abs() < 1e-6 {
+    let power = (weapon.ability_power(c) / home.max(1e-3)).min(1.0);
+    if (power - 1.0).abs() < 1e-6 || ability.uses_primary() {
         return Cow::Borrowed(t);
     }
     let mut scaled = t.clone();
@@ -909,10 +943,7 @@ impl SimWorld {
             WeaponKind::Longwick => {
                 self.loose_arrows(t, id, eye, aim, charge, ProjectileKind::Arrow, attack, 1.0)
             }
-            WeaponKind::Kiln => {
-                let k = &c.kiln;
-                self.kiln_spray(t, history, id, input, k.range, k.cone_degrees, k.damage);
-            }
+            WeaponKind::Kiln => self.kiln_spray(t, history, id, input),
         }
     }
 
@@ -943,7 +974,7 @@ impl SimWorld {
         if weapon.class() == WeaponClass::Draw {
             let (kind, scale) = match ability {
                 Ability::PinningArrow => (ProjectileKind::PinArrow, c.pinning_arrow.damage_scale),
-                Ability::EmberArrow => (ProjectileKind::EmberArrow, 1.0),
+                Ability::EmberArrow => (ProjectileKind::EmberArrow, c.ember_arrow.damage_scale),
                 Ability::Brand => (ProjectileKind::BrandArrow, 1.0),
                 _ => (ProjectileKind::Arrow, c.triple_nock.damage_scale),
             };
@@ -991,12 +1022,11 @@ impl SimWorld {
                 }
             }
             Ability::Skewer => {
-                // Placeholder until the pierce lands (docs/arsenal.md): one charged shot.
+                // Pierces instead of ricocheting.
                 let k = &c.skewer;
                 let damage = k.min_damage + (k.max_damage - k.min_damage) * charge.clamp(0.0, 1.0);
-                let shot =
-                    ShotSpec::new(eye, aim, c.hitscan_range, damage, attack).ricochet(ricochet);
-                self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
+                let shot = ShotSpec::new(eye, aim, c.hitscan_range, damage, attack);
+                self.fire_piercing(t, history, id, input, &shot, k.pierce, k.pierce_falloff);
             }
             Ability::Flurry => {
                 let f = &c.flurry;
@@ -1076,10 +1106,8 @@ impl SimWorld {
                 self.push_fired(id, attack, eye);
             }
             Ability::Limpet => {
-                let l = &c.limpet;
                 let start = self.safe_launch_point(eye, eye + aim * 0.5);
-                self.spawn_projectile(t, ProjectileKind::Limpet, owner, start, aim * l.speed);
-                self.push_fired(id, attack, eye);
+                self.limpet(t, id, charge, start, aim * c.limpet.speed);
             }
             Ability::Mortar => {
                 let m = &c.mortar;
@@ -1171,16 +1199,22 @@ impl SimWorld {
                 self.arc_zaps(t, history, id, input, &dirs, v.damage_scale, attack)
             }
             _ => {
-                let range = if weapon == WeaponKind::Kiln {
-                    c.kiln.range
-                } else {
-                    c.hitscan_range
-                };
+                let kiln = weapon == WeaponKind::Kiln;
+                let range = if kiln { c.kiln.range } else { c.hitscan_range };
                 let shots: Vec<ShotSpec> = dirs
                     .iter()
                     .map(|d| ShotSpec::new(eye, *d, range, damage, attack))
                     .collect();
-                self.fire_hitscan_group(t, history, id, input, attack, &shots);
+                let (_, results) = self.fire_hitscan_group(t, history, id, input, attack, &shots);
+                if kiln {
+                    // Ember rays set what they hit alight like the spray.
+                    for impact in results.iter().filter_map(|r| r.impact) {
+                        if let Some((target, _)) = impact.target {
+                            let stacks = c.kiln.burn_stacks;
+                            self.apply_burn(t, Owner::Player(id), attack, target, stacks);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1590,14 +1624,24 @@ mod tests {
         assert_eq!(Ability::Wisp.home(), WeaponKind::Arclash);
         assert_eq!(Ability::Volley.home(), WeaponKind::Riveter);
         let mut t = Tuning::default();
+        // At home, and made of the weapon's own shots: unchanged.
         assert!(matches!(
-            ability_tuning(&t, WeaponKind::Lancet, Ability::Splinter),
+            ability_tuning(&t, WeaponKind::Quill, Ability::Splinter),
+            Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            ability_tuning(&t, WeaponKind::Kiln, Ability::Volley),
             Cow::Borrowed(_)
         ));
         t.combat.lancet.ability_power = 0.5;
         let scaled = ability_tuning(&t, WeaponKind::Lancet, Ability::Splinter);
         assert_eq!(scaled.combat.quill.splinter_damage, 10.0);
         assert_eq!(scaled.combat.quill.splinter_cooldown, 1.1);
+        // The other way round: never above the listed numbers.
+        assert!(matches!(
+            ability_tuning(&t, WeaponKind::Quill, Ability::Skewer),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
@@ -1630,6 +1674,43 @@ mod tests {
         // Garbage decodes to something usable.
         let junk = packed_loadout::unpack(u64::MAX);
         assert_eq!(junk.slots, [None; 4]);
+    }
+
+    #[test]
+    fn limpet_taps_throw_and_holds_detonate() {
+        let t = CombatTuning::default();
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Cinderbox.default_build()));
+        let hold = secs_to_ticks(t.limpet.detonate_hold, 60, 1);
+        // A tap: fires on release, charge 0 (throw).
+        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        let out = step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+        assert!(matches!(
+            out.as_slice(),
+            [FireIntent::Ability { ability: Ability::Limpet, charge, .. }] if *charge == 0.0
+        ));
+        // A hold: fires once when the hold time is reached, charge 1 (detonate), nothing on
+        // release.
+        let mut fired = Vec::new();
+        for _ in 0..hold + 20 {
+            fired.extend(step_weapons(
+                &mut s,
+                &input(Buttons::ALT_FIRE, 0, 0),
+                true,
+                &t,
+                60,
+            ));
+        }
+        fired.extend(step_weapons(
+            &mut s,
+            &input(Buttons::NONE, 0, 0),
+            true,
+            &t,
+            60,
+        ));
+        assert!(matches!(
+            fired.as_slice(),
+            [FireIntent::Ability { charge, .. }] if *charge == 1.0
+        ));
     }
 
     #[test]

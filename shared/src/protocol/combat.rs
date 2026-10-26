@@ -145,6 +145,14 @@ pub enum Fx {
         origin: QPos,
         ends: Vec<QPos>,
     },
+    /// A projectile burst into secondary rays at `origin` (the Flak ring, `attack` = `Flak`, or
+    /// a Gust-deflected shell's `Gust`): a tracer to each end. Sent to everyone.
+    Burst {
+        shooter: u16,
+        attack: Attack,
+        origin: QPos,
+        ends: Vec<QPos>,
+    },
     /// An Arclash zap chained from target to target: jagged arcs through `points` (the first
     /// target hit, then each target it jumped to), `Sfx::ArcChain`. Sent to everyone.
     ArcChain { shooter: u16, points: Vec<QPos> },
@@ -209,6 +217,7 @@ impl Fx {
             Fx::Explosion { .. }
                 | Fx::Ricochet { .. }
                 | Fx::Splinters { .. }
+                | Fx::Burst { .. }
                 | Fx::ArcChain { .. }
                 | Fx::Branded { .. }
                 | Fx::Deflected { .. }

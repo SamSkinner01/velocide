@@ -496,7 +496,7 @@ impl SimWorld {
             return true;
         }
         if now >= p.expire_tick {
-            if p.explosion.is_some() {
+            if !self.payload_expired(t, p) && p.explosion.is_some() {
                 self.explode_projectile(t, p, None);
             }
             return false;
@@ -583,6 +583,10 @@ impl SimWorld {
             p.relaunch(now);
             return true;
         }
+        // The expansion's sticky charges, airbursts, flares and special arrows (payload.rs).
+        if let Some(keep) = self.payload_hit_target(t, p, target, part, dir) {
+            return keep;
+        }
         if p.explosion.is_some() {
             self.explode_projectile(t, p, Some(target));
             return false;
@@ -591,7 +595,7 @@ impl SimWorld {
         false
     }
 
-    fn projectile_direct_damage(
+    pub(crate) fn projectile_direct_damage(
         &mut self,
         t: &Tuning,
         p: &Projectile,
@@ -626,6 +630,9 @@ impl SimWorld {
 
     fn projectile_hit_world(&mut self, t: &Tuning, p: &mut Projectile, hit: SweepHit) -> bool {
         let now = self.tick;
+        if let Some(keep) = self.payload_hit_world(t, p, hit) {
+            return keep;
+        }
         match p.kind {
             ProjectileKind::Bomb if p.bounces_left > 0 && !p.parried => {
                 let n = hit.normal;
@@ -771,9 +778,15 @@ impl SimWorld {
         self.apply_damage(t, target, info);
     }
 
-    fn explode_projectile(&mut self, t: &Tuning, p: &Projectile, direct: Option<HitTarget>) {
+    /// Explodes `p` (if it is explosive); returns everything the blast reached.
+    pub(crate) fn explode_projectile(
+        &mut self,
+        t: &Tuning,
+        p: &Projectile,
+        direct: Option<HitTarget>,
+    ) -> Vec<HitTarget> {
         let Some(spec) = p.explosion else {
-            return;
+            return Vec::new();
         };
         let mut flags = DamageFlags::NONE;
         if p.parried {
@@ -789,14 +802,14 @@ impl SimWorld {
             Some(p.id),
             direct,
             p.original_owner,
-        );
+        )
     }
 
     /// An explosion: damage with linear falloff and line of sight from the centre, and
     /// knockback away from the centre (with an upward bias) to everything in the radius —
     /// including the owner (self-damage fraction, full knockback: blast jumps) and co-op
     /// teammates (knockback only). Player-owned explosions measure the distance to the
-    /// shapes inflated by the hit assist.
+    /// shapes inflated by the hit assist. Returns every target the blast reached.
     #[allow(clippy::too_many_arguments)]
     pub fn explode(
         &mut self,
@@ -809,7 +822,7 @@ impl SimWorld {
         projectile: Option<NetId>,
         direct: Option<HitTarget>,
         original_owner: Owner,
-    ) {
+    ) -> Vec<HitTarget> {
         self.events.push(SimEvent::Explosion {
             position: center,
             radius: spec.radius,
@@ -874,9 +887,11 @@ impl SimWorld {
             info.projectile = projectile;
             hits.push((h.target, info));
         }
+        let reached = hits.iter().map(|(target, _)| *target).collect();
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        reached
     }
 
     /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit, or at the

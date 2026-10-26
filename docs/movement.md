@@ -36,7 +36,9 @@ serde): `position` (feet), `velocity`, `on_ground`, `prev_buttons`, `mode`, `gro
 `dash_time`, `dash_dir`, `dash_exit_speed`, `invuln_time`, `slide_dir`, `slam_start_y`,
 `slam_bounce_time`, `slam_bounce_power`, `coyote_time`, `jump_buffer`, `wall_jumps_used`,
 `wall_normal` (for view tilt; zero if none), `wall_clinging`, `jump_pad` (pad currently
-inside), `footstep_accum`, `air_time`.
+inside), `footstep_accum`, `air_time`, `slow_time` + `slow_scale` (a slow set by the server:
+the Pinned status, `docs/arsenal.md`; while `slow_time` runs, ground / air / dash / slide speeds
+are scaled by `slow_scale`).
 
 `MoveEvents` (per tick, `Copy`): `jumped` (any ground/coyote jump, incl. slide-/dash-jumps and
 slam bounces), `slide_jumped`, `dash_jumped`, `slam_bounced`, `wall_jumped`, `dashed`,
@@ -76,6 +78,7 @@ crouch, or dashing out of a slide under a ceiling).
 
 ### Tick order (`step`)
 
+0. Slowed (`slow_time > 0`): count it down and use the tuning with its speeds scaled.
 1. Depenetrate (spawned/pushed into geometry, or resting exactly on a surface).
 2. Grounded with `velocity.y > 0` (external impulse) → leave the ground.
 3. Timers: i-frames, coyote, slam-bounce window, jump buffer (a jump press sets it), stamina
