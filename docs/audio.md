@@ -221,6 +221,44 @@ its index, so generation is deterministic.
     and fizzle.
   - **Explosion** is a crack, a 90→28 Hz sub boom, a low-pass sweep from 6 kHz down to 250 Hz,
     a rumble, crackle, and a reverb tail (2.1 s).
+- **Arsenal** (the expansion, `docs/expansion.md`; the block marked `arsenal-client` in
+  `sfx.rs`). The six new weapons keep a material each, like the first four: the Lancet is thin
+  steel, the Thresher a rougher Bellows with a ratchet, the Riveter compressed air and hammered
+  metal, the Cinderbox fizzing clay rockets, the Longwick wood and string, the Kiln fire.
+  - **Lancet.** `LancetFire` (0.09 s) is a tight band-passed "tsik" (9→5 kHz), a 3.3 kHz steel
+    ping and a small high thump: thinner and higher than the Quill's crack.
+  - **Thresher.** `ThresherFire` is a shorter Bellows core (weight 0.8) with a crack and the
+    pellets rattling, then two ratchet clicks at 0.09 / 0.13 s, the drum turning one shell.
+  - **Riveter.** `RiveterFire` (0.07 s, 8 voices, for eleven a second) is a burst of high-passed
+    air and a hard 1.45 kHz "tak" over a knock; `RivetImpact` (2 variants) a bright clink and a
+    short sizzle.
+  - **Cinderbox.** `CinderboxFire` is one rocket (play it per rocket, three per salvo): a pop
+    from the clay tube and a rising fizzing rush. `CinderBlast` is a small, dry burst (0.6 s) so
+    three in a row stay three.
+  - **Longwick.** `BowDraw` (0.75 s) is wax-hardened wood creaking: stick-slip grains through a
+    band-pass, coming faster as the draw deepens, over the string's rising tension.
+    `BowFullDraw` is the wick string flaring (a soft whoomph) and ringing a clear 1.76 kHz note.
+    `BowRelease` is a low 98 Hz Karplus–Strong twang, the limbs' thwack and the arrow's hiss;
+    `TripleNock` three twangs a chord apart; `PinningRelease` a heavier 82 Hz twang and a chain
+    rattling out. `ArrowImpact` (2 variants) is a wooden thunk and a quivering pluck,
+    `PinThunk` a heavier thunk with the chain going taut, `EmberArrowBurst` a crack, a whoomph
+    of flame and a shower of embers.
+  - **Kiln.** `KilnIgnite` is the spray catching; `KilnRoar` (0.55 s) a breathy rumble with
+    crackle, soft at both ends: re-trigger it every ~0.35 s while the Kiln fires for one
+    continuous roar.
+  - **Abilities.** `SkewerCharge` (1.2 s, stop it on release) is a glassy whine climbing 600 Hz
+    → 2.4 kHz and holding with a quickening tremolo; `SkewerFire` a heavy, lowered Quill crack
+    with a long ringing zing and an echo. `FlurryFire` is three needles 0.06 s apart, each a
+    little higher. `SlugFire` a heavy Bellows core with a crack and the barrel ringing.
+    `FlakFire` thumps the shell out with its timer whistling up; `FlakBurst` is a crack in the
+    air and a ring of pellets (a glass-spray of pings) hissing out. `VolleyFire` rips ten hard
+    ticks out in 0.12 s over a gust. `FlareLaunch` is a pop and a fizzing hiss; `FlareBurn`
+    (1.6 s) the patch catching and crackling. `LimpetThrow`, `LimpetStick` (a clank and four
+    claw ticks), `LimpetBlink` (a tiny crushed square beep at 1.76 kHz, for the armed lamp) and
+    `LimpetDetonate` (a double crack and a boom). `MortarLaunch` is a deep tube "thoomp",
+    `MortarBlast` the arsenal's biggest boom (2.5 s, as loud as `Explosion`).
+  - **Status.** `BurnSizzle` (0.6 s) is a fizzing sizzle, a guttering flame and pops; re-trigger
+    it while something burns.
 - **Parry.** The loudest and brightest sound in the game (spectral centroid 6.2 kHz): a
   transient crack, a long inharmonic clang (C6 with partials at ×1.5, 2.76, 5.4, 8.9 and 13.3),
   a beating 3.52 kHz shimmer, a fast whoosh, then saturation and a reverb tail. Nothing else
@@ -339,6 +377,13 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 | Hitmarker, enemy hurt, Gnawer bark, Gaoler steps, UI select/back, chat, Gravewell hum, thorn throw / shatter, Discharge charge | −18 … −20 |
 | Jump, land, slide, ember fuse, wisp hum, weapon/mode switch, UI move | −20 … −22 |
 | Footsteps (constant, 4 voices) | −25 |
+| Arsenal: Mortar blast | −10 |
+| Arsenal: Slug, Limpet detonation, Thresher, Skewer, Flak burst, Volley, Cinder blast | −11 … −12 |
+| Arsenal: Mortar launch, Triple Nock, ember burst, bow release, Pinning release, pin thunk, Flurry, Flak shell | −13 … −14 |
+| Arsenal: Lancet, Cinderbox rocket, Flare launch, Kiln ignite, arrow impact, limpet stick | −15 … −16 |
+| Arsenal: Riveter (11/s), Kiln roar, full draw, Flare burn, limpet throw | −17 … −18 |
+| Arsenal: bow draw, Skewer charge, rivet impact, burn sizzle | −19 |
+| Arsenal: limpet blink | −22 |
 
 Each track is mastered so the full mix's loudest 400 ms sits at **−21 LU** (Campaign and
 Arena), −23 (Menu) or −22 (Results), with peaks at −5 dBFS or lower. In practice:

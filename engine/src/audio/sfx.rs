@@ -130,6 +130,72 @@ pub enum Sfx {
     Countdown,
     MatchStart,
     MatchEnd,
+    // arsenal-client: the expansion arsenal's weapons, abilities and status effects
+    // (docs/audio.md "Arsenal").
+    /// The Lancet's needle: a tight high "tsik" and a steel ping.
+    LancetFire,
+    /// The Thresher's blast, then its drum ratcheting round one shell.
+    ThresherFire,
+    /// Pneumatic "pff-tak": air from the motor, the nose hammering a rivet out.
+    RiveterFire,
+    /// A hot rivet striking: a clink and a short sizzle.
+    RivetImpact,
+    /// One cinder rocket leaving its tube (three per salvo).
+    CinderboxFire,
+    /// A cinder rocket bursting: short and dry, so three don't mush together.
+    CinderBlast,
+    /// The Longwick drawn: wax-hardened wood creaking, tension rising.
+    BowDraw,
+    /// Full draw: the wick string flares and rings.
+    BowFullDraw,
+    /// The string's low twang and the arrow hissing away.
+    BowRelease,
+    /// An arrow thunking home and quivering.
+    ArrowImpact,
+    /// The Kiln's roar (0.55 s, soft both ends: re-trigger every ~0.35 s while spraying).
+    KilnRoar,
+    /// The Kiln's spray catching.
+    KilnIgnite,
+    /// Skewer charging: a glassy whine climbing then holding (stop it on release).
+    SkewerCharge,
+    /// Skewer: a heavy crack and a long ringing zing.
+    SkewerFire,
+    /// Flurry: three needles 0.06 s apart.
+    FlurryFire,
+    /// Slug: a deep crack-boom and the barrel ringing.
+    SlugFire,
+    /// Flak: the shell thumped out, its timer whistling.
+    FlakFire,
+    /// Flak airburst: a crack in the air and a ring of pellets hissing out.
+    FlakBurst,
+    /// Volley: ten shots ripped out at once.
+    VolleyFire,
+    /// Flare: a pop and a fizzing hiss climbing away.
+    FlareLaunch,
+    /// A flare's patch catching and burning.
+    FlareBurn,
+    /// A limpet thrown.
+    LimpetThrow,
+    /// A limpet's claws biting.
+    LimpetStick,
+    /// An armed limpet's lamp beeping.
+    LimpetBlink,
+    /// The limpets going off.
+    LimpetDetonate,
+    /// Mortar: a deep tube "thoomp".
+    MortarLaunch,
+    /// A mortar shell landing: the arsenal's biggest boom.
+    MortarBlast,
+    /// Triple Nock: three twangs and a wide hiss.
+    TripleNock,
+    /// Pinning Arrow: a heavier twang and a chain rattling away.
+    PinningRelease,
+    /// A pinning arrow driving home, its chain going taut.
+    PinThunk,
+    /// An ember arrow bursting into flame.
+    EmberArrowBurst,
+    /// Something burning (re-trigger while Burn lasts).
+    BurnSizzle,
 }
 
 /// Mixing and playback metadata of one sound.
@@ -273,6 +339,39 @@ impl Sfx {
         Sfx::Countdown,
         Sfx::MatchStart,
         Sfx::MatchEnd,
+        // arsenal-client
+        Sfx::LancetFire,
+        Sfx::ThresherFire,
+        Sfx::RiveterFire,
+        Sfx::RivetImpact,
+        Sfx::CinderboxFire,
+        Sfx::CinderBlast,
+        Sfx::BowDraw,
+        Sfx::BowFullDraw,
+        Sfx::BowRelease,
+        Sfx::ArrowImpact,
+        Sfx::KilnRoar,
+        Sfx::KilnIgnite,
+        Sfx::SkewerCharge,
+        Sfx::SkewerFire,
+        Sfx::FlurryFire,
+        Sfx::SlugFire,
+        Sfx::FlakFire,
+        Sfx::FlakBurst,
+        Sfx::VolleyFire,
+        Sfx::FlareLaunch,
+        Sfx::FlareBurn,
+        Sfx::LimpetThrow,
+        Sfx::LimpetStick,
+        Sfx::LimpetBlink,
+        Sfx::LimpetDetonate,
+        Sfx::MortarLaunch,
+        Sfx::MortarBlast,
+        Sfx::TripleNock,
+        Sfx::PinningRelease,
+        Sfx::PinThunk,
+        Sfx::EmberArrowBurst,
+        Sfx::BurnSizzle,
     ];
 
     /// Number of sounds; `sfx as usize` is a valid index below this.
@@ -399,6 +498,40 @@ impl Sfx {
             Countdown => info(-16.0, 2, 0.0, 0.1),
             MatchStart => info(-13.0, 1, 0.0, 0.2),
             MatchEnd => info(-13.0, 1, 0.0, 0.2),
+
+            // arsenal-client
+            LancetFire => info(-15.0, 6, 0.06, 0.0),
+            ThresherFire => info(-12.0, 4, 0.04, 0.0),
+            RiveterFire => info(-17.0, 8, 0.06, 0.02),
+            RivetImpact => variants(info(-19.0, 6, 0.1, 0.02), 2),
+            CinderboxFire => info(-15.0, 6, 0.05, 0.02),
+            CinderBlast => info(-12.0, 6, 0.07, 0.02),
+            BowDraw => info(-19.0, 2, 0.03, 0.1),
+            BowFullDraw => info(-17.0, 2, 0.0, 0.1),
+            BowRelease => info(-14.0, 3, 0.04, 0.0),
+            ArrowImpact => variants(info(-16.0, 6, 0.08, 0.02), 2),
+            KilnRoar => info(-17.0, 3, 0.04, 0.1),
+            KilnIgnite => info(-15.0, 2, 0.04, 0.1),
+            SkewerCharge => info(-19.0, 2, 0.0, 0.05),
+            SkewerFire => info(-12.0, 3, 0.03, 0.0),
+            FlurryFire => info(-14.0, 3, 0.04, 0.0),
+            SlugFire => info(-11.0, 3, 0.03, 0.0),
+            FlakFire => info(-14.0, 3, 0.04, 0.0),
+            FlakBurst => info(-12.0, 4, 0.06, 0.02),
+            VolleyFire => info(-12.0, 3, 0.04, 0.0),
+            FlareLaunch => info(-15.0, 3, 0.05, 0.0),
+            FlareBurn => info(-17.0, 4, 0.05, 0.1),
+            LimpetThrow => info(-18.0, 3, 0.06, 0.03),
+            LimpetStick => info(-16.0, 6, 0.06, 0.03),
+            LimpetBlink => info(-22.0, 6, 0.0, 0.05),
+            LimpetDetonate => info(-11.0, 4, 0.05, 0.02),
+            MortarLaunch => info(-13.0, 3, 0.04, 0.0),
+            MortarBlast => info(-10.0, 4, 0.05, 0.03),
+            TripleNock => info(-13.0, 3, 0.03, 0.0),
+            PinningRelease => info(-14.0, 3, 0.04, 0.0),
+            PinThunk => info(-14.0, 4, 0.05, 0.03),
+            EmberArrowBurst => info(-13.0, 4, 0.06, 0.02),
+            BurnSizzle => info(-19.0, 6, 0.1, 0.08),
         }
     }
 }
@@ -2438,6 +2571,529 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut b = layer(&[(&horn, 0.8, 0.0), (&gong, 0.5, 0.0)]);
             reverb(&mut b, 0.7, 0.5, 0.2, 0.6);
             b
+        }
+
+        // ----- arsenal-client: the expansion arsenal (docs/audio.md "Arsenal") ---------------
+        // Each new weapon keeps its own material: the Lancet is thin steel, the Thresher a
+        // rougher Bellows with a ratchet, the Riveter compressed air and hammered metal, the
+        // Cinderbox fizzing clay rockets, the Longwick wood and string, the Kiln fire.
+        LancetFire => {
+            // A needle leaving a thin barrel: a tight high "tsik", a steel ping, a puff of air.
+            let snap = click(r, 0.001);
+            let tsik = noise(r, 0.04, Pass::Band, 9000.0, 5000.0, 1.6, 0.0002, 0.006);
+            let ping = metal(
+                0.09,
+                3300.0,
+                &[(1.0, 1.0, 0.018), (2.41, 0.5, 0.012), (3.77, 0.3, 0.008)],
+            );
+            let puff = noise(r, 0.06, Pass::Low, 2400.0, 900.0, 0.8, 0.001, 0.012);
+            let body = thump(0.05, 520.0, 260.0, 0.004, 0.01);
+            layer(&[
+                (&snap, 0.7, 0.0),
+                (&tsik, 1.0, 0.0),
+                (&ping, 0.35, 0.002),
+                (&puff, 0.5, 0.0),
+                (&body, 0.6, 0.0),
+            ])
+        }
+        ThresherFire => {
+            // Shorter and rougher than the Bellows: a chunky blast, pellets rattling in the
+            // duckbill, then the drum ratcheting round one shell.
+            let core = bellows_core(r, 0.8);
+            let crack = noise(r, 0.05, Pass::Band, 4200.0, 2000.0, 1.1, 0.0002, 0.01);
+            let rattle = envelope(crackle(r, 0.12, 900.0, 0.05), 0.001, 0.04);
+            let ratchet = metal(0.05, 1800.0, &[(1.0, 1.0, 0.01), (2.3, 0.5, 0.006)]);
+            let thud = thump(0.08, 260.0, 120.0, 0.006, 0.02);
+            let mut b = layer(&[
+                (&core, 1.0, 0.0),
+                (&crack, 0.8, 0.0),
+                (&rattle, 0.5, 0.004),
+                (&ratchet, 0.35, 0.09),
+                (&thud, 0.4, 0.09),
+                (&ratchet, 0.3, 0.13),
+            ]);
+            drive(&mut b, 2.0);
+            crush(&mut b, 10, 1.5);
+            b
+        }
+        RiveterFire => {
+            // Pneumatic "pff-tak": a burst of air from the motor and the nose hammering a rivet
+            // out, hard and metallic; short enough for eleven a second.
+            let hiss = noise(r, 0.05, Pass::High, 3500.0, 2500.0, 0.7, 0.0005, 0.012);
+            let snap = click(r, 0.0012);
+            let tak = metal(
+                0.06,
+                1450.0,
+                &[(1.0, 1.0, 0.012), (2.13, 0.7, 0.009), (3.4, 0.4, 0.006)],
+            );
+            let knock = thump(0.05, 300.0, 140.0, 0.004, 0.01);
+            let mut b = layer(&[
+                (&hiss, 0.6, 0.0),
+                (&snap, 0.6, 0.006),
+                (&tak, 0.7, 0.006),
+                (&knock, 0.8, 0.006),
+            ]);
+            crush(&mut b, 10, 1.5);
+            b
+        }
+        RivetImpact => {
+            // A hot rivet striking: a bright clink and a short sizzle.
+            let base = r.range(2100.0, 2600.0);
+            let clink = metal(
+                0.12,
+                base,
+                &[(1.0, 1.0, 0.025), (2.76, 0.5, 0.015), (4.1, 0.25, 0.01)],
+            );
+            let tick = thump(0.04, 600.0, 300.0, 0.003, 0.008);
+            let mut sizzle = envelope(crackle(r, 0.25, 900.0, 0.12), 0.01, 0.1);
+            highpass(&mut sizzle, 2500.0);
+            layer(&[(&clink, 0.7, 0.0), (&tick, 0.6, 0.0), (&sizzle, 0.6, 0.01)])
+        }
+        CinderboxFire => {
+            // One cinder rocket: a pop from the clay tube and a fizzing rush as it leaves.
+            let snap = click(r, 0.002);
+            let pop = thump(0.12, 210.0, 70.0, 0.008, 0.03);
+            let rush = whoosh(r, 0.35, 900.0, 3200.0, 1.0);
+            let mut fizz = envelope(crackle(r, 0.35, 600.0, 0.2), 0.005, 0.15);
+            highpass(&mut fizz, 1800.0);
+            let mut b = layer(&[
+                (&snap, 0.6, 0.0),
+                (&pop, 1.0, 0.0),
+                (&rush, 0.8, 0.01),
+                (&fizz, 0.4, 0.02),
+            ]);
+            drive(&mut b, 1.6);
+            b
+        }
+        CinderBlast => {
+            // A small rocket bursting: a crack, a short boom and a spit of cinders. Three land in
+            // a row, so it is short and dry.
+            let crack = noise(r, 0.04, Pass::High, 1800.0, 1800.0, 0.6, 0.0001, 0.006);
+            let boom = thump(0.45, 140.0, 40.0, 0.02, 0.08);
+            let body = noise(r, 0.3, Pass::Low, 4000.0, 400.0, 0.8, 0.0008, 0.05);
+            let cinders = envelope(crackle(r, 0.45, 500.0, 0.12), 0.01, 0.12);
+            let mut b = layer(&[
+                (&crack, 1.2, 0.0),
+                (&boom, 1.0, 0.0),
+                (&body, 0.8, 0.0),
+                (&cinders, 0.5, 0.01),
+            ]);
+            drive(&mut b, 2.4);
+            crush(&mut b, 9, 2.0);
+            reverb(&mut b, 0.2, 0.6, 0.08, 0.15);
+            b
+        }
+        BowDraw => {
+            // Wax-hardened wood creaking under load (stick-slip grains, coming faster as the
+            // draw deepens) over the string's rising tension.
+            let dur = 0.75;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let mut grain = 0.0f32;
+            let creak = render(dur, |t, _| {
+                if n.chance(lerp(40.0, 140.0, t / dur) / SR) {
+                    grain = n.range(0.5, 1.0);
+                }
+                grain *= 0.985;
+                let env = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(dur - 0.08, dur, t));
+                bp.bandpass(grain * n.bipolar(), lerp(700.0, 1300.0, t / dur), 6.0) * env
+            });
+            let mut tension = Osc::new(Wave::Saw);
+            let mut lp = Svf::default();
+            let hum = render(dur, |t, _| {
+                let x = tension.next(sweep(t, 90.0, 140.0, dur));
+                lp.lowpass(x, 600.0, 0.8)
+                    * smoothstep(0.0, 0.3, t)
+                    * (1.0 - smoothstep(0.6, dur, t))
+            });
+            layer(&[(&creak, 1.0, 0.0), (&hum, 0.12, 0.0)])
+        }
+        BowFullDraw => {
+            // Full draw: the wick string flares (a soft whoomph) and rings a clear high note.
+            let ring = metal(
+                0.5,
+                1760.0,
+                &[(1.0, 1.0, 0.18), (2.0, 0.35, 0.12), (3.01, 0.2, 0.08)],
+            );
+            let flare = noise(r, 0.25, Pass::Band, 500.0, 1500.0, 0.9, 0.02, 0.08);
+            let glint = fm(0.3, 2637.0, 2637.0, 3.5, 2.0, 0.2, 0.002, 0.09);
+            layer(&[(&ring, 0.6, 0.0), (&flare, 0.5, 0.0), (&glint, 0.3, 0.0)])
+        }
+        BowRelease => {
+            // The string's low twang, the snap of the limbs and the arrow hissing away.
+            let mut twang = pluck(r, 0.4, 98.0, 0.994);
+            for (i, s) in twang.iter_mut().enumerate() {
+                *s *= perc(i as f32 / SR, 0.001, 0.12);
+            }
+            lowpass(&mut twang, 1800.0);
+            let snap = click(r, 0.002);
+            let thwack = thump(0.12, 180.0, 90.0, 0.006, 0.03);
+            let hiss = whoosh(r, 0.3, 2500.0, 900.0, 1.2);
+            let mut b = layer(&[
+                (&snap, 0.6, 0.0),
+                (&thwack, 0.8, 0.0),
+                (&twang, 1.0, 0.0),
+                (&hiss, 0.5, 0.015),
+            ]);
+            drive(&mut b, 1.4);
+            b
+        }
+        ArrowImpact => {
+            // An arrow thunking into something solid and quivering.
+            let thunk = thump(0.1, r.range(240.0, 280.0), 110.0, 0.006, 0.02);
+            let knock = noise(r, 0.05, Pass::Band, 1500.0, 700.0, 1.2, 0.0005, 0.01);
+            let mut quiver = pluck(r, 0.25, 210.0, 0.995);
+            let mut wob = Osc::new(Wave::Sine);
+            for (i, s) in quiver.iter_mut().enumerate() {
+                *s *= perc(i as f32 / SR, 0.002, 0.08) * (0.6 + 0.4 * wob.next(30.0));
+            }
+            lowpass(&mut quiver, 2000.0);
+            layer(&[
+                (&thunk, 1.0, 0.0),
+                (&knock, 0.6, 0.0),
+                (&quiver, 0.6, 0.004),
+            ])
+        }
+        KilnRoar => {
+            // The firebox roaring while it sprays: a breathy rumble with crackling embers, soft
+            // at both ends so re-triggering it keeps one continuous roar.
+            let dur = 0.55;
+            let mut n = Rng::new(r.next_u64());
+            let (mut lp, mut bp) = (Svf::default(), Svf::default());
+            let mut flutter = Osc::new(Wave::Sine);
+            let roar = render(dur, |t, _| {
+                let x = n.bipolar();
+                let low = lp.lowpass(x, 420.0, 0.7);
+                let breath = bp.bandpass(x, 1100.0, 1.2) * 0.35;
+                (low + breath) * (0.8 + 0.2 * flutter.next(13.0)) * bell(t, dur)
+            });
+            let pops = envelope(crackle(r, dur, 220.0, 2.0), 0.08, 1.0);
+            layer(&[(&roar, 1.0, 0.0), (&pops, 0.35, 0.0)])
+        }
+        KilnIgnite => {
+            // The spray catching: a whoomph of flame and a burst of crackle.
+            let whoomph = noise(r, 0.4, Pass::Low, 300.0, 1600.0, 0.9, 0.03, 0.12);
+            let body = thump(0.3, 90.0, 60.0, 0.03, 0.08);
+            let pops = envelope(crackle(r, 0.4, 500.0, 0.2), 0.01, 0.15);
+            layer(&[(&whoomph, 1.0, 0.0), (&body, 0.6, 0.0), (&pops, 0.4, 0.02)])
+        }
+        SkewerCharge => {
+            // A wire drawn taut through the barrel: a glassy whine climbing 600 Hz → 2.4 kHz over
+            // 0.8 s, then holding, with a trembling shimmer. 1.2 s; stop it on release.
+            let dur = 1.2;
+            let mut whine = Osc::new(Wave::Triangle);
+            let mut over = Osc::new(Wave::Sine);
+            let mut trem = Osc::new(Wave::Sine);
+            let wire = render(dur, |t, _| {
+                let f = sweep(t.min(0.8), 600.0, 2400.0, 0.8);
+                let x = whine.next(f) * 0.6 + over.next(f * 2.01) * 0.25;
+                let env = smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(1.1, dur, t));
+                let rate = lerp(6.0, 22.0, (t / 0.8).min(1.0));
+                x * (0.8 + 0.2 * trem.next(rate)) * env
+            });
+            let shimmer = noise(r, dur, Pass::High, 6000.0, 8000.0, 0.7, 0.3, 2.0);
+            layer(&[(&wire, 1.0, 0.0), (&shimmer, 0.15, 0.0)])
+        }
+        SkewerFire => {
+            // A heavy crack and a long ringing "zing" through everything in line.
+            let crack = quill_crack(r, 0.7);
+            let boom = thump(0.25, 200.0, 60.0, 0.012, 0.05);
+            let zing = tone(0.5, Wave::Sine, 4200.0, 1400.0, 0.45, 0.001, 0.14);
+            let ring = metal(
+                0.6,
+                1900.0,
+                &[(1.0, 1.0, 0.2), (2.76, 0.5, 0.12), (5.4, 0.3, 0.06)],
+            );
+            let mut b = layer(&[
+                (&crack, 1.0, 0.0),
+                (&boom, 0.7, 0.0),
+                (&zing, 0.3, 0.005),
+                (&ring, 0.25, 0.0),
+            ]);
+            drive(&mut b, 1.5);
+            echo(&mut b, 0.09, 0.25, 0.2, 3000.0, 0.2);
+            b
+        }
+        FlurryFire => {
+            // Three needles 0.06 s apart, each a little higher.
+            let mut b = Vec::new();
+            for k in 0..3 {
+                let tsik = noise(r, 0.04, Pass::Band, 8500.0, 4800.0, 1.6, 0.0002, 0.006);
+                let ping = metal(
+                    0.08,
+                    3100.0 + k as f32 * 260.0,
+                    &[(1.0, 1.0, 0.016), (2.41, 0.5, 0.01)],
+                );
+                let body = thump(0.05, 480.0, 240.0, 0.004, 0.01);
+                let shot = layer(&[(&tsik, 1.0, 0.0), (&ping, 0.4, 0.002), (&body, 0.6, 0.0)]);
+                mix_at(&mut b, &shot, 1.0 - k as f32 * 0.08, k as f32 * 0.06);
+            }
+            b
+        }
+        SlugFire => {
+            // One heavy slug: a deep crack-boom and the barrel ringing after it.
+            let core = bellows_core(r, 1.1);
+            let crack = noise(r, 0.06, Pass::High, 2600.0, 2600.0, 0.6, 0.0001, 0.008);
+            let ring = metal(
+                0.7,
+                620.0,
+                &[(1.0, 1.0, 0.25), (2.31, 0.6, 0.15), (3.97, 0.3, 0.08)],
+            );
+            let mut b = layer(&[(&core, 1.0, 0.0), (&crack, 1.3, 0.0), (&ring, 0.25, 0.01)]);
+            drive(&mut b, 2.4);
+            crush(&mut b, 10, 1.5);
+            reverb(&mut b, 0.3, 0.6, 0.1, 0.25);
+            b
+        }
+        FlakFire => {
+            // The shell thumped out of the barrel and its timer's rising whistle.
+            let thunk = thump(0.3, 160.0, 55.0, 0.015, 0.06);
+            let puff = noise(r, 0.2, Pass::Low, 2200.0, 500.0, 0.8, 0.001, 0.04);
+            let mut osc = Osc::new(Wave::Sine);
+            let whistle = render(0.35, |t, _| {
+                osc.next(sweep(t, 1800.0, 3400.0, 0.35)) * bell(t, 0.35)
+            });
+            let tick = metal(0.05, 2400.0, &[(1.0, 1.0, 0.01), (2.0, 0.4, 0.008)]);
+            let mut b = layer(&[
+                (&thunk, 1.0, 0.0),
+                (&puff, 0.6, 0.0),
+                (&whistle, 0.15, 0.03),
+                (&tick, 0.3, 0.02),
+            ]);
+            drive(&mut b, 1.8);
+            b
+        }
+        FlakBurst => {
+            // The airburst: a sharp crack in the air and a ring of pellets hissing outwards.
+            let crack = noise(r, 0.04, Pass::High, 2200.0, 2200.0, 0.6, 0.0001, 0.006);
+            let boom = thump(0.35, 170.0, 60.0, 0.015, 0.06);
+            let spray = glass_spray(r, 10, 0.08, 1800.0, 4200.0);
+            let hiss = noise(r, 0.35, Pass::High, 5000.0, 2500.0, 0.8, 0.002, 0.08);
+            let mut b = layer(&[
+                (&crack, 1.2, 0.0),
+                (&boom, 0.9, 0.0),
+                (&spray, 0.6, 0.005),
+                (&hiss, 0.4, 0.0),
+            ]);
+            drive(&mut b, 2.0);
+            reverb(&mut b, 0.35, 0.5, 0.12, 0.3);
+            b
+        }
+        VolleyFire => {
+            // Ten shots dumped at once: a ripping burst of hard ticks over a gust of air.
+            let mut b = Vec::new();
+            for k in 0..10 {
+                let at = k as f32 * 0.012 + r.range(0.0, 0.004);
+                let tick = metal(
+                    0.04,
+                    r.range(1600.0, 2200.0),
+                    &[(1.0, 1.0, 0.008), (2.3, 0.5, 0.006)],
+                );
+                let knock = thump(0.04, 320.0, 150.0, 0.003, 0.008);
+                mix_at(&mut b, &tick, 0.5, at);
+                mix_at(&mut b, &knock, 0.7, at);
+            }
+            let rip = noise(r, 0.2, Pass::Band, 3000.0, 1200.0, 0.8, 0.002, 0.06);
+            let boom = thump(0.25, 140.0, 50.0, 0.015, 0.05);
+            mix_at(&mut b, &rip, 0.7, 0.0);
+            mix_at(&mut b, &boom, 0.8, 0.0);
+            drive(&mut b, 1.8);
+            b
+        }
+        FlareLaunch => {
+            // A pop and the flare's fizzing hiss climbing away.
+            let snap = click(r, 0.002);
+            let pop = thump(0.1, 300.0, 120.0, 0.006, 0.02);
+            let hiss = noise(r, 0.6, Pass::Band, 2500.0, 5000.0, 1.0, 0.01, 0.25);
+            let mut fizz = envelope(crackle(r, 0.6, 1400.0, 1.0), 0.01, 0.3);
+            highpass(&mut fizz, 2000.0);
+            layer(&[
+                (&snap, 0.6, 0.0),
+                (&pop, 1.0, 0.0),
+                (&hiss, 0.6, 0.01),
+                (&fizz, 0.4, 0.01),
+            ])
+        }
+        FlareBurn => {
+            // The flare landing and the ground catching: a whoomph, then a crackling burn.
+            let whoomph = noise(r, 0.5, Pass::Low, 250.0, 1400.0, 0.9, 0.03, 0.15);
+            let body = thump(0.4, 80.0, 50.0, 0.04, 0.1);
+            let burn = envelope(crackle(r, 1.6, 260.0, 4.0), 0.05, 0.7);
+            let rumble = noise(r, 1.6, Pass::Low, 380.0, 280.0, 0.7, 0.08, 0.7);
+            layer(&[
+                (&whoomph, 1.0, 0.0),
+                (&body, 0.5, 0.0),
+                (&burn, 0.5, 0.05),
+                (&rumble, 0.4, 0.0),
+            ])
+        }
+        LimpetThrow => {
+            let swish = whoosh(r, 0.2, 1200.0, 3000.0, 1.1);
+            let rattle = metal(0.08, 1500.0, &[(1.0, 1.0, 0.015), (2.6, 0.5, 0.01)]);
+            layer(&[
+                (&swish, 1.0, 0.0),
+                (&rattle, 0.4, 0.0),
+                (&rattle, 0.3, 0.05),
+            ])
+        }
+        LimpetStick => {
+            // The claws biting: a heavy clank and four quick ticks as they grip.
+            let thud = thump(0.12, 200.0, 90.0, 0.008, 0.03);
+            let clank = metal(
+                0.25,
+                520.0,
+                &[(1.0, 1.0, 0.06), (2.43, 0.6, 0.04), (3.9, 0.3, 0.025)],
+            );
+            let mut b = layer(&[(&thud, 1.0, 0.0), (&clank, 0.5, 0.0)]);
+            for k in 0..4 {
+                let tick = metal(
+                    0.04,
+                    2600.0 + k as f32 * 150.0,
+                    &[(1.0, 1.0, 0.008), (1.9, 0.4, 0.006)],
+                );
+                mix_at(&mut b, &tick, 0.35, 0.05 + k as f32 * 0.025);
+            }
+            b
+        }
+        LimpetBlink => {
+            // An armed limpet's lamp: a tiny square beep.
+            let mut b = tone(0.06, Wave::Square, 1760.0, 1760.0, 0.01, 0.001, 0.02);
+            lowpass(&mut b, 5000.0);
+            crush(&mut b, 7, 1.0);
+            b
+        }
+        LimpetDetonate => {
+            // Every live charge going off: a hard double crack and a boom.
+            let crack = noise(r, 0.04, Pass::High, 1600.0, 1600.0, 0.6, 0.0001, 0.006);
+            let boom = thump(0.8, 110.0, 32.0, 0.03, 0.14);
+            let body = noise(r, 0.5, Pass::Low, 5000.0, 300.0, 0.8, 0.0008, 0.08);
+            let debris = envelope(crackle(r, 0.6, 200.0, 0.2), 0.01, 0.2);
+            let mut b = layer(&[
+                (&crack, 1.2, 0.0),
+                (&crack, 0.7, 0.03),
+                (&boom, 1.1, 0.0),
+                (&body, 0.9, 0.0),
+                (&debris, 0.4, 0.02),
+            ]);
+            drive(&mut b, 2.5);
+            crush(&mut b, 9, 2.0);
+            reverb(&mut b, 0.35, 0.6, 0.12, 0.3);
+            b
+        }
+        MortarLaunch => {
+            // A deep tube "thoomp".
+            let thoomp = thump(0.5, 95.0, 40.0, 0.03, 0.1);
+            let mut tube = tone(0.4, Wave::Triangle, 160.0, 90.0, 0.15, 0.003, 0.08);
+            lowpass(&mut tube, 600.0);
+            let puff = noise(r, 0.35, Pass::Low, 900.0, 200.0, 0.9, 0.003, 0.08);
+            let mut b = layer(&[(&thoomp, 1.0, 0.0), (&tube, 0.6, 0.0), (&puff, 0.7, 0.0)]);
+            drive(&mut b, 2.0);
+            b
+        }
+        MortarBlast => {
+            // The heavy shell: the arsenal's biggest boom, a long rumble and falling debris.
+            let crack = noise(r, 0.06, Pass::High, 900.0, 900.0, 0.6, 0.0002, 0.01);
+            let boom = thump(2.0, 75.0, 24.0, 0.07, 0.5);
+            let body = noise(r, 1.4, Pass::Low, 5000.0, 200.0, 0.8, 0.001, 0.25);
+            let rumble = noise(r, 2.2, Pass::Low, 150.0, 70.0, 1.0, 0.01, 0.6);
+            let debris = crackle(r, 2.0, 160.0, 0.6);
+            let mut b = layer(&[
+                (&crack, 1.0, 0.0),
+                (&boom, 1.3, 0.0),
+                (&body, 1.0, 0.0),
+                (&rumble, 0.9, 0.0),
+                (&debris, 0.5, 0.02),
+            ]);
+            drive(&mut b, 2.4);
+            crush(&mut b, 10, 2.0);
+            reverb(&mut b, 0.7, 0.6, 0.2, 0.7);
+            b
+        }
+        TripleNock => {
+            // Three arrows at once: a spread chord of twangs and a wider hiss.
+            let mut b = Vec::new();
+            for (k, f) in [98.0f32, 123.5, 146.8].into_iter().enumerate() {
+                let mut twang = pluck(r, 0.35, f, 0.993);
+                for (i, s) in twang.iter_mut().enumerate() {
+                    *s *= perc(i as f32 / SR, 0.001, 0.1);
+                }
+                lowpass(&mut twang, 2000.0);
+                mix_at(&mut b, &twang, 0.8, k as f32 * 0.012);
+            }
+            let snap = click(r, 0.002);
+            let hiss = whoosh(r, 0.35, 3000.0, 800.0, 0.9);
+            mix_at(&mut b, &snap, 0.6, 0.0);
+            mix_at(&mut b, &hiss, 0.6, 0.015);
+            drive(&mut b, 1.4);
+            b
+        }
+        PinningRelease => {
+            // A heavier, lower twang and the pin's chain rattling out after the arrow.
+            let mut twang = pluck(r, 0.45, 82.0, 0.995);
+            for (i, s) in twang.iter_mut().enumerate() {
+                *s *= perc(i as f32 / SR, 0.001, 0.15);
+            }
+            lowpass(&mut twang, 1500.0);
+            let thwack = thump(0.15, 150.0, 70.0, 0.008, 0.04);
+            let mut b = layer(&[(&thwack, 0.9, 0.0), (&twang, 1.0, 0.0)]);
+            for k in 0..6 {
+                let link = metal(
+                    0.05,
+                    r.range(2200.0, 3200.0),
+                    &[(1.0, 1.0, 0.01), (2.7, 0.4, 0.007)],
+                );
+                mix_at(
+                    &mut b,
+                    &link,
+                    0.3,
+                    0.02 + k as f32 * 0.025 + r.range(0.0, 0.01),
+                );
+            }
+            drive(&mut b, 1.4);
+            b
+        }
+        PinThunk => {
+            // A pinning arrow driving home: a heavy thunk, then the chain going taut with a clank.
+            let thunk = thump(0.18, 200.0, 70.0, 0.008, 0.04);
+            let knock = noise(r, 0.06, Pass::Band, 1300.0, 600.0, 1.2, 0.0005, 0.012);
+            let clank = metal(
+                0.3,
+                740.0,
+                &[(1.0, 1.0, 0.07), (2.51, 0.6, 0.05), (4.2, 0.3, 0.03)],
+            );
+            let rattle = envelope(crackle(r, 0.2, 600.0, 0.1), 0.002, 0.08);
+            let mut b = layer(&[
+                (&thunk, 1.0, 0.0),
+                (&knock, 0.6, 0.0),
+                (&rattle, 0.4, 0.03),
+                (&clank, 0.5, 0.06),
+            ]);
+            drive(&mut b, 1.6);
+            b
+        }
+        EmberArrowBurst => {
+            // The ember head bursting: a crack, a whoomph of flame and a shower of embers.
+            let crack = noise(r, 0.04, Pass::High, 2000.0, 2000.0, 0.6, 0.0001, 0.006);
+            let whoomph = noise(r, 0.45, Pass::Low, 250.0, 1800.0, 0.9, 0.01, 0.12);
+            let boom = thump(0.35, 120.0, 50.0, 0.015, 0.07);
+            let mut embers = envelope(crackle(r, 0.8, 700.0, 0.3), 0.01, 0.3);
+            highpass(&mut embers, 1500.0);
+            let mut b = layer(&[
+                (&crack, 0.9, 0.0),
+                (&whoomph, 1.0, 0.0),
+                (&boom, 0.8, 0.0),
+                (&embers, 0.5, 0.02),
+            ]);
+            drive(&mut b, 1.8);
+            reverb(&mut b, 0.25, 0.6, 0.1, 0.2);
+            b
+        }
+        BurnSizzle => {
+            // Something burning: a fizzing sizzle, a guttering flame and a few pops.
+            let sizzle = noise(r, 0.6, Pass::High, 4500.0, 3000.0, 0.8, 0.05, 0.25);
+            let flame = gutter(r, 0.6, 900.0, 600.0, 24.0, 0.3);
+            let pops = envelope(crackle(r, 0.6, 300.0, 1.0), 0.02, 0.3);
+            layer(&[(&sizzle, 0.5, 0.0), (&flame, 0.7, 0.0), (&pops, 0.4, 0.0)])
         }
     }
 }
