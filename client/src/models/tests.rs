@@ -130,13 +130,13 @@ fn broken_file_is_rejected() {
     std::fs::create_dir_all(&dir).unwrap();
     // A valid glTF of the wrong model: part names don't match.
     engine::assets::gltf::write_parts(
-        &dir.join(ModelId::Husk.file_name()),
+        &dir.join(ModelId::Gnawer.file_name()),
         &ModelId::Rivet.build(),
     )
     .unwrap();
-    assert!(load_parts(ModelId::Husk, &dir).is_err());
-    std::fs::write(dir.join(ModelId::Gnat.file_name()), "not json").unwrap();
-    assert!(load_parts(ModelId::Gnat, &dir).is_err());
+    assert!(load_parts(ModelId::Gnawer, &dir).is_err());
+    std::fs::write(dir.join(ModelId::Harrier.file_name()), "not json").unwrap();
+    assert!(load_parts(ModelId::Harrier, &dir).is_err());
     assert!(load_parts(ModelId::Door, &dir).is_err(), "missing file");
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -379,22 +379,66 @@ fn enemy_poses_are_finite() {
     ];
     for kind in EnemyKind::ALL {
         for state in states {
-            for (speed, strafe, time) in
-                [(0.0, 0.0, 0.0), (6.0, 1.0, 98765.4321), (30.0, -3.0, 1.5)]
-            {
-                let anim = EnemyAnim {
-                    state,
-                    speed,
-                    strafe,
-                    time,
-                    cycle: kind.advance_cycle(0.9, speed, 0.25),
-                    aim_pitch: 0.4,
-                    seed: 99,
-                    ..EnemyAnim::new(kind)
-                };
-                let pose = super::enemies::pose(&anim);
-                assert_pose_finite(kind.model(), &pose, &format!("{state:?}"));
+            for attack in 0..4u8 {
+                for (speed, strafe, time) in
+                    [(0.0, 0.0, 0.0), (6.0, 1.0, 98765.4321), (30.0, -3.0, 1.5)]
+                {
+                    let anim = EnemyAnim {
+                        state,
+                        attack,
+                        speed,
+                        strafe,
+                        time,
+                        cycle: kind.advance_cycle(0.9, speed, 0.25),
+                        aim_pitch: 0.4,
+                        aim_locked: attack == 1,
+                        seed: 99,
+                        ..EnemyAnim::new(kind)
+                    };
+                    let pose = super::enemies::pose(&anim);
+                    assert_pose_finite(kind.model(), &pose, &format!("{state:?} attack {attack}"));
+                }
             }
+        }
+    }
+}
+
+/// The models are built at the contract sizes (docs/roster.md): roughly the capsule's height,
+/// the Harrier's 3 m wingspan, and the weak points sit inside visible geometry.
+#[test]
+fn enemy_models_match_their_definitions() {
+    let defs = shared::sim::EnemyRegistry::builtin();
+    for kind in EnemyKind::ALL {
+        let name = format!("{kind:?}").to_ascii_lowercase();
+        let def = defs.get(&name).unwrap_or_else(|| panic!("no definition for {name}"));
+        assert_eq!(EnemyKind::from_name(&name), Some(kind));
+        let parts = kind.model().build();
+        let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+        for p in &parts {
+            let (a, b) = engine::assets::meshgen::bounds(&p.mesh.vertices);
+            lo = lo.min(a);
+            hi = hi.max(b);
+        }
+        // Model space: feet at 0 (the Harrier: its hover centre).
+        let lift = kind.root_lift();
+        let (bottom, top) = (lo.y + lift, hi.y + lift);
+        let size = hi - lo;
+        println!("{kind:?}: {size} (feet {bottom:.2} .. top {top:.2}), capsule {} x {}", def.radius, def.height);
+        assert!(size.max_element() >= 1.9, "{kind:?}: at least ~2 m in its longest dimension");
+        if kind == EnemyKind::Harrier {
+            assert!(size.x >= 2.9, "3 m wingspan: {}", size.x);
+        } else {
+            assert!(bottom.abs() < 0.12, "{kind:?} stands on its feet: {bottom}");
+            assert!((top - def.height).abs() < 0.45, "{kind:?}: model top {top} vs capsule {}", def.height);
+        }
+        for w in &def.weak_points {
+            let c = w.offset - Vec3::Y * lift;
+            assert!(
+                c.cmpge(lo - Vec3::splat(w.radius * 0.5)).all() && c.cmple(hi + Vec3::splat(w.radius * 0.5)).all(),
+                "{kind:?} weak point {} at {} outside the model {lo}..{hi}",
+                w.name,
+                w.offset
+            );
         }
     }
 }
@@ -425,12 +469,13 @@ fn telegraphs_brighten_during_windup() {
 }
 
 #[test]
-fn bastion_strobes_in_the_parry_window() {
+fn gaoler_strobes_in_the_bash_parry_window() {
     let glow = |p: f32, t: f64| {
         let anim = EnemyAnim {
             state: EnemyState::Windup(p),
+            attack: super::enemies::gaoler::BASH,
             time: t,
-            ..EnemyAnim::new(EnemyKind::Bastion)
+            ..EnemyAnim::new(EnemyKind::Gaoler)
         };
         super::enemies::pose(&anim).glow
     };
@@ -440,6 +485,34 @@ fn bastion_strobes_in_the_parry_window() {
     assert!(samples.iter().any(|g| g.z < 3.0), "yellow phase");
     // Before the window there is no white-hot phase.
     assert!((0..8).all(|i| glow(0.3, i as f64 / 72.0).z < 3.0));
+    // The bash lights the door's rim, the sweep the chain (the other one is hidden).
+    use super::enemies::gaoler::{CHAIN_GLOW, RIM, SWEEP};
+    let pose = |attack| {
+        super::enemies::pose(&EnemyAnim {
+            state: EnemyState::Windup(0.5),
+            attack,
+            ..EnemyAnim::new(EnemyKind::Gaoler)
+        })
+    };
+    let bash = pose(super::enemies::gaoler::BASH);
+    assert!(!bash.is_hidden(RIM) && bash.is_hidden(CHAIN_GLOW));
+    let sweep = pose(SWEEP);
+    assert!(sweep.is_hidden(RIM) && !sweep.is_hidden(CHAIN_GLOW));
+}
+
+#[test]
+fn heron_lens_flares_once_the_aim_locks() {
+    let glow = |locked: bool| {
+        let anim = EnemyAnim {
+            state: EnemyState::Windup(0.9),
+            attack: super::enemies::heron::NEEDLE,
+            aim_locked: locked,
+            time: 2.0,
+            ..EnemyAnim::new(EnemyKind::Heron)
+        };
+        super::enemies::pose(&anim).glow.x
+    };
+    assert!(glow(true) > glow(false) * 1.2, "{} vs {}", glow(true), glow(false));
 }
 
 #[test]
@@ -551,7 +624,7 @@ fn prop_poses_are_finite() {
 fn lookups() {
     assert_eq!(WeaponKind::from_index(2), WeaponKind::Riveter);
     assert_eq!(WeaponKind::from_index(9), WeaponKind::Lancet);
-    assert_eq!(EnemyKind::from_name("Bastion"), Some(EnemyKind::Bastion));
+    assert_eq!(EnemyKind::from_name("Gaoler"), Some(EnemyKind::Gaoler));
     assert_eq!(EnemyKind::from_name("nope"), None);
     let c = PlayerAnim::advance_cycle(0.95, Vec3::new(0.0, 0.0, -100.0), 0.1);
     assert!((0.0..1.0).contains(&c));

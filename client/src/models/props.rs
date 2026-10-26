@@ -22,13 +22,17 @@ const SAWBLADE: [JointDef; 2] = [
     static_part("blade", Shade::Lit),
     static_part("edge", Shade::Glow),
 ];
-const SPITTER_ORB: [JointDef; 2] = [
-    static_part("core", Shade::Glow),
-    static_part("shell", Shade::Glow),
+const EMBER_BOMB: [JointDef; 2] = [
+    static_part("shell", Shade::Lit),
+    static_part("cracks", Shade::Glow),
 ];
-const GNAT_BOLT: [JointDef; 2] = [
-    static_part("bolt", Shade::Glow),
+const NEEDLE: [JointDef; 2] = [
+    static_part("shaft", Shade::Lit),
+    static_part("glow", Shade::Glow),
+];
+const AIM_LASER: [JointDef; 2] = [
     static_part("core", Shade::Glow),
+    static_part("sheath", Shade::Glow),
 ];
 const PRISM: [JointDef; 2] = [
     static_part("shard", Shade::Core),
@@ -77,8 +81,9 @@ pub(crate) fn joints(id: ModelId) -> &'static [JointDef] {
         | ModelId::StickyCharge
         | ModelId::MortarShell => &BODY_GLOW,
         ModelId::Sawblade => &SAWBLADE,
-        ModelId::SpitterOrb => &SPITTER_ORB,
-        ModelId::GnatBolt => &GNAT_BOLT,
+        ModelId::EmberBomb => &EMBER_BOMB,
+        ModelId::Needle => &NEEDLE,
+        ModelId::AimLaser => &AIM_LASER,
         ModelId::Prism => &PRISM,
         ModelId::BloodCore => &BLOOD_CORE,
         ModelId::JumpPad => &JUMP_PAD,
@@ -98,8 +103,9 @@ pub(crate) fn build(id: ModelId) -> Vec<ModelPart> {
         ModelId::FlakGrenade => flak(),
         ModelId::StickyCharge => sticky(),
         ModelId::MortarShell => mortar(),
-        ModelId::SpitterOrb => spitter_orb(),
-        ModelId::GnatBolt => gnat_bolt(),
+        ModelId::EmberBomb => ember_bomb(),
+        ModelId::Needle => needle(),
+        ModelId::AimLaser => aim_laser(),
         ModelId::Prism => prism(),
         ModelId::BloodCore => blood_core(),
         ModelId::JumpPad => jump_pad(),
@@ -494,65 +500,78 @@ fn mortar() -> Vec<ModelPart> {
     p.finish()
 }
 
-fn spitter_orb() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&SPITTER_ORB);
-    p.add(0, gem(Vec3::ZERO, 0.12, 1, Vec4::new(0.85, 1.0, 0.45, 1.0)));
-    let mut shell = kit::ellipsoid(
-        Vec3::new(0.0, 0.0, 0.03),
-        Vec3::new(0.19, 0.19, 0.24),
-        Quat::IDENTITY,
-        5,
-        9,
-        Vec4::new(0.45, 0.9, 0.12, 1.0),
-        true,
-    );
-    // Trailing drips.
-    for (dx, dy) in [(0.07, 0.05), (-0.08, -0.03), (0.0, -0.09)] {
-        add(
-            &mut shell,
-            spike(
-                Vec3::new(dx, dy, 0.12),
-                Vec3::new(dx * 1.4, dy * 1.4, 0.38),
-                0.05,
-                4,
-                Vec4::new(0.35, 0.75, 0.1, 1.0),
-            ),
-        );
+/// The Censer's ember bomb (~0.35 m): a lump of dark slag split by white-hot seams, a few
+/// knobbly clinkers. Big and bright on purpose (docs/roster.md "Visibility").
+fn ember_bomb() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&EMBER_BOMB);
+    let slag = rgb(0x2e2925);
+    let hot = Vec4::new(1.0, 0.62, 0.18, 1.0);
+    let mut shell = kit::ellipsoid(Vec3::ZERO, Vec3::splat(0.3), Quat::IDENTITY, 5, 9, slag, false);
+    for (i, d) in [Vec3::new(0.7, 0.5, 0.2), Vec3::new(-0.6, 0.3, -0.5), Vec3::new(0.1, -0.8, 0.4)]
+        .into_iter()
+        .enumerate()
+    {
+        let d = d.normalize();
+        add(&mut shell, gem(d * 0.27, 0.09 + 0.02 * i as f32, 0, slag));
     }
-    p.add(1, shell);
-    p.color(1, Vec4::new(1.0, 1.0, 1.0, 0.6));
-    p.texture(0, kit::tex_glow());
-    p.texture(1, kit::tex_skin());
+    p.add(0, shell);
+    // Glowing seams: three great circles at odd angles, and a hot core peeking out.
+    let mut cracks = MeshBuilder::new();
+    for axis in [Vec3::new(0.3, 1.0, 0.1), Vec3::new(1.0, -0.2, 0.4), Vec3::new(-0.2, 0.3, 1.0)] {
+        add(&mut cracks, kit::band(Vec3::ZERO, axis, 0.3, 0.06, 0.03, 12, hot));
+    }
+    add(&mut cracks, gem(Vec3::new(0.0, 0.0, 0.18), 0.17, 1, Vec4::new(1.0, 0.85, 0.45, 1.0)));
+    p.add(1, cracks);
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_grime());
+    p.texture(1, kit::tex_glow());
     p.finish()
 }
 
-fn gnat_bolt() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&GNAT_BOLT);
-    p.add(
-        0,
-        kit::crystal(
-            Vec3::new(0.0, 0.0, 0.05),
-            Vec3::NEG_Z,
-            (0.22, 0.12),
-            0.06,
-            6,
-            Vec4::new(0.85, 0.35, 1.0, 1.0),
-        ),
+/// The Heron's needle: a long blackened brass spike (0.9 m) with a white-hot point and a
+/// glowing fletch; the client adds a long streak behind it.
+fn needle() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&NEEDLE);
+    let brass = rgb(0x6a5226);
+    p.add(0, tube(Vec3::new(0.0, 0.0, 0.45), Vec3::new(0.0, 0.0, -0.3), 0.035, 0.03, 6, brass));
+    let mut glow = spike(
+        Vec3::new(0.0, 0.0, -0.3),
+        Vec3::new(0.0, 0.0, -0.5),
+        0.04,
+        6,
+        Vec4::new(1.0, 0.9, 0.8, 1.0),
     );
-    p.add(
-        1,
-        kit::crystal(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::NEG_Z,
-            (0.12, 0.09),
-            0.025,
-            4,
-            Vec4::new(1.0, 0.9, 1.0, 1.0),
-        ),
-    );
-    p.color(0, Vec4::new(1.0, 1.0, 1.0, 0.75));
-    p.texture(0, kit::tex_glow());
+    for k in 0..3 {
+        let a = k as f32 / 3.0 * std::f32::consts::TAU;
+        let (s, c) = a.sin_cos();
+        add(
+            &mut glow,
+            kit::plate(
+                &[
+                    Vec3::new(c * 0.03, s * 0.03, 0.25),
+                    Vec3::new(c * 0.03, s * 0.03, 0.45),
+                    Vec3::new(c * 0.11, s * 0.11, 0.48),
+                ],
+                0.01,
+                Vec4::new(1.0, 0.25, 0.12, 1.0),
+            ),
+        );
+    }
+    p.add(1, glow);
+    finish_lit(&mut p);
+    p.texture(0, kit::tex_plate());
     p.texture(1, kit::tex_glow());
+    p.finish()
+}
+
+/// A unit glowing beam for the Heron's aim laser and needle streaks: 1 m along -Z from the
+/// origin, 1 m across (the client scales it to width x width x length). A hot core inside a
+/// translucent sheath; white, the client tints it through `Tint::glow`.
+fn aim_laser() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&AIM_LASER);
+    p.add(0, block(Vec3::new(0.0, 0.0, -0.5), Vec3::new(0.22, 0.22, 0.5), Quat::IDENTITY, Vec4::ONE));
+    p.add(1, block(Vec3::new(0.0, 0.0, -0.5), Vec3::new(0.5, 0.5, 0.5), Quat::IDENTITY, Vec4::ONE));
+    p.color(1, Vec4::new(1.0, 1.0, 1.0, 0.4));
     p.finish()
 }
 

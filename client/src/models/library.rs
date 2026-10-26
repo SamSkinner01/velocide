@@ -166,22 +166,29 @@ impl ModelLibrary {
         }
     }
 
-    /// Draws an enemy posed from `anim` with its feet (or hover centre for Gnats) at `root`.
+    /// Draws an enemy posed from `anim` with its model origin (feet; the Harrier's hover
+    /// centre) at `root`.
     pub fn draw_enemy(&self, anim: &EnemyAnim, root: Mat4, tint: &Tint, out: &mut Vec<DrawItem>) {
         let id = anim.kind.model();
         let pose = enemies::pose(anim);
         self.get(id).draw(&pose, root, tint, out);
     }
 
-    /// World-space point an enemy attacks from in its current pose: Husk right claw tips,
-    /// Spitter maw (orb spawn), Gnat emitters (bolt spawn), Bastion right fist (slam impact).
-    /// For muzzle flashes / impact effects; gameplay positions come from the server.
+    /// World-space point an enemy attacks from in its current pose: the Gnawer's jaw, the
+    /// Censer's censer pot (ember bombs leave it), the Harrier's beak, the Gaoler's door (bash)
+    /// or flail ball, the Heron's lens (needle and laser). For muzzle flashes / impact
+    /// effects; gameplay positions come from the server.
     pub fn enemy_attack_point(&self, anim: &EnemyAnim, root: Mat4) -> Vec3 {
+        use enemies::{EnemyKind, censer, gaoler, gnawer, harrier, heron};
         let (part, offset) = match anim.kind {
-            enemies::EnemyKind::Husk => (enemies::husk::CLAWS_R, Vec3::new(0.0, -0.25, -0.09)),
-            enemies::EnemyKind::Spitter => (enemies::spitter::MAW, Vec3::new(0.0, 0.012, -0.2)),
-            enemies::EnemyKind::Gnat => (enemies::gnat::EMITTERS, Vec3::new(0.0, -0.045, -0.21)),
-            enemies::EnemyKind::Bastion => (enemies::bastion::FIST_R, Vec3::new(0.0, -0.5, -0.04)),
+            EnemyKind::Gnawer => (gnawer::JAW, Vec3::new(0.0, -0.1, -0.55)),
+            EnemyKind::Censer => (censer::CENSER, Vec3::ZERO),
+            EnemyKind::Harrier => (harrier::HEAD, Vec3::new(0.0, -0.1, -0.4)),
+            EnemyKind::Gaoler if anim.attack == gaoler::BASH => {
+                (gaoler::SHIELD, Vec3::new(0.38, 0.1, -0.3))
+            }
+            EnemyKind::Gaoler => (gaoler::FLAIL, Vec3::ZERO),
+            EnemyKind::Heron => (heron::LENS, Vec3::new(0.0, 0.14, -0.26)),
         };
         let pose = enemies::pose(anim);
         self.get(anim.kind.model())

@@ -603,7 +603,7 @@ pub fn tex_plate() -> TextureData {
     c.into_texture()
 }
 
-/// Dirty pitted metal, darker and rougher than [`tex_plate`] (Bastion armour, Gnat shell).
+/// Dirty pitted metal, darker and rougher than [`tex_plate`] (Gaoler iron, Censer brass).
 pub fn tex_grime() -> TextureData {
     const SEED: u32 = 719;
     let mut c = Canvas::new(32, 32);
@@ -635,6 +635,28 @@ pub fn tex_skin() -> TextureData {
             col = Vec3::splat(1.0);
         }
         opaque(col)
+    });
+    c.into_texture()
+}
+
+/// Poured wax-flesh (the Moulds): smooth and pale with vertical drip runs, pits and hairline
+/// cracks. Neutral; tinted per enemy by vertex colours.
+pub fn tex_wax() -> TextureData {
+    const SEED: u32 = 739;
+    let mut c = Canvas::new(32, 32);
+    c.fill(|x, y, u, v| {
+        let n = fbm(u, v, 3, 3, SEED);
+        // Drip runs: stretched noise along v.
+        let drip = value_noise2(u, v, 9, 2, SEED + 4);
+        let crack = (fbm(u, v, 2, 5, SEED + 7) - 0.5).abs();
+        let mut g = 0.84 + n * 0.14 - (drip - 0.6).max(0.0) * 0.5;
+        if crack < 0.018 {
+            g *= 0.62;
+        }
+        if rand01(x, y, SEED + 1) < 0.025 {
+            g *= 0.8;
+        }
+        opaque(Vec3::new(g * 1.02, g, g * 0.95))
     });
     c.into_texture()
 }

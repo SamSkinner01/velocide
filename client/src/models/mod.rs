@@ -42,11 +42,12 @@ pub use weapons::{BarrelSpin, ViewmodelAnim, WeaponKind};
 pub enum ModelId {
     /// Player character (third person).
     Shrike,
-    // Enemies.
-    Husk,
-    Spitter,
-    Gnat,
-    Bastion,
+    // Enemies (docs/roster.md).
+    Gnawer,
+    Censer,
+    Harrier,
+    Gaoler,
+    Heron,
     // Weapons: used both as first-person viewmodels and in the Shrike's hand.
     Lancet,
     Thresher,
@@ -63,8 +64,12 @@ pub enum ModelId {
     FlakGrenade,
     StickyCharge,
     MortarShell,
-    SpitterOrb,
-    GnatBolt,
+    /// The Censer's lobbed ember bomb.
+    EmberBomb,
+    /// The Heron's needle.
+    Needle,
+    /// Unit glowing beam (the Heron's aim laser, needle streaks).
+    AimLaser,
     /// Thrown ricochet shard (also shown spinning above the fist while throwing).
     Prism,
     /// Optional core for blood-burst effects.
@@ -77,12 +82,13 @@ pub enum ModelId {
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 25] = [
+    pub const ALL: [ModelId; 27] = [
         ModelId::Shrike,
-        ModelId::Husk,
-        ModelId::Spitter,
-        ModelId::Gnat,
-        ModelId::Bastion,
+        ModelId::Gnawer,
+        ModelId::Censer,
+        ModelId::Harrier,
+        ModelId::Gaoler,
+        ModelId::Heron,
         ModelId::Lancet,
         ModelId::Thresher,
         ModelId::Riveter,
@@ -95,8 +101,9 @@ impl ModelId {
         ModelId::FlakGrenade,
         ModelId::StickyCharge,
         ModelId::MortarShell,
-        ModelId::SpitterOrb,
-        ModelId::GnatBolt,
+        ModelId::EmberBomb,
+        ModelId::Needle,
+        ModelId::AimLaser,
         ModelId::Prism,
         ModelId::BloodCore,
         ModelId::JumpPad,
@@ -114,10 +121,11 @@ impl ModelId {
     pub fn file_name(self) -> &'static str {
         match self {
             ModelId::Shrike => "shrike.gltf",
-            ModelId::Husk => "enemy_husk.gltf",
-            ModelId::Spitter => "enemy_spitter.gltf",
-            ModelId::Gnat => "enemy_gnat.gltf",
-            ModelId::Bastion => "enemy_bastion.gltf",
+            ModelId::Gnawer => "enemy_gnawer.gltf",
+            ModelId::Censer => "enemy_censer.gltf",
+            ModelId::Harrier => "enemy_harrier.gltf",
+            ModelId::Gaoler => "enemy_gaoler.gltf",
+            ModelId::Heron => "enemy_heron.gltf",
             ModelId::Lancet => "weapon_lancet.gltf",
             ModelId::Thresher => "weapon_thresher.gltf",
             ModelId::Riveter => "weapon_riveter.gltf",
@@ -130,8 +138,9 @@ impl ModelId {
             ModelId::FlakGrenade => "proj_flak.gltf",
             ModelId::StickyCharge => "proj_sticky.gltf",
             ModelId::MortarShell => "proj_mortar.gltf",
-            ModelId::SpitterOrb => "proj_spitter_orb.gltf",
-            ModelId::GnatBolt => "proj_gnat_bolt.gltf",
+            ModelId::EmberBomb => "proj_ember_bomb.gltf",
+            ModelId::Needle => "proj_needle.gltf",
+            ModelId::AimLaser => "fx_aim_laser.gltf",
             ModelId::Prism => "proj_prism.gltf",
             ModelId::BloodCore => "fx_blood_core.gltf",
             ModelId::JumpPad => "prop_jump_pad.gltf",
@@ -145,10 +154,11 @@ impl ModelId {
     pub fn joints(self) -> &'static [JointDef] {
         match self {
             ModelId::Shrike => &shrike::JOINTS,
-            ModelId::Husk => &enemies::husk::JOINTS,
-            ModelId::Spitter => &enemies::spitter::JOINTS,
-            ModelId::Gnat => &enemies::gnat::JOINTS,
-            ModelId::Bastion => &enemies::bastion::JOINTS,
+            ModelId::Gnawer => &enemies::gnawer::JOINTS,
+            ModelId::Censer => &enemies::censer::JOINTS,
+            ModelId::Harrier => &enemies::harrier::JOINTS,
+            ModelId::Gaoler => &enemies::gaoler::JOINTS,
+            ModelId::Heron => &enemies::heron::JOINTS,
             ModelId::Lancet => &weapons::lancet::JOINTS,
             ModelId::Thresher => &weapons::thresher::JOINTS,
             ModelId::Riveter => &weapons::riveter::JOINTS,
@@ -164,10 +174,11 @@ impl ModelId {
     pub fn build(self) -> Vec<ModelPart> {
         match self {
             ModelId::Shrike => shrike::build(),
-            ModelId::Husk => enemies::husk::build(),
-            ModelId::Spitter => enemies::spitter::build(),
-            ModelId::Gnat => enemies::gnat::build(),
-            ModelId::Bastion => enemies::bastion::build(),
+            ModelId::Gnawer => enemies::gnawer::build(),
+            ModelId::Censer => enemies::censer::build(),
+            ModelId::Harrier => enemies::harrier::build(),
+            ModelId::Gaoler => enemies::gaoler::build(),
+            ModelId::Heron => enemies::heron::build(),
             ModelId::Lancet => weapons::lancet::build(),
             ModelId::Thresher => weapons::thresher::build(),
             ModelId::Riveter => weapons::riveter::build(),

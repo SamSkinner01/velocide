@@ -2,7 +2,9 @@
 //! resolution (saved 2x nearest-upscaled as 1280x720 PNGs):
 //!
 //! - `lineup.png`: every character side by side (scale check);
-//! - `shrike_*.png`, `husk.png`, `spitter.png`, `gnat.png`, `bastion.png`: animation states;
+//! - `closeup_*.png`: each enemy from the front three-quarter and from behind;
+//! - `shrike_*.png`, `gnawer_*.png`, `censer_*.png`, `harrier_*.png`, `gaoler_*.png`,
+//!   `heron_*.png`: animation states, every attack's wind-up and strike;
 //! - `vm_*.png`: first-person viewmodels (rest, kick, switch, punch, overcharge, throw...);
 //! - `projectiles.png`, `props.png`.
 //!
@@ -379,10 +381,13 @@ fn shrike_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
     shots
 }
 
+/// One labelled pose of an enemy sheet: (label, state, speed, attack index, aim pitch).
+type Pose = (&'static str, EnemyState, f32, u8, f32);
+
 fn enemy_shot(
     lib: &ModelLibrary,
     kind: EnemyKind,
-    states: &[(&str, EnemyState, f32)],
+    states: &[Pose],
     spacing: f32,
     cam_dist: f32,
     cam_y: f32,
@@ -394,17 +399,20 @@ fn enemy_shot(
         Vec3::new(0.0, target_y, 0.0),
         60.0,
     ));
-    for ((name, state, speed), pos) in states.iter().zip(&positions) {
+    for ((name, state, speed, attack, pitch), pos) in states.iter().zip(&positions) {
         let anim = EnemyAnim {
             state: *state,
             speed: *speed,
+            attack: *attack,
+            aim_pitch: *pitch,
+            aim_locked: name.contains("LOCK"),
             cycle: 0.2,
             time: 2.1,
             seed: 7,
             ..EnemyAnim::new(kind)
         };
-        let root_pos = if kind == EnemyKind::Gnat {
-            *pos + Vec3::new(0.0, 1.2, 0.0)
+        let root_pos = if kind == EnemyKind::Harrier {
+            *pos + Vec3::new(0.0, 1.4, 0.0)
         } else {
             *pos
         };
@@ -420,17 +428,87 @@ fn enemy_shot(
     shot
 }
 
-fn standard_states(windup_hi: f32) -> Vec<(&'static str, EnemyState, f32)> {
+/// One pose sheet: (file name, title, kind, poses, spacing, camera distance, camera height,
+/// look-at height).
+type Sheet = (&'static str, &'static str, EnemyKind, Vec<Pose>, f32, f32, f32, f32);
+
+/// The pose sheets of every enemy.
+fn enemy_sheets() -> Vec<Sheet> {
+    use EnemyState::*;
     vec![
-        ("IDLE", EnemyState::Idle, 0.0),
-        ("WALK", EnemyState::Walk, 5.0),
-        ("WINDUP .4", EnemyState::Windup(0.4), 0.0),
-        ("WINDUP HI", EnemyState::Windup(windup_hi), 0.0),
-        ("ATTACK", EnemyState::Attack(0.5), 0.0),
-        ("RECOVER", EnemyState::Recover(0.3), 0.0),
-        ("STUNNED", EnemyState::Stunned, 0.0),
-        ("DYING .5", EnemyState::Dying(0.5), 0.0),
-        ("DEAD", EnemyState::Dying(1.0), 0.0),
+        ("gnawer_1", "GNAWER: BITE", EnemyKind::Gnawer, vec![
+            ("IDLE", Idle, 0.0, 0, 0.0),
+            ("WALK", Walk, 8.0, 0, 0.0),
+            ("BITE .5", Windup(0.5), 0.0, 0, 0.0),
+            ("BITE HI", Windup(0.9), 0.0, 0, 0.0),
+            ("SNAP", Attack(0.3), 0.0, 0, 0.0),
+        ], 1.9, 6.2, 1.8, 1.0),
+        ("gnawer_2", "GNAWER: POUNCE, STUN, DEATH", EnemyKind::Gnawer, vec![
+            ("POUNCE WIND", Windup(0.8), 0.0, 1, 0.0),
+            ("POUNCE", Attack(0.2), 0.0, 1, 0.0),
+            ("RECOVER", Recover(0.3), 0.0, 0, 0.0),
+            ("STUNNED", Stunned, 0.0, 0, 0.0),
+            ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+            ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+        ], 1.8, 6.8, 1.8, 0.9),
+        ("censer_1", "CENSER: VOLLEY", EnemyKind::Censer, vec![
+            ("IDLE", Idle, 0.0, 1, 0.0),
+            ("WALK", Walk, 4.0, 1, 0.0),
+            ("WHIRL .3", Windup(0.3), 0.0, 1, 0.0),
+            ("WHIRL .9", Windup(0.9), 0.0, 1, 0.0),
+            ("LOB", Attack(0.4), 0.0, 1, 0.0),
+        ], 2.0, 7.0, 2.0, 1.4),
+        ("censer_2", "CENSER: SWING, STUN, DEATH", EnemyKind::Censer, vec![
+            ("SWING WIND", Windup(0.8), 0.0, 0, 0.0),
+            ("SWING", Attack(0.5), 0.0, 0, 0.0),
+            ("STUNNED", Stunned, 0.0, 0, 0.0),
+            ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+            ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+        ], 2.0, 7.0, 2.0, 1.3),
+        ("harrier_1", "HARRIER: DIVE", EnemyKind::Harrier, vec![
+            ("HOVER", Idle, 0.0, 0, 0.0),
+            ("REAR .5", Windup(0.5), 0.0, 0, 0.0),
+            ("REAR HI", Windup(0.95), 0.0, 0, 0.0),
+            ("DIVE", Attack(0.4), 0.0, 0, -0.6),
+            ("CLIMB", Recover(0.3), 0.0, 0, 0.0),
+        ], 3.2, 8.0, 2.4, 1.4),
+        ("harrier_2", "HARRIER: SWATTED, DEATH", EnemyKind::Harrier, vec![
+            ("SWATTED", Stunned, 0.0, 0, 0.0),
+            ("DYING", Dying(0.5), 0.0, 0, 0.0),
+            ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+        ], 3.4, 6.5, 2.2, 1.3),
+        ("gaoler_1", "GAOLER: SHIELD BASH", EnemyKind::Gaoler, vec![
+            ("IDLE", Idle, 0.0, 0, 0.0),
+            ("WALK", Walk, 4.0, 0, 0.0),
+            ("BASH .4", Windup(0.4), 0.0, 0, 0.0),
+            ("PARRY NOW", Windup(0.85), 0.0, 0, 0.0),
+            ("BASH", Attack(0.5), 0.0, 0, 0.0),
+        ], 3.4, 12.0, 3.0, 1.9),
+        ("gaoler_2", "GAOLER: CHAIN SWEEP, RUSH", EnemyKind::Gaoler, vec![
+            ("SWEEP WIND", Windup(0.7), 0.0, 1, 0.0),
+            ("SWEEP", Attack(0.35), 0.0, 1, 0.0),
+            ("RUSH WIND", Windup(0.8), 0.0, 2, 0.0),
+            ("RUSH", Attack(0.5), 0.0, 2, 0.0),
+        ], 3.8, 12.0, 3.0, 1.8),
+        ("gaoler_3", "GAOLER: PARRIED, DEATH", EnemyKind::Gaoler, vec![
+            ("PARRIED", Stunned, 0.0, 0, 0.0),
+            ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+            ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+        ], 4.0, 11.0, 3.0, 1.6),
+        ("heron_1", "HERON: NEEDLE", EnemyKind::Heron, vec![
+            ("IDLE", Idle, 0.0, 1, 0.0),
+            ("WALK", Walk, 6.0, 1, 0.0),
+            ("AIM .5", Windup(0.5), 0.0, 1, -0.1),
+            ("AIM LOCKED", Windup(0.9), 0.0, 1, -0.1),
+            ("FIRE", Attack(0.3), 0.0, 1, -0.1),
+        ], 2.0, 9.0, 2.6, 1.9),
+        ("heron_2", "HERON: KICK, STUN, DEATH", EnemyKind::Heron, vec![
+            ("KICK WIND", Windup(0.8), 0.0, 0, 0.0),
+            ("KICK", Attack(0.4), 0.0, 0, 0.0),
+            ("STUNNED", Stunned, 0.0, 0, 0.0),
+            ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+            ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+        ], 2.2, 9.0, 2.6, 1.7),
     ]
 }
 
@@ -542,8 +620,8 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
         (ModelId::FlakGrenade, "FLAK"),
         (ModelId::StickyCharge, "STICKY"),
         (ModelId::MortarShell, "MORTAR"),
-        (ModelId::SpitterOrb, "ORB"),
-        (ModelId::GnatBolt, "BOLT"),
+        (ModelId::EmberBomb, "EMBER"),
+        (ModelId::Needle, "NEEDLE"),
         (ModelId::Prism, "PRISM"),
         (ModelId::BloodCore, "BLOOD"),
     ];
@@ -679,11 +757,11 @@ fn main() -> anyhow::Result<()> {
     // Scale lineup.
     {
         let mut shot = Shot::new(look_at(
-            Vec3::new(0.0, 2.0, 8.5),
-            Vec3::new(0.0, 1.3, 0.0),
+            Vec3::new(0.3, 2.3, 10.5),
+            Vec3::new(0.3, 1.6, 0.0),
             60.0,
         ));
-        let xs = [-3.6, -1.9, -0.2, 1.7, 4.0];
+        let xs = [-5.6, -3.7, -1.7, 0.7, 3.6, 6.2];
         lib.draw_player(
             &PlayerAnim {
                 yaw: FACE_CAMERA,
@@ -696,7 +774,7 @@ fn main() -> anyhow::Result<()> {
         shot.labels
             .push((Vec3::new(xs[0], -0.2, 0.0), "SHRIKE".into()));
         for (kind, x) in EnemyKind::ALL.iter().zip(&xs[1..]) {
-            let y = if *kind == EnemyKind::Gnat { 1.4 } else { 0.0 };
+            let y = if *kind == EnemyKind::Harrier { 1.6 } else { 0.0 };
             let anim = EnemyAnim {
                 time: 1.0,
                 ..EnemyAnim::new(*kind)
@@ -713,8 +791,8 @@ fn main() -> anyhow::Result<()> {
         shots.push(("lineup".into(), "LINEUP".into(), shot));
         // Same from behind: the models face the wall, the camera looks at their backs.
         let mut shot = Shot::new(look_at(
-            Vec3::new(1.0, 2.2, 7.5),
-            Vec3::new(0.0, 1.3, 0.0),
+            Vec3::new(1.0, 2.5, 9.5),
+            Vec3::new(0.3, 1.6, 0.0),
             60.0,
         ));
         lib.draw_player(
@@ -728,7 +806,7 @@ fn main() -> anyhow::Result<()> {
             &mut shot.draws,
         );
         for (kind, x) in EnemyKind::ALL.iter().zip(&xs[1..]) {
-            let y = if *kind == EnemyKind::Gnat { 1.4 } else { 0.0 };
+            let y = if *kind == EnemyKind::Harrier { 1.6 } else { 0.0 };
             let anim = EnemyAnim {
                 time: 1.0,
                 ..EnemyAnim::new(*kind)
@@ -744,17 +822,18 @@ fn main() -> anyhow::Result<()> {
     }
     // Close-ups: each enemy idle (front three-quarter) next to the same model from behind.
     for (kind, dist, height) in [
-        (EnemyKind::Husk, 3.2, 1.2),
-        (EnemyKind::Spitter, 3.6, 1.0),
-        (EnemyKind::Gnat, 2.2, 1.3),
-        (EnemyKind::Bastion, 5.5, 1.8),
+        (EnemyKind::Gnawer, 4.2, 1.1),
+        (EnemyKind::Censer, 5.0, 1.4),
+        (EnemyKind::Harrier, 5.6, 1.6),
+        (EnemyKind::Gaoler, 7.6, 2.0),
+        (EnemyKind::Heron, 6.4, 1.8),
     ] {
         let mut shot = Shot::new(look_at(
             Vec3::new(0.0, height + 0.4, dist),
             Vec3::new(0.0, height, 0.0),
             60.0,
         ));
-        let y = if kind == EnemyKind::Gnat { 1.3 } else { 0.0 };
+        let y = if kind == EnemyKind::Harrier { 1.6 } else { 0.0 };
         let half = dist * 0.27;
         for (x, yaw) in [(-half, FACE_CAMERA), (half, 0.5)] {
             let anim = EnemyAnim {
@@ -777,51 +856,13 @@ fn main() -> anyhow::Result<()> {
         ));
     }
     shots.extend(shrike_shots(&lib));
-    let husk = standard_states(0.85);
-    shots.push((
-        "husk_1".into(),
-        "HUSK 1".into(),
-        enemy_shot(&lib, EnemyKind::Husk, &husk[..5], 1.2, 4.3, 1.5, 0.95),
-    ));
-    shots.push((
-        "husk_2".into(),
-        "HUSK 2".into(),
-        enemy_shot(&lib, EnemyKind::Husk, &husk[5..], 1.2, 4.3, 1.5, 0.95),
-    ));
-    let spitter = standard_states(0.9);
-    shots.push((
-        "spitter_1".into(),
-        "SPITTER 1".into(),
-        enemy_shot(&lib, EnemyKind::Spitter, &spitter[..5], 1.5, 5.2, 1.7, 0.8),
-    ));
-    shots.push((
-        "spitter_2".into(),
-        "SPITTER 2".into(),
-        enemy_shot(&lib, EnemyKind::Spitter, &spitter[5..], 1.5, 5.2, 1.7, 0.8),
-    ));
-    let gnat = standard_states(0.8);
-    shots.push((
-        "gnat_1".into(),
-        "GNAT 1".into(),
-        enemy_shot(&lib, EnemyKind::Gnat, &gnat[..5], 1.0, 3.6, 1.7, 1.1),
-    ));
-    shots.push((
-        "gnat_2".into(),
-        "GNAT 2".into(),
-        enemy_shot(&lib, EnemyKind::Gnat, &gnat[5..], 1.0, 3.6, 1.7, 1.0),
-    ));
-    let mut bastion = standard_states(0.8);
-    bastion.insert(4, ("ATTACK .1", EnemyState::Attack(0.1), 0.0));
-    shots.push((
-        "bastion_1".into(),
-        "BASTION 1".into(),
-        enemy_shot(&lib, EnemyKind::Bastion, &bastion[..5], 2.6, 9.0, 2.6, 1.6),
-    ));
-    shots.push((
-        "bastion_2".into(),
-        "BASTION 2".into(),
-        enemy_shot(&lib, EnemyKind::Bastion, &bastion[5..], 2.6, 9.0, 2.6, 1.4),
-    ));
+    for (name, title, kind, poses, spacing, dist, cam_y, target_y) in enemy_sheets() {
+        shots.push((
+            name.into(),
+            title.into(),
+            enemy_shot(&lib, kind, &poses, spacing, dist, cam_y, target_y),
+        ));
+    }
     shots.extend(viewmodel_shots(&lib));
     shots.extend(prop_shots(&lib, 2.0));
 
