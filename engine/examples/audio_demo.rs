@@ -284,7 +284,7 @@ mod demo {
             for i in 0..32 {
                 let a = i as f32 / 32.0 * std::f32::consts::TAU;
                 let pos = Vec3::new(a.sin() * 8.0, 0.0, -a.cos() * 8.0);
-                audio.play_at(Sfx::HuskAlert, pos);
+                audio.play_at(Sfx::GnawerAlert, pos);
                 wait(&mut audio, 0.25);
             }
             println!("spatial: distance falloff 2 m .. 60 m");

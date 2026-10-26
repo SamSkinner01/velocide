@@ -68,19 +68,44 @@ pub enum Sfx {
     Hitmarker,
     Headshot,
     KillConfirm,
-    // Enemies
-    HuskAlert,
-    HuskWindup,
-    HuskSwipe,
-    SpitterWindup,
-    SpitterFire,
-    GnatBuzz,
-    GnatFire,
-    BastionTelegraph,
-    BastionSlam,
-    BastionStep,
+    // Enemies (the Moulds, docs/roster.md): alert, wind-up telegraphs, strikes, projectiles.
+    GnawerAlert,
+    GnawerBiteWindup,
+    GnawerBite,
+    GnawerPounceWindup,
+    GnawerPounce,
+    CenserAlert,
+    CenserWhirl,
+    CenserLob,
+    CenserSwingWindup,
+    CenserSwing,
+    EmberFlight,
+    EmberBurst,
+    HarrierAlert,
+    HarrierShriek,
+    HarrierDive,
+    HarrierSwat,
+    GaolerAlert,
+    GaolerBashWindup,
+    GaolerBash,
+    GaolerChain,
+    GaolerSweep,
+    GaolerRushWindup,
+    GaolerRush,
+    GaolerStep,
+    HeronAlert,
+    HeronLaser,
+    HeronLock,
+    HeronNeedle,
+    HeronKickWindup,
+    HeronKick,
+    /// A hit cracks a Mould: wax snapping, a sizzle.
     EnemyHurt,
+    /// A Mould slumps and melts.
     EnemyDeath,
+    GaolerDeath,
+    /// The heat leaving a dead Mould: one big ember burst.
+    EmberRelease,
     Gib,
     EnemySpawn,
     ProjectileImpact,
@@ -183,18 +208,40 @@ impl Sfx {
         Sfx::Hitmarker,
         Sfx::Headshot,
         Sfx::KillConfirm,
-        Sfx::HuskAlert,
-        Sfx::HuskWindup,
-        Sfx::HuskSwipe,
-        Sfx::SpitterWindup,
-        Sfx::SpitterFire,
-        Sfx::GnatBuzz,
-        Sfx::GnatFire,
-        Sfx::BastionTelegraph,
-        Sfx::BastionSlam,
-        Sfx::BastionStep,
+        Sfx::GnawerAlert,
+        Sfx::GnawerBiteWindup,
+        Sfx::GnawerBite,
+        Sfx::GnawerPounceWindup,
+        Sfx::GnawerPounce,
+        Sfx::CenserAlert,
+        Sfx::CenserWhirl,
+        Sfx::CenserLob,
+        Sfx::CenserSwingWindup,
+        Sfx::CenserSwing,
+        Sfx::EmberFlight,
+        Sfx::EmberBurst,
+        Sfx::HarrierAlert,
+        Sfx::HarrierShriek,
+        Sfx::HarrierDive,
+        Sfx::HarrierSwat,
+        Sfx::GaolerAlert,
+        Sfx::GaolerBashWindup,
+        Sfx::GaolerBash,
+        Sfx::GaolerChain,
+        Sfx::GaolerSweep,
+        Sfx::GaolerRushWindup,
+        Sfx::GaolerRush,
+        Sfx::GaolerStep,
+        Sfx::HeronAlert,
+        Sfx::HeronLaser,
+        Sfx::HeronLock,
+        Sfx::HeronNeedle,
+        Sfx::HeronKickWindup,
+        Sfx::HeronKick,
         Sfx::EnemyHurt,
         Sfx::EnemyDeath,
+        Sfx::GaolerDeath,
+        Sfx::EmberRelease,
         Sfx::Gib,
         Sfx::EnemySpawn,
         Sfx::ProjectileImpact,
@@ -278,18 +325,40 @@ impl Sfx {
             Headshot => info(-17.0, 3, 0.02, 0.035),
             KillConfirm => info(-16.0, 3, 0.0, 0.04),
 
-            HuskAlert => info(-17.0, 4, 0.1, 0.1),
-            HuskWindup => info(-14.0, 6, 0.06, 0.05),
-            HuskSwipe => info(-16.0, 6, 0.08, 0.03),
-            SpitterWindup => info(-15.0, 4, 0.06, 0.05),
-            SpitterFire => info(-16.0, 6, 0.08, 0.03),
-            GnatBuzz => info(-21.0, 4, 0.1, 0.1),
-            GnatFire => info(-17.0, 6, 0.08, 0.03),
-            BastionTelegraph => info(-11.0, 3, 0.0, 0.2),
-            BastionSlam => info(-10.0, 3, 0.03, 0.1),
-            BastionStep => info(-17.0, 4, 0.06, 0.1),
+            GnawerAlert => variants(info(-18.0, 4, 0.1, 0.1), 2),
+            GnawerBiteWindup => info(-14.0, 6, 0.06, 0.05),
+            GnawerBite => info(-15.0, 6, 0.08, 0.03),
+            GnawerPounceWindup => info(-14.0, 4, 0.06, 0.05),
+            GnawerPounce => info(-15.0, 4, 0.06, 0.05),
+            CenserAlert => info(-17.0, 3, 0.06, 0.1),
+            CenserWhirl => info(-13.0, 4, 0.03, 0.05),
+            CenserLob => info(-15.0, 6, 0.08, 0.03),
+            CenserSwingWindup => info(-15.0, 3, 0.05, 0.05),
+            CenserSwing => info(-14.0, 3, 0.06, 0.05),
+            EmberFlight => info(-22.0, 6, 0.12, 0.03),
+            EmberBurst => variants(info(-13.0, 6, 0.08, 0.02), 2),
+            HarrierAlert => info(-17.0, 4, 0.1, 0.1),
+            HarrierShriek => info(-12.0, 4, 0.05, 0.05),
+            HarrierDive => info(-14.0, 4, 0.05, 0.05),
+            HarrierSwat => info(-12.0, 3, 0.04, 0.05),
+            GaolerAlert => info(-14.0, 2, 0.04, 0.2),
+            GaolerBashWindup => info(-11.0, 3, 0.0, 0.2),
+            GaolerBash => info(-10.0, 3, 0.03, 0.1),
+            GaolerChain => info(-12.0, 3, 0.02, 0.2),
+            GaolerSweep => info(-11.0, 3, 0.03, 0.1),
+            GaolerRushWindup => info(-13.0, 3, 0.03, 0.2),
+            GaolerRush => info(-12.0, 3, 0.03, 0.1),
+            GaolerStep => variants(info(-18.0, 4, 0.06, 0.1), 2),
+            HeronAlert => info(-16.0, 3, 0.06, 0.1),
+            HeronLaser => info(-15.0, 4, 0.0, 0.1),
+            HeronLock => info(-12.0, 4, 0.0, 0.05),
+            HeronNeedle => info(-12.0, 4, 0.04, 0.03),
+            HeronKickWindup => info(-17.0, 3, 0.06, 0.05),
+            HeronKick => info(-15.0, 3, 0.06, 0.05),
             EnemyHurt => variants(info(-19.0, 6, 0.1, 0.03), 3),
-            EnemyDeath => info(-15.0, 5, 0.1, 0.03),
+            EnemyDeath => variants(info(-15.0, 5, 0.1, 0.03), 2),
+            GaolerDeath => info(-11.0, 2, 0.03, 0.1),
+            EmberRelease => info(-15.0, 5, 0.08, 0.03),
             Gib => variants(info(-16.0, 5, 0.08, 0.03), 3),
             EnemySpawn => info(-16.0, 4, 0.05, 0.05),
             ProjectileImpact => variants(info(-18.0, 6, 0.1, 0.02), 2),
@@ -996,135 +1065,364 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             layer(&[(&thud, 0.7, 0.0), (&a, 0.5, 0.0), (&b2, 0.5, 0.06)])
         }
 
-        // ----- enemies --------------------------------------------------------------------
-        HuskAlert => {
-            let mut b = growl(r, 0.75, 85.0, 115.0, [650.0, 1100.0], 0.08, 0.05, 0.3);
-            drive(&mut b, 3.0);
-            crush(&mut b, 8, 2.0);
-            b
-        }
-        HuskWindup => {
-            // Rising screech that ends right as the swipe comes: an obvious "incoming" cue.
-            let dur = 0.55;
-            let screech = growl(r, dur, 140.0, 420.0, [900.0, 1700.0], 0.05, 0.4, 0.2);
-            let rise = noise(r, dur, Pass::Band, 800.0, 3000.0, 1.5, 0.4, 0.15);
-            let mut b = layer(&[(&screech, 1.0, 0.0), (&rise, 0.4, 0.0)]);
+        // ----- enemies (the Moulds) ---------------------------------------------------------
+        GnawerAlert => {
+            // A chittering snarl: a jittery growl chopped into a chatter, brass teeth clicking.
+            let f0 = r.range(140.0, 170.0);
+            let mut snarl = growl(r, 0.6, f0, 110.0, [850.0, 1600.0], 0.12, 0.02, 0.25);
+            stutter(&mut snarl, 26.0, 0.05);
+            let clicks = crackle(r, 0.55, 70.0, 0.3);
+            let mut b = layer(&[(&snarl, 1.0, 0.0), (&clicks, 0.6, 0.04)]);
             drive(&mut b, 2.5);
             b
         }
-        HuskSwipe => {
-            let air = whoosh(r, 0.2, 3500.0, 500.0, 1.2);
-            let grunt = growl(r, 0.15, 130.0, 100.0, [600.0, 1000.0], 0.05, 0.005, 0.05);
-            let claw = metal(0.08, 2500.0, &[(1.0, 1.0, 0.03), (1.33, 0.6, 0.02)]);
-            layer(&[(&air, 1.0, 0.0), (&grunt, 0.4, 0.0), (&claw, 0.12, 0.08)])
-        }
-        SpitterWindup => {
-            let dur = 0.65;
-            let mut n = Rng::new(r.next_u64());
-            let mut svf = Svf::default();
-            let gurgle = render(dur, |t, _| {
-                let fc = 250.0 + 900.0 * t / dur + 200.0 * (t * 11.0 * std::f32::consts::TAU).sin();
-                svf.process(n.bipolar(), fc, 8.0, SR).low * smoothstep(0.0, 0.45, t) * (1.0 - smoothstep(0.58, dur, t))
-            });
-            let mut osc = Osc::new(Wave::Sine);
-            let rise = render(dur, |t, _| {
-                let f = sweep(t, 150.0, 480.0, dur) * (1.0 + 0.05 * (t * 9.0 * std::f32::consts::TAU).sin());
-                osc.next(f) * smoothstep(0.0, 0.5, t) * (1.0 - smoothstep(0.58, dur, t))
-            });
-            layer(&[(&gurgle, 0.6, 0.0), (&rise, 0.5, 0.0)])
-        }
-        SpitterFire => {
-            let spit = noise(r, 0.2, Pass::Band, 1300.0, 900.0, 1.5, 0.0005, 0.045);
-            let drop = tone(0.15, Wave::Sine, 700.0, 180.0, 0.12, 0.001, 0.05);
-            let squelch = noise(r, 0.15, Pass::Low, 1500.0, 300.0, 6.0, 0.001, 0.04);
-            let push = thump(0.15, 160.0, 80.0, 0.01, 0.04);
-            layer(&[(&spit, 1.0, 0.0), (&drop, 0.4, 0.0), (&squelch, 0.5, 0.0), (&push, 0.6, 0.0)])
-        }
-        GnatBuzz => {
-            let dur = 0.6;
-            let mut saw = Osc::new(Wave::Saw);
-            let mut vib = Osc::new(Wave::Sine);
-            let mut am = Osc::new(Wave::Sine);
-            let mut bp = Svf::default();
-            let mut b = render(dur, |t, _| {
-                let f = 190.0 * (1.0 + 0.06 * vib.next(25.0));
-                let x = saw.next(f) * (0.6 + 0.4 * am.next(48.0));
-                let env = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.45, dur, t));
-                bp.bandpass(x, 1400.0, 1.2) * env
-            });
-            highpass(&mut b, 300.0);
-            b
-        }
-        GnatFire => {
-            let pew = tone(0.12, Wave::Square, 2200.0, 480.0, 0.08, 0.0005, 0.04);
-            let snap = noise(r, 0.03, Pass::High, 3000.0, 3000.0, 0.6, 0.0002, 0.006);
-            let mut b = layer(&[(&pew, 0.7, 0.0), (&snap, 0.5, 0.0)]);
-            lowpass(&mut b, 7000.0);
-            echo(&mut b, 0.05, 0.2, 0.2, 3000.0, 0.1);
-            b
-        }
-        BastionTelegraph => {
-            // Two-octave rising siren with a tremolo, over a rumble, ending in a bright "ding":
-            // the ding marks the moment to parry.
-            let dur = 0.95;
-            let cue = 0.7;
-            let (mut sq, mut saw, mut trem) = (Osc::new(Wave::Square), Osc::new(Wave::Saw), Osc::new(Wave::Sine));
-            let mut lp = Svf::default();
-            let siren = render(dur, |t, _| {
-                let f = sweep(t, 260.0, 1040.0, cue);
-                let x = sq.next(f) * 0.5 + saw.next(f * 1.005) * 0.5;
-                let am = 0.75 + 0.25 * trem.next(14.0);
-                let env = smoothstep(0.0, cue, t).powf(0.6) * (1.0 - smoothstep(cue + 0.03, dur, t));
-                lp.lowpass(x, 3000.0, 1.0) * am * env
-            });
-            let mut rumble = {
-                let mut o = Osc::new(Wave::Saw);
-                render(dur, |t, _| o.next(sweep(t, 55.0, 70.0, cue)) * smoothstep(0.0, cue, t) * (1.0 - smoothstep(cue, dur, t)))
-            };
-            lowpass(&mut rumble, 300.0);
-            let ding = metal(0.6, 1568.0, &[(1.0, 1.0, 0.18), (2.76, 0.6, 0.1), (5.4, 0.4, 0.06)]);
-            let snap = click(r, 0.002);
-            let mut b = layer(&[(&siren, 0.8, 0.0), (&rumble, 0.6, 0.0), (&ding, 0.8, cue), (&snap, 0.6, cue)]);
+        GnawerBiteWindup => {
+            // The jaw unhinging: a rising chitter that ends as the bite lands.
+            let dur = 0.42;
+            let mut chitter = growl(r, dur, 180.0, 560.0, [1000.0, 2100.0], 0.06, 0.25, 0.2);
+            stutter(&mut chitter, 34.0, 0.0);
+            let hiss = noise(r, dur, Pass::Band, 1500.0, 4200.0, 1.4, 0.3, 0.15);
+            let mut b = layer(&[(&chitter, 1.0, 0.0), (&hiss, 0.35, 0.0)]);
             drive(&mut b, 2.0);
             b
         }
-        BastionSlam => {
-            let boom = thump(1.4, 75.0, 24.0, 0.05, 0.38);
-            let crunch = noise(r, 1.0, Pass::Low, 3500.0, 150.0, 0.8, 0.0005, 0.22);
-            let crash = metal(1.2, 220.0, &[(1.0, 1.0, 0.5), (2.41, 0.8, 0.35), (3.83, 0.6, 0.25), (6.07, 0.4, 0.15)]);
-            let debris = crackle(r, 0.9, 200.0, 0.25);
-            let mut b = layer(&[(&boom, 1.2, 0.0), (&crunch, 0.9, 0.0), (&crash, 0.35, 0.0), (&debris, 0.35, 0.02)]);
-            drive(&mut b, 3.0);
-            crush(&mut b, 9, 2.0);
+        GnawerBite => {
+            // Brass teeth slamming shut.
+            let clack = metal(0.12, 1900.0, &[(1.0, 1.0, 0.03), (1.48, 0.7, 0.025), (2.9, 0.4, 0.015)]);
+            let snap = click(r, 0.003);
+            let thud = thump(0.15, 220.0, 90.0, 0.01, 0.04);
+            let grunt = growl(r, 0.12, 160.0, 120.0, [700.0, 1200.0], 0.05, 0.004, 0.04);
+            layer(&[(&clack, 0.8, 0.0), (&snap, 0.8, 0.0), (&thud, 0.7, 0.0), (&grunt, 0.4, 0.0)])
+        }
+        GnawerPounceWindup => {
+            // Coiling: a low growl swelling, claws scraping the floor.
+            let dur = 0.56;
+            let growl_ = growl(r, dur, 80.0, 150.0, [500.0, 900.0], 0.1, 0.35, 0.25);
+            let scrape = noise(r, dur, Pass::Band, 2500.0, 1200.0, 3.0, 0.1, 0.3);
+            let mut b = layer(&[(&growl_, 1.0, 0.0), (&scrape, 0.4, 0.05)]);
+            drive(&mut b, 2.2);
+            b
+        }
+        GnawerPounce => {
+            let air = whoosh(r, 0.35, 900.0, 3000.0, 1.0);
+            let snarl = growl(r, 0.3, 220.0, 320.0, [900.0, 1700.0], 0.1, 0.01, 0.12);
+            let push = thump(0.2, 140.0, 60.0, 0.02, 0.05);
+            layer(&[(&air, 1.0, 0.0), (&snarl, 0.6, 0.0), (&push, 0.6, 0.0)])
+        }
+        CenserAlert => {
+            // The brazier flaring up: a breathy whoomph, embers crackling, a low drone.
+            let dur = 0.9;
+            let mut n = Rng::new(r.next_u64());
+            let mut lp = Svf::default();
+            let whoomph = render(dur, |t, _| {
+                let env = smoothstep(0.0, 0.12, t) * (-(t - 0.12).max(0.0) / 0.25).exp();
+                lp.lowpass(n.bipolar(), sweep(t, 300.0, 1400.0, 0.2), 0.8) * env
+            });
+            let embers = crackle(r, dur, 120.0, 0.4);
+            let mut drone = chord(&[38.0, 45.0], dur, Wave::Saw, 300.0, 600.0, 0.15, 0.5, 0.6);
+            lowpass(&mut drone, 700.0);
+            layer(&[(&whoomph, 1.0, 0.0), (&embers, 0.5, 0.05), (&drone, 0.35, 0.0)])
+        }
+        CenserWhirl => {
+            // The censer whirled overhead: whooshes coming faster and faster, the chain
+            // rattling, the embers hissing brighter. Ends as the bombs fly.
+            let dur = 0.82;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let mut phase = 0.0f32;
+            let whirl = render(dur, |t, _| {
+                // Revolutions per second rise from 2 to 9.
+                phase += sweep(t, 2.0, 9.0, dur) / SR;
+                let pulse = (phase * std::f32::consts::TAU).sin().max(0.0).powi(2);
+                bp.bandpass(n.bipolar(), 600.0 + 1400.0 * pulse, 1.5) * (0.3 + pulse) * smoothstep(0.0, 0.2, t)
+            });
+            let rattle = crackle(r, dur, 260.0, 2.0);
+            let hiss = noise(r, dur, Pass::High, 3000.0, 6000.0, 0.7, 0.5, 0.2);
+            let mut b = layer(&[(&whirl, 1.0, 0.0), (&rattle, 0.45, 0.0), (&hiss, 0.25, 0.0)]);
+            fade_out(&mut b, 0.03);
+            b
+        }
+        CenserLob => {
+            // A bomb flung up out of the censer: a dull thump and a rising whoosh.
+            let thud = thump(0.2, 180.0, 70.0, 0.015, 0.05);
+            let up = whoosh(r, 0.3, 700.0, 2200.0, 1.2);
+            let clank = metal(0.15, 900.0, &[(1.0, 1.0, 0.05), (2.3, 0.5, 0.03)]);
+            layer(&[(&thud, 1.0, 0.0), (&up, 0.7, 0.02), (&clank, 0.25, 0.0)])
+        }
+        CenserSwingWindup => {
+            // Drawing the censer back: the chain rattles taut, the joint creaks.
+            let dur = 0.5;
+            let rattle = crackle(r, dur, 180.0, 1.0);
+            let mut creak = tone(dur, Wave::Saw, 220.0, 160.0, dur, 0.1, 0.25);
+            lowpass(&mut creak, 1200.0);
+            stutter(&mut creak, 40.0, 0.0);
+            layer(&[(&rattle, 0.8, 0.0), (&creak, 0.35, 0.05)])
+        }
+        CenserSwing => {
+            let air = whoosh(r, 0.32, 2400.0, 500.0, 1.3);
+            let clang = metal(0.5, 520.0, &[(1.0, 1.0, 0.2), (2.4, 0.6, 0.12), (3.9, 0.3, 0.08)]);
+            let rattle = crackle(r, 0.3, 300.0, 0.15);
+            layer(&[(&air, 1.0, 0.0), (&clang, 0.3, 0.12), (&rattle, 0.4, 0.0)])
+        }
+        EmberFlight => {
+            // A fuse burning on a lump of slag: crackle and a thin hiss.
+            let dur = 0.9;
+            let fuse = crackle(r, dur, 400.0, 2.0);
+            let hiss = noise(r, dur, Pass::Band, 4500.0, 3000.0, 2.0, 0.05, 0.6);
+            layer(&[(&fuse, 0.8, 0.0), (&hiss, 0.4, 0.0)])
+        }
+        EmberBurst => {
+            // An ember bomb bursting: a sharp pop, a spray of sizzling embers, no big boom.
+            let pop = thump(0.3, r.range(200.0, 240.0), 60.0, 0.01, 0.07);
+            let crack = noise(r, 0.2, Pass::Band, 2500.0, 900.0, 0.9, 0.0003, 0.04);
+            let spray = crackle(r, 0.7, 500.0, 0.2);
+            let sizzle = noise(r, 0.8, Pass::High, 5000.0, 3000.0, 0.7, 0.01, 0.3);
+            let mut b = layer(&[(&pop, 1.0, 0.0), (&crack, 0.8, 0.0), (&spray, 0.5, 0.01), (&sizzle, 0.3, 0.02)]);
+            drive(&mut b, 2.0);
+            b
+        }
+        HarrierAlert => {
+            // A carrion screech: high formants, a lot of jitter.
+            let mut b = growl(r, 0.55, 420.0, 300.0, [1800.0, 3100.0], 0.2, 0.02, 0.2);
+            let mut rasp = noise(r, 0.5, Pass::Band, 2800.0, 1800.0, 2.0, 0.02, 0.2);
+            stutter(&mut rasp, 18.0, 0.0);
+            b = layer(&[(&b, 1.0, 0.0), (&rasp, 0.4, 0.0)]);
+            drive(&mut b, 2.5);
+            b
+        }
+        HarrierShriek => {
+            // Rearing up to dive: a piercing rising shriek that peaks as it drops.
+            let dur = 0.72;
+            let scream = growl(r, dur, 380.0, 1100.0, [2000.0, 3600.0], 0.08, 0.3, 0.25);
+            let tone_ = fm(dur, 900.0, 2400.0, 1.5, 3.0, 1.0, 0.3, 0.3);
+            let mut b = layer(&[(&scream, 1.0, 0.0), (&tone_, 0.35, 0.0)]);
+            drive(&mut b, 2.0);
+            b
+        }
+        HarrierDive => {
+            // The wind tearing past a falling body.
+            let rush = whoosh(r, 0.62, 400.0, 3500.0, 2.0);
+            let flap = thump(0.12, 120.0, 70.0, 0.01, 0.03);
+            let mut b = layer(&[(&rush, 1.0, 0.0), (&flap, 0.6, 0.0)]);
+            highpass(&mut b, 150.0);
+            b
+        }
+        HarrierSwat => {
+            // Punched out of the air: wax crunching, a flapping tumble.
+            let crunch = noise(r, 0.25, Pass::Low, 3500.0, 600.0, 0.8, 0.0005, 0.05);
+            let thud = thump(0.25, 180.0, 60.0, 0.01, 0.07);
+            let mut flaps = noise(r, 0.5, Pass::Band, 900.0, 500.0, 1.0, 0.02, 0.25);
+            stutter(&mut flaps, 11.0, 0.08);
+            let squawk = growl(r, 0.25, 520.0, 300.0, [1800.0, 2900.0], 0.2, 0.01, 0.1);
+            layer(&[(&crunch, 0.9, 0.0), (&thud, 1.0, 0.0), (&flaps, 0.5, 0.05), (&squawk, 0.5, 0.02)])
+        }
+        GaolerAlert => {
+            // A deep iron bellow through the grille, the chain shaken.
+            let bellow = growl(r, 1.1, 55.0, 48.0, [300.0, 650.0], 0.05, 0.15, 0.5);
+            let rattle = crackle(r, 0.8, 200.0, 0.4);
+            let mut b = layer(&[(&bellow, 1.0, 0.0), (&rattle, 0.4, 0.1)]);
+            drive(&mut b, 2.0);
+            reverb(&mut b, 0.6, 0.5, 0.2, 0.5);
+            b
+        }
+        GaolerBashWindup => {
+            // The door drawn back: iron grinding up in pitch, then two bright strikes on the
+            // bell at 0.65 s, the start of the parry window, and a shimmer until the bash.
+            let dur = 1.0;
+            let cue = 0.65;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let grind = render(dur, |t, _| {
+                let env = smoothstep(0.0, cue, t).powf(0.7) * (1.0 - smoothstep(cue, dur, t) * 0.7);
+                bp.bandpass(n.bipolar(), sweep(t, 300.0, 1500.0, cue), 6.0) * env
+            });
+            let mut rumble = {
+                let mut o = Osc::new(Wave::Saw);
+                render(dur, |t, _| o.next(sweep(t, 45.0, 60.0, cue)) * smoothstep(0.0, cue, t) * (1.0 - smoothstep(cue, dur, t)))
+            };
+            lowpass(&mut rumble, 250.0);
+            let ting = metal(0.5, 2093.0, &[(1.0, 1.0, 0.15), (2.92, 0.5, 0.08), (5.1, 0.3, 0.05)]);
+            let shimmer = metal(0.4, 3136.0, &[(1.0, 0.5, 0.25), (1.5, 0.3, 0.2)]);
+            let mut b = layer(&[(&grind, 0.8, 0.0), (&rumble, 0.6, 0.0), (&ting, 0.9, cue), (&ting, 0.7, cue + 0.09), (&shimmer, 0.4, cue + 0.12)]);
+            drive(&mut b, 1.8);
+            b
+        }
+        GaolerBash => {
+            // A cell door slammed into you: a huge iron clang over a boom.
+            let boom = thump(1.0, 85.0, 28.0, 0.04, 0.3);
+            let clang = metal(1.1, 165.0, &[(1.0, 1.0, 0.45), (2.31, 0.8, 0.3), (3.62, 0.6, 0.22), (5.7, 0.4, 0.12)]);
+            let crunch = noise(r, 0.6, Pass::Low, 3000.0, 200.0, 0.8, 0.0005, 0.15);
+            let mut b = layer(&[(&boom, 1.2, 0.0), (&clang, 0.55, 0.0), (&crunch, 0.7, 0.0)]);
+            drive(&mut b, 2.5);
+            reverb(&mut b, 0.6, 0.5, 0.2, 0.6);
+            b
+        }
+        GaolerChain => {
+            // The chain swung up to speed, low: heavy links rattling faster, a whirr rising,
+            // a red-hot hiss.
+            let dur = 0.82;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let mut phase = 0.0f32;
+            let whirr = render(dur, |t, _| {
+                phase += sweep(t, 1.5, 6.0, dur) / SR;
+                let pulse = (phase * std::f32::consts::TAU).sin().max(0.0);
+                bp.bandpass(n.bipolar(), 250.0 + 600.0 * pulse, 2.0) * (0.3 + pulse) * smoothstep(0.0, 0.25, t)
+            });
+            let links = crackle(r, dur, 220.0, 3.0);
+            let hiss = noise(r, dur, Pass::High, 2500.0, 5000.0, 0.8, 0.4, 0.25);
+            let mut b = layer(&[(&whirr, 1.0, 0.0), (&links, 0.6, 0.0), (&hiss, 0.25, 0.0)]);
+            fade_out(&mut b, 0.03);
+            b
+        }
+        GaolerSweep => {
+            let air = whoosh(r, 0.5, 300.0, 1800.0, 1.5);
+            let links = crackle(r, 0.5, 400.0, 0.2);
+            let scrape = noise(r, 0.4, Pass::Band, 1800.0, 700.0, 4.0, 0.01, 0.15);
+            let thud = thump(0.3, 90.0, 40.0, 0.02, 0.08);
+            layer(&[(&air, 1.0, 0.0), (&links, 0.6, 0.0), (&scrape, 0.4, 0.05), (&thud, 0.6, 0.0)])
+        }
+        GaolerRushWindup => {
+            // A snort through the grille, iron feet scraping, a rumble building.
+            let dur = 0.9;
+            let snort = noise(r, 0.35, Pass::Low, 900.0, 300.0, 1.5, 0.02, 0.1);
+            let scrape = noise(r, dur, Pass::Band, 1400.0, 700.0, 3.0, 0.2, 0.4);
+            let mut rumble = {
+                let mut o = Osc::new(Wave::Saw);
+                render(dur, |t, _| o.next(sweep(t, 40.0, 65.0, dur)) * smoothstep(0.0, dur, t))
+            };
+            lowpass(&mut rumble, 220.0);
+            layer(&[(&snort, 1.0, 0.0), (&snort, 0.6, 0.45), (&scrape, 0.4, 0.1), (&rumble, 0.8, 0.0)])
+        }
+        GaolerRush => {
+            // Charging: iron footfalls coming faster.
+            let mut b = Vec::new();
+            for (k, at) in [0.0f32, 0.18, 0.33, 0.46, 0.57, 0.67].iter().enumerate() {
+                let step = thump(0.25, 100.0, 35.0, 0.02, 0.07);
+                let clank = metal(0.15, 280.0 + 20.0 * k as f32, &[(1.0, 1.0, 0.06), (2.7, 0.5, 0.04)]);
+                mix_at(&mut b, &step, 1.0, *at);
+                mix_at(&mut b, &clank, 0.25, *at);
+            }
+            let rattle = crackle(r, 0.8, 250.0, 1.0);
+            mix_at(&mut b, &rattle, 0.4, 0.0);
+            b
+        }
+        GaolerStep => {
+            let thud = thump(0.4, r.range(85.0, 100.0), 35.0, 0.03, 0.1);
+            let clank = metal(0.25, r.range(260.0, 320.0), &[(1.0, 1.0, 0.1), (2.6, 0.6, 0.07), (4.1, 0.3, 0.04)]);
+            let jingle = crackle(r, 0.25, 160.0, 0.08);
+            layer(&[(&thud, 1.0, 0.0), (&clank, 0.35, 0.0), (&jingle, 0.3, 0.02)])
+        }
+        HeronAlert => {
+            // A creaking metal call: two hoarse honks through a brass throat.
+            let honk = |r: &mut Rng, f: f32| {
+                let h = fm(0.22, f, f * 0.9, 1.5, 4.0, 2.0, 0.01, 0.12);
+                let rasp = noise(r, 0.22, Pass::Band, f * 3.0, f * 2.0, 3.0, 0.01, 0.1);
+                layer(&[(&h, 1.0, 0.0), (&rasp, 0.4, 0.0)])
+            };
+            let a = honk(r, 420.0);
+            let b2 = honk(r, 360.0);
+            let mut b = layer(&[(&a, 1.0, 0.0), (&b2, 0.9, 0.26)]);
+            drive(&mut b, 2.0);
+            b
+        }
+        HeronLaser => {
+            // The aim laser: an electric hum with a whine climbing towards the lock (1.3 s).
+            let dur = 1.3;
+            let (mut saw, mut sine, mut vib) = (Osc::new(Wave::Saw), Osc::new(Wave::Sine), Osc::new(Wave::Sine));
+            let mut bp = Svf::default();
+            let hum = render(dur, |t, _| {
+                let f = 110.0 * (1.0 + 0.01 * vib.next(7.0));
+                let x = saw.next(f) * 0.6 + sine.next(f * 4.0) * 0.4;
+                bp.bandpass(x, 700.0, 1.2) * smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(1.22, dur, t))
+            });
+            let mut whine_osc = Osc::new(Wave::Sine);
+            let whine = render(dur, |t, _| {
+                whine_osc.next(sweep(t, 900.0, 2600.0, 1.05)) * smoothstep(0.1, 1.05, t) * (1.0 - smoothstep(1.2, dur, t))
+            });
+            layer(&[(&hum, 1.0, 0.0), (&whine, 0.25, 0.0)])
+        }
+        HeronLock => {
+            // Locked on: a hard mechanical click and a short high double beep.
+            let clk = click(r, 0.002);
+            let latch = metal(0.08, 3200.0, &[(1.0, 1.0, 0.02), (1.7, 0.6, 0.015)]);
+            let beep = tone(0.06, Wave::Square, 2637.0, 2637.0, 0.01, 0.001, 0.05);
+            let mut b = layer(&[(&clk, 1.0, 0.0), (&latch, 0.7, 0.0), (&beep, 0.35, 0.03), (&beep, 0.35, 0.11)]);
+            lowpass(&mut b, 9000.0);
+            b
+        }
+        HeronNeedle => {
+            // The needle leaving: a hard crack and a zip falling away.
+            let crack = noise(r, 0.08, Pass::High, 3500.0, 3500.0, 0.7, 0.0002, 0.012);
+            let zip = tone(0.25, Wave::Saw, 6000.0, 900.0, 0.2, 0.0005, 0.08);
+            let thump_ = thump(0.12, 300.0, 120.0, 0.008, 0.03);
+            let mut b = layer(&[(&crack, 1.0, 0.0), (&zip, 0.35, 0.0), (&thump_, 0.6, 0.0)]);
+            lowpass(&mut b, 11000.0);
+            echo(&mut b, 0.09, 0.25, 0.25, 4000.0, 0.2);
+            b
+        }
+        HeronKickWindup => {
+            // A brass joint cocking: a squeaky creak.
+            let dur = 0.4;
+            let mut creak = tone(dur, Wave::Saw, 380.0, 260.0, dur, 0.05, 0.2);
+            highpass(&mut creak, 500.0);
+            lowpass(&mut creak, 1600.0);
+            stutter(&mut creak, 55.0, 0.0);
+            let tick = metal(0.06, 2400.0, &[(1.0, 1.0, 0.02)]);
+            layer(&[(&creak, 1.0, 0.0), (&tick, 0.4, 0.3)])
+        }
+        HeronKick => {
+            let air = whoosh(r, 0.22, 2000.0, 600.0, 1.4);
+            let thud = thump(0.2, 160.0, 60.0, 0.01, 0.05);
+            let clank = metal(0.2, 700.0, &[(1.0, 1.0, 0.08), (2.2, 0.5, 0.05)]);
+            layer(&[(&air, 1.0, 0.0), (&thud, 0.8, 0.08), (&clank, 0.3, 0.08)])
+        }
+        EnemyHurt => {
+            // Wax cracking under the hit, a puff of hiss from the heat inside.
+            let (crack_hz, snap_hz) = (r.range(2800.0, 3600.0), r.range(1100.0, 1500.0));
+            let crack = noise(r, 0.06, Pass::High, crack_hz, 2000.0, 0.8, 0.0003, 0.012);
+            let snap = noise(r, 0.15, Pass::Band, snap_hz, 600.0, 1.5, 0.0005, 0.03);
+            let thud = thump(0.12, r.range(150.0, 190.0), 70.0, 0.01, 0.03);
+            let hiss = noise(r, 0.25, Pass::High, 4500.0, 3500.0, 0.7, 0.01, 0.08);
+            layer(&[(&crack, 0.8, 0.0), (&snap, 0.7, 0.0), (&thud, 0.8, 0.0), (&hiss, 0.25, 0.02)])
+        }
+        EnemyDeath => {
+            // A Mould gives out: wax splitting, a slag thud as it slumps, a long sizzle as it
+            // melts.
+            let split_hz = r.range(1500.0, 2000.0);
+            let split = noise(r, 0.3, Pass::Band, split_hz, 500.0, 1.2, 0.0005, 0.07);
+            let thud = thump(0.45, r.range(110.0, 140.0), 38.0, 0.02, 0.12);
+            let creak = growl(r, 0.5, 120.0, 60.0, [400.0, 800.0], 0.08, 0.02, 0.22);
+            let sizzle = noise(r, 1.2, Pass::High, 4000.0, 2500.0, 0.7, 0.05, 0.45);
+            let pops = crackle(r, 1.0, 90.0, 0.5);
+            let mut b = layer(&[(&split, 0.8, 0.0), (&thud, 1.0, 0.05), (&creak, 0.35, 0.0), (&sizzle, 0.35, 0.1), (&pops, 0.4, 0.1)]);
+            drive(&mut b, 1.8);
+            reverb(&mut b, 0.4, 0.6, 0.12, 0.3);
+            b
+        }
+        GaolerDeath => {
+            // The jailer falls: the door crashes down, iron collapses, the lantern hisses out.
+            let boom = thump(1.2, 70.0, 24.0, 0.05, 0.35);
+            let crash = metal(1.4, 140.0, &[(1.0, 1.0, 0.6), (2.2, 0.8, 0.4), (3.5, 0.5, 0.3), (6.1, 0.3, 0.15)]);
+            let chain = crackle(r, 1.0, 300.0, 0.4);
+            let hiss = noise(r, 1.6, Pass::High, 4000.0, 2000.0, 0.7, 0.2, 0.6);
+            let mut b = layer(&[(&boom, 1.2, 0.0), (&crash, 0.5, 0.05), (&chain, 0.5, 0.1), (&hiss, 0.35, 0.3)]);
+            drive(&mut b, 2.2);
             reverb(&mut b, 0.7, 0.5, 0.22, 0.7);
             b
         }
-        BastionStep => {
-            let thud = thump(0.45, 95.0, 38.0, 0.03, 0.11);
-            let clank = metal(0.3, 300.0, &[(1.0, 1.0, 0.12), (2.6, 0.6, 0.08), (4.1, 0.3, 0.05)]);
-            let mut servo = tone(0.15, Wave::Saw, 600.0, 750.0, 0.1, 0.005, 0.07);
-            lowpass(&mut servo, 1500.0);
-            let grit = noise(r, 0.15, Pass::Low, 1500.0, 600.0, 0.8, 0.001, 0.035);
-            layer(&[(&thud, 1.0, 0.0), (&clank, 0.4, 0.0), (&servo, 0.12, 0.02), (&grit, 0.6, 0.0)])
-        }
-        EnemyHurt => {
-            let (crunch_hz, squelch_hz) = (r.range(2200.0, 2800.0), r.range(1800.0, 2400.0));
-            let crunch = noise(r, 0.15, Pass::Low, crunch_hz, 600.0, 0.7, 0.0005, 0.035);
-            let squelch = noise(r, 0.18, Pass::Low, squelch_hz, 350.0, 6.0, 0.001, 0.045);
-            let thud = thump(0.1, r.range(150.0, 180.0), 70.0, 0.01, 0.03);
-            let mut b = layer(&[(&crunch, 0.8, 0.0), (&squelch, 0.6, 0.0), (&thud, 0.7, 0.0)]);
-            crush(&mut b, 8, 2.0);
-            b
-        }
-        EnemyDeath => {
-            let squelch = noise(r, 0.4, Pass::Low, 2500.0, 250.0, 7.0, 0.001, 0.09);
-            let thud = thump(0.4, 130.0, 40.0, 0.02, 0.1);
-            let groan = growl(r, 0.55, 200.0, 55.0, [500.0, 900.0], 0.1, 0.01, 0.25);
-            let crunch = noise(r, 0.4, Pass::Low, 3000.0, 300.0, 0.8, 0.0005, 0.1);
-            let mut b = layer(&[(&squelch, 0.6, 0.0), (&thud, 1.0, 0.0), (&groan, 0.5, 0.02), (&crunch, 0.7, 0.0)]);
-            drive(&mut b, 2.5);
-            reverb(&mut b, 0.4, 0.6, 0.12, 0.3);
-            b
+        EmberRelease => {
+            // The heat leaving a dead Mould: a soft whoomph and a fountain of crackling embers.
+            let dur = 1.1;
+            let mut n = Rng::new(r.next_u64());
+            let mut lp = Svf::default();
+            let whoomph = render(dur, |t, _| {
+                let env = smoothstep(0.0, 0.06, t) * (-(t - 0.06).max(0.0) / 0.18).exp();
+                lp.lowpass(n.bipolar(), sweep(t, 250.0, 2200.0, 0.15), 0.9) * env
+            });
+            let rise = whoosh(r, 0.8, 500.0, 4000.0, 0.8);
+            let embers = crackle(r, dur, 350.0, 0.35);
+            layer(&[(&whoomph, 1.0, 0.0), (&rise, 0.4, 0.05), (&embers, 0.6, 0.05)])
         }
         Gib => {
             let mut b = Vec::new();
@@ -1315,8 +1613,8 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let s = ron::to_string(&Sfx::BastionTelegraph).expect("serialize");
+        let s = ron::to_string(&Sfx::GaolerBashWindup).expect("serialize");
         let back: Sfx = ron::from_str(&s).expect("deserialize");
-        assert_eq!(back, Sfx::BastionTelegraph);
+        assert_eq!(back, Sfx::GaolerBashWindup);
     }
 }

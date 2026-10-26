@@ -408,13 +408,13 @@ mod demo {
             ("rivet_witch", 63, false, false),
             ("HOLLOWPOINT", 95, true, false),
             ("tin saint", 131, false, false),
-            ("Gnatcatcher", 22, true, false),
+            ("Waxwing", 22, true, false),
         ];
         let chat_log = [
             ("", "GRAVEL_SHRIKE opened the lobby."),
             (
                 "Mx. Ossuary",
-                "arena or campaign? I want to try the new bastion room",
+                "arena or campaign? I want to try the new gaoler room",
             ),
             ("rivet_witch", "arena. loser buys the prisms"),
             ("HOLLOWPOINT", "gl hf"),
@@ -558,9 +558,9 @@ mod demo {
             t.bone_dim,
         );
         let mut kills = TextFeed::new(4, 4.0);
-        kills.push("rivet_witch  >  HUSK", t.bone, now - 3.0);
-        kills.push("GRAVEL_SHRIKE  >  BASTION", t.blood_bright, now - 1.5);
-        kills.push("HOLLOWPOINT  >  GNAT", t.bone, now - 0.2);
+        kills.push("rivet_witch  >  GNAWER", t.bone, now - 3.0);
+        kills.push("GRAVEL_SHRIKE  >  GAOLER", t.blood_bright, now - 1.5);
+        kills.push("HOLLOWPOINT  >  HARRIER", t.bone, now - 0.2);
         kills.newest_on_top = false;
         kills.draw(
             &mut list,
@@ -626,7 +626,7 @@ mod demo {
             ChatLine {
                 name: "Mx. Ossuary".into(),
                 name_color: t.blood_bright,
-                text: "bastion on the left, parry the slam when it glows".into(),
+                text: "gaoler on the left, parry the bash when the door glows".into(),
                 time: now - 1.0,
             },
         ];
