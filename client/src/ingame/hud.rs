@@ -372,6 +372,12 @@ fn draw_weapons(list: &mut UiDrawList, t: &Theme, c: Rect, w: &HudWeapons, now: 
     let br = vec2(c.max.x - 12.0, c.max.y - 12.0);
     let slot = w.slot as usize % LOADOUT_SLOTS;
     let Some(build) = w.loadout.slots[slot] else {
+        // Nothing carried (gun game's Fist tier).
+        list.text(
+            br - vec2(0.0, 18.0),
+            "FISTS",
+            &TextStyle::new(t.bone).scale(2.0).right().outline(outline),
+        );
         return;
     };
     let names = build.abilities.map(|a| a.name().to_uppercase());

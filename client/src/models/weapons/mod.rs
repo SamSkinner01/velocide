@@ -230,6 +230,8 @@ pub struct ViewmodelAnim {
     pub sway: Vec2,
     /// Drum angle in radians (Tumbler, Thresher; see [`DrumTurn`]).
     pub spin: f32,
+    /// No weapon at all (gun game's Fist tier): both fists up instead of a gun.
+    pub unarmed: bool,
     pub time: f64,
 }
 
@@ -530,6 +532,38 @@ fn fist_transform(anim: &ViewmodelAnim) -> Option<Mat4> {
     None
 }
 
+/// Unarmed (gun game's Fist tier): the right hand (the arm's closed glove) raised where a grip
+/// would be, the left fist up in a guard until it punches or throws.
+fn draw_fists(
+    lib: &ModelLibrary,
+    anim: &ViewmodelAnim,
+    gun: Mat4,
+    tint: &Tint,
+    out: &mut Vec<DrawItem>,
+) -> ViewmodelDrawInfo {
+    let raise = Mat4::from_translation(Vec3::new(-0.02, 0.05, 0.0)) * Mat4::from_rotation_x(0.35);
+    let right = gun * Mat4::from_quat(view_rotation(anim.weapon).inverse()) * raise;
+    lib.get(ModelId::ArmRight).draw_static(right, tint, out);
+    let left = fist_transform(anim).unwrap_or_else(|| {
+        let bob = gun.w_axis.truncate() - view_offset(anim.weapon);
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(VIEWMODEL_SCALE),
+            Quat::from_euler(EulerRot::YXZ, -0.12, 0.25, 0.35),
+            Vec3::new(-0.11, -0.16, -0.3) + bob,
+        )
+    });
+    let mut pose = Pose::rest(fist::JOINTS.len());
+    let flare = 0.6 + punch_extension(anim.punch) * 2.0;
+    pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
+    lib.get(ModelId::Fist).draw(&pose, left, tint, out);
+    let knuckles = left.transform_point3(Vec3::new(0.0, 0.0, -0.02));
+    ViewmodelDrawInfo {
+        muzzle: right.transform_point3(Vec3::new(0.0, 0.0, -0.05)),
+        muzzle_dir: Vec3::NEG_Z,
+        fist: Some(knuckles),
+    }
+}
+
 /// Draws the viewmodel; see [`ModelLibrary::draw_viewmodel`].
 pub(crate) fn draw_viewmodel(
     lib: &ModelLibrary,
@@ -539,6 +573,9 @@ pub(crate) fn draw_viewmodel(
 ) -> ViewmodelDrawInfo {
     let w = anim.weapon;
     let gun = viewmodel_transform(anim);
+    if anim.unarmed {
+        return draw_fists(lib, anim, gun, tint, out);
+    }
     let held = anim.held();
     let pose = weapon_pose(&held);
     lib.get(w.model()).draw(&pose, gun, tint, out);

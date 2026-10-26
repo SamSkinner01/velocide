@@ -84,6 +84,8 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
             0.0
         },
         cycle: v.cycle,
+        // Every replicated player holds a weapon until the protocol says otherwise.
+        unarmed: false,
     }
 }
 

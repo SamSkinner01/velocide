@@ -190,7 +190,7 @@ impl ModelLibrary {
             ..Default::default()
         });
         let gun = self.get(weapon.model());
-        if !anim.dead {
+        if !anim.dead && !anim.unarmed {
             gun.draw(&gun_pose, gun_root, tint, out);
         }
         let head = rig.part_transform(&pose, root, shrike::HEAD);

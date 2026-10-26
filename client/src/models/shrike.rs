@@ -852,6 +852,8 @@ pub struct PlayerAnim {
     /// Longwick draw 0..1 (string, arrow and limbs) and alt charge 0..1 (a charging glow).
     pub draw: f32,
     pub charge: f32,
+    /// Holding no weapon (gun game's Fist tier).
+    pub unarmed: bool,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
 }
@@ -960,7 +962,7 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         end: 0.0,
     };
     let mut arm_l_out = 0.12f32; // sideways raise of the left arm (+ = outward)
-    let mut two_handed = super::weapons::two_handed(a.weapon);
+    let mut two_handed = super::weapons::two_handed(a.weapon) && !a.unarmed;
     // World swing of the coat tails (radians about X, - = streaming back).
     let coat: f32;
     let mut flutter = 0.0f32;

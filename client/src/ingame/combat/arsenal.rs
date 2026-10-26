@@ -208,6 +208,8 @@ impl ArsenalView {
         viewmodel: &mut Viewmodel,
         audio: &mut Audio,
     ) {
+        // Nothing carried (gun game's Fist tier): fists only.
+        viewmodel.set_unarmed(s.loadout.first_slot().is_none());
         viewmodel.set_charge(s.charge_fraction(t, tick_rate));
         let whine = (s.charge > 0).then(|| match s.ability() {
             Ability::Skewer => Sfx::SkewerCharge,
@@ -1136,7 +1138,7 @@ pub enum Status {
 pub fn burn_tint(time: f64, seed: u32) -> Vec4 {
     let t = time + (seed % 101) as f64 * 0.173;
     let f = 0.5 + 0.3 * (t * 11.0).sin() as f32 + 0.2 * (t * 27.0).sin() as f32;
-    Vec4::new(1.0 + 0.45 * f, 0.88 + 0.12 * f, 0.72, 1.0)
+    Vec4::new(1.0 + 0.25 * f, 0.9 + 0.08 * f, 0.78, 1.0)
 }
 
 /// Per-frame visuals of a status on a body standing at `feet`, `height` tall and `radius`

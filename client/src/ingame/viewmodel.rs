@@ -100,6 +100,11 @@ impl Viewmodel {
         self.anim.salvo = Some(0.0);
     }
 
+    /// No weapon at all (gun game's Fist tier): fists only.
+    pub fn set_unarmed(&mut self, unarmed: bool) {
+        self.anim.unarmed = unarmed;
+    }
+
     /// One Kiln spray tick (every ~0.08 s while the trigger is held).
     pub fn spray(&mut self) {
         self.since_spray = 0.0;

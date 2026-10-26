@@ -119,6 +119,8 @@ changes, so the standard look keeps each model's own glow colours.
 | `downed`, `dead` | kneeling with a guttering wick / flat on its back, wick snuffed (flame hidden, eye slits dark, a dull smoulder) |
 | `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
 | `weapon` | the held weapon's wire id (`shared::loadout::WeaponKind`: 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler, 4 Lancet, 5 Thresher, 6 Riveter, 7 Cinderbox, 8 Longwick, 9 Kiln; `weapons::two_handed`: the Quill and Lancet are one-handed) |
+| `ability`, `draw`, `charge` | the selected ability id (the held weapon glows in its colour; one the weapon can't take shows its default build's first), the Longwick's draw and an alt charge 0..1 (from the replicated `player_weapon` and `DRAWING` / `CHARGING`) |
+| `unarmed` | holding nothing (gun game's Fist tier): no weapon drawn, no two-handed grip |
 | `cycle` | locomotion phase — keep per player: `cycle = PlayerAnim::advance_cycle(cycle, velocity, dt)` (phase keeps legs continuous when speed changes; leg rate capped at 2.6 cycles/s) |
 
 ### `ViewmodelAnim` (first person)
@@ -131,6 +133,7 @@ changes, so the standard look keeps each model's own glow colours.
 | `draw` | 0..1 Longwick draw: the nock and the arrow come back by up to `longwick::DRAW_LENGTH` (0.3 m), the limbs flex, the wick string and the arrow's flame heat up and strobe white at full draw, the left fist pinches the nock (`longwick::draw_hand`), the bow trembles past 85 % |
 | `salvo` | seconds since a Cinderbox salvo started (`None` = no salvo): the tubes fire top, left, right 0.08 s apart (`cinderbox::SALVO_GAP`), each mouth flares (`tube_flash`), the box kicks once per rocket (`salvo_kick`), the back face's three "loaded" lamps go dark as their tubes fire and relight at `RELOAD` (0.9 s) |
 | `spray` | 0..1 Kiln spray (smoothed while it fires): the firebox coals roar, the chimney's damper rattles, the gun shakes |
+| `unarmed` | no weapon at all (gun game's Fist tier; the client sets it when the carried loadout is empty): the right hand (the arm's closed glove) raised and the left fist up in a guard, punching as usual |
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
 | `throw` | Thorn throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles, flicks it at ~0.5 |
