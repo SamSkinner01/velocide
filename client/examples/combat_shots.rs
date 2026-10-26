@@ -1,7 +1,7 @@
 //! Headless combat screenshots: a real single-player session (in-process server) driven by a
-//! script — dev commands spawn husks and orbs, the local player aims and fires every weapon —
+//! script — dev commands spawn gnawers and needles, the local player aims and fires every weapon —
 //! and PNGs of the moments worth looking at: muzzle flashes and tracers, explosions, a parry
-//! flash, blood mist and decals, husks walking / winding up / dying, projectiles in flight,
+//! flash, blood mist and decals, gnawers walking / winding up / dying, projectiles in flight,
 //! the HUD with damage and hard damage, hit markers, the kill feed and the death screen.
 //!
 //! ```text
@@ -167,10 +167,10 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 200, |g, _| hold(g, Buttons::NONE));
     anyhow::ensure!(game.is_playing(), "not in game");
 
-    // Husks in front, us invulnerable and ignored for the weapon shots.
+    // Gnawers in front, us invulnerable and ignored for the weapon shots.
     game.send_chat("/god");
     game.send_chat("/notarget");
-    game.send_chat("/spawn husk 4");
+    game.send_chat("/spawn gnawer 4");
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
 
     // Lancet: muzzle flash, tracer, hit marker, damage number.
@@ -198,8 +198,8 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_blood_gibs");
 
-    // Rocket at a husk: in flight, then the explosion.
-    game.send_chat("/spawn husk 3");
+    // Rocket at a gnawer: in flight, then the explosion.
+    game.send_chat("/spawn gnawer 3");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     select(&mut game, 3, 0);
     h.frames(&mut game, 5, |g, i| {
@@ -218,7 +218,7 @@ fn main() -> anyhow::Result<()> {
     h.shot("combat_after_explosion");
 
     // Riveter stream + sawblade + flak in flight.
-    game.send_chat("/spawn husk 2");
+    game.send_chat("/spawn gnawer 2");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     select(&mut game, 2, 0);
     h.frames(&mut game, 16, |g, i| {
@@ -251,7 +251,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
 
     // Overcharge beam.
-    game.send_chat("/spawn husk 3");
+    game.send_chat("/spawn gnawer 3");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     select(&mut game, 0, 0);
     h.frames(&mut game, 50, |g, _| {
@@ -266,7 +266,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
 
     // Ricochet: throw a prism, shoot it.
-    game.send_chat("/spawn husk 2");
+    game.send_chat("/spawn gnawer 2");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
     select(&mut game, 0, 0);
     h.frames(&mut game, 2, |g, i| {
@@ -313,16 +313,16 @@ fn main() -> anyhow::Result<()> {
     h.shot("combat_ricochet");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
 
-    // Husks attacking: walking, winding up (we're still god-moded).
+    // Gnawers attacking: walking, winding up (we're still god-moded).
     game.send_chat("/notarget");
-    game.send_chat("/spawn husk 4");
+    game.send_chat("/spawn gnawer 4");
     h.frames(&mut game, 50, |g, _| {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t);
         }
         hold(g, Buttons::NONE);
     });
-    h.shot("combat_husks_walking");
+    h.shot("combat_gnawers_walking");
     let mut windup = false;
     for _ in 0..240 {
         if let Some(t) = nearest_enemy(&game, false) {
@@ -343,20 +343,20 @@ fn main() -> anyhow::Result<()> {
         }
     }
     println!("caught a wind-up: {windup}");
-    h.shot("combat_husk_windup");
+    h.shot("combat_gnawer_windup");
 
-    // Parry an orb.
+    // Parry a (slowed) Heron needle.
     game.send_chat("/killall");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
     game.controls.pitch = 0.0;
-    game.send_chat("/orb 16");
+    game.send_chat("/needle 16");
     let mut punched = false;
     for _ in 0..120 {
         let orb = game.net().and_then(|n| {
             let me = eye(&game)?;
             n.remote_entities()
                 .iter()
-                .find(|e| e.kind == kind::SPITTER_ORB)
+                .find(|e| e.kind == kind::NEEDLE)
                 .map(|e| {
                     shared::sim::projectiles::replicated_position(
                         e,
@@ -374,7 +374,7 @@ fn main() -> anyhow::Result<()> {
             Buttons::NONE
         };
         if orb.is_some_and(|d| d < 8.0) && orb.is_some_and(|d| d > 6.0) {
-            h.shot("combat_orb_incoming");
+            h.shot("combat_needle_incoming");
         }
         hold(&mut game, b);
         h.frame(&mut game);
@@ -386,9 +386,9 @@ fn main() -> anyhow::Result<()> {
     h.shot("combat_parry");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
 
-    // A husk hits us from the side: damage flash + direction indicator.
+    // A gnawer hits us from the side: damage flash + direction indicator.
     game.send_chat("/god");
-    game.send_chat("/spawn husk 1");
+    game.send_chat("/spawn gnawer 1");
     h.frames(&mut game, 20, |g, _| hold(g, Buttons::NONE));
     let mut hurt = false;
     for _ in 0..300 {
@@ -410,8 +410,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
     h.frames(&mut game, 3, |g, _| hold(g, Buttons::NONE));
-    println!("husk hit us: {hurt}");
-    h.shot("combat_hit_by_husk");
+    println!("gnawer hit us: {hurt}");
+    h.shot("combat_hit_by_gnawer");
     game.send_chat("/killall");
     game.send_chat("/give");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));

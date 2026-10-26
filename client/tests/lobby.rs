@@ -613,10 +613,10 @@ fn combat_follows_the_match_settings() {
     // No combat in the lobby: nothing to spawn into, dev commands refuse.
     assert!(
         h.server
-            .spawn_enemies("husk", glam::Vec3::ZERO, 0.0, 2)
+            .spawn_enemies("gnawer", glam::Vec3::ZERO, 0.0, 2)
             .is_empty()
     );
-    h.clients[host].net.send_chat("/spawn husk");
+    h.clients[host].net.send_chat("/spawn gnawer");
     wait(&mut h, 2.0, "dev command refused", |h| {
         h.clients[host].events.iter().any(
             |e| matches!(e, NetEvent::Chat { from: None, text, .. } if text.contains("no match")),
@@ -638,7 +638,7 @@ fn combat_follows_the_match_settings() {
     );
     let spawned = h
         .server
-        .spawn_enemies("husk", glam::Vec3::new(0.0, 0.0, -10.0), 0.0, 2);
+        .spawn_enemies("gnawer", glam::Vec3::new(0.0, 0.0, -10.0), 0.0, 2);
     assert_eq!(spawned.len(), 2);
     assert_eq!(h.server.world().enemies.len(), 2);
 

@@ -1357,10 +1357,11 @@ fn performance(rig: &mut Rig) {
     c.chat("/god");
     walk_into_encounter(&mut c, 4);
     rig.run(&mut [&mut c], 150);
-    c.chat("/spawn husk 14");
-    c.chat("/spawn spitter 6");
-    c.chat("/spawn gnat 6");
-    c.chat("/spawn bastion 2");
+    c.chat("/spawn gnawer 14");
+    c.chat("/spawn censer 6");
+    c.chat("/spawn harrier 6");
+    c.chat("/spawn heron 2");
+    c.chat("/spawn gaoler 2");
     rig.run(&mut [&mut c], 120);
     let enemies = c.server_stats().map_or(0, |s| s.enemies);
     println!("      enemies alive on the server: {enemies}");
@@ -1507,7 +1508,7 @@ fn window_sizes(rig: &mut Rig) {
         }),
     );
     wait_playing(rig, &mut [&mut c], 20.0);
-    c.chat("/spawn husk 3");
+    c.chat("/spawn gnawer 3");
     rig.run(&mut [&mut c], 90);
     // A long kill-feed line to see where it lands at every size.
     c.chat("/killall");

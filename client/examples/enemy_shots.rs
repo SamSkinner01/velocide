@@ -1,7 +1,11 @@
-//! Headless screenshots of the enemies in action (docs/enemies.md): a real single-player
-//! session (in-process server) driven by dev commands — Spitters winding up and spitting,
-//! Gnats hovering and firing, a Bastion's slam wind-up and parry window — then an arena
-//! encounter on the campaign level (doors locked, a wave spawning, the HUD readout).
+//! Headless screenshots of the enemies in action (docs/enemies.md, docs/roster.md): a real
+//! single-player session (in-process server) driven by dev commands — every attack of every
+//! Mould from its wind-up through its strike: Gnawers biting and pouncing on a strafing
+//! player, Censers whirling and lobbing ember bombs (in flight and bursting), Harriers
+//! hovering, rearing and diving (and one swatted), the Gaoler's bash wind-up / parry window /
+//! bash, its chain sweep and its rush, the Heron's aim laser tracking, locking and the needle
+//! (also dodged with a dash), a crowd, then an arena encounter on the campaign level (doors
+//! locked, a wave spawning, the HUD readout).
 //!
 //! ```text
 //! cargo run -p client --release --example enemy_shots -- [out_dir]   # default target/enemy_shots
@@ -36,6 +40,8 @@ struct Harness {
     input: InputState,
     time: f64,
     out: PathBuf,
+    /// Movement held by the player: (forward, right, buttons).
+    moving: (f32, f32, Buttons),
 }
 
 impl Harness {
@@ -68,7 +74,7 @@ impl Harness {
 
     fn frames(&mut self, game: &mut InGame, n: usize) {
         for _ in 0..n {
-            hold(game);
+            game.controls.override_move = Some(self.moving);
             self.frame(game);
         }
     }
@@ -99,7 +105,7 @@ impl Harness {
             if let Some(t) = nearest(game, kind) {
                 aim_at(game, chest(&t));
             }
-            hold(game);
+            game.controls.override_move = Some(self.moving);
             self.frame(game);
             let hit = game.net().is_some_and(|n| {
                 n.remote_entities()
@@ -119,14 +125,15 @@ fn eye(game: &InGame) -> Option<Vec3> {
     Some(net.local_state()?.eye_position(&net.tuning().movement))
 }
 
-/// Where to look at an enemy (its body centre; Gnats hover 0.45 m above their feet).
+/// Where to look at an enemy (about the middle of its body; Harriers hover).
 fn chest(e: &EntityState) -> Vec3 {
     e.position
         + Vec3::Y
             * match e.kind {
-                kind::GNAT => 0.45,
-                kind::BASTION => 1.7,
-                kind::SPITTER => 1.0,
+                kind::HARRIER => 0.65,
+                kind::GAOLER => 2.0,
+                kind::HERON => 2.4,
+                kind::CENSER => 1.5,
                 _ => 1.0,
             }
 }
@@ -150,16 +157,21 @@ fn aim_at(game: &mut InGame, target: Vec3) {
     game.controls.pitch = d.y.clamp(-1.0, 1.0).asin();
 }
 
-fn hold(game: &mut InGame) {
-    game.controls.override_move = Some((0.0, 0.0, Buttons::NONE));
+fn attack(e: &EntityState) -> u8 {
+    ((e.aux >> 8) & 0xFF) as u8
 }
 
-fn windup_progress(e: &EntityState) -> u32 {
-    if e.state == AiState::Windup as u16 {
+/// Wind-up progress (0..255) of attack `index`, 0 otherwise.
+fn windup_of(e: &EntityState, index: u8) -> u32 {
+    if e.state == AiState::Windup as u16 && attack(e) == index {
         e.aux & 0xFF
     } else {
         0
     }
+}
+
+fn striking(e: &EntityState, index: u8) -> bool {
+    e.state == AiState::Strike as u16 && attack(e) == index
 }
 
 fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
@@ -175,6 +187,12 @@ fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
     game.send_chat("/god");
     h.frames(&mut game, 10);
     Ok(game)
+}
+
+fn clear(h: &mut Harness, game: &mut InGame) {
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    game.send_chat("/killall");
+    h.frames(game, 90);
 }
 
 fn main() -> anyhow::Result<()> {
@@ -198,82 +216,217 @@ fn main() -> anyhow::Result<()> {
         input: InputState::new(),
         time: 10.0,
         out,
+        moving: (0.0, 0.0, Buttons::NONE),
     };
 
     // ---- Proving ground: one type at a time. ----
     let mut game = session(&mut h, shared::sim::BUILTIN_LEVEL)?;
 
-    // Spitters: alert, strafe, wind up (sac glows), spit.
-    game.send_chat("/spawn spitter 2");
-    h.frames(&mut game, 20);
-    h.shot("spitter_spawn");
-    let ok = h.until(&mut game, kind::SPITTER, 600, |e| windup_progress(e) > 170);
-    println!("spitter wind-up: {ok}");
-    h.shot("spitter_windup");
-    let ok = h.until(&mut game, kind::SPITTER, 120, |e| e.state == AiState::Strike as u16);
-    println!("spitter strike: {ok}");
-    h.frames(&mut game, 8);
-    h.shot("spitter_orb");
-    game.send_chat("/killall");
-    h.frames(&mut game, 60);
+    // Gnawers: the pack comes knuckle-running, the jaw unhinges, the bite; then the player
+    // strafes and gets pounced on.
+    game.send_chat("/spawn gnawer 3");
+    h.frames(&mut game, 25);
+    h.shot("gnawer_pack");
+    let ok = h.until(&mut game, kind::GNAWER, 600, |e| windup_of(e, 0) > 160);
+    println!("gnawer bite wind-up: {ok}");
+    h.shot("gnawer_bite_windup");
+    let ok = h.until(&mut game, kind::GNAWER, 60, |e| striking(e, 0));
+    println!("gnawer bite: {ok}");
+    h.shot("gnawer_bite");
+    clear(&mut h, &mut game);
+    game.send_chat("/spawn gnawer 2");
+    h.moving = (0.0, 0.4, Buttons::NONE);
+    let ok = h.until(&mut game, kind::GNAWER, 600, |e| windup_of(e, 1) > 120);
+    println!("gnawer pounce wind-up: {ok}");
+    h.shot("gnawer_pounce_windup");
+    let ok = h.until(&mut game, kind::GNAWER, 60, |e| striking(e, 1));
+    h.frames(&mut game, 5);
+    println!("gnawer pounce: {ok}");
+    h.shot("gnawer_pounce");
+    clear(&mut h, &mut game);
 
-    // Gnats: hover at 4-8 m, circle, burst of bolts.
-    game.send_chat("/spawn gnat 3");
+    // Censers: back off, whirl the censer overhead, lob three ember bombs that burst.
+    game.send_chat("/spawn censer 2");
+    h.frames(&mut game, 30);
+    h.shot("censer_spawn");
+    let ok = h.until(&mut game, kind::CENSER, 900, |e| windup_of(e, 1) > 180);
+    println!("censer whirl: {ok}");
+    h.shot("censer_whirl");
+    let ok = h.until(&mut game, kind::CENSER, 120, |e| striking(e, 1));
+    h.frames(&mut game, 18);
+    println!("censer lob: {ok}");
+    h.shot("censer_embers_in_flight");
+    let burst = (0..200).any(|_| {
+        h.frames(&mut game, 1);
+        !game.net().is_some_and(|n| n.remote_entities().iter().any(|e| e.kind == kind::EMBER_BOMB))
+    });
+    h.frames(&mut game, 2);
+    println!("ember bombs burst: {burst}");
+    h.shot("censer_embers_burst");
+    // The swing when crowded.
+    clear(&mut h, &mut game);
+    game.send_chat("/spawn censer 1");
+    h.frames(&mut game, 2);
+    h.moving = (1.0, 0.0, Buttons::NONE);
+    let ok = h.until(&mut game, kind::CENSER, 300, |e| windup_of(e, 0) > 150);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    println!("censer swing wind-up: {ok}");
+    h.shot("censer_swing_windup");
+    clear(&mut h, &mut game);
+
+    // Harriers: hover and circle, rear up, dive; one gets swatted.
+    game.send_chat("/spawn harrier 3");
     h.frames(&mut game, 150);
-    if let Some(g) = nearest(&game, kind::GNAT) {
+    if let Some(g) = nearest(&game, kind::HARRIER) {
         aim_at(&mut game, chest(&g));
     }
     h.frames(&mut game, 2);
-    h.shot("gnats_hovering");
-    let ok = h.until(&mut game, kind::GNAT, 600, |e| windup_progress(e) > 150);
-    println!("gnat wind-up: {ok}");
-    h.shot("gnat_windup");
-    let ok = h.until(&mut game, kind::GNAT, 60, |e| e.state == AiState::Strike as u16);
-    println!("gnat strike: {ok}");
+    h.shot("harriers_hovering");
+    let ok = h.until(&mut game, kind::HARRIER, 600, |e| windup_of(e, 0) > 170);
+    println!("harrier rearing: {ok}");
+    h.shot("harrier_windup");
+    let ok = h.until(&mut game, kind::HARRIER, 60, |e| striking(e, 0));
     h.frames(&mut game, 6);
-    h.shot("gnat_bolts");
-    game.send_chat("/killall");
-    h.frames(&mut game, 60);
+    println!("harrier dive: {ok}");
+    h.shot("harrier_dive");
+    // Swat: punch the next diving one when it is close.
+    let mut swatted = false;
+    for _ in 0..900 {
+        let me = eye(&game).unwrap_or_default();
+        let close = game.net().and_then(|n| {
+            n.remote_entities()
+                .iter()
+                .filter(|e| e.kind == kind::HARRIER && striking(e, 0))
+                .find(|e| chest(e).distance(me) < 4.5)
+                .copied()
+        });
+        if let Some(e) = close {
+            aim_at(&mut game, chest(&e));
+            h.moving = (0.0, 0.0, Buttons::PUNCH);
+            h.frames(&mut game, 1);
+            h.moving = (0.0, 0.0, Buttons::NONE);
+            h.frames(&mut game, 8);
+            swatted = true;
+            break;
+        }
+        if let Some(t) = nearest(&game, kind::HARRIER) {
+            aim_at(&mut game, chest(&t));
+        }
+        h.frames(&mut game, 1);
+    }
+    println!("harrier swatted: {swatted}");
+    h.shot("harrier_swatted");
+    clear(&mut h, &mut game);
 
-    // Bastion: slow approach, slam wind-up, parry window (yellow), slam.
-    game.send_chat("/spawn bastion 1");
+    // Gaoler: the door drawn back, the parry window strobe, the bash; the chain sweep; the
+    // rush from afar.
+    game.send_chat("/spawn gaoler 1");
     h.frames(&mut game, 30);
-    h.shot("bastion_spawn");
-    let ok = h.until(&mut game, kind::BASTION, 900, |e| windup_progress(e) > 60);
-    println!("bastion wind-up: {ok}");
-    h.shot("bastion_windup");
-    let ok = h.until(&mut game, kind::BASTION, 60, |e| {
-        e.flags & enemy_flags::PARRYABLE != 0
-    });
-    println!("bastion parry window: {ok}");
+    h.shot("gaoler_spawn");
+    let ok = h.until(&mut game, kind::GAOLER, 900, |e| windup_of(e, 0) > 60);
+    println!("gaoler bash wind-up: {ok}");
+    h.shot("gaoler_bash_windup");
+    let ok = h.until(&mut game, kind::GAOLER, 60, |e| e.flags & enemy_flags::PARRYABLE != 0);
     h.frames(&mut game, 6);
-    h.shot("bastion_parryable");
-    let ok = h.until(&mut game, kind::BASTION, 60, |e| e.state == AiState::Strike as u16);
-    println!("bastion slam: {ok}");
+    println!("gaoler parry window: {ok}");
+    h.shot("gaoler_parryable");
+    let ok = h.until(&mut game, kind::GAOLER, 60, |e| striking(e, 0));
     h.frames(&mut game, 3);
-    h.shot("bastion_slam");
+    println!("gaoler bash: {ok}");
+    h.shot("gaoler_bash");
+    // Step back a little: the sweep.
+    h.moving = (-1.0, 0.0, Buttons::NONE);
+    h.frames(&mut game, 14);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    let ok = h.until(&mut game, kind::GAOLER, 600, |e| windup_of(e, 1) > 150);
+    println!("gaoler sweep wind-up: {ok}");
+    h.shot("gaoler_sweep_windup");
+    let ok = h.until(&mut game, kind::GAOLER, 60, |e| striking(e, 1));
+    h.frames(&mut game, 6);
+    println!("gaoler sweep: {ok}");
+    h.shot("gaoler_sweep");
+    clear(&mut h, &mut game);
+    // The rush: back away first so it is 8-20 m out.
+    game.send_chat("/spawn gaoler 1");
+    h.moving = (-1.0, 0.0, Buttons::NONE);
+    h.frames(&mut game, 40);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    let ok = h.until(&mut game, kind::GAOLER, 900, |e| windup_of(e, 2) > 150);
+    println!("gaoler rush wind-up: {ok}");
+    h.shot("gaoler_rush_windup");
+    let ok = h.until(&mut game, kind::GAOLER, 90, |e| striking(e, 2));
+    h.frames(&mut game, 12);
+    println!("gaoler rush: {ok}");
+    h.shot("gaoler_rush");
+    clear(&mut h, &mut game);
+
+    // Heron: walks off to sniping range, the laser tracks, locks, the needle; then a second
+    // shot dodged with a dash so the locked laser and the needle go past.
+    game.send_chat("/spawn heron 1");
+    h.frames(&mut game, 30);
+    h.shot("heron_spawn");
+    let ok = h.until(&mut game, kind::HERON, 900, |e| {
+        windup_of(e, 1) > 100 && e.flags & enemy_flags::AIMING != 0
+    });
+    println!("heron laser: {ok}");
+    h.shot("heron_laser");
+    let ok = h.until(&mut game, kind::HERON, 90, |e| e.flags & enemy_flags::AIM_LOCKED != 0);
+    h.frames(&mut game, 4);
+    println!("heron locked: {ok}");
+    h.shot("heron_laser_locked");
+    let ok = h.until(&mut game, kind::HERON, 60, |e| striking(e, 1));
+    h.frames(&mut game, 1);
+    println!("heron needle: {ok}");
+    h.shot("heron_needle");
+    let ok = h.until(&mut game, kind::HERON, 600, |e| e.flags & enemy_flags::AIM_LOCKED != 0);
+    h.moving = (0.0, 1.0, Buttons::DASH);
+    h.frames(&mut game, 1);
+    h.moving = (0.0, 1.0, Buttons::NONE);
+    h.frames(&mut game, 9);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    if let Some(e) = nearest(&game, kind::HERON) {
+        aim_at(&mut game, chest(&e));
+    }
+    h.frames(&mut game, 2);
+    println!("heron dodged: {ok}");
+    h.shot("heron_dodged");
+    clear(&mut h, &mut game);
+
     // A mixed crowd.
-    game.send_chat("/spawn husk 4");
-    game.send_chat("/spawn spitter 2");
-    game.send_chat("/spawn gnat 2");
-    h.frames(&mut game, 180);
-    if let Some(b) = nearest(&game, kind::BASTION) {
+    game.send_chat("/spawn gnawer 4");
+    game.send_chat("/spawn censer 2");
+    game.send_chat("/spawn harrier 2");
+    h.frames(&mut game, 60);
+    game.send_chat("/spawn gaoler 1");
+    game.send_chat("/spawn heron 1");
+    h.frames(&mut game, 60);
+    // Back off so the crowd fits the view.
+    h.moving = (-1.0, 0.0, Buttons::NONE);
+    h.frames(&mut game, 50);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    if let Some(b) = nearest(&game, kind::GAOLER) {
         aim_at(&mut game, chest(&b));
     }
     h.frames(&mut game, 2);
     h.shot("mixed_crowd");
+    // Kills: ember bursts, melting corpses.
+    game.send_chat("/killall");
+    h.frames(&mut game, 6);
+    h.shot("mixed_crowd_killed");
+    h.frames(&mut game, 30);
+    h.shot("mixed_crowd_melting");
     game.shutdown(&mut h.renderer, &mut h.common);
 
-    // ---- Campaign: an arena encounter (Crucible Heart: the bastion on the island). ----
+    // ---- Campaign: an arena encounter (Crucible Heart: the gaoler on the island). ----
     let mut game = session(&mut h, "crucible_of_veins")?;
     game.send_chat("/encounter 4");
     h.frames(&mut game, 20);
     h.shot("arena4_locked");
     h.frames(&mut game, 60);
     h.shot("arena4_wave1");
-    let ok = h.until(&mut game, kind::BASTION, 600, |e| windup_progress(e) > 100);
-    println!("arena bastion wind-up: {ok}");
-    h.shot("arena4_bastion");
+    let ok = h.until(&mut game, kind::GAOLER, 600, |e| e.state == AiState::Windup as u16);
+    println!("arena gaoler wind-up: {ok}");
+    h.shot("arena4_gaoler");
     game.send_chat("/killall");
     h.frames(&mut game, 150);
     h.shot("arena4_wave2");
