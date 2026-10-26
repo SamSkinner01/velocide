@@ -6,6 +6,7 @@
 //! [`settings_menu::SettingsMenu`].
 
 pub mod backdrop;
+pub mod loadout;
 pub mod lobby;
 pub mod main_menu;
 /// End-of-match results screens (campaign tally / co-op table / deathmatch standings).

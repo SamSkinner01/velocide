@@ -544,6 +544,8 @@ impl InGame {
         // stay queued for the lobby screen.
         if let Some(s) = &mut self.session {
             s.client_mut().update(Duration::from_secs_f32(dt));
+            // The loadout to carry (sent once per change and after connecting).
+            s.client_mut().set_loadout(common.settings.loadout.current);
         }
         while let Some(ev) = self
             .session

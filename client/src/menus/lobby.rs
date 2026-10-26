@@ -110,6 +110,8 @@ pub struct LobbyScreen {
     /// Countdown number on screen and when it appeared (banner animation).
     countdown: Option<(u8, f64)>,
     time: f64,
+    /// The LOADOUT overlay, while open.
+    loadout: Option<super::loadout::LoadoutMenu>,
 }
 
 impl LobbyScreen {
@@ -207,6 +209,7 @@ impl LobbyScreen {
             pending_bots: 0,
             countdown: None,
             time: 0.0,
+            loadout: None,
         }
     }
 
@@ -263,6 +266,8 @@ impl LobbyScreen {
         // 1. Network. Stop taking events once the match starts: the game screen gets the rest.
         if let Some(s) = &mut self.session {
             s.client_mut().update(Duration::from_secs_f32(io.dt));
+            // The loadout to carry (sent once per change and after connecting).
+            s.client_mut().set_loadout(common.settings.loadout.current);
         }
         while transition.is_none()
             && let Some(ev) = self
@@ -479,6 +484,22 @@ impl LobbyScreen {
             }
             return;
         };
+        // The LOADOUT overlay (applies right away in the lobby).
+        if let Some(menu) = &mut self.loadout {
+            settings_menu::dim(&mut ui, 0.45);
+            let r = menu.ui(
+                &mut ui,
+                &mut common.settings.loadout,
+                super::loadout::panel_rect(canvas),
+            );
+            common.settings_changed |= r.changed;
+            if r.back {
+                common.settings_save = true;
+                self.loadout = None;
+                *sound = Some(Sfx::UiBack);
+            }
+            return;
+        }
         let levels = net.levels().to_vec();
         let local = net.local_player_id();
         let my_rtt = net.stats().rtt_ms;
@@ -710,6 +731,9 @@ impl LobbyScreen {
                         }
                     });
                 }
+            }
+            if ui.button("LOADOUT") {
+                self.loadout = Some(super::loadout::LoadoutMenu::new());
             }
             if ui.button("LEAVE LOBBY") {
                 actions.push(Action::Leave);

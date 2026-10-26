@@ -1,5 +1,5 @@
 //! Main menu: SINGLE PLAYER (level select), HOST GAME (mode, level, port, max players), JOIN
-//! GAME (address, name), SETTINGS, QUIT. HOST and JOIN continue in the lobby screen
+//! GAME (address, name), LOADOUT (`menus::loadout`), SETTINGS, QUIT. HOST and JOIN continue in the lobby screen
 //! (`menus::lobby`). A level renders behind it; messages (disconnect reasons,
 //! connection errors) appear in a modal box.
 //!
@@ -14,6 +14,7 @@ use shared::level::LevelDef;
 use shared::lobby::{GameMode, LevelInfo};
 
 use super::backdrop::Backdrop;
+use super::loadout::{self, LoadoutMenu};
 use super::settings_menu::{self, SettingsMenu};
 use super::style;
 use crate::app::Common;
@@ -26,13 +27,15 @@ pub enum Page {
     SinglePlayer,
     Host,
     Join,
+    Loadout,
     Settings,
 }
 
-const ROOT_ITEMS: [(&str, Page); 4] = [
+const ROOT_ITEMS: [(&str, Page); 5] = [
     ("SINGLE PLAYER", Page::SinglePlayer),
     ("HOST GAME", Page::Host),
     ("JOIN GAME", Page::Join),
+    ("LOADOUT", Page::Loadout),
     ("SETTINGS", Page::Settings),
 ];
 
@@ -52,6 +55,8 @@ pub struct MainMenu {
     max_players: f32,
     address: String,
     settings: SettingsMenu,
+    /// The LOADOUT page (made when it opens: it reads the tuning file for its numbers).
+    loadout: Option<LoadoutMenu>,
 }
 
 /// Available levels: `assets/levels/*.ron` plus the built-in level.
@@ -102,6 +107,7 @@ impl MainMenu {
             max_players: 4.0,
             address: String::new(),
             settings: SettingsMenu::new(),
+            loadout: None,
         }
     }
 
@@ -130,6 +136,9 @@ impl MainMenu {
         if page == Page::Host {
             self.catalog = shared::lobby::scan_levels();
             self.fit_host_level();
+        }
+        if page == Page::Loadout {
+            self.loadout = Some(LoadoutMenu::new());
         }
         self.page = page;
     }
@@ -164,7 +173,16 @@ impl MainMenu {
             let mut ui = Ui::new(&mut out.ui, &mut common.ui_state, io.ui_input, theme);
             let canvas = ui.canvas();
 
-            if self.page == Page::Settings {
+            if let (Page::Loadout, Some(menu)) = (self.page, &mut self.loadout) {
+                settings_menu::dim(&mut ui, 0.45);
+                let r = menu.ui(&mut ui, &mut settings.loadout, loadout::panel_rect(canvas));
+                settings_resp.changed |= r.changed;
+                if r.back {
+                    settings_resp.back = true;
+                    sound = Some(Sfx::UiBack);
+                    self.back();
+                }
+            } else if self.page == Page::Settings {
                 settings_menu::dim(&mut ui, 0.45);
                 settings_resp = self.settings.ui(
                     &mut ui,
@@ -220,7 +238,7 @@ impl MainMenu {
                 if !modal {
                     let mut name_changed = false;
                     let page_result = match self.page {
-                        Page::Root | Page::Settings => None,
+                        Page::Root | Page::Settings | Page::Loadout => None,
                         Page::SinglePlayer => self.single_player_page(&mut ui, panel, settings),
                         Page::Host => self.host_page(&mut ui, panel, settings, &mut name_changed),
                         Page::Join => self.join_page(&mut ui, panel, settings, &mut name_changed),
