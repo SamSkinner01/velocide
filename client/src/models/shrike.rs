@@ -954,7 +954,7 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         end: 0.0,
     };
     let mut arm_l_out = 0.12f32; // sideways raise of the left arm (+ = outward)
-    let mut two_handed = super::weapons::WeaponKind::from_index(a.weapon).two_handed();
+    let mut two_handed = super::weapons::two_handed(a.weapon);
     // World swing of the coat tails (radians about X, - = streaming back).
     let coat: f32;
     let mut flutter = 0.0f32;

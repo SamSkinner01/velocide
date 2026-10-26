@@ -118,27 +118,47 @@ changes, so the standard look keeps each model's own glow colours.
 | `punching` | punch progress 0..1 (left arm thrust; fast out in the first 25 %) |
 | `downed`, `dead` | kneeling with a guttering wick / flat on its back, wick snuffed (flame hidden, eye slits dark, a dull smoulder) |
 | `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
-| `weapon` | 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler (`WeaponKind::two_handed`: the Quill is one-handed) |
+| `weapon` | the held weapon's wire id (`shared::loadout::WeaponKind`: 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler, 4 Lancet, 5 Thresher, 6 Riveter, 7 Cinderbox, 8 Longwick, 9 Kiln; `weapons::two_handed`: the Quill and Lancet are one-handed) |
 | `cycle` | locomotion phase — keep per player: `cycle = PlayerAnim::advance_cycle(cycle, velocity, dt)` (phase keeps legs continuous when speed changes; leg rate capped at 2.6 cycles/s) |
 
 ### `ViewmodelAnim` (first person)
 
 | field | meaning |
 |---|---|
-| `weapon`, `alt_mode` | weapon index; alt mode 0/1 sets the glow colour (`WeaponKind::glow_color`: Quill Brand crimson / Splinter ice, Bellows Gust sky / Both Barrels orange, Arclash Wisp violet / Discharge blue, Tumbler Breach orange-red / Gravewell green); `WeaponKind::primary_color` is each gun's primary-fire colour for tracers / beams |
-| `fire_kick` | 1 on fire, decay (~0.3 s); also drives the mechanisms: the Quill's crest folds flat front to back and rises again, the Bellows pumps (board swings shut half way through the decay, pleats squash, then refill) |
-| `alt_charge` | 0..1 Arclash Discharge: the capacitor's crawling light speeds up and brightens towards white, arcs jump between the prongs (flickering), the gun shakes above 0.6 |
+| `weapon`, `ability` | the held `WeaponKind` and its selected `Ability`; the weapon's `Glow` parts take the ability's colour (`weapons::ability_color`, one per ability; see below); `WeaponLook::primary_color` is each gun's primary-fire colour for tracers / beams |
+| `fire_kick` | 1 on fire, decay (~0.3 s); also drives the mechanisms: the Quill's crest folds flat front to back and rises again, the Bellows pumps (board swings shut half way through the decay, pleats squash, then refill), the Lancet's feed sleeve snaps back, the Riveter's nose hammers back and one air pulse runs down its hose (`riveter::pulse_position`: the kick falls 0.3 between rivets, which carries the pulse from the tank to the tool), the Longwick's string snaps and quivers and its arrow is gone until the kick fades below 0.35 (the next one nocked) |
+| `alt_charge` | 0..1 alt charge (Discharge, Skewer): any gun's glow brightens towards white; the Arclash's capacitor light speeds up and arcs jump between its prongs (flickering); the gun shakes above 0.6 |
+| `draw` | 0..1 Longwick draw: the nock and the arrow come back by up to `longwick::DRAW_LENGTH` (0.3 m), the limbs flex, the wick string and the arrow's flame heat up and strobe white at full draw, the left fist pinches the nock (`longwick::draw_hand`), the bow trembles past 85 % |
+| `salvo` | seconds since a Cinderbox salvo started (`None` = no salvo): the tubes fire top, left, right 0.08 s apart (`cinderbox::SALVO_GAP`), each mouth flares (`tube_flash`), the box kicks once per rocket (`salvo_kick`), the back face's three "loaded" lamps go dark as their tubes fire and relight at `RELOAD` (0.9 s) |
+| `spray` | 0..1 Kiln spray (smoothed while it fires): the firebox coals roar, the chimney's damper rattles, the gun shakes |
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
 | `throw` | Thorn throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles, flicks it at ~0.5 |
 | `bob_phase`, `bob_amount` | walk bob (advance phase by ~speed × 1.2 rad/s; amount = ground speed / run speed) |
 | `sway` | smoothed look velocity (rad/s); the weapon lags |
-| `spin` | Tumbler drum angle — keep a `DrumTurn` per local player: `drum.kick()` on every Tumbler shot, `drum.update(dt)` every frame, `spin = drum.angle()` (one chamber = `DrumTurn::STEP`, eased in with ~10 % overshoot) |
+| `spin` | Tumbler / Thresher drum angle — keep a `DrumTurn` per local player: `drum.kick()` on every Tumbler or Thresher shot, `drum.update(dt)` every frame, `spin = drum.angle()` (one chamber = `DrumTurn::STEP`, eased in with ~10 % overshoot; the Thresher's six shell windows have the same spacing) |
 | `time` | seconds |
 
 Weapons are modelled at real scale (the third-person Shrike holds the same models) and drawn
 at `weapons::VIEWMODEL_SCALE` (0.52) in first person, grip around 0.3 m in front of the
-camera, lower right. Each weapon exposes its muzzle (`WeaponKind::muzzle()`, model space).
+camera, lower right. Each weapon exposes its muzzle (`WeaponLook::muzzle()`, model space). The
+Longwick is canted almost flat (`longwick::view_rotation`) and held further out so the bow
+crosses the view; the right arm keeps its usual angle and runs off the bottom of the screen.
+
+The client draws the shared `shared::loadout::WeaponKind` (wire ids); the visual side is the
+`weapons::WeaponLook` trait (`model`, `muzzle`, `two_handed`, `primary_color`, `glow_color` of the
+default build's alt modes) plus `weapons::weapon_kind(id)` (unknown ids draw the Quill) and
+`weapons::ability_color`. `weapons::weapon_pose(&HeldWeapon)` poses any weapon
+(`ViewmodelAnim::held()` in first person, `third_person_pose(weapon, firing, time)` for other
+players until the replicated state carries their ability and draw).
+
+| class | ability colours (`ability_color`) |
+|---|---|
+| Precision | Brand crimson, Splinter ice, Skewer white-gold, Flurry mint |
+| Scatter | Gust sky, Both Barrels orange, Slug brass, Flak rose |
+| Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
+| Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
+| Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
 
 ### `EnemyAnim`
 
@@ -186,9 +206,16 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | Bellows | `weapon_bellows.gltf` | body, board (lower bellows board, hinged at the front), pleats (squashed vertically about the hinge), glow *Glow* (gauge face, throat rings, vents) |
 | Arclash | `weapon_arclash.gltf` | body, glass (translucent capacitor), crawl *Glow* (filaments, turn about the bore), tips *Glow* (prong tips, strap spark, lamps, charge eye on the back), arcs *Glow* (hidden unless charging / on a strong shot) |
 | Tumbler | `weapon_tumbler.gltf` | body, drum (six chambers, turns about +Z), drum_glow[drum] *Glow* (fuse bands in the chamber mouths), glow *Glow* (muzzle throat, fuse windows) |
+| Lancet (needle pistol: blued lozenge receiver, glass needle vial on top, long thin silver needle with copper fins, a scalpel-spine blade over it, syringe finger flanges; no cylinder, no hammer) | `weapon_lancet.gltf` | body, glass (translucent vial), needles *Glow*, slide (feed sleeve, snaps back on the shot), glow *Glow* (channel under the needle, point ring, eyes) |
+| Thresher (drum-fed auto-scattergun: an upright brass drum like a threshing wheel under the receiver, caged barrel with heat coils, flattened duckbill muzzle; no pump) | `weapon_thresher.gltf` | body, drum (turns about +X), shells[drum] *Core* (six shell windows per face), glow *Glow* (heat coils, duckbill slit, lamps) |
+| Riveter (pneumatic rivet driver: green enamel housing, steel nose with a rivet-set cup, brass feed of hot rivets, copper pressure tank under the nose, rubber hose along the left flank) | `weapon_riveter.gltf` | body, nose (hammers back), rivet[nose] *Core*, heads *Core* (the feed's rivets), glow *Glow* (gauge dial, cap lamp), hose_0..3 (bulge in turn as the pulse passes) |
+| Cinderbox (squat sooty box flaring to a brass face, three short clay tubes in a triangle, cinder vents, carry handle) | `weapon_cinderbox.gltf` | body, cinders *Core* (behind the vent slats), glow *Glow* (mouth rings), flare_0..2 *Glow* (shown while that tube fires), lamp_0..2 *Glow* ("loaded" lamps on the back face) |
+| Longwick (recurve bow of wax-hardened wood, ~1.1 m: dark riser with brass limb pockets, amber limbs sweeping back and flicking forward at the tips, a glowing wick string, a taper arrow nocked) | `weapon_longwick.gltf` | riser, limb_upper / limb_lower (flex about their pockets), string_upper / string_lower *Core* (each a full transform from its flexed tip to the nock), arrow (slides back with the nock), flame[arrow] *Core*, glow *Glow* (riser inlays, pocket rings) |
+| Kiln (ceramic ember sprayer: long terracotta spout on top with glazed bands, firebox belly underneath with grated, glowing doors, a chimney with a hinged damper, brass feed cap) | `weapon_kiln.gltf` | body, damper (rattles), coals *Core* (door grates, chimney mouth), glow *Glow* (spout throat, cap lamp) |
 | right arm (1st person) | `vm_arm.gltf` | forearm (cloth wraps), hand (glove), trim *Team* (cord round the bracer), bracer (brass) |
 | left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
+| arsenal projectiles | `proj_arrow/arrow_pinning/arrow_ember/rivet/cinder_rocket/flak_shell/limpet/mortar_shell/flare.gltf` | `body` + `glow`, all flying along -Z: taper arrow (wax shaft, red cock vane, iron head, the taper's flame behind it, ~0.72 m), pinning arrow (dark shaft, barbed steel head, chain, steel-blue rings), ember arrow (iron cage round a bulb of coals), rivet (red-hot, domed head at the back), cinder rocket (clay casing, brass nose, fins, cinder exhaust), flak shell (brass case, rose timer band, ring of pellet tips), limpet (iron dome on four claws facing -Z, a lamp to blink), mortar shell (fat iron teardrop, tail fins, lilac bands, fuse nose), flare (brass-capped tube, sputtering flame head) |
 | enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 
@@ -209,7 +236,11 @@ on): `lineup` / `lineup_back` (scale and silhouettes, back = the Gaoler's lanter
 `closeup_<enemy>` (front 3/4 + back), `shrike_0..3` + `shrike_closeup` (every movement state
 in profile, team colour), `gnawer_1/2`, `censer_1/2`, `harrier_1/2`, `gaoler_1/2/3`,
 `heron_1/2` (idle, walk, every attack's wind-up early / late and strike, recover, stunned,
-melting, dead), `vm_00..22` (each weapon rest / kick / alt mode, Quill crest folding, Bellows
+melting, dead), `vmx_00..17` (the arsenal in first person: Lancet rest / fire / Skewer charged,
+Thresher drum turning, Riveter hose pulse at the tank and at the tool, Cinderbox salvo 1st / 3rd
+tube, Longwick rest / half / full draw / release, Kiln rest / spraying / Discharge),
+`weapons_x` / `weapons_x34` and `projectiles_x` (the arsenal at real scale), `vm_00..22` (each
+weapon rest / kick / alt mode, Quill crest folding, Bellows
 pump, Arclash Discharge 40 % / full, Tumbler drum turning, switch, punch, thorn throw, bob +
 sway), `weapons` / `weapons_34` (the guns at real scale), `projectiles`, `thorns` (planted at
 angles, lying, in flight), `props`.

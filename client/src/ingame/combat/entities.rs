@@ -37,7 +37,7 @@ use super::enemy_fx;
 use super::fx::{Beams, brand_color, enemy_projectile_color};
 use crate::models::enemies::{EnemyAnim, EnemyKind, EnemyState};
 use crate::models::projectiles::THORN_TIP;
-use crate::models::{ModelId, ModelLibrary, Tint, WeaponKind};
+use crate::models::{ModelId, ModelLibrary, Tint, WeaponKind, WeaponLook as _};
 use crate::palette::palette;
 
 /// Model kind for a replicated enemy kind (unknown kinds draw as Gnawers).

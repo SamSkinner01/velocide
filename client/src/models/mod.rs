@@ -36,7 +36,10 @@ pub use enemies::{EnemyAnim, EnemyKind, EnemyState};
 pub use library::{ModelLibrary, PlayerDrawInfo, ViewmodelDrawInfo};
 pub use rig::{DEFAULT_TEAM_COLOR, JointDef, Pose, Rig, RigPart, Shade, Tint};
 pub use shrike::PlayerAnim;
-pub use weapons::{DrumTurn, ViewmodelAnim, WeaponKind};
+pub use weapons::{
+    Ability, DrumTurn, HeldWeapon, ViewmodelAnim, WeaponKind, WeaponLook, ability_color,
+    weapon_kind,
+};
 
 /// Every model in the game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -54,6 +57,13 @@ pub enum ModelId {
     Bellows,
     Arclash,
     Tumbler,
+    // The expansion arsenal (docs/expansion.md).
+    Lancet,
+    Thresher,
+    Riveter,
+    Cinderbox,
+    Longwick,
+    Kiln,
     /// First-person right forearm + gloved hand that grips every weapon.
     ArmRight,
     /// First-person left forearm + fist (punch / parry, Thorn throw).
@@ -73,6 +83,22 @@ pub enum ModelId {
     AimLaser,
     /// Thrown relay spike (also shown between the knuckles while throwing).
     Thorn,
+    /// Longwick taper arrow, the Pinning Arrow and the Ember Arrow.
+    Arrow,
+    PinningArrow,
+    EmberArrow,
+    /// Riveter hot rivet.
+    Rivet,
+    /// Cinderbox salvo rocket.
+    CinderRocket,
+    /// Flak shell (airbursts into a ring of pellets).
+    FlakShell,
+    /// Limpet sticky charge.
+    Limpet,
+    /// Mortar shell.
+    MortarShell,
+    /// Flare (leaves a burning patch).
+    Flare,
     /// Optional glowing core for ember-burst effects (a cluster of live coals).
     EmberCore,
     // Level props.
@@ -83,7 +109,7 @@ pub enum ModelId {
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 24] = [
+    pub const ALL: [ModelId; 39] = [
         ModelId::Shrike,
         ModelId::Gnawer,
         ModelId::Censer,
@@ -94,6 +120,12 @@ impl ModelId {
         ModelId::Bellows,
         ModelId::Arclash,
         ModelId::Tumbler,
+        ModelId::Lancet,
+        ModelId::Thresher,
+        ModelId::Riveter,
+        ModelId::Cinderbox,
+        ModelId::Longwick,
+        ModelId::Kiln,
         ModelId::ArmRight,
         ModelId::Fist,
         ModelId::Bomb,
@@ -103,6 +135,15 @@ impl ModelId {
         ModelId::Needle,
         ModelId::AimLaser,
         ModelId::Thorn,
+        ModelId::Arrow,
+        ModelId::PinningArrow,
+        ModelId::EmberArrow,
+        ModelId::Rivet,
+        ModelId::CinderRocket,
+        ModelId::FlakShell,
+        ModelId::Limpet,
+        ModelId::MortarShell,
+        ModelId::Flare,
         ModelId::EmberCore,
         ModelId::JumpPad,
         ModelId::Checkpoint,
@@ -128,6 +169,12 @@ impl ModelId {
             ModelId::Bellows => "weapon_bellows.gltf",
             ModelId::Arclash => "weapon_arclash.gltf",
             ModelId::Tumbler => "weapon_tumbler.gltf",
+            ModelId::Lancet => "weapon_lancet.gltf",
+            ModelId::Thresher => "weapon_thresher.gltf",
+            ModelId::Riveter => "weapon_riveter.gltf",
+            ModelId::Cinderbox => "weapon_cinderbox.gltf",
+            ModelId::Longwick => "weapon_longwick.gltf",
+            ModelId::Kiln => "weapon_kiln.gltf",
             ModelId::ArmRight => "vm_arm.gltf",
             ModelId::Fist => "vm_fist.gltf",
             ModelId::Bomb => "proj_bomb.gltf",
@@ -137,6 +184,15 @@ impl ModelId {
             ModelId::Needle => "proj_needle.gltf",
             ModelId::AimLaser => "fx_aim_laser.gltf",
             ModelId::Thorn => "proj_thorn.gltf",
+            ModelId::Arrow => "proj_arrow.gltf",
+            ModelId::PinningArrow => "proj_arrow_pinning.gltf",
+            ModelId::EmberArrow => "proj_arrow_ember.gltf",
+            ModelId::Rivet => "proj_rivet.gltf",
+            ModelId::CinderRocket => "proj_cinder_rocket.gltf",
+            ModelId::FlakShell => "proj_flak_shell.gltf",
+            ModelId::Limpet => "proj_limpet.gltf",
+            ModelId::MortarShell => "proj_mortar_shell.gltf",
+            ModelId::Flare => "proj_flare.gltf",
             ModelId::EmberCore => "fx_ember_core.gltf",
             ModelId::JumpPad => "prop_jump_pad.gltf",
             ModelId::Checkpoint => "prop_checkpoint.gltf",
@@ -158,11 +214,15 @@ impl ModelId {
             ModelId::Bellows => &weapons::bellows::JOINTS,
             ModelId::Arclash => &weapons::arclash::JOINTS,
             ModelId::Tumbler => &weapons::tumbler::JOINTS,
+            ModelId::Lancet => &weapons::lancet::JOINTS,
+            ModelId::Thresher => &weapons::thresher::JOINTS,
+            ModelId::Riveter => &weapons::riveter::JOINTS,
+            ModelId::Cinderbox => &weapons::cinderbox::JOINTS,
+            ModelId::Longwick => &weapons::longwick::JOINTS,
+            ModelId::Kiln => &weapons::kiln::JOINTS,
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
-            ModelId::Bomb | ModelId::Gravewell | ModelId::Wisp | ModelId::Thorn => {
-                projectiles::joints(self)
-            }
+            id if id.is_player_projectile() => projectiles::joints(self),
             other => props::joints(other),
         }
     }
@@ -181,13 +241,37 @@ impl ModelId {
             ModelId::Bellows => weapons::bellows::build(),
             ModelId::Arclash => weapons::arclash::build(),
             ModelId::Tumbler => weapons::tumbler::build(),
+            ModelId::Lancet => weapons::lancet::build(),
+            ModelId::Thresher => weapons::thresher::build(),
+            ModelId::Riveter => weapons::riveter::build(),
+            ModelId::Cinderbox => weapons::cinderbox::build(),
+            ModelId::Longwick => weapons::longwick::build(),
+            ModelId::Kiln => weapons::kiln::build(),
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
-            ModelId::Bomb | ModelId::Gravewell | ModelId::Wisp | ModelId::Thorn => {
-                projectiles::build(self)
-            }
+            id if id.is_player_projectile() => projectiles::build(self),
             other => props::build(other),
         }
+    }
+
+    /// Built by `models::projectiles` (the players' projectiles and the Thorn).
+    fn is_player_projectile(self) -> bool {
+        matches!(
+            self,
+            ModelId::Bomb
+                | ModelId::Gravewell
+                | ModelId::Wisp
+                | ModelId::Thorn
+                | ModelId::Arrow
+                | ModelId::PinningArrow
+                | ModelId::EmberArrow
+                | ModelId::Rivet
+                | ModelId::CinderRocket
+                | ModelId::FlakShell
+                | ModelId::Limpet
+                | ModelId::MortarShell
+                | ModelId::Flare
+        )
     }
 }
 

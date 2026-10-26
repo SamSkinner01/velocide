@@ -17,7 +17,7 @@ use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
 use super::{Rng, attack_style, enemy_fx};
-use crate::models::WeaponKind;
+use crate::models::{WeaponKind, WeaponLook as _};
 use crate::palette::palette;
 
 /// A fading tracer segment.

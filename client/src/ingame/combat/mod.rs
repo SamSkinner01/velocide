@@ -12,6 +12,7 @@
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
 //! `combat_update` (Fx playback, entity bookkeeping, music), `combat_draw`, `combat_hud`.
 
+pub mod arsenal;
 pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
@@ -27,7 +28,7 @@ use shared::input::look_dir;
 use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
 
-use crate::models::WeaponKind;
+use crate::models::{WeaponKind, WeaponLook as _};
 
 use super::{InGame, effects};
 use crate::app::Common;

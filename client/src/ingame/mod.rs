@@ -782,10 +782,11 @@ impl InGame {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
+                let (weapon, ability) = self.held_weapon();
                 self.viewmodel.draw(
                     lib,
-                    self.controls.weapons.current,
-                    self.controls.weapons.mode(),
+                    weapon,
+                    ability,
                     team,
                     self.camera.dip(),
                     self.camera.roll(),

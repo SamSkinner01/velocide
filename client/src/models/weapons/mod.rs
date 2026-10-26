@@ -3,128 +3,217 @@
 //!
 //! Weapon model space: the grip (where the hand closes) is at the origin, the barrel points
 //! down -Z, top is +Y, units are metres. Glow parts are white; their colour comes from
-//! `Pose::glow` (weapon colour per alt mode, brighter while charging / firing).
+//! `Pose::glow` (the colour of the selected ability, [`ability_color`], brighter while
+//! charging / firing). Core parts are each weapon's own fixed hot colour (the Kiln's firebox,
+//! red-hot rivets, the Cinderbox's cinders, the Longwick's arrow flame) and flicker through
+//! `Pose::core`.
+//!
+//! The client draws the shared [`WeaponKind`] (wire ids: `shared::loadout`); everything visual
+//! about a weapon (model, muzzle, colours, how it is held) comes from [`WeaponLook`].
 
 pub mod arclash;
 pub mod arm;
 pub mod bellows;
+pub mod cinderbox;
 pub mod fist;
+pub mod kiln;
+pub mod lancet;
+pub mod longwick;
 pub mod quill;
+pub mod riveter;
+pub mod thresher;
 pub mod tumbler;
 
 use engine::gfx::DrawItem;
 use engine::glam::{EulerRot, Mat4, Quat, Vec2, Vec3, Vec4};
+pub use shared::loadout::{Ability, WeaponKind};
 
 use super::ModelId;
 use super::library::{ModelLibrary, ViewmodelDrawInfo};
 use super::rig::{Pose, Tint};
 use super::shrike::punch_extension;
 
-/// The four guns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum WeaponKind {
-    /// Slot 1: precision spike-caster (hitscan).
-    Quill,
-    /// Slot 2: twin-barrel blast cannon.
-    Bellows,
-    /// Slot 3: arc caster.
-    Arclash,
-    /// Slot 4: bouncing-bomb launcher.
-    Tumbler,
+/// The weapon of a replicated / input weapon id (unknown ids draw the Quill).
+pub fn weapon_kind(id: u8) -> WeaponKind {
+    WeaponKind::from_id(id).unwrap_or_default()
 }
 
-impl WeaponKind {
-    pub const ALL: [WeaponKind; 4] = [
-        WeaponKind::Quill,
-        WeaponKind::Bellows,
-        WeaponKind::Arclash,
-        WeaponKind::Tumbler,
-    ];
+/// Whether the third-person Shrike holds weapon `id` with both hands.
+pub fn two_handed(id: u8) -> bool {
+    weapon_kind(id).two_handed()
+}
 
-    /// Weapon index (0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler); out of range = Quill.
-    pub fn from_index(index: u8) -> WeaponKind {
-        Self::ALL
-            .get(index as usize)
-            .copied()
-            .unwrap_or(WeaponKind::Quill)
-    }
+/// What the client draws for a weapon: its model, muzzle, colours and how it is held.
+pub trait WeaponLook: Copy {
+    fn model(self) -> ModelId;
+    /// Muzzle point in weapon model space (the Longwick: the nocked arrow's head).
+    fn muzzle(self) -> Vec3;
+    /// Held with both hands by the third-person Shrike (the Quill and Lancet are one-handed).
+    fn two_handed(self) -> bool;
+    /// Glow colour of alt mode 0 / 1 of the weapon's *default build*
+    /// ([`WeaponKind::default_build`]); see [`ability_color`] for any build.
+    fn glow_color(self, alt_mode: u8) -> Vec4;
+    /// Colour of the primary fire (tracers, beams, muzzle flashes): Quill pale gold, Bellows
+    /// amber, Arclash blue-white, Tumbler fuse orange, Lancet steel-cyan, Thresher hot amber,
+    /// Riveter red-hot, Cinderbox cinder orange, Longwick wick gold, Kiln ember.
+    fn primary_color(self) -> Vec4;
+}
 
-    pub fn model(self) -> ModelId {
+impl WeaponLook for WeaponKind {
+    fn model(self) -> ModelId {
         match self {
             WeaponKind::Quill => ModelId::Quill,
             WeaponKind::Bellows => ModelId::Bellows,
             WeaponKind::Arclash => ModelId::Arclash,
             WeaponKind::Tumbler => ModelId::Tumbler,
+            WeaponKind::Lancet => ModelId::Lancet,
+            WeaponKind::Thresher => ModelId::Thresher,
+            WeaponKind::Riveter => ModelId::Riveter,
+            WeaponKind::Cinderbox => ModelId::Cinderbox,
+            WeaponKind::Longwick => ModelId::Longwick,
+            WeaponKind::Kiln => ModelId::Kiln,
         }
     }
 
-    /// Muzzle point in weapon model space.
-    pub fn muzzle(self) -> Vec3 {
+    fn muzzle(self) -> Vec3 {
         match self {
             WeaponKind::Quill => quill::MUZZLE,
             WeaponKind::Bellows => bellows::MUZZLE,
             WeaponKind::Arclash => arclash::MUZZLE,
             WeaponKind::Tumbler => tumbler::MUZZLE,
+            WeaponKind::Lancet => lancet::MUZZLE,
+            WeaponKind::Thresher => thresher::MUZZLE,
+            WeaponKind::Riveter => riveter::MUZZLE,
+            WeaponKind::Cinderbox => cinderbox::MUZZLE,
+            WeaponKind::Longwick => longwick::MUZZLE,
+            WeaponKind::Kiln => kiln::MUZZLE,
         }
     }
 
-    /// Held with both hands by the third-person Shrike (the Quill is one-handed).
-    pub fn two_handed(self) -> bool {
-        self != WeaponKind::Quill
+    fn two_handed(self) -> bool {
+        !matches!(self, WeaponKind::Quill | WeaponKind::Lancet)
     }
 
-    /// Where the grip sits in view space (lower right of the screen).
-    fn view_offset(self) -> Vec3 {
-        match self {
-            WeaponKind::Quill => Vec3::new(0.118, -0.112, -0.3),
-            WeaponKind::Bellows => Vec3::new(0.13, -0.13, -0.31),
-            WeaponKind::Arclash => Vec3::new(0.13, -0.122, -0.31),
-            WeaponKind::Tumbler => Vec3::new(0.14, -0.148, -0.32),
-        }
+    fn glow_color(self, alt_mode: u8) -> Vec4 {
+        ability_color(self.default_build().ability(alt_mode % 2))
     }
 
-    /// Glow colour for an alt-fire mode (0 = alt A, 1 = alt B): Quill Brand crimson / Splinter
-    /// ice; Bellows Gust sky / Both Barrels orange; Arclash Wisp violet / Discharge blue;
-    /// Tumbler Breach orange-red / Gravewell green.
-    pub fn glow_color(self, alt_mode: u8) -> Vec4 {
-        let c = match (self, alt_mode % 2) {
-            (WeaponKind::Quill, 0) => Vec3::new(1.0, 0.22, 0.38),
-            (WeaponKind::Quill, _) => Vec3::new(0.55, 0.95, 1.0),
-            (WeaponKind::Bellows, 0) => Vec3::new(0.72, 0.9, 1.0),
-            (WeaponKind::Bellows, _) => Vec3::new(1.0, 0.5, 0.15),
-            (WeaponKind::Arclash, 0) => Vec3::new(0.75, 0.5, 1.0),
-            (WeaponKind::Arclash, _) => Vec3::new(0.4, 0.8, 1.0),
-            (WeaponKind::Tumbler, 0) => Vec3::new(1.0, 0.4, 0.1),
-            (WeaponKind::Tumbler, _) => Vec3::new(0.45, 1.0, 0.55),
-        };
-        c.extend(1.0)
-    }
-
-    /// Colour of the primary fire (tracers, beams, muzzle flashes): Quill pale gold, Bellows
-    /// amber, Arclash blue-white, Tumbler fuse orange.
-    pub fn primary_color(self) -> Vec4 {
+    fn primary_color(self) -> Vec4 {
         match self {
             WeaponKind::Quill => Vec4::new(1.0, 0.9, 0.6, 1.0),
             WeaponKind::Bellows => Vec4::new(1.0, 0.7, 0.3, 1.0),
             WeaponKind::Arclash => Vec4::new(0.6, 0.85, 1.0, 1.0),
             WeaponKind::Tumbler => Vec4::new(1.0, 0.55, 0.15, 1.0),
+            WeaponKind::Lancet => Vec4::new(0.75, 0.95, 1.0, 1.0),
+            WeaponKind::Thresher => Vec4::new(1.0, 0.62, 0.25, 1.0),
+            WeaponKind::Riveter => Vec4::new(1.0, 0.42, 0.18, 1.0),
+            WeaponKind::Cinderbox => Vec4::new(1.0, 0.4, 0.12, 1.0),
+            WeaponKind::Longwick => Vec4::new(1.0, 0.8, 0.42, 1.0),
+            WeaponKind::Kiln => Vec4::new(1.0, 0.5, 0.1, 1.0),
         }
+    }
+}
+
+/// Glow colour of an ability: the held weapon's glow parts take the selected ability's colour
+/// (and its tracers / effects use it). The two abilities of every class pool differ clearly:
+///
+/// | class | abilities |
+/// |---|---|
+/// | Precision | Brand crimson, Splinter ice, Skewer white-gold, Flurry mint |
+/// | Scatter | Gust sky, Both Barrels orange, Slug brass, Flak rose |
+/// | Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
+/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
+/// | Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
+pub fn ability_color(a: Ability) -> Vec4 {
+    let c = match a {
+        Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
+        Ability::Splinter => Vec3::new(0.55, 0.95, 1.0),
+        Ability::Gust => Vec3::new(0.72, 0.9, 1.0),
+        Ability::BothBarrels => Vec3::new(1.0, 0.5, 0.15),
+        Ability::Wisp => Vec3::new(0.75, 0.5, 1.0),
+        Ability::Discharge => Vec3::new(0.4, 0.8, 1.0),
+        Ability::Breach => Vec3::new(1.0, 0.4, 0.1),
+        Ability::Gravewell => Vec3::new(0.45, 1.0, 0.55),
+        Ability::Skewer => Vec3::new(1.0, 0.95, 0.55),
+        Ability::Flurry => Vec3::new(0.35, 1.0, 0.72),
+        Ability::Slug => Vec3::new(1.0, 0.82, 0.36),
+        Ability::Flak => Vec3::new(1.0, 0.42, 0.68),
+        Ability::Volley => Vec3::new(1.0, 0.76, 0.2),
+        Ability::Flare => Vec3::new(1.0, 0.28, 0.2),
+        Ability::Limpet => Vec3::new(0.95, 1.0, 0.3),
+        Ability::Mortar => Vec3::new(0.82, 0.6, 1.0),
+        Ability::TripleNock => Vec3::new(0.7, 1.0, 0.35),
+        Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
+        Ability::EmberArrow => Vec3::new(1.0, 0.55, 0.16),
+    };
+    c.extend(1.0)
+}
+
+/// Where the grip sits in view space (lower right of the screen).
+fn view_offset(w: WeaponKind) -> Vec3 {
+    match w {
+        WeaponKind::Quill => Vec3::new(0.118, -0.112, -0.3),
+        WeaponKind::Bellows => Vec3::new(0.13, -0.13, -0.31),
+        WeaponKind::Arclash => Vec3::new(0.13, -0.122, -0.31),
+        WeaponKind::Tumbler => Vec3::new(0.14, -0.148, -0.32),
+        WeaponKind::Lancet => Vec3::new(0.115, -0.108, -0.3),
+        WeaponKind::Thresher => Vec3::new(0.135, -0.13, -0.31),
+        WeaponKind::Riveter => Vec3::new(0.13, -0.122, -0.31),
+        WeaponKind::Cinderbox => Vec3::new(0.14, -0.15, -0.32),
+        WeaponKind::Longwick => longwick::VIEW_OFFSET,
+        WeaponKind::Kiln => Vec3::new(0.135, -0.135, -0.31),
+    }
+}
+
+/// Extra view rotation: the Longwick is canted so its long limbs cross the screen instead of
+/// filling it.
+fn view_rotation(w: WeaponKind) -> Quat {
+    match w {
+        WeaponKind::Longwick => longwick::view_rotation(),
+        _ => Quat::IDENTITY,
+    }
+}
+
+/// Recoil at full kick: (pull back in metres before scaling, muzzle climb in radians).
+fn kick_amount(w: WeaponKind) -> (f32, f32) {
+    match w {
+        WeaponKind::Quill => (0.04, 0.2),
+        WeaponKind::Bellows => (0.085, 0.45),
+        WeaponKind::Arclash => (0.016, 0.05),
+        WeaponKind::Tumbler => (0.09, 0.32),
+        WeaponKind::Lancet => (0.03, 0.11),
+        WeaponKind::Thresher => (0.07, 0.3),
+        WeaponKind::Riveter => (0.022, 0.05),
+        WeaponKind::Cinderbox => (0.05, 0.16),
+        // The string snaps forward and the bow rocks towards the target.
+        WeaponKind::Longwick => (-0.035, -0.06),
+        WeaponKind::Kiln => (0.01, 0.025),
     }
 }
 
 /// Everything the first-person viewmodel depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct ViewmodelAnim {
-    /// Weapon index (see [`WeaponKind::from_index`]).
-    pub weapon: u8,
-    /// Selected alt-fire mode (0 or 1): changes the weapon's glow colour.
-    pub alt_mode: u8,
+    /// The held weapon.
+    pub weapon: WeaponKind,
+    /// Selected ability (alt fire): the weapon glows in its colour ([`ability_color`]).
+    pub ability: Ability,
     /// Recoil 0..1 (set to 1 on fire, decay over ~0.15–0.4 s depending on the weapon). Also
-    /// folds the Quill's crest flat and pumps the Bellows.
+    /// folds the Quill's crest flat, pumps the Bellows, drives the Riveter's nose and hose,
+    /// and snaps the Longwick's string.
     pub fire_kick: f32,
     /// Alt-fire charge 0..1 (Arclash Discharge: the capacitor brightens towards white, arcs
-    /// jump between the prongs and the gun shakes above 0.6).
+    /// jump between the prongs; Skewer: the barrel glows white-hot). The gun shakes above 0.6.
     pub alt_charge: f32,
+    /// Longwick draw 0..1: the string and the nocked arrow pull back, the limbs flex, the
+    /// left hand draws, the wick string glows hotter and strobes at full draw.
+    pub draw: f32,
+    /// Seconds since the Cinderbox's last salvo started (`None`: no salvo): its three tubes
+    /// fire in turn, each with its own kick.
+    pub salvo: Option<f32>,
+    /// Kiln spray 0..1 (smoothed while the trigger is held): the firebox roars brighter, the
+    /// damper rattles, the nozzle shakes.
+    pub spray: f32,
     /// Weapon raise 0..1 after a switch (0 = just switched, below the screen; 1 = ready).
     pub switch: f32,
     /// Punch progress 0..1 (0 = not punching): the left fist thrusts forward.
@@ -139,14 +228,53 @@ pub struct ViewmodelAnim {
     /// Smoothed look velocity (radians per second-ish, x = yaw right, y = pitch up); the
     /// weapon lags behind it.
     pub sway: Vec2,
-    /// Tumbler drum angle in radians (see [`DrumTurn`]).
+    /// Drum angle in radians (Tumbler, Thresher; see [`DrumTurn`]).
+    pub spin: f32,
+    pub time: f64,
+}
+
+impl ViewmodelAnim {
+    /// The weapon-pose inputs of this frame.
+    pub fn held(&self) -> HeldWeapon {
+        HeldWeapon {
+            weapon: self.weapon,
+            ability: self.ability,
+            kick: self.fire_kick,
+            charge: self.alt_charge,
+            draw: self.draw,
+            salvo: self.salvo,
+            spray: self.spray,
+            spin: self.spin,
+            time: self.time,
+        }
+    }
+}
+
+/// What a weapon's pose depends on (first person: [`ViewmodelAnim::held`]; third person:
+/// [`third_person_pose`]).
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct HeldWeapon {
+    pub weapon: WeaponKind,
+    pub ability: Ability,
+    /// Recoil 0..1.
+    pub kick: f32,
+    /// Alt charge 0..1 (Discharge, Skewer).
+    pub charge: f32,
+    /// Longwick draw 0..1.
+    pub draw: f32,
+    /// Seconds since the Cinderbox salvo started.
+    pub salvo: Option<f32>,
+    /// Kiln spray 0..1.
+    pub spray: f32,
+    /// Drum angle (Tumbler, Thresher).
     pub spin: f32,
     pub time: f64,
 }
 
 /// The Tumbler's drum: turns one chamber per shot, easing in with a little overshoot (keep
-/// one per local player; [`DrumTurn::kick`] on every Tumbler shot, [`DrumTurn::update`] every
-/// frame, feed [`DrumTurn::angle`] into [`ViewmodelAnim::spin`]).
+/// one per local player; [`DrumTurn::kick`] on every Tumbler / Thresher shot,
+/// [`DrumTurn::update`] every frame, feed [`DrumTurn::angle`] into [`ViewmodelAnim::spin`]).
+/// The Thresher's drum has the same six-way symmetry, so one step is one shell for it too.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct DrumTurn {
     angle: f32,
@@ -197,28 +325,20 @@ impl DrumTurn {
     }
 }
 
-fn wave(time: f64, hz: f64) -> f32 {
+pub(crate) fn wave(time: f64, hz: f64) -> f32 {
     ((time * hz).fract() as f32 * std::f32::consts::TAU).sin()
 }
 
 /// Pose of a weapon model: glow colour / intensity and moving parts.
-/// `kick` = recoil 0..1, `charge` = alt charge 0..1 (Arclash Discharge), `spin` = Tumbler drum
-/// angle.
-pub fn weapon_pose(
-    weapon: WeaponKind,
-    alt_mode: u8,
-    kick: f32,
-    charge: f32,
-    spin: f32,
-    time: f64,
-) -> Pose {
-    let base = weapon.glow_color(alt_mode).truncate();
-    let kick = kick.clamp(0.0, 1.0);
-    let charge = charge.clamp(0.0, 1.0);
+pub fn weapon_pose(h: &HeldWeapon) -> Pose {
+    let base = ability_color(h.ability).truncate();
+    let kick = unit(h.kick);
+    let charge = unit(h.charge);
+    let time = h.time;
     let pulse = 0.85 + 0.15 * wave(time, 1.3);
     let mut glow = 0.9 * pulse + kick * 0.8;
     let mut color = base;
-    let mut pose = match weapon {
+    let mut pose = match h.weapon {
         WeaponKind::Quill => {
             let mut pose = Pose::rest(quill::JOINTS.len());
             // The crest folds flat front to back on the shot, then rises again.
@@ -254,8 +374,7 @@ pub fn weapon_pose(
             let crawl = ((time * (2.2 + charge as f64 * 12.0)) % 1000.0) as f32;
             pose.rotate(arclash::CRAWL, Quat::from_rotation_z(crawl));
             let crackle = 0.12 * wave(time, 7.3) * wave(time, 2.9);
-            glow += crackle + charge * (1.6 + 0.5 * wave(time, 17.0));
-            color = base + Vec3::splat(charge * charge * 0.7);
+            glow += crackle;
             let flicker = (time * 23.0).fract() < 0.65;
             let arcing = (charge > 0.08 && flicker) || kick > 0.6;
             if !arcing {
@@ -265,23 +384,46 @@ pub fn weapon_pose(
         }
         WeaponKind::Tumbler => {
             let mut pose = Pose::rest(tumbler::JOINTS.len());
-            pose.rotate(tumbler::DRUM, Quat::from_rotation_z(-spin));
+            pose.rotate(tumbler::DRUM, Quat::from_rotation_z(-h.spin));
             glow = 0.8 + 0.3 * wave(time, 1.1) + kick * 1.4;
             pose
         }
+        WeaponKind::Lancet => lancet::pose(h, &mut glow),
+        WeaponKind::Thresher => thresher::pose(h, &mut glow),
+        WeaponKind::Riveter => riveter::pose(h, &mut glow),
+        WeaponKind::Cinderbox => cinderbox::pose(h, &mut glow),
+        WeaponKind::Longwick => longwick::pose(h, &mut glow, &mut color),
+        WeaponKind::Kiln => kiln::pose(h, &mut glow),
     };
+    // Charging an alt (Discharge, Skewer): brighter and whiter towards full.
+    if charge > 0.0 {
+        glow += charge * (1.6 + 0.5 * wave(time, 17.0));
+        color += Vec3::splat(charge * charge * 0.7);
+    }
     pose.glow = (color * glow).extend(1.0);
     pose
 }
 
-/// Pose of the weapon held by a third-person Shrike (`firing` = recoil 0..1).
+/// Pose of the weapon held by a third-person Shrike (`firing` = recoil 0..1) with its
+/// default build's first ability.
 pub fn third_person_pose(weapon: WeaponKind, firing: f32, time: f64) -> Pose {
-    weapon_pose(weapon, 0, firing, 0.0, 0.0, time)
+    weapon_pose(&HeldWeapon {
+        weapon,
+        ability: weapon.default_build().abilities[0],
+        kick: firing,
+        time,
+        ..HeldWeapon::default()
+    })
 }
 
-fn smoothstep(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
+pub(crate) fn smoothstep(t: f32) -> f32 {
+    let t = unit(t);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// `x` clamped to 0..1, NaN = 0 (animation inputs come from outside).
+pub(crate) fn unit(x: f32) -> f32 {
+    if x.is_nan() { 0.0 } else { x.clamp(0.0, 1.0) }
 }
 
 /// Weapons are modelled at real scale (the third-person Shrike holds them); first person
@@ -290,14 +432,12 @@ pub const VIEWMODEL_SCALE: f32 = 0.52;
 
 /// Grip transform of the held weapon in view space.
 pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
-    let w = WeaponKind::from_index(anim.weapon);
-    let kick = anim.fire_kick.clamp(0.0, 1.0);
-    let (kick_back, kick_pitch) = match w {
-        WeaponKind::Quill => (0.04, 0.2),
-        WeaponKind::Bellows => (0.085, 0.45),
-        WeaponKind::Arclash => (0.016, 0.05),
-        WeaponKind::Tumbler => (0.09, 0.32),
-    };
+    let w = anim.weapon;
+    let kick = anim
+        .fire_kick
+        .clamp(0.0, 1.0)
+        .max(cinderbox::salvo_kick(anim.salvo));
+    let (kick_back, kick_pitch) = kick_amount(w);
     let lowered = (1.0 - smoothstep(anim.switch)).powi(2);
     let punch = punch_extension(anim.punch).max(throw_extension(anim.throw) * 0.6);
     let bob = anim.bob_amount.clamp(0.0, 1.0);
@@ -305,17 +445,32 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
     let bob_offset = Vec3::new(s * 0.008, -(c * c) * 0.009 + 0.0045, 0.0) * bob;
     let sway = anim.sway.clamp(Vec2::splat(-3.0), Vec2::splat(3.0));
     let sway_offset = Vec3::new(-sway.x * 0.006, -sway.y * 0.006, 0.0);
-    // Discharge shake near full charge.
-    let shake = if w == WeaponKind::Arclash && anim.alt_charge > 0.6 {
-        let a = (anim.alt_charge.min(1.0) - 0.6) / 0.4;
-        Vec3::new(wave(anim.time, 31.0), wave(anim.time, 37.0), 0.0) * 0.0025 * a
+    // Shake near a full alt charge, at full draw and while the Kiln roars.
+    let tremble = if anim.alt_charge > 0.6 {
+        (anim.alt_charge.min(1.0) - 0.6) / 0.4
     } else {
-        Vec3::ZERO
+        0.0
+    } + if w == WeaponKind::Longwick {
+        0.35 * smoothstep((anim.draw - 0.85) / 0.15)
+    } else {
+        0.0
+    } + if w == WeaponKind::Kiln {
+        0.5 * unit(anim.spray)
+    } else {
+        0.0
     };
-    let offset = w.view_offset()
-        + bob_offset
+    let shake = Vec3::new(wave(anim.time, 31.0), wave(anim.time, 37.0), 0.0) * 0.0025 * tremble;
+    // The bow comes up and in towards the eye as it is drawn.
+    let draw = if w == WeaponKind::Longwick {
+        smoothstep(anim.draw)
+    } else {
+        0.0
+    };
+    let offset = view_offset(w)
+        + bob_offset * (1.0 - 0.6 * draw)
         + sway_offset
         + shake
+        + longwick::DRAW_SHIFT * draw
         + Vec3::new(0.0, -0.24 * lowered, 0.04 * lowered)
         + Vec3::new(0.0, -0.008, kick_back * VIEWMODEL_SCALE) * kick
         + Vec3::new(0.025, -0.04, 0.02) * punch;
@@ -324,7 +479,7 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
         0.045 - sway.x * 0.025 + 0.05 * punch,
         kick_pitch * kick - 0.7 * lowered + sway.y * 0.02 - 0.1 * punch,
         -0.04 * s * bob - 0.2 * lowered,
-    );
+    ) * view_rotation(w);
     Mat4::from_scale_rotation_translation(Vec3::splat(VIEWMODEL_SCALE), rotation, offset)
 }
 
@@ -382,18 +537,14 @@ pub(crate) fn draw_viewmodel(
     tint: &Tint,
     out: &mut Vec<DrawItem>,
 ) -> ViewmodelDrawInfo {
-    let w = WeaponKind::from_index(anim.weapon);
+    let w = anim.weapon;
     let gun = viewmodel_transform(anim);
-    let pose = weapon_pose(
-        w,
-        anim.alt_mode,
-        anim.fire_kick.clamp(0.0, 1.0),
-        anim.alt_charge.clamp(0.0, 1.0),
-        anim.spin,
-        anim.time,
-    );
+    let held = anim.held();
+    let pose = weapon_pose(&held);
     lib.get(w.model()).draw(&pose, gun, tint, out);
-    lib.get(ModelId::ArmRight).draw_static(gun, tint, out);
+    // The arm doesn't follow a weapon's cant (the bow's): it still runs down off the screen.
+    let arm = gun * Mat4::from_quat(view_rotation(w).inverse());
+    lib.get(ModelId::ArmRight).draw_static(arm, tint, out);
 
     let mut fist_point = None;
     if let Some(fist) = fist_transform(anim) {
@@ -418,6 +569,13 @@ pub(crate) fn draw_viewmodel(
             fist_point =
                 Some(thorn.transform_point3(Vec3::new(0.0, 0.0, -super::projectiles::THORN_TIP)));
         }
+    } else if w == WeaponKind::Longwick && anim.draw > 0.01 {
+        // The left hand pinches the nock and draws the string back.
+        let hand = longwick::draw_hand(gun, anim.draw, anim.time);
+        let mut pose = Pose::rest(fist::JOINTS.len());
+        let ember = 0.5 + 0.5 * anim.draw;
+        pose.glow = Vec4::new(ember, ember * 0.85, ember * 0.7, 1.0);
+        lib.get(ModelId::Fist).draw(&pose, hand, tint, out);
     }
     ViewmodelDrawInfo {
         muzzle: gun.transform_point3(w.muzzle()),

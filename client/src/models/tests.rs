@@ -10,7 +10,9 @@ use super::kit::tests::assert_valid;
 use super::library::match_parts;
 use super::rig::{Pose, Rig, Tint, validate_joints};
 use super::shrike::PlayerAnim;
-use super::weapons::{self, DrumTurn, ViewmodelAnim, WeaponKind};
+use super::weapons::{
+    self, Ability, DrumTurn, HeldWeapon, ViewmodelAnim, WeaponKind, WeaponLook, ability_color,
+};
 use super::{ModelId, generate_all, load_parts, props, shrike};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -297,7 +299,7 @@ fn player_poses_are_finite() {
     for (name, anim) in player_variants() {
         let pose = shrike::pose(&anim);
         assert_pose_finite(ModelId::Shrike, &pose, name);
-        let w = WeaponKind::from_index(anim.weapon);
+        let w = weapons::weapon_kind(anim.weapon);
         assert_pose_finite(
             w.model(),
             &weapons::third_person_pose(w, anim.firing, anim.time),
@@ -311,7 +313,7 @@ fn shrike_aims_its_weapon_along_the_look_direction() {
     // With no locomotion the gun barrel should point roughly along the aim (yaw + pitch).
     let rig = dummy_rig(ModelId::Shrike);
     for pitch in [-0.6f32, 0.0, 0.6] {
-        for weapon in 0..4u8 {
+        for weapon in 0..WeaponKind::COUNT as u8 {
             let anim = PlayerAnim {
                 on_ground: true,
                 pitch,
@@ -540,52 +542,51 @@ fn viewmodels_are_finite_and_framed() {
         time: 4321.0,
         ..Default::default()
     };
-    for w in 0..4u8 {
-        let weapon = WeaponKind::from_index(w);
+    for weapon in WeaponKind::ALL {
+        let ability = weapon.default_build().abilities[1];
         for anim in [
-            ViewmodelAnim { weapon: w, ..base },
+            ViewmodelAnim { weapon, ..base },
             ViewmodelAnim {
-                weapon: w,
+                weapon,
+                ability,
                 fire_kick: 1.0,
                 alt_charge: 1.0,
-                alt_mode: 1,
+                draw: 1.0,
+                salvo: Some(0.09),
+                spray: 1.0,
                 ..base
             },
             ViewmodelAnim {
-                weapon: w,
+                weapon,
                 punch: 0.25,
                 bob_amount: 1.0,
                 bob_phase: 2.0,
                 sway: Vec2::new(9.0, -9.0),
+                draw: 0.5,
                 ..base
             },
             ViewmodelAnim {
-                weapon: w,
+                weapon,
                 throw: 0.4,
                 spin: 1e4,
+                salvo: Some(f32::INFINITY),
+                draw: f32::NAN,
                 ..base
             },
             ViewmodelAnim {
-                weapon: w,
+                weapon,
                 switch: 0.0,
                 ..base
             },
         ] {
             let gun = weapons::viewmodel_transform(&anim);
-            assert!(gun.is_finite());
-            let pose = weapons::weapon_pose(
-                weapon,
-                anim.alt_mode,
-                anim.fire_kick,
-                anim.alt_charge,
-                anim.spin,
-                anim.time,
-            );
+            assert!(gun.is_finite(), "{weapon:?}");
+            let pose = weapons::weapon_pose(&anim.held());
             assert_pose_finite(weapon.model(), &pose, "viewmodel");
         }
         // At rest: grip on the lower right, muzzle in front of the camera and inside the
         // 60 degree viewmodel frustum.
-        let gun = weapons::viewmodel_transform(&ViewmodelAnim { weapon: w, ..base });
+        let gun = weapons::viewmodel_transform(&ViewmodelAnim { weapon, ..base });
         let grip = gun.transform_point3(Vec3::ZERO);
         let muzzle = gun.transform_point3(weapon.muzzle());
         assert!(
@@ -600,7 +601,7 @@ fn viewmodels_are_finite_and_framed() {
         );
         // Just switched: lowered out of view.
         let lowered = weapons::viewmodel_transform(&ViewmodelAnim {
-            weapon: w,
+            weapon,
             switch: 0.0,
             ..base
         });
@@ -637,13 +638,28 @@ fn drum_turns_one_chamber_per_shot_with_overshoot() {
     assert!(drum.angle().is_finite());
 }
 
+fn held(weapon: WeaponKind) -> HeldWeapon {
+    HeldWeapon {
+        weapon,
+        ability: weapon.default_build().abilities[0],
+        time: 1.0,
+        ..HeldWeapon::default()
+    }
+}
+
 #[test]
 fn weapon_mechanisms_move() {
-    use super::weapons::{arclash, bellows, quill, tumbler};
+    use super::weapons::{
+        arclash, bellows, cinderbox, kiln, lancet, longwick, quill, riveter, thresher, tumbler,
+    };
     let moved = |pose: &Pose, part: usize| !pose.locals[part].abs_diff_eq(Mat4::IDENTITY, 1e-5);
+    let pose = |h: HeldWeapon| weapons::weapon_pose(&h);
     // Quill: the crest folds front to back on the shot and stands at rest.
-    let rest = weapons::weapon_pose(WeaponKind::Quill, 0, 0.0, 0.0, 0.0, 1.0);
-    let kick = weapons::weapon_pose(WeaponKind::Quill, 0, 1.0, 0.0, 0.0, 1.0);
+    let rest = pose(held(WeaponKind::Quill));
+    let kick = pose(HeldWeapon {
+        kick: 1.0,
+        ..held(WeaponKind::Quill)
+    });
     for i in 0..quill::CREST_COUNT {
         assert!(
             !moved(&rest, quill::QUILL + i) && moved(&kick, quill::QUILL + i),
@@ -651,32 +667,159 @@ fn weapon_mechanisms_move() {
         );
     }
     // Bellows: the pump closes the board half way through the recoil, open at rest.
-    let pump = weapons::weapon_pose(WeaponKind::Bellows, 0, 0.5, 0.0, 0.0, 1.0);
-    let open = weapons::weapon_pose(WeaponKind::Bellows, 0, 0.0, 0.0, 0.0, 1.0);
+    let pump = pose(HeldWeapon {
+        kick: 0.5,
+        ..held(WeaponKind::Bellows)
+    });
+    let open = pose(held(WeaponKind::Bellows));
     assert!(moved(&pump, bellows::BOARD) && moved(&pump, bellows::PLEATS));
     assert!(!moved(&open, bellows::BOARD));
     // Arclash: arcs only while charging (or on a strong shot); the glow whitens with charge.
-    let calm = weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 0.0, 0.0, 1.0);
+    let discharge = HeldWeapon {
+        ability: Ability::Discharge,
+        ..held(WeaponKind::Arclash)
+    };
+    let calm = pose(discharge);
     assert!(calm.is_hidden(arclash::ARCS));
     let arcing = (0..8)
-        .map(|i| weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 1.0, 0.0, i as f64 / 50.0))
+        .map(|i| {
+            pose(HeldWeapon {
+                charge: 1.0,
+                time: i as f64 / 50.0,
+                ..discharge
+            })
+        })
         .filter(|p| !p.is_hidden(arclash::ARCS))
         .count();
     assert!(arcing > 0);
-    let full = weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 1.0, 0.0, 1.0);
+    let full = pose(HeldWeapon {
+        charge: 1.0,
+        ..discharge
+    });
     assert!(full.glow.x > calm.glow.x * 2.0);
-    // Tumbler: the drum follows the spin angle.
-    let turned = weapons::weapon_pose(WeaponKind::Tumbler, 0, 0.0, 0.0, DrumTurn::STEP, 1.0);
-    assert!(moved(&turned, tumbler::DRUM));
-    // Mode colours differ per weapon and mode.
-    let mut colours: Vec<[u32; 3]> = WeaponKind::ALL
+    // Tumbler and Thresher: the drum follows the spin angle.
+    let turned = HeldWeapon {
+        spin: DrumTurn::STEP,
+        ..HeldWeapon::default()
+    };
+    assert!(moved(
+        &pose(HeldWeapon {
+            weapon: WeaponKind::Tumbler,
+            ..turned
+        }),
+        tumbler::DRUM
+    ));
+    assert!(moved(
+        &pose(HeldWeapon {
+            weapon: WeaponKind::Thresher,
+            ..turned
+        }),
+        thresher::DRUM
+    ));
+    // Lancet: the feed sleeve snaps back on the shot.
+    assert!(!moved(&pose(held(WeaponKind::Lancet)), lancet::SLIDE));
+    assert!(moved(
+        &pose(HeldWeapon {
+            kick: 0.8,
+            ..held(WeaponKind::Lancet)
+        }),
+        lancet::SLIDE
+    ));
+    // Riveter: the nose hammers back and a pulse runs down the hose, tank to grip.
+    let riveter = |kick| {
+        pose(HeldWeapon {
+            kick,
+            ..held(WeaponKind::Riveter)
+        })
+    };
+    assert!(moved(&riveter(1.0), riveter::NOSE));
+    let bulge = |p: &Pose, i: usize| p.locals[riveter::HOSE + i].x_axis.length();
+    let early = riveter(0.95);
+    let late = riveter(0.8);
+    assert!(
+        bulge(&early, 3) > bulge(&early, 0) + 0.05,
+        "starts at the tank"
+    );
+    assert!(
+        bulge(&late, 0) > bulge(&late, 3) + 0.05,
+        "arrives at the tool"
+    );
+    assert!(riveter::pulse_position(0.65) < 0.0 && riveter::pulse_position(1.0) >= 4.0);
+    // Cinderbox: the tubes flare in turn, one kick per rocket; nothing without a salvo.
+    let salvo = |s: Option<f32>| {
+        pose(HeldWeapon {
+            salvo: s,
+            ..held(WeaponKind::Cinderbox)
+        })
+    };
+    let idle = salvo(None);
+    assert!((0..cinderbox::TUBES).all(|i| idle.is_hidden(cinderbox::FLARE + i)));
+    for i in 0..cinderbox::TUBES {
+        let p = salvo(Some(i as f32 * cinderbox::SALVO_GAP + 0.01));
+        assert!(!p.is_hidden(cinderbox::FLARE + i), "tube {i} flares");
+        assert!(cinderbox::salvo_kick(Some(i as f32 * cinderbox::SALVO_GAP)) > 0.9);
+    }
+    assert!(cinderbox::salvo_kick(None) == 0.0 && cinderbox::salvo_kick(Some(0.9)) < 0.01);
+    // Longwick: drawing pulls the arrow back and flexes the limbs; the release hides the
+    // arrow; full draw glows hotter.
+    let bow = |draw: f32, kick: f32| {
+        pose(HeldWeapon {
+            draw,
+            kick,
+            ..held(WeaponKind::Longwick)
+        })
+    };
+    let (slack, drawn) = (bow(0.0, 0.0), bow(1.0, 0.0));
+    assert!(!moved(&slack, longwick::LIMB_U) && moved(&drawn, longwick::LIMB_U));
+    let arrow_z = |p: &Pose| p.locals[longwick::ARROW].w_axis.z;
+    assert!(arrow_z(&drawn) > arrow_z(&slack) + longwick::DRAW_LENGTH * 0.9);
+    assert!(bow(0.0, 1.0).is_hidden(longwick::ARROW) && !slack.is_hidden(longwick::ARROW));
+    assert!(drawn.glow.x > slack.glow.x * 1.8 && drawn.core.x > slack.core.x);
+    // The strings reach the drawn nock from the flexed tips (their meshes end at the rest
+    // nock, `MUZZLE.y` high, in joint space relative to the tip).
+    let rig = dummy_rig(ModelId::Longwick);
+    let nock = longwick::nock_position(1.0, 0.0, 1.0);
+    for (part, tip) in [
+        (longwick::STRING_U, longwick::TIP_U),
+        (longwick::STRING_L, longwick::TIP_L),
+    ] {
+        let w = rig.part_transform(&drawn, Mat4::IDENTITY, part);
+        let rest_nock = longwick::nock_position(0.0, 0.0, 1.0);
+        let end = w.transform_point3(rest_nock - Vec3::from(tip));
+        assert!(
+            end.distance(nock) < 0.01,
+            "string {part} ends at {end}, nock {nock}"
+        );
+    }
+    // Kiln: spraying rattles the damper and stokes the coals.
+    let kiln_pose = |spray: f32, time: f64| {
+        pose(HeldWeapon {
+            spray,
+            time,
+            ..held(WeaponKind::Kiln)
+        })
+    };
+    let roaring = (0..10).any(|i| moved(&kiln_pose(1.0, 0.3 + i as f64 * 0.013), kiln::DAMPER));
+    assert!(roaring);
+    assert!(kiln_pose(1.0, 1.0).core.x > kiln_pose(0.0, 1.0).core.x + 0.5);
+    // Ability colours: every ability has its own, and they drive the glow.
+    let mut colours: Vec<[u32; 3]> = Ability::ALL
         .iter()
-        .flat_map(|w| [w.glow_color(0), w.glow_color(1)])
+        .map(|a| ability_color(*a))
         .map(|c| [c.x, c.y, c.z].map(|v| (v * 100.0) as u32))
         .collect();
     colours.sort_unstable();
     colours.dedup();
-    assert_eq!(colours.len(), 8);
+    assert_eq!(colours.len(), Ability::COUNT);
+    let a = pose(HeldWeapon {
+        ability: Ability::Slug,
+        ..held(WeaponKind::Thresher)
+    });
+    let b = pose(HeldWeapon {
+        ability: Ability::Flak,
+        ..held(WeaponKind::Thresher)
+    });
+    assert!(a.glow.distance(b.glow) > 0.2);
 }
 
 #[test]
@@ -743,9 +886,20 @@ fn prop_poses_are_finite() {
 
 #[test]
 fn lookups() {
-    assert_eq!(WeaponKind::from_index(2), WeaponKind::Arclash);
-    assert_eq!(WeaponKind::from_index(9), WeaponKind::Quill);
+    assert_eq!(weapons::weapon_kind(2), WeaponKind::Arclash);
+    assert_eq!(weapons::weapon_kind(9), WeaponKind::Kiln);
+    assert_eq!(weapons::weapon_kind(200), WeaponKind::Quill);
     assert!(!WeaponKind::Quill.two_handed() && WeaponKind::Tumbler.two_handed());
+    assert!(!WeaponKind::Lancet.two_handed() && WeaponKind::Longwick.two_handed());
+    // Every weapon has its own model, and the default builds' glows are the ability colours.
+    let mut models: Vec<ModelId> = WeaponKind::ALL.iter().map(|w| w.model()).collect();
+    models.sort_unstable();
+    models.dedup();
+    assert_eq!(models.len(), WeaponKind::COUNT);
+    assert_eq!(
+        WeaponKind::Tumbler.glow_color(1),
+        ability_color(Ability::Gravewell)
+    );
     assert_eq!(EnemyKind::from_name("Gaoler"), Some(EnemyKind::Gaoler));
     assert_eq!(EnemyKind::from_name("nope"), None);
     let c = PlayerAnim::advance_cycle(0.95, Vec3::new(0.0, 0.0, -100.0), 0.1);
