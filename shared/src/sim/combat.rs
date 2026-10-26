@@ -288,6 +288,10 @@ impl DamageFlags {
     pub const DIRECT: DamageFlags = DamageFlags(1 << 14);
     /// The victim was branded: the damage was multiplied by `quill.brand_multiplier`.
     pub const BRANDED: DamageFlags = DamageFlags(1 << 15);
+    /// Burn damage over time (status effect, `status.rs`).
+    pub const BURN: DamageFlags = DamageFlags(1 << 16);
+    /// A Skewer shot that passed through at least one target before this one.
+    pub const PIERCED: DamageFlags = DamageFlags(1 << 17);
 
     pub fn contains(self, other: DamageFlags) -> bool {
         self.0 & other.0 == other.0 && other.0 != 0

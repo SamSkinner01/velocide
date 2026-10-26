@@ -266,6 +266,21 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 },
                 None,
             ),
+            SimEvent::Burst {
+                shooter,
+                attack,
+                origin,
+                ends,
+            } => fx.push(
+                tick,
+                Fx::Burst {
+                    shooter: shared::protocol::owner_code(*shooter),
+                    attack: *attack,
+                    origin: (*origin).into(),
+                    ends: ends.iter().map(|e| QPos::from(*e)).collect(),
+                },
+                None,
+            ),
             SimEvent::ArcChain { shooter, points } => fx.push(
                 tick,
                 Fx::ArcChain {

@@ -15,8 +15,8 @@
 //! 2. **projectiles** (sweeps, impacts, explosions, parry-delayed impacts), then open parry
 //!    windows are re-checked against the moved projectiles.
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
-//! 4. **thorns**, **brands**, **ember bursts**, **vitals** (hard damage recovery,
-//!    respawns).
+//! 4. **thorns**, **brands**, **status effects** (Burn, Pinned, burning patches),
+//!    **ember bursts**, **vitals** (hard damage recovery, respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
 //! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
 //!    events, checkpoints, revives, the exit, deathmatch limits, the scoreboard.
@@ -42,7 +42,9 @@ pub mod loadouts; // requested / forced loadouts and when they apply: docs/arsen
 pub mod modes;
 pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
+mod payload; // what the expansion's projectiles do on contact: docs/arsenal.md
 pub mod projectiles;
+pub mod status; // Burn, Pinned, burning patches: docs/arsenal.md
 pub mod style;
 pub mod thorn;
 pub mod trail;
@@ -362,6 +364,13 @@ pub enum SimEvent {
         origin: Vec3,
         ends: Vec<Vec3>,
     },
+    /// A projectile burst into secondary rays at `origin` (the Flak ring): the end of each.
+    Burst {
+        shooter: Owner,
+        attack: Attack,
+        origin: Vec3,
+        ends: Vec<Vec3>,
+    },
     /// An Arclash zap jumped between targets: the first target's hit point, then the centre
     /// of each target it chained to.
     ArcChain {
@@ -552,6 +561,10 @@ pub struct SimWorld {
     pub brands: BTreeMap<HitTarget, Brand>,
     /// Live ember bursts (heal pools, `embers.rs`).
     pub embers: BTreeMap<NetId, EmberBurst>,
+    /// Burn / Pinned status effects, keyed by the target (`status.rs`).
+    pub statuses: BTreeMap<HitTarget, status::Status>,
+    /// Burning patches on the ground (Flare, `status.rs`).
+    pub fire_patches: BTreeMap<NetId, status::FirePatch>,
     /// The loadout each player asked for (`loadouts.rs`). The server carries it over to every
     /// new world, so it outlives matches.
     pub loadout_requests: BTreeMap<PlayerId, Loadout>,
@@ -614,6 +627,8 @@ impl SimWorld {
             thorns: BTreeMap::new(),
             brands: BTreeMap::new(),
             embers: BTreeMap::new(),
+            statuses: BTreeMap::new(),
+            fire_patches: BTreeMap::new(),
             loadout_requests: BTreeMap::new(),
             forced_loadouts: BTreeMap::new(),
             warmup: false,
@@ -648,8 +663,11 @@ impl SimWorld {
     /// the spawn is refused.
     pub fn alloc_net_id(&mut self) -> Option<NetId> {
         let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
-        let live =
-            self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.embers.len();
+        let live = self.enemies.len()
+            + self.projectiles.len()
+            + self.thorns.len()
+            + self.embers.len()
+            + self.fire_patches.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -672,6 +690,7 @@ impl SimWorld {
             || self.projectiles.contains_key(&id)
             || self.thorns.contains_key(&id)
             || self.embers.contains_key(&id)
+            || self.fire_patches.contains_key(&id)
     }
 
     /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
@@ -714,6 +733,9 @@ impl SimWorld {
         self.thorns.retain(|_, th| th.owner != id);
         self.brands
             .retain(|target, b| b.owner != id && *target != HitTarget::Player(id));
+        self.statuses.remove(&HitTarget::Player(id));
+        self.fire_patches
+            .retain(|_, p| p.owner != Owner::Player(id));
         self.cancel_pending_for_victim(id);
         for e in self.enemies.values_mut() {
             if e.target == Some(id) {
@@ -754,6 +776,8 @@ impl SimWorld {
         self.thorns.clear();
         self.brands.clear();
         self.embers.clear();
+        self.statuses.clear();
+        self.fire_patches.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
         self.reset_encounters();
@@ -907,9 +931,10 @@ impl SimWorld {
             self.apply_due_pending_hits(tuning);
         }
 
-        // 4. Thorns, brands, healing, vitals.
+        // 4. Thorns, brands, status effects, healing, vitals.
         self.step_thorns(tuning);
         self.step_brands();
+        self.step_statuses(tuning);
         self.step_embers(tuning);
         self.tick_vitals(tuning);
 
@@ -1009,8 +1034,15 @@ impl SimWorld {
             let mut e = p.replicated_state(tuning, self.tick_rate);
             // Game mode flags (co-op DOWNED), modes.rs.
             self.decorate_player_entity(&mut e);
-            if self.is_branded(HitTarget::Player(p.id)) {
+            let target = HitTarget::Player(p.id);
+            if self.is_branded(target) {
                 e.flags |= player_flags::BRANDED;
+            }
+            if self.is_burning(target) {
+                e.flags |= player_flags::BURNING;
+            }
+            if self.is_pinned(target) {
+                e.flags |= player_flags::PINNED;
             }
             frame.insert(&e);
         }
@@ -1030,9 +1062,16 @@ impl SimWorld {
         }
         for e in self.enemies.values() {
             let mut state = e.entity_state(self.tick);
-            // Brands live in a side table (brand.rs), not on the enemy.
-            if self.is_branded(HitTarget::Entity(e.id)) {
+            // Brands and statuses live in side tables (brand.rs, status.rs), not on the enemy.
+            let target = HitTarget::Entity(e.id);
+            if self.is_branded(target) {
                 state.flags |= crate::protocol::enemy_flags::BRANDED;
+            }
+            if self.is_burning(target) {
+                state.flags |= crate::protocol::enemy_flags::BURNING;
+            }
+            if self.is_pinned(target) {
+                state.flags |= crate::protocol::enemy_flags::PINNED;
             }
             frame.insert(&state);
         }
@@ -1044,6 +1083,9 @@ impl SimWorld {
         }
         for b in self.embers.values() {
             frame.insert(&b.entity_state());
+        }
+        for p in self.fire_patches.values() {
+            frame.insert(&p.entity_state());
         }
         // Encounter state (HUD: wave, enemies left).
         self.replicate_encounters(frame);

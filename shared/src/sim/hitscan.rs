@@ -223,6 +223,68 @@ impl SimWorld {
         (view, results)
     }
 
+    /// A piercing shot (Skewer): passes through up to `pierce` targets along the ray (before
+    /// the level stops it), nearest first, the damage × `falloff` for each one passed
+    /// ([`DamageFlags::PIERCED`] after the first). Lag-compensated like every shot; no thorn
+    /// ricochet. Emits one [`SimEvent::Shot`] ending where it stopped.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn fire_piercing(
+        &mut self,
+        t: &Tuning,
+        history: Option<&dyn HitboxHistory>,
+        id: PlayerId,
+        input: &PlayerInput,
+        spec: &ShotSpec,
+        pierce: u32,
+        falloff: f32,
+    ) {
+        let view = self.shot_view(t, history, id, input);
+        let shooter = Owner::Player(id);
+        let (origin, dir) = (spec.origin, spec.dir);
+        let world_t = self
+            .collision
+            .world
+            .cast_ray(origin, dir, spec.range, MASK_SHOTS)
+            .map_or(spec.range, |h| h.distance);
+        let mut hits: Vec<(f32, HitTarget, HitPart)> = view
+            .hitboxes
+            .iter()
+            .filter(|h| self.can_hit(shooter, h.target))
+            .filter_map(|h| {
+                let pads = self.hit_pads(t, shooter, h.target);
+                h.ray_hit_padded(origin, dir, world_t, pads)
+                    .map(|(d, part)| (d, h.target, part))
+            })
+            .collect();
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let pierce = pierce.max(1) as usize;
+        hits.truncate(pierce);
+        let end_t = if hits.len() == pierce {
+            hits.last().map_or(world_t, |h| h.0)
+        } else {
+            world_t
+        };
+        let mut damage = spec.damage;
+        for (i, (d, target, part)) in hits.into_iter().enumerate() {
+            let mut info = DamageInfo::new(damage, shooter, spec.attack)
+                .at(origin + dir * d, dir)
+                .part(part)
+                .knockback(dir * spec.knockback)
+                .flags(Self::hitscan_flags(spec.attack));
+            if i > 0 {
+                info.flags.insert(DamageFlags::PIERCED);
+            }
+            self.apply_damage(t, target, info);
+            damage *= falloff;
+        }
+        self.events.push(SimEvent::Shot(ShotEvent {
+            shooter: id,
+            attack: spec.attack,
+            origin,
+            ends: vec![origin + dir * end_t],
+        }));
+    }
+
     /// Nearest target along a ray before `max_t` that `shooter` may hit (with hit assist):
     /// (distance, target, part).
     #[allow(clippy::too_many_arguments)]

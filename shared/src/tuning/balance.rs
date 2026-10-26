@@ -342,7 +342,7 @@ impl CombatTuning {
             }
             Ability::Flare => {
                 let f = &mut self.flare;
-                f.burn_scale *= s.damage;
+                f.burn_rate *= s.damage;
                 f.cooldown *= s.interval;
                 f.patch_radius *= s.radius;
                 f.speed *= s.speed;
@@ -375,6 +375,7 @@ impl CombatTuning {
             }
             Ability::EmberArrow => {
                 let e = &mut self.ember_arrow;
+                e.damage_scale *= s.damage;
                 e.damage *= s.damage;
                 e.cooldown *= s.interval;
                 e.explosion_radius *= s.radius;

@@ -944,6 +944,19 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             }
             ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
         }
+        Fx::Burst { origin, ends, .. } => {
+            // Stand-in until the expansion has its own effects (arsenal-client): hot pellet
+            // tracers from the burst, a flash and the splinter burst sound.
+            let o = q(*origin);
+            let hot_pellet = hot(WeaponKind::Bellows.glow_color(1), 1.8);
+            for end in ends {
+                let end = q(*end);
+                ctx.beams.beam(o, end, 0.02, hot_pellet, 0.12);
+                world_impact(ctx.effects, ctx.world, o, end, 2);
+            }
+            ctx.effects.glow(o, hot_pellet, 0.9, 0.15);
+            ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
+        }
         Fx::ArcChain { points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
             for (i, w) in pts.windows(2).enumerate() {

@@ -318,6 +318,7 @@
             cone_degrees: 16.0,
             interval: 0.08,        // 5 ticks at 60 Hz
             damage: 3.0,
+            burn_stacks: 1,        // per spray
             ability_power: 1.0,
         ),
         // Abilities (pools per class: docs/arsenal.md).
@@ -365,7 +366,7 @@
             flight_time: 4.0,
             patch_radius: 3.0,
             patch_time: 4.0,
-            burn_scale: 1.0,
+            burn_rate: 2.0,        // Burn stacks per second to everything inside the patch
             cooldown: 3.0,
         ),
         limpet: (
@@ -377,7 +378,8 @@
             explosion_radius: 3.5,
             damage: 50.0,
             knockback: 14.0,
-            cooldown: 0.4,
+            cooldown: 0.4,         // between throws
+            detonate_hold: 0.25,   // hold this long: every charge out detonates
         ),
         mortar: (
             speed: 26.0,
@@ -407,9 +409,11 @@
             cooldown: 2.5,
         ),
         ember_arrow: (
+            damage_scale: 0.75,    // the arrow's own hit, of a plain arrow at the same draw
             explosion_radius: 3.0,
             damage: 30.0,
             knockback: 8.0,
+            burn_stacks: 2,
             cooldown: 3.0,
         ),
         // Burn status (Kiln, Flare patches, Ember Arrow).
@@ -417,6 +421,7 @@
             dps: 4.0,              // per stack
             max_stacks: 3,
             duration: 3.0,         // refreshed by every new stack
+            tick_interval: 0.25,   // damage steps
         ),
         // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
         enemy_projectiles: (
