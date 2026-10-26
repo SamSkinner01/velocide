@@ -43,29 +43,45 @@ is exactly one code path for SP, co-op and PvP.
   its wax-and-slag *Moulds* hold every scrap of heat left in the world. Players are *Shrikes*:
   masked hunters whose life is a flame (the *wick*) in a chest lantern. Healing is *kindling*
   (drawing in the embers that hits knock out of Moulds); hard damage is *smother*.
-- **Weapons** (each has primary fire + 2 alt-fire modes, cycled by pressing the slot key again;
-  full design and as-built notes: `docs/roster.md`):
-  1. **Quill** (precision spike-caster, hitscan) — *Brand* (marks a target: ×1.35 damage taken
-     from everyone for 5 s), *Splinter* (bursts into secondary traces, reflects off walls).
-  2. **Bellows** (twin-barrel blast cannon) — *Gust* (air blast: knockback, turns hostile
-     projectiles around, self-recoil), *Both Barrels* (double blast, blast-jump recoil).
-  3. **Arclash** (arc caster) — primary chains between nearby targets; *Wisp* (slow ball
-     lightning that zaps what's near), *Discharge* (hold to charge a nova around you).
-  4. **Tumbler** (bouncing-bomb launcher) — *Breach* (point-blank blast, blast-jump),
-     *Gravewell* (sticks, pulls enemies in, implodes).
-  - **Fist**: punch / parry. **Thorn**: a thrown relay spike that plants itself in surfaces;
-    Quill shots that pass it ricochet to the next thorn, a branded target or the nearest enemy,
-    ×1.5 damage per bounce.
+- **Weapons** (loadouts of up to four builds; a build = a base weapon with fixed stats + two
+  abilities from its class's pool, cycled by pressing the slot key again; full reference:
+  `docs/arsenal.md`, the second-generation design notes: `docs/roster.md`):
+  - *Precision*: **Quill** (spike-caster, hitscan), **Lancet** (rapid needle pistol) — Brand,
+    Splinter, Skewer, Flurry.
+  - *Scatter*: **Bellows** (twin-barrel blast cannon), **Thresher** (drum-fed
+    auto-scattergun) — Gust, Both Barrels, Slug, Flak.
+  - *Rapid*: **Arclash** (chaining arc caster), **Riveter** (hot rivets), **Kiln** (ember
+    sprayer, Burn) — Wisp, Discharge, Volley, Flare.
+  - *Explosive*: **Tumbler** (bouncing bombs), **Cinderbox** (three-rocket salvo) — Breach,
+    Gravewell, Limpet, Mortar.
+  - *Draw*: **Longwick** (recurve bow) — Brand, Triple Nock, Pinning Arrow, Ember Arrow.
+  - Lancet, Thresher, Riveter and Cinderbox are the first-generation names with new
+    silhouettes, new primaries and no fixed alt set (their old signature combos are gone).
+  - **Fist**: punch / parry. **Thorn** (solo and co-op only): a thrown relay spike that plants
+    itself in surfaces; Quill shots that pass it ricochet to the next thorn, a branded target or
+    the nearest enemy, ×1.5 damage per bounce.
+  - **Balance per mode:** `Tuning::for_mode` applies the `balance.pve` / `balance.pvp` profile
+    (per-weapon and per-ability multipliers + overrides); the server runs and sends that
+    effective tuning, so prediction matches. PvP sets Thorn charges to 0.
 - **Enemies** (the Moulds, `docs/enemies.md`): *Gnawer* (fodder melee, pounces), *Censer*
   (ranged lobber, parryable ember bombs), *Harrier* (flying dive-bomber, swattable mid-dive),
   *Gaoler* (heavy shielded, parryable bash, jumpable sweep, lantern weak point), *Heron*
-  (sniper with a replicated aim laser that locks before it fires).
+  (sniper with a replicated aim laser that locks before it fires), *Bellwether* (support: its
+  bell frenzies nearby Moulds), *Snuffer* (latches on and smothers the wick until punched off),
+  *Smelter* (heavy that pours slag lines on the floor), *Effigy* (warm-up training dummy).
+  Any Mould can spawn as an *elite*.
 - **Hit assist:** player-owned attacks test against hit shapes inflated by `combat.hit_assist`
   (enemies +0.2 m body / +0.1 m weak points; PvP players +0.12 / +0.06); enemy attacks don't.
 - **Style ranks** (low → high): DULL, CRUDE, FERAL, VICIOUS, MERCILESS, GRISLY, SEARING,
   VELOCIDE.
-- **Levels:** campaigns *Crucible of Veins* and *Spire of Wicks*; arenas *Cistern Nine*,
-  *Knell Yard* and *Ingot Run* (`docs/levels.md`).
+- **Levels:** campaigns *Crucible of Veins*, *Spire of Wicks* and *The Drowned Chandlery*;
+  arenas *Cistern Nine*, *Knell Yard*, *Ingot Run*, *Tallow Works*, *Wickmarket* and *Furnace
+  Ring*; the warm-up hub *Vestry* (`docs/levels.md`).
+- **Modes:** Campaign, Grind (endless co-op waves), Deathmatch, Gun Game; PvE difficulty Easy →
+  Inferno with player-count scaling; play of the game after PvP matches (`docs/style_modes.md`,
+  `docs/potg.md`).
+- **Cosmetics:** mask, crest, cloak, emblem, two colours, wick flame (`shared::cosmetics`;
+  decorative only, separate from the identity colour).
 - **Accessibility:** colour-vision modes (protan / deutan / tritan + strength) correct the 3D
   view in the post pass and switch gameplay-critical colours to a semantic palette
   (`client::palette`), plus shape cues (`docs/render.md`, `docs/ui.md`).
@@ -167,8 +183,11 @@ errors and bad normals otherwise).
 host), messages `ClientMessage::Lobby(LobbyRequest)` / `ServerMessage::Lobby(LobbyUpdate)`.
 The server owns the phase (`Server::start_match`, `end_match`, `return_to_lobby`; host-only
 requests validated and rate-limited); a fresh `SimWorld` is built per match with the settings
-in `SimWorld::match_settings` for the game-mode rules. Single-player has no lobby. Client:
-`menus::lobby::LobbyScreen` ⇄ `InGame` hand the session over (`Handoff`). Full notes:
+in `SimWorld::match_settings` for the game-mode rules. While in its lobby phase the server runs
+the warm-up world (the *Vestry* hub, `SimWorld::warmup` / `warmup_rules`) and players play in it
+with the lobby panel as an overlay; `--no-warmup` keeps the menu-style lobby. Single-player has
+no lobby. Client: `menus::lobby::LobbyScreen` ⇄ `InGame` hand the session over (`Handoff`).
+Per-player `ClientMessage::SetLoadout` / `SetCosmetics` are sanitised by the server. Full notes:
 `docs/lobby.md`.
 
 ### `shared::level::LevelDef`
@@ -185,8 +204,12 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
 - `docs/lobby.md` — lobby phases, messages, host rules, screens, how game modes plug in.
 - `docs/style_modes.md` — style meter / ranks / freshness, game modes (checkpoints, downed &
   revive, exit, deathmatch), the death rule, scoreboard, results grading and screens.
-- `docs/enemies.md` — the four enemy types, AI states and telegraphs, nav grid, arena
-  encounters, co-op scaling, hooks for game modes, measurements.
+- `docs/enemies.md` — the enemy types, AI states and telegraphs, nav grid, arena
+  encounters, co-op scaling, elites, difficulty scaling, hooks for game modes, measurements.
+- `docs/arsenal.md` — loadouts, builds, the ten weapons and nineteen abilities, Burn / Pinned,
+  balance per mode, replication.
+- `docs/potg.md` — highlight scoring, recording and the play-of-the-game replay.
+- `docs/expansion.md` — the contract the expansion areas were built against.
 
 ## Running it
 - Single-player: `cargo run -p client --release -- --sp crucible_of_veins`
@@ -227,6 +250,16 @@ fiction and new designs). The same pass made enemies bigger and easier to read, 
 player-owned hits more forgiving (hit assist), added the campaign *Spire of Wicks* and the
 arenas *Knell Yard* and *Ingot Run*, and added colour-vision accessibility.
 `PROTOCOL_VERSION` 7.
+
+### Expansion: loadouts, modes, play of the game, warm-up, cosmetics, content
+Built by seven parallel areas against `docs/expansion.md`: loadouts and customisable builds
+(ten weapons, the first-generation four redesigned, the Longwick bow and the Kiln; nineteen
+abilities; Burn and Pinned), separate PvE / PvP balance with no Thorns in PvP (`docs/arsenal.md`);
+difficulty with stronger co-op scaling, Grind and Gun Game (`docs/style_modes.md`); play of the
+game and kill distance in the feed (`docs/potg.md`); the warm-up lobby in the Vestry and
+character cosmetics (`docs/lobby.md`); the Bellwether, Snuffer, Smelter, Effigy and elites
+(`docs/enemies.md`); the levels The Drowned Chandlery, Tallow Works, Wickmarket and Furnace Ring
+plus grind spawns on every arena (`docs/levels.md`). `PROTOCOL_VERSION` 8.
 
 ### Deliberate deviations from the spec
 - **Netcode transport.** Connection authentication uses `renet_netcode`'s types

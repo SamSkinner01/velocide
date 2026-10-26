@@ -17,6 +17,8 @@ PLAY WITH FRIENDS
   Join:  Main menu -> JOIN GAME -> type the address you were given, e.g. 203.0.113.7:47420
   Host:  Main menu -> HOST GAME. Your friends need your IP address, and port 47420 must be
          forwarded on your router (UDP). Using a dedicated server avoids all of that.
+  While everyone gathers you can run around the warm-up hall. Tab opens the lobby panel,
+  F1 readies you up. LOADOUT picks your weapons and abilities, CUSTOMISE your look.
   Everyone must use the same build (the version above). After an update, everyone downloads
   the new one.
 
@@ -24,9 +26,10 @@ CONTROLS (rebind them in Settings -> Controls)
   WASD move        Mouse look       Space jump / wall jump     Shift dash
   Ctrl or C        slide on the ground, slam in the air
   Left mouse       fire             Right mouse  alt fire
-  1 2 3 4          weapons (press the same number again to switch alt mode)
-  F punch / parry  Q throw thorn    E use / revive a teammate
-  Tab scoreboard   T chat           Esc pause      F11 fullscreen
+  1 2 3 4          your loadout's weapons (press the same number again to switch ability)
+  F punch / parry  Q throw thorn (not in PvP)       E use / revive a teammate
+  Tab scoreboard (lobby panel in the warm-up)       F1 ready up in the warm-up
+  T chat           Esc pause        F11 fullscreen
   Gamepads work too.
 
 TIPS
@@ -36,5 +39,7 @@ TIPS
   Punch an incoming projectile just before it hits you: it flies back at double damage and
   your wick flares back to full.
   Throw a thorn and shoot it with the Quill: the shot ricochets to the nearest enemy.
+  Grind: endless waves until your whole team is down. Gun game: every kill with your current
+  weapon moves you up the ladder; the last tier is fists only.
 
 Settings are saved in %APPDATA%\velocide (Windows) or ~/.config/velocide (Linux).
