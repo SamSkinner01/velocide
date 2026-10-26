@@ -15,7 +15,7 @@ use engine::ui::text::line_width;
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec4, vec2};
 use shared::sim::style::{TOP_RANK, rank_name};
-use shared::sim::{StyleBonus, StyleEvent, StyleKey, StyleView};
+use shared::sim::{StyleBonus, StyleEvent, StyleKey, StyleView, WeaponBuild};
 use shared::tuning::StyleTuning;
 
 /// Width of the style block (canvas units).
@@ -184,7 +184,7 @@ impl StyleHud {
         t: &Theme,
         view: Option<&StyleView>,
         tuning: &StyleTuning,
-        weapon: u8,
+        build: WeaponBuild,
         mode: u8,
         audio: Option<&mut Audio>,
         now: f64,
@@ -263,8 +263,8 @@ impl StyleHud {
             now,
         );
 
-        // STALE indicator + freshness of the held weapon (primary, alt A, alt B).
-        let keys = StyleKey::weapon_keys(weapon);
+        // STALE indicator + freshness of the held build (primary, ability A, ability B).
+        let keys = StyleKey::build_keys(&build);
         let active = [keys[0], keys[1 + (mode as usize).min(1)]];
         let stale = active.iter().find(|k| view.is_stale(**k, tuning));
         let pip_y = rect.max.y + 3.0;

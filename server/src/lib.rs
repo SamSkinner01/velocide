@@ -22,6 +22,7 @@
 
 pub mod combat;
 mod commands;
+pub mod highlights; // play of the game (PvP): docs/potg.md
 pub mod input_queue;
 pub mod lagcomp;
 // Style / game-mode messages and the end-of-match hook (docs/style_modes.md).
@@ -82,6 +83,10 @@ const MAX_UNRELIABLE_PER_UPDATE: usize = 128;
 /// Chat rate limit per client: burst size and sustained messages per second.
 const CHAT_BURST: f32 = 5.0;
 const CHAT_PER_SECOND: f32 = 1.0;
+/// `SetLoadout` rate limit per client (a loadout screen sends one per change): burst and
+/// sustained messages per second. Extra messages are dropped.
+const LOADOUT_BURST: f32 = 8.0;
+const LOADOUT_PER_SECOND: f32 = 2.0;
 /// Delay between sending `Rejected` and disconnecting, so the message arrives.
 const KICK_DELAY_SECS: f64 = 0.5;
 /// Simulation events kept for [`Server::drain_sim_events`] when nobody drains them.
@@ -256,6 +261,9 @@ struct ClientConn {
     /// Chat rate limit: token bucket refilled at `CHAT_PER_SECOND`.
     chat_tokens: f32,
     chat_refill_time: f64,
+    /// `SetLoadout` rate limit: token bucket refilled at `LOADOUT_PER_SECOND`.
+    loadout_tokens: f32,
+    loadout_refill_time: f64,
 }
 
 impl ClientConn {
@@ -273,6 +281,8 @@ impl ClientConn {
             decode_errors: 0,
             chat_tokens: CHAT_BURST,
             chat_refill_time: 0.0,
+            loadout_tokens: LOADOUT_BURST,
+            loadout_refill_time: 0.0,
         }
     }
 
@@ -293,7 +303,11 @@ pub struct Server {
     renet: RenetServer,
     transport: Box<dyn ServerTransport>,
     world: SimWorld,
+    /// The effective tuning of the running world: `base_tuning` with the balance profile of
+    /// its mode applied ([`Tuning::for_mode`]). The simulation runs with it and clients get it.
     tuning: Tuning,
+    /// The tuning file as loaded (balance profiles not applied).
+    base_tuning: Tuning,
     tuning_path: PathBuf,
     watcher: Option<FileWatcher>,
     timestep: FixedTimestep,
@@ -319,6 +333,8 @@ pub struct Server {
     /// Tick of the last and second-to-last snapshot (FX batching).
     last_snapshot_tick: u32,
     prev_snapshot_tick: u32,
+    /// Play of the game: the match's highlights (`highlights.rs`).
+    highlights: highlights::Highlights,
 }
 
 impl Server {
@@ -367,7 +383,8 @@ impl Server {
             renet: RenetServer::new(connection_config()),
             transport,
             world,
-            tuning,
+            tuning: tuning.clone(),
+            base_tuning: tuning,
             tuning_path,
             watcher,
             timestep: FixedTimestep::new(tick_rate as f64),
@@ -387,10 +404,12 @@ impl Server {
             event_log: Vec::new(),
             last_snapshot_tick: 0,
             prev_snapshot_tick: 0,
+            highlights: highlights::Highlights::new(tick_rate),
             config,
         };
         server.config.tick_rate = tick_rate;
         server.init_match_flow();
+        server.update_effective_tuning();
         server.update_snapshot_interval();
         log::info!(
             "server listening on {:?}: level '{}', {} Hz tick, {:.1} Hz snapshots, max {} players{}",
@@ -441,8 +460,15 @@ impl Server {
         &mut self.world
     }
 
+    /// The effective tuning the world runs with (and clients predict with): the tuning file
+    /// with the current mode's balance profile applied.
     pub fn tuning(&self) -> &Tuning {
         &self.tuning
+    }
+
+    /// The tuning file as loaded (or set), before the balance profile.
+    pub fn base_tuning(&self) -> &Tuning {
+        &self.base_tuning
     }
 
     pub fn lag_comp(&self) -> &LagCompHistory {
@@ -516,20 +542,38 @@ impl Server {
         infos
     }
 
-    /// Replaces the tuning (sanitized: out-of-range values are clamped) and pushes it to every
-    /// client.
+    /// Replaces the tuning (sanitized: out-of-range values are clamped) and pushes the
+    /// effective tuning of the running mode to every client.
     pub fn set_tuning(&mut self, mut tuning: Tuning) {
         if tuning.sanitize() {
             log::warn!("tuning: out-of-range values were clamped");
         }
-        if tuning == self.tuning {
+        self.base_tuning = tuning;
+        self.update_effective_tuning();
+    }
+
+    /// Recomputes the effective tuning from the base tuning and the world's mode (balance
+    /// profile, docs/arsenal.md) and sends it to every client if it changed. Called on tuning
+    /// (re)loads and whenever a new world (or mode) starts.
+    pub(crate) fn update_effective_tuning(&mut self) {
+        // The warm-up plays with the balance of the match it waits for (docs/lobby.md).
+        let mode = if self.world.in_warmup() {
+            self.flow.settings.mode
+        } else {
+            self.world.match_settings.mode
+        };
+        let effective = self.base_tuning.for_mode(mode);
+        if effective == self.tuning {
             return;
         }
-        self.tuning = tuning;
+        self.tuning = effective;
         self.update_snapshot_interval();
         let msg = ServerMessage::Tuning(Box::new(self.tuning.clone()));
         self.broadcast(&msg);
-        log::info!("tuning updated and sent to {} clients", self.clients.len());
+        log::info!(
+            "tuning updated ({mode:?} balance) and sent to {} clients",
+            self.clients.len()
+        );
     }
 
     /// External velocity change (explosion knockback...).
@@ -1003,8 +1047,18 @@ impl Server {
             ClientMessage::SetReady { ready } => self.lobby_set_ready(client, player, ready),
             ClientMessage::Lobby(request) => self.handle_lobby_request(client, player, request),
             ClientMessage::SetCosmetics(c) => self.lobby_set_cosmetics(client, player, c),
-            // Accepted and ignored until the arsenal (loadouts) lands (docs/expansion.md).
-            ClientMessage::SetLoadout(_) => {}
+            ClientMessage::SetLoadout(loadout) => {
+                // Rate-limited; sanitised and applied by the world (docs/arsenal.md).
+                let elapsed = (now - conn.loadout_refill_time).max(0.0) as f32;
+                conn.loadout_refill_time = now;
+                conn.loadout_tokens =
+                    (conn.loadout_tokens + elapsed * LOADOUT_PER_SECOND).min(LOADOUT_BURST);
+                if conn.loadout_tokens < 1.0 {
+                    return;
+                }
+                conn.loadout_tokens -= 1.0;
+                self.world.request_loadout(player, loadout);
+            }
         }
     }
 

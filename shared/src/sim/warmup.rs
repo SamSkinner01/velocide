@@ -46,7 +46,7 @@ pub const CONSOLE_COOLDOWN_SECS: f32 = 1.0;
 /// Pack Moulds this far outside their pen (m) are put back in it.
 pub const PEN_MARGIN: f32 = 2.0;
 
-/// Warm-up state of a world (`SimWorld::warmup`, `None` outside the warm-up).
+/// Warm-up state of a world (`SimWorld::warmup_rules`, `None` outside the warm-up).
 #[derive(Clone, Debug, Default)]
 pub struct Warmup {
     /// The next match is PvP: players' hits hurt each other (otherwise knockback only).
@@ -115,14 +115,16 @@ impl SimWorld {
     pub fn start_warmup(&mut self, next: &MatchSettings) {
         self.mode = ModeState::new(ModeRules::campaign());
         self.style.clear();
-        self.warmup = Some(Warmup::default());
+        self.warmup_rules = Some(Warmup::default());
+        // Loadout changes apply at once in the warm-up (`loadouts.rs`).
+        self.warmup = true;
         self.set_warmup_next(next);
     }
 
     /// The host changed the next match's settings: players hurt each other in the warm-up only
     /// when that match is PvP. No-op outside the warm-up.
     pub fn set_warmup_next(&mut self, next: &MatchSettings) {
-        let Some(w) = &mut self.warmup else {
+        let Some(w) = &mut self.warmup_rules else {
             return;
         };
         w.pvp = next.mode.is_pvp();
@@ -134,12 +136,12 @@ impl SimWorld {
 
     /// This world is the lobby's warm-up.
     pub fn in_warmup(&self) -> bool {
-        self.warmup.is_some()
+        self.warmup_rules.is_some()
     }
 
     /// Practice stations (pipeline step 5, after the world rules). No-op outside the warm-up.
     pub(crate) fn step_warmup(&mut self, t: &Tuning) {
-        let Some(mut w) = self.warmup.take() else {
+        let Some(mut w) = self.warmup_rules.take() else {
             return;
         };
         let level = Arc::clone(&self.level);
@@ -172,7 +174,7 @@ impl SimWorld {
                 self.step_console(&mut w.stations[index], index, enc, used, now);
             }
         }
-        self.warmup = Some(w);
+        self.warmup_rules = Some(w);
     }
 
     /// Keeps a fixture's dummies standing (each back a while after it dies).
@@ -381,7 +383,7 @@ mod tests {
             })
             .collect();
         assert_eq!(waves, vec![1]);
-        assert_eq!(w.warmup.as_ref().unwrap().pack(1).len(), 2);
+        assert_eq!(w.warmup_rules.as_ref().unwrap().pack(1).len(), 2);
         step(
             &mut w,
             &input(2, false),
@@ -406,7 +408,7 @@ mod tests {
             "the old pack is replaced"
         );
         // A Mould that gets out of the pen is put back where it was summoned.
-        let id = w.warmup.as_ref().unwrap().pack(1)[0];
+        let id = w.warmup_rules.as_ref().unwrap().pack(1)[0];
         w.enemies.get_mut(&id).unwrap().position = Vec3::new(40.0, 0.0, 40.0);
         step(&mut w, &TickInputs::new(), 1);
         let back = w.enemies[&id].position;
@@ -416,7 +418,8 @@ mod tests {
     #[test]
     fn damage_between_players_follows_the_next_mode() {
         let mut w = hub();
-        assert!(w.in_warmup() && !w.rules.friendly_fire && !w.rules.coop_enemy_scaling);
+        assert!(w.in_warmup() && w.warmup && !w.rules.friendly_fire);
+        assert!(!w.rules.coop_enemy_scaling);
         w.set_warmup_next(&MatchSettings::new(GameMode::Deathmatch, "cistern_nine"));
         assert!(w.rules.friendly_fire);
         w.set_warmup_next(&MatchSettings::new(GameMode::Grind, "cistern_nine"));

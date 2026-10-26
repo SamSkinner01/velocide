@@ -24,7 +24,7 @@ use engine::physics::MASK_SHOTS;
 use engine::render::Renderer;
 use glam::{Vec3, Vec4};
 use shared::input::look_dir;
-use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags};
+use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags, player_weapon};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
 
 use crate::models::WeaponKind;
@@ -184,7 +184,7 @@ pub fn attack_style(a: Attack) -> AttackStyle {
 }
 
 /// Range of a hitscan attack's rays (client tracers).
-fn hitscan_range(attack: Attack, t: &shared::tuning::CombatTuning) -> f32 {
+pub(crate) fn hitscan_range(attack: Attack, t: &shared::tuning::CombatTuning) -> f32 {
     match attack {
         Attack::Blast | Attack::BothBarrels => t.bellows.pellet_range,
         Attack::Arc => t.arclash.zap_range,
@@ -261,6 +261,12 @@ impl CombatClient {
     pub fn music_intensity(&self) -> f32 {
         self.music
     }
+
+    /// Predicted shots of this frame's ticks not played yet (the play of the game records
+    /// them: `replay.rs`).
+    pub fn pending_shots(&self) -> &[PredictedShot] {
+        &self.shots
+    }
 }
 
 /// Name of whoever caused something, for the kill feed.
@@ -312,25 +318,57 @@ fn attack_name(net: &NetClient, attack: Attack) -> String {
     attack.name().to_uppercase()
 }
 
-/// "YOU [QUILL] GNAWER  HEADSHOT" style kill feed line ("GNAWER [BITE] YOU").
-fn kill_line(net: &NetClient, k: &KillInfo) -> String {
-    let mut s = format!(
-        "{} [{}] {}",
-        owner_name(net, k.killer, k.attack),
-        attack_name(net, k.attack),
-        victim_name(net, k)
-    );
+/// "YOU [QUILL] GNAWER 38m HEADSHOT" style kill feed line ("GNAWER [BITE] YOU 3m"), names
+/// from the session.
+pub(crate) fn kill_line(net: &NetClient, k: &KillInfo) -> String {
+    let attack = match k.weapon {
+        Some(weapon) => weapon_attack_label(weapon, k.attack),
+        None => attack_name(net, k.attack),
+    };
+    kill_line_text(
+        &owner_name(net, k.killer, k.attack),
+        &attack,
+        &victim_name(net, k),
+        k,
+    )
+}
+
+/// The bracket of a weapon's kill: its name for the primary ("RIVETER"), weapon and ability
+/// for an ability (several weapons share one: "RIVETER VOLLEY", "LONGWICK BRAND").
+pub fn weapon_attack_label(weapon: shared::loadout::WeaponKind, attack: Attack) -> String {
+    if Attack::primary(weapon) == attack {
+        weapon.name().to_uppercase()
+    } else {
+        format!("{} {}", weapon.name(), attack.name()).to_uppercase()
+    }
+}
+
+/// Whole metres from the killer to the victim for the kill feed, when the killer has a body
+/// (a player or a Mould, not the world) and it wasn't a suicide.
+pub fn kill_distance(k: &KillInfo) -> Option<u32> {
+    let body = matches!(k.killer, Owner::Player(_) | Owner::Enemy(_));
+    let suicide = k.killer.as_target() == Some(k.victim);
+    (body && !suicide && k.distance.is_finite() && k.distance > 0.0)
+        .then(|| (k.distance.round() as u32).max(1))
+}
+
+/// The kill feed line: killer, [weapon], victim, the distance, then what made it special.
+pub fn kill_line_text(killer: &str, attack: &str, victim: &str, k: &KillInfo) -> String {
+    let mut s = format!("{killer} [{attack}] {victim}");
+    if let Some(m) = kill_distance(k) {
+        s.push_str(&format!(" {m}m"));
+    }
     if k.flags.contains(DamageFlags::HEADSHOT) {
-        s.push_str("  HEADSHOT");
+        s.push_str(" HEADSHOT");
     }
     if k.parried_projectile {
-        s.push_str("  RETURNED");
+        s.push_str(" RETURNED");
     }
     if k.ricochets > 0 {
-        s.push_str(&format!("  RICOCHET x{}", k.ricochets));
+        s.push_str(&format!(" RICOCHET x{}", k.ricochets));
     }
     if k.killer_airborne {
-        s.push_str("  AIR");
+        s.push_str(" AIR");
     }
     s
 }
@@ -359,7 +397,7 @@ fn own_projectiles(net: &NetClient) -> (Vec<EntityState>, f64, Option<u16>) {
 }
 
 /// Approximate displayed hit capsules for client-side tracer ends: (entity, a, b, radius).
-fn entity_capsule(e: &EntityState) -> Option<(Vec3, Vec3, f32)> {
+pub(crate) fn entity_capsule(e: &EntityState) -> Option<(Vec3, Vec3, f32)> {
     if e.kind == kind::PLAYER {
         if e.flags & player_flags::DEAD != 0 {
             return None;
@@ -573,6 +611,8 @@ impl InGame {
             GameEvent::EncounterStarted { .. }
             | GameEvent::WaveStarted { .. }
             | GameEvent::EncounterCleared { .. } => {}
+            // Play of the game: `replay.rs` (ingame/mod.rs).
+            GameEvent::HighlightMark(_) | GameEvent::PlayOfTheGame(_) => {}
         }
     }
 
@@ -604,7 +644,7 @@ impl InGame {
             });
             for intent in &shot.intents {
                 match intent {
-                    FireIntent::Primary(_) | FireIntent::Alt { .. } => {
+                    FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
                         };
@@ -615,7 +655,7 @@ impl InGame {
                             viewmodel.turn_drum();
                         }
                         let charge = match intent {
-                            FireIntent::Alt { charge, .. } => *charge,
+                            FireIntent::Ability { charge, .. } => *charge,
                             _ => 1.0,
                         };
                         feedback.shake(
@@ -759,12 +799,15 @@ impl InGame {
             feedback,
             remote,
             last_camera,
+            potg,
             ..
         } = self;
         let Some(session) = session.as_mut() else {
             return;
         };
         let fx = session.client_mut().drain_fx();
+        // The play of the game keeps a copy (replay.rs).
+        potg.recorder.record_fx(&fx);
         combat.queue.push(fx);
         let net = session.client();
         if !net.is_in_game() {
@@ -783,9 +826,13 @@ impl InGame {
         for e in entities.iter().filter(|e| e.kind == kind::PLAYER) {
             let vis = remote.visual_mut(e.id);
             vis.dead = e.flags & player_flags::DEAD != 0;
-            if e.flags & player_flags::CHARGING != 0 && vis.muzzle != Vec3::ZERO {
-                // Arclash Discharge charging: the capacitor crackles brighter.
-                let c = (e.state >> 8) as f32 / 255.0;
+            let (_, ability, level) = player_weapon(e.state);
+            if e.flags & player_flags::CHARGING != 0
+                && ability == shared::sim::Ability::Discharge
+                && vis.muzzle != Vec3::ZERO
+            {
+                // Discharge charging: the capacitor crackles brighter.
+                let c = level as f32 / 255.0;
                 effects.glow(
                     vis.muzzle,
                     Vec4::new(0.55, 0.8, 1.0, 0.5 + 0.5 * c),

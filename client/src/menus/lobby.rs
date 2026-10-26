@@ -948,6 +948,7 @@ impl LobbyScreen {
                 let mut server = ServerConfig::host(port, &level, max as usize);
                 server.lobby.autostart = common.launch.autostart;
                 server.lobby.settings.mode = common.launch.mode.unwrap_or(s.host_mode);
+                server.lobby.settings.difficulty = common.launch.difficulty.unwrap_or(s.difficulty);
                 (
                     SessionSpec::Host {
                         server: Box::new(server),
@@ -1256,9 +1257,14 @@ fn settings_rows(ui: &mut Ui, s: &MatchSettings, levels: &[LevelInfo]) {
     if s.mode.has_score_limits() {
         ui.value_row("FRAG LIMIT", &frag_text(s.frag_limit));
         ui.value_row("TIME LIMIT", &time_text(s.time_limit_secs));
+    } else if s.mode.has_time_limit() {
+        ui.value_row("TIME LIMIT", &time_text(s.time_limit_secs));
     }
     if s.mode.has_friendly_fire() {
         ui.value_row("FRIENDLY FIRE", if s.friendly_fire { "ON" } else { "OFF" });
+    }
+    if s.mode.has_difficulty() {
+        ui.value_row("DIFFICULTY", s.difficulty.title());
     }
 }
 
@@ -1316,9 +1322,27 @@ fn host_settings(ui: &mut Ui, s: &mut MatchSettings, levels: &[LevelInfo]) -> bo
             &TIME_PRESETS,
             time_text,
         );
+    } else if s.mode.has_time_limit() {
+        // Gun game: no frag limit (the ladder ends it), the time limit ranks by tier.
+        changed |= preset_choice(
+            ui,
+            "TIME LIMIT",
+            &mut s.time_limit_secs,
+            &TIME_PRESETS,
+            time_text,
+        );
     }
     if s.mode.has_friendly_fire() {
         changed |= ui.toggle("FRIENDLY FIRE", &mut s.friendly_fire);
+    }
+    if s.mode.has_difficulty() {
+        use shared::lobby::Difficulty;
+        let names = Difficulty::ALL.map(Difficulty::title);
+        let mut index = s.difficulty.index();
+        if ui.choice("DIFFICULTY", &mut index, &names) {
+            s.difficulty = Difficulty::ALL[index.min(Difficulty::ALL.len() - 1)];
+            changed = true;
+        }
     }
     changed
 }

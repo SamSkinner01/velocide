@@ -99,6 +99,10 @@ pub struct MoveState {
     pub footstep_accum: f32,
     /// Time since leaving the ground (0 while grounded).
     pub air_time: f32,
+    /// Seconds left of a slow (status Pinned in PvP, `docs/arsenal.md`): while it lasts,
+    /// ground / air / dash / slide speeds are scaled by `slow_scale`. Set by the server.
+    pub slow_time: f32,
+    pub slow_scale: f32,
 }
 
 /// A slam hit the ground: the server applies a shockwave here.
@@ -230,6 +234,24 @@ fn volume_overlaps(v: &Volume, lo: Vec3, hi: Vec3) -> bool {
     lo.cmple(v.max).all() && hi.cmpge(v.min).all()
 }
 
+/// `t` with its speeds scaled by `k` (0..=1): a slowed player.
+fn slowed(t: &MovementTuning, k: f32) -> MovementTuning {
+    let k = if k.is_finite() {
+        k.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    MovementTuning {
+        ground_speed: t.ground_speed * k,
+        air_max_speed: t.air_max_speed * k,
+        dash_speed: t.dash_speed * k,
+        dash_end_speed: t.dash_end_speed * k,
+        slide_min_speed: t.slide_min_speed * k,
+        slide_max_speed: t.slide_max_speed * k,
+        ..t.clone()
+    }
+}
+
 /// Advances one fixed tick.
 pub fn step(
     state: &mut MoveState,
@@ -247,6 +269,15 @@ pub fn step(
     if !state.velocity.is_finite() {
         state.velocity = Vec3::ZERO;
     }
+    // Slowed: every speed scaled while it lasts.
+    let slowed_tuning;
+    let t = if state.slow_time > 0.0 {
+        state.slow_time = (state.slow_time - dt).max(0.0);
+        slowed_tuning = slowed(t, state.slow_scale);
+        &slowed_tuning
+    } else {
+        t
+    };
 
     let ctx = Ctx {
         world: env.world,

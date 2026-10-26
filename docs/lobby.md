@@ -68,8 +68,11 @@ Rules (`shared::sim::warmup`, hooked into the death / respawn rule and `step_mod
 - Players hurt each other only if the **selected next mode** is PvP (`MatchSettings::mode.is_pvp()`,
   re-applied whenever the host changes the settings: `SimWorld::set_warmup_next`); otherwise
   their hits only knock back. Practice Moulds get no co-op scaling.
-- The base tuning applies (when `Tuning::for_mode` lands, the warm-up should use the selected
-  mode's profile; see Known limitations). Loadout code can ask `SimWorld::in_warmup()`.
+- The warm-up runs the **balance profile of the selected mode** (`Server::update_effective_tuning`
+  uses the lobby's mode while the world is the warm-up; re-run on every settings change, so the
+  clients get the matching `Tuning`). `SimWorld::warmup` is set too: loadout changes apply at
+  once (docs/arsenal.md); `SimWorld::in_warmup()` = the warm-up rules are on. Highlights and
+  play-of-the-game recording only run during a match.
 - **Practice stations** read from the hub's encounters (`step_encounters` only runs campaign
   levels): an encounter whose trigger has no volume is a **fixture** — its first wave stands from
   the start (the firing range's Effigy dummies; names the registry doesn't know, e.g. `effigy`
@@ -219,13 +222,15 @@ config). If the mode doesn't suit the level, the level's natural mode is used.
 Dedicated server (`velocide-server`) starts in the lobby:
 
 ```text
-velocide-server [--level cistern_nine] [--mode campaign|deathmatch] [--max-players 8]
+velocide-server [--level cistern_nine] [--mode campaign|deathmatch|gungame|grind]
+                [--difficulty easy|normal|hard|brutal|inferno] [--max-players 8]
                 [--frag-limit 20] [--time-limit 600] [--friendly-fire] [--autostart] [--no-lobby]
                 [--no-warmup]
 ```
 
 Without `--mode` the level's kind decides. An incompatible `--mode` / `--level` pair is an
-error at startup. `--max-players` is clamped to 8 (4 for co-op).
+error at startup. `--max-players` is clamped to 8 (4 for co-op and grind). `--difficulty`
+applies to the PvE modes (campaign, grind). `--no-warmup` keeps the lobby without a world.
 
 ## Pings
 
@@ -335,7 +340,8 @@ explains why). Changing the mode re-fits the level and player limit (`MatchSetti
 ### Command line
 
 ```text
-velocide --host [PORT] [--level L] [--mode campaign|deathmatch] [--max-players N] [--autostart]
+velocide --host [PORT] [--level L] [--mode campaign|deathmatch|gungame|grind]
+         [--difficulty easy|normal|hard|brutal|inferno] [--max-players N] [--autostart]
 velocide --connect IP:PORT [--ready]
          --ready       ready up automatically 1 s after entering the lobby / the warm-up (--bot implies it)
          --autostart   hosting: the server starts once everyone is ready (implies --ready)
@@ -421,8 +427,6 @@ keeps ticking, late joiners, the empty server returns to its warm-up), `--no-war
 - The first lobby state on a listen server can show no host for one round trip.
 - Player identity colours follow the slot (`PlayerId`); `LobbyPlayer::color` is there for a
   future colour picker. (Cosmetic colours are separate: they never replace the identity colour.)
-- The warm-up runs the base tuning. When the arsenal's `Tuning::for_mode` exists, the warm-up
-  should use the selected mode's profile (and send it to clients).
 - A practice console remembers its next pack per world; a client that joins later shows pack 1
   as next on the console's sign until someone summons.
 - The overlay opens by itself only on the first arrival in a session, not after every match.

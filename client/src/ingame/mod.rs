@@ -40,6 +40,7 @@ pub mod match_flow;
 pub mod mode_hud;
 pub mod pause;
 pub mod remote_players;
+pub mod replay; // play of the game: recording, title card, replay (docs/potg.md)
 pub mod scoreboard;
 pub mod style_hud;
 pub mod tuning_edit;
@@ -132,6 +133,8 @@ pub struct InGame {
     match_ui: match_flow::MatchUi,
     /// The lobby's warm-up: overlay, HUD card, the hub's board (`warmup.rs`).
     pub warmup: warmup::WarmupUi,
+    /// Play of the game: recording, marked clip, the end-of-match replay (`replay.rs`).
+    potg: replay::PotgClient,
 }
 
 impl InGame {
@@ -149,9 +152,14 @@ impl InGame {
             StartMode::Menu => anyhow::bail!("nothing to start"),
             StartMode::SinglePlayer { level } => {
                 let level = level.clone().unwrap_or_else(|| s.last_level.clone());
+                // Game modes: grind on an arena (the single-player page / `--mode grind`), and
+                // the difficulty of the PvE modes.
+                let mode = common.launch.mode.unwrap_or(s.sp_mode);
                 (
                     SessionSpec::SinglePlayer {
                         level: level.clone(),
+                        mode: (mode == shared::lobby::GameMode::Grind).then_some(mode),
+                        difficulty: common.launch.difficulty.unwrap_or(s.difficulty),
                     },
                     format!(
                         "SINGLE PLAYER // {}",
@@ -251,6 +259,7 @@ impl InGame {
             last_snapshot_time: 0.0,
             match_ui: match_flow::MatchUi::default(),
             warmup: warmup::WarmupUi::new(panel, !common.launch.bot),
+            potg: replay::PotgClient::new(),
         };
         game.load_received_level(common, renderer);
         game
@@ -570,6 +579,7 @@ impl InGame {
             .as_mut()
             .and_then(|s| s.client_mut().poll_event())
         {
+            self.potg_event(&ev, common);
             if let Some(t) = self.on_net_event(ev, common, io.renderer) {
                 let to_lobby = t == Transition::ReturnToLobby;
                 transition = Some(t);
@@ -577,6 +587,12 @@ impl InGame {
                     break;
                 }
             }
+        }
+        // Play of the game (replay.rs): recording; its title card and replay take over the
+        // screen until they end or are skipped, then the results.
+        self.potg_record();
+        if let Some(output) = self.potg_frame(common, io, out, &mut transition) {
+            return output;
         }
         let in_game = self.is_playing();
         // The results screen (match over) takes the keys and the cursor.
@@ -729,6 +745,7 @@ impl InGame {
             self.on_local_move_events(ev, feet, &tuning);
         }
         self.tick_events = events;
+        self.potg_record_local_shots();
         self.combat_after_ticks(common);
     }
 
@@ -815,14 +832,17 @@ impl InGame {
             && net.local_state().is_some()
         {
             let dead = net.own_combat().is_some_and(|c| c.combat.dead);
-            if common.settings.show_viewmodel && !results && !dead {
+            // (Nor behind the warm-up's lobby overlay.)
+            let lobby_up = self.warmup.open && self.in_warmup();
+            if common.settings.show_viewmodel && !results && !dead && !lobby_up {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
+                let held = *self.combat.predictor.state();
                 self.viewmodel.draw(
                     lib,
-                    self.controls.weapons.current,
-                    self.controls.weapons.mode(),
+                    crate::models::WeaponKind::for_weapon(held.current()).index(),
+                    held.mode,
                     team,
                     self.camera.dip(),
                     self.camera.roll(),

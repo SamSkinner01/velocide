@@ -44,15 +44,46 @@ pub enum ProjectileKind {
     EmberBomb,
     /// The Heron's needle (enemy, fast and straight, parryable).
     Needle,
+    // ---- expansion arsenal (docs/arsenal.md) ----
+    /// Longwick arrow (also Triple Nock's): ballistic, direct damage by the draw.
+    Arrow,
+    /// Riveter hot rivet: fast, light gravity, direct damage.
+    Rivet,
+    /// Cinderbox rocket (one of a salvo): straight, explodes on contact.
+    CinderRocket,
+    /// Flak shell: straight, airbursts into a ring of pellets.
+    FlakShell,
+    /// Limpet sticky charge.
+    Limpet,
+    /// Mortar shell: lobbed high, wide blast on contact.
+    MortarShell,
+    /// Flare: lobbed, leaves a burning patch where it lands.
+    Flare,
+    /// Longwick pinning arrow.
+    PinArrow,
+    /// Longwick ember arrow: bursts into flame on impact.
+    EmberArrow,
+    /// Longwick branding arrow (Brand on the bow).
+    BrandArrow,
 }
 
 impl ProjectileKind {
-    pub const ALL: [ProjectileKind; 5] = [
+    pub const ALL: [ProjectileKind; 15] = [
         ProjectileKind::Bomb,
         ProjectileKind::Gravewell,
         ProjectileKind::Wisp,
         ProjectileKind::EmberBomb,
         ProjectileKind::Needle,
+        ProjectileKind::Arrow,
+        ProjectileKind::Rivet,
+        ProjectileKind::CinderRocket,
+        ProjectileKind::FlakShell,
+        ProjectileKind::Limpet,
+        ProjectileKind::MortarShell,
+        ProjectileKind::Flare,
+        ProjectileKind::PinArrow,
+        ProjectileKind::EmberArrow,
+        ProjectileKind::BrandArrow,
     ];
 
     pub fn net_kind(self) -> u16 {
@@ -62,7 +93,28 @@ impl ProjectileKind {
             ProjectileKind::Wisp => kind::WISP,
             ProjectileKind::EmberBomb => kind::EMBER_BOMB,
             ProjectileKind::Needle => kind::NEEDLE,
+            ProjectileKind::Arrow => kind::ARROW,
+            ProjectileKind::Rivet => kind::RIVET,
+            ProjectileKind::CinderRocket => kind::CINDER_ROCKET,
+            ProjectileKind::FlakShell => kind::FLAK_SHELL,
+            ProjectileKind::Limpet => kind::LIMPET,
+            ProjectileKind::MortarShell => kind::MORTAR_SHELL,
+            ProjectileKind::Flare => kind::FLARE,
+            ProjectileKind::PinArrow => kind::PIN_ARROW,
+            ProjectileKind::EmberArrow => kind::EMBER_ARROW,
+            ProjectileKind::BrandArrow => kind::BRAND_ARROW,
         }
+    }
+
+    /// A Longwick arrow of any sort.
+    pub fn is_arrow(self) -> bool {
+        matches!(
+            self,
+            ProjectileKind::Arrow
+                | ProjectileKind::PinArrow
+                | ProjectileKind::EmberArrow
+                | ProjectileKind::BrandArrow
+        )
     }
 
     pub fn from_net_kind(k: u16) -> Option<Self> {
@@ -77,6 +129,12 @@ impl ProjectileKind {
             ProjectileKind::Wisp => 0.0,
             ProjectileKind::EmberBomb => t.enemy_projectiles.ember_gravity,
             ProjectileKind::Needle => t.enemy_projectiles.needle_gravity,
+            k if k.is_arrow() => t.longwick.arrow_gravity,
+            ProjectileKind::Rivet => t.riveter.rivet_gravity,
+            ProjectileKind::Limpet => t.limpet.gravity,
+            ProjectileKind::MortarShell => t.mortar.gravity,
+            ProjectileKind::Flare => t.flare.gravity,
+            _ => 0.0,
         }
     }
 
@@ -88,6 +146,13 @@ impl ProjectileKind {
             ProjectileKind::Wisp => t.arclash.wisp_radius,
             ProjectileKind::EmberBomb => t.enemy_projectiles.ember_radius,
             ProjectileKind::Needle => t.enemy_projectiles.needle_radius,
+            k if k.is_arrow() => t.longwick.arrow_radius,
+            ProjectileKind::Rivet => t.riveter.rivet_radius,
+            ProjectileKind::CinderRocket => t.cinderbox.rocket_radius,
+            ProjectileKind::FlakShell => t.flak.shell_radius,
+            ProjectileKind::Limpet => t.limpet.projectile_radius,
+            ProjectileKind::MortarShell => t.mortar.projectile_radius,
+            _ => t.flare.projectile_radius,
         }
     }
 
@@ -99,6 +164,14 @@ impl ProjectileKind {
             ProjectileKind::Wisp => t.arclash.wisp_lifetime,
             ProjectileKind::EmberBomb => t.enemy_projectiles.ember_lifetime,
             ProjectileKind::Needle => t.enemy_projectiles.needle_lifetime,
+            k if k.is_arrow() => t.longwick.arrow_lifetime,
+            ProjectileKind::Rivet => t.riveter.rivet_lifetime,
+            ProjectileKind::CinderRocket => t.cinderbox.rocket_lifetime,
+            // It bursts where its flight ends.
+            ProjectileKind::FlakShell => t.flak.burst_distance / t.flak.shell_speed.max(1e-3),
+            ProjectileKind::Limpet => t.limpet.fuse,
+            ProjectileKind::MortarShell => t.mortar.flight_time,
+            _ => t.flare.flight_time,
         }
     }
 
@@ -126,6 +199,16 @@ impl ProjectileKind {
             ProjectileKind::EmberBomb | ProjectileKind::Needle => {
                 Attack::Enemy { kind: 0, attack: 0 }
             }
+            ProjectileKind::Arrow => Attack::Longwick,
+            ProjectileKind::Rivet => Attack::Riveter,
+            ProjectileKind::CinderRocket => Attack::Cinderbox,
+            ProjectileKind::FlakShell => Attack::Flak,
+            ProjectileKind::Limpet => Attack::Limpet,
+            ProjectileKind::MortarShell => Attack::Mortar,
+            ProjectileKind::Flare => Attack::Flare,
+            ProjectileKind::PinArrow => Attack::PinningArrow,
+            ProjectileKind::EmberArrow => Attack::EmberArrow,
+            ProjectileKind::BrandArrow => Attack::Brand,
         }
     }
 
@@ -152,6 +235,26 @@ impl ProjectileKind {
                 t.enemy_projectiles.ember_explosion_radius,
                 0.0,
                 t.enemy_projectiles.ember_knockback,
+            ),
+            ProjectileKind::CinderRocket => (
+                t.cinderbox.explosion_radius,
+                t.cinderbox.damage,
+                t.cinderbox.knockback,
+            ),
+            ProjectileKind::Limpet => (
+                t.limpet.explosion_radius,
+                t.limpet.damage,
+                t.limpet.knockback,
+            ),
+            ProjectileKind::MortarShell => (
+                t.mortar.explosion_radius,
+                t.mortar.damage,
+                t.mortar.knockback,
+            ),
+            ProjectileKind::EmberArrow => (
+                t.ember_arrow.explosion_radius,
+                t.ember_arrow.damage,
+                t.ember_arrow.knockback,
             ),
             _ => return None,
         };
@@ -393,7 +496,7 @@ impl SimWorld {
             return true;
         }
         if now >= p.expire_tick {
-            if p.explosion.is_some() {
+            if !self.payload_expired(t, p) && p.explosion.is_some() {
                 self.explode_projectile(t, p, None);
             }
             return false;
@@ -480,6 +583,10 @@ impl SimWorld {
             p.relaunch(now);
             return true;
         }
+        // The expansion's sticky charges, airbursts, flares and special arrows (payload.rs).
+        if let Some(keep) = self.payload_hit_target(t, p, target, part, dir) {
+            return keep;
+        }
         if p.explosion.is_some() {
             self.explode_projectile(t, p, Some(target));
             return false;
@@ -488,7 +595,7 @@ impl SimWorld {
         false
     }
 
-    fn projectile_direct_damage(
+    pub(crate) fn projectile_direct_damage(
         &mut self,
         t: &Tuning,
         p: &Projectile,
@@ -523,6 +630,9 @@ impl SimWorld {
 
     fn projectile_hit_world(&mut self, t: &Tuning, p: &mut Projectile, hit: SweepHit) -> bool {
         let now = self.tick;
+        if let Some(keep) = self.payload_hit_world(t, p, hit) {
+            return keep;
+        }
         match p.kind {
             ProjectileKind::Bomb if p.bounces_left > 0 && !p.parried => {
                 let n = hit.normal;
@@ -668,9 +778,15 @@ impl SimWorld {
         self.apply_damage(t, target, info);
     }
 
-    fn explode_projectile(&mut self, t: &Tuning, p: &Projectile, direct: Option<HitTarget>) {
+    /// Explodes `p` (if it is explosive); returns everything the blast reached.
+    pub(crate) fn explode_projectile(
+        &mut self,
+        t: &Tuning,
+        p: &Projectile,
+        direct: Option<HitTarget>,
+    ) -> Vec<HitTarget> {
         let Some(spec) = p.explosion else {
-            return;
+            return Vec::new();
         };
         let mut flags = DamageFlags::NONE;
         if p.parried {
@@ -686,14 +802,14 @@ impl SimWorld {
             Some(p.id),
             direct,
             p.original_owner,
-        );
+        )
     }
 
     /// An explosion: damage with linear falloff and line of sight from the centre, and
     /// knockback away from the centre (with an upward bias) to everything in the radius —
     /// including the owner (self-damage fraction, full knockback: blast jumps) and co-op
     /// teammates (knockback only). Player-owned explosions measure the distance to the
-    /// shapes inflated by the hit assist.
+    /// shapes inflated by the hit assist. Returns every target the blast reached.
     #[allow(clippy::too_many_arguments)]
     pub fn explode(
         &mut self,
@@ -706,7 +822,7 @@ impl SimWorld {
         projectile: Option<NetId>,
         direct: Option<HitTarget>,
         original_owner: Owner,
-    ) {
+    ) -> Vec<HitTarget> {
         self.events.push(SimEvent::Explosion {
             position: center,
             radius: spec.radius,
@@ -771,9 +887,11 @@ impl SimWorld {
             info.projectile = projectile;
             hits.push((h.target, info));
         }
+        let reached = hits.iter().map(|(target, _)| *target).collect();
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        reached
     }
 
     /// Spawns an enemy projectile (for enemy attacks): `damage` per direct hit, or at the

@@ -153,8 +153,10 @@ impl MatchFlow {
         settings.level = config.level.clone();
         let info = LevelInfo::from_def(&config.level, level);
         // Without a lobby (single-player, tests) the level's kind decides the mode, so arenas
-        // keep PvP rules; with one, the configured mode wins if the level allows it.
-        if !lobby.enabled || !settings.mode.accepts(&info) {
+        // keep PvP rules, unless a mode no level kind implies was asked for (solo grind); with
+        // one, the configured mode wins if the level allows it.
+        let explicit = !matches!(settings.mode, GameMode::Campaign | GameMode::Deathmatch);
+        if (!lobby.enabled && !explicit) || !settings.mode.accepts(&info) {
             settings.mode = GameMode::for_level_kind(info.kind);
         }
         settings.max_players = config.max_players.clamp(1, u8::MAX as usize) as u8;
@@ -302,9 +304,11 @@ impl Server {
         }
         if settings != self.flow.settings {
             log::info!("match settings: {}", settings.summary(&self.flow.levels));
-            // The warm-up follows the next mode: PvP damage between players or not.
+            // The warm-up follows the next mode: PvP damage between players or not, and that
+            // mode's balance profile.
             self.world.set_warmup_next(&settings);
             self.flow.settings = settings;
+            self.update_effective_tuning();
         }
         Ok(())
     }
@@ -687,6 +691,8 @@ impl Server {
         };
         self.replace_world(world, hub);
         self.world.start_warmup(&self.flow.settings);
+        // The balance of the selected mode (`update_effective_tuning` reads the lobby's).
+        self.update_effective_tuning();
         self.flow.warmup_on = true;
         self.spawn_members();
         self.broadcast_load_level();
@@ -725,6 +731,8 @@ impl Server {
     fn replace_world(&mut self, mut world: SimWorld, settings: MatchSettings) {
         world.tick = self.world.tick;
         world.enemy_defs = std::mem::take(&mut self.world.enemy_defs);
+        // Loadouts chosen so far go along (docs/arsenal.md).
+        world.loadout_requests = std::mem::take(&mut self.world.loadout_requests);
         // Enemy navigation: reuse the nav grid for the same level, else build it now rather
         // than on the first enemy tick (docs/enemies.md).
         match self.world.ai.nav.take() {
@@ -735,6 +743,8 @@ impl Server {
         }
         world.apply_match_settings(settings);
         self.world = world;
+        // The new mode's balance profile (docs/arsenal.md).
+        self.update_effective_tuning();
         self.fx.prune(self.world.tick);
         self.lagcomp = LagCompHistory::new(self.config.tick_rate, LAG_COMP_HISTORY_MS);
         for conn in self.clients.values_mut() {

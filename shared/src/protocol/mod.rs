@@ -30,7 +30,7 @@ use crate::input::PlayerInput;
 use crate::level::LevelDef;
 use crate::movement::MoveState;
 pub use crate::sim::PlayerId;
-use crate::sim::{KillInfo, ModeEvent, ParryEvent, PlayerCombat, StyleEvent, StyleView};
+use crate::sim::{Highlight, KillInfo, ModeEvent, ParryEvent, PlayerCombat, StyleEvent, StyleView};
 use crate::tuning::Tuning;
 
 /// netcode protocol id ("VELOCIDE"). Clients with a different id cannot even handshake.
@@ -279,6 +279,14 @@ pub enum GameEvent {
     },
     /// The encounter was won; its doors open ("CLEARED", `Sfx::EncounterClear` + `DoorOpen`).
     EncounterCleared { index: u32 },
+
+    // ---- play of the game (PvP modes, docs/potg.md); everyone ----
+    /// A burst of kills closed and beat the match's best so far: clients copy that stretch out
+    /// of their rolling recording (with margins) and keep it.
+    HighlightMark(Highlight),
+    /// The match is over: the play of the game. Sent right before the results
+    /// (`ModeEvent::Ended`); clients play its title card and replay before the results screen.
+    PlayOfTheGame(Highlight),
 }
 
 /// Unreliable server -> client messages.

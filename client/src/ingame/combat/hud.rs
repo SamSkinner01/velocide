@@ -10,7 +10,7 @@ use engine::ui::hud;
 use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use shared::input::look_dir;
-use shared::sim::{Weapon, WeaponState};
+use shared::sim::{Ability, WeaponState};
 use shared::tuning::CombatTuning;
 
 use super::super::hud::project;
@@ -225,13 +225,13 @@ impl CombatHud {
             list.text(p - vec2(0.0, 6.0 + 18.0 * age), &n.text, &style);
         }
 
-        // Cooldowns + Discharge gauge under / beside the crosshair.
+        // Cooldowns + charge / draw gauge under / beside the crosshair.
         let w = info.weapons;
-        let wi = (w.weapon as usize).min(3);
-        let weapon = Weapon::from_slot(w.weapon).unwrap_or(Weapon::Quill);
+        let wi = (w.slot as usize).min(w.primary_cooldown.len() - 1);
+        let build = w.build();
         let rate = info.tick_rate as f32;
-        let prim_total = (weapon.primary_interval(info.tuning) * rate).max(1.0);
-        let alt_total = (weapon.alt_cooldown(w.mode, info.tuning) * rate).max(1.0);
+        let prim_total = (build.weapon.primary_interval(info.tuning) * rate).max(1.0);
+        let alt_total = (build.ability(w.mode).cooldown(info.tuning) * rate).max(1.0);
         let bars = [
             (w.primary_cooldown[wi] as f32 / prim_total, t.bone_dim),
             (w.alt_cooldown[wi] as f32 / alt_total, t.crimson_bright),
@@ -255,8 +255,12 @@ impl CombatHud {
                 fade(*color, 0.85),
             );
         }
-        if w.charge > 0 {
-            let f = w.charge_fraction(info.tuning, info.tick_rate);
+        if w.charge > 0 || w.draw > 0 {
+            let f = if w.draw > 0 {
+                w.draw_fraction(info.tuning, info.tick_rate)
+            } else {
+                w.charge_fraction(info.tuning, info.tick_rate)
+            };
             let h = 26.0;
             let bar = Rect::new(
                 vec2(center.x + 14.0, center.y - h * 0.5),
@@ -277,15 +281,17 @@ impl CombatHud {
                 Rect::new(vec2(bar.min.x, bar.max.y - h * f), bar.max),
                 color,
             );
-            // Nova radius at this charge, beside the gauge.
+            // Discharge: the nova radius at this charge, beside the gauge.
             let a = &info.tuning.arclash;
-            let radius =
-                a.discharge_min_radius + (a.discharge_max_radius - a.discharge_min_radius) * f;
-            list.text(
-                vec2(bar.max.x + 4.0, bar.min.y - 2.0),
-                &format!("{radius:.0}M"),
-                &TextStyle::new(fade(color, 0.9)).outline(outline),
-            );
+            if w.charge > 0 && w.ability() == Ability::Discharge {
+                let radius =
+                    a.discharge_min_radius + (a.discharge_max_radius - a.discharge_min_radius) * f;
+                list.text(
+                    vec2(bar.max.x + 4.0, bar.min.y - 2.0),
+                    &format!("{radius:.0}M"),
+                    &TextStyle::new(fade(color, 0.9)).outline(outline),
+                );
+            }
         }
 
         // Thorns above the weapon block (bottom right).
@@ -346,7 +352,9 @@ impl CombatHud {
                 let style = TextStyle::new(fade(t.bone, k)).centered().outline(outline);
                 list.text(vec2(c.center().x, c.center().y - 6.0), by, &style);
             }
-            if info.respawn_in > 0.0 {
+            // Longer waits are the game mode holding you out (grind: back at the next wave;
+            // the mode HUD says so), not a countdown.
+            if info.respawn_in > 0.0 && info.respawn_in < 600.0 {
                 let style = TextStyle::new(fade(t.bone_dim, k))
                     .scale(2.0)
                     .centered()

@@ -7,6 +7,11 @@
 //!   (kills, style, damage, deaths, revives, the four grades, overall), "LEFT BEHIND" for
 //!   anyone who missed the extraction.
 //! * **Deathmatch**: winner banner and the final standings (frags, deaths, best rank, style).
+//! * **Gun game**: the deathmatch layout with the tier reached (and its weapon / FIST / WON) in
+//!   place of the frags.
+//! * **Grind**: OVERRUN; solo, the campaign tally with WAVE (time survived, the wave grade) in
+//!   place of TIME; co-op, the team line with the wave and one row per player (wave, kills,
+//!   style and damage grades). The local best wave on this arena and difficulty, or NEW BEST.
 //!
 //! Enter / click skips the reveal; then the lobby's buttons appear (CONTINUE TO LOBBY / LEAVE
 //! for the host, RESTART / MAIN MENU in single player; drawn by `ingame::match_flow`).
@@ -49,6 +54,8 @@ pub struct ResultsScreen {
     pub local: Option<PlayerId>,
     /// Everyone's look (`PlayerInfo::cosmetics`): a swatch next to each name.
     pub looks: std::collections::BTreeMap<PlayerId, shared::cosmetics::Cosmetics>,
+    /// Grind: the local best wave on this arena and difficulty before this run (0 = none).
+    pub previous_best_wave: Option<u32>,
     opened: f64,
     /// Stamps already heard.
     stamps_played: usize,
@@ -98,13 +105,51 @@ impl ResultsScreen {
             results,
             local,
             looks: Default::default(),
+            previous_best_wave: None,
             opened: now,
             stamps_played: 0,
         }
     }
 
     fn is_coop(&self) -> bool {
-        self.results.rules.kind == GameMode::Campaign && self.results.players.len() > 1
+        matches!(
+            self.results.rules.kind,
+            GameMode::Campaign | GameMode::Grind
+        ) && self.results.players.len() > 1
+    }
+
+    /// Level name, with the difficulty in the PvE modes: "KNELL YARD  //  HARD".
+    fn subtitle(&self) -> String {
+        let r = &self.results;
+        if r.rules.kind.has_difficulty() {
+            format!(
+                "{}  //  {}",
+                r.level.to_uppercase(),
+                r.rules.difficulty.title()
+            )
+        } else {
+            r.level.to_uppercase()
+        }
+    }
+
+    /// Title of the PvE layouts.
+    fn pve_title(&self) -> &'static str {
+        match (self.results.rules.kind, self.results.reason) {
+            (GameMode::Grind, EndReason::Overrun) => "OVERRUN",
+            (GameMode::Grind, _) => "RUN OVER",
+            _ => "LEVEL COMPLETE",
+        }
+    }
+
+    /// Grind: "NEW BEST" (beat the local record) or the record to beat.
+    fn best_wave_line(&self) -> Option<(String, bool)> {
+        let run = self.results.grind?;
+        let before = self.previous_best_wave?;
+        Some(if run.wave > before {
+            ("NEW BEST!".to_string(), true)
+        } else {
+            (format!("BEST: WAVE {before}"), false)
+        })
     }
 
     /// The reveal steps of this layout (their stamps make the sounds).
@@ -243,8 +288,8 @@ impl ResultsScreen {
             list,
             t,
             vec2(cx, 22.0),
-            "LEVEL COMPLETE",
-            &r.level.to_uppercase(),
+            self.pve_title(),
+            &self.subtitle(),
             age,
         );
         let Some(me) = r.players.first() else {
@@ -259,8 +304,15 @@ impl ResultsScreen {
         } else {
             0.0
         };
-        let rows: [TallyRow; 4] = [
-            (
+        // Grind: the wave reached (and the time survived) instead of the time vs par.
+        let first: TallyRow = match r.grind {
+            Some(run) => (
+                "WAVE",
+                Box::new(move |p| format!("{}", (run.wave as f32 * p).round() as u32)),
+                format!("SURVIVED {}", format_timer(r.duration_secs as f64)),
+                Some(run.grade),
+            ),
+            None => (
                 "TIME",
                 Box::new(|p| format_timer((r.duration_secs * p) as f64)),
                 if r.par_secs > 0.0 {
@@ -270,6 +322,9 @@ impl ResultsScreen {
                 },
                 g.and_then(|g| g.time),
             ),
+        };
+        let rows: [TallyRow; 4] = [
+            first,
             (
                 "KILLS",
                 Box::new(|p| format!("{}", (me.stats.kills as f32 * p).round() as u32)),
@@ -378,7 +433,38 @@ impl ResultsScreen {
                     );
                 }
             }
+            if age >= s.stamp {
+                self.draw_best_wave(
+                    list,
+                    t,
+                    vec2(center.x, frame.max.y + 24.0),
+                    age - s.stamp,
+                    now,
+                );
+            }
         }
+    }
+
+    /// Grind: "NEW BEST!" (flashing) or "BEST: WAVE 25", centred at `at`.
+    fn draw_best_wave(&self, list: &mut UiDrawList, t: &Theme, at: Vec2, since: f64, now: f64) {
+        let Some((text, new)) = self.best_wave_line() else {
+            return;
+        };
+        let k = (since / 0.3).clamp(0.0, 1.0) as f32;
+        let col = if !new {
+            t.bone_dim
+        } else if (now * 6.0).fract() < 0.5 {
+            t.rank_color(7)
+        } else {
+            t.crimson_bright
+        };
+        list.text(
+            at,
+            &text,
+            &TextStyle::new(fade(col, k))
+                .centered()
+                .outline(fade(t.ink, 0.9 * k)),
+        );
     }
 
     fn draw_coop(
@@ -396,8 +482,8 @@ impl ResultsScreen {
             list,
             t,
             vec2(cx, 22.0),
-            "LEVEL COMPLETE",
-            &r.level.to_uppercase(),
+            self.pve_title(),
+            &self.subtitle(),
             age,
         );
         let w = 600.0f32.min(c.width() - 20.0);
@@ -421,19 +507,38 @@ impl ResultsScreen {
         } else {
             String::new()
         };
-        let line = format!(
-            "TIME {}{}     KILLS {}/{}{}",
-            format_timer(r.duration_secs as f64),
-            par,
-            r.team_kills,
-            r.total_enemies,
-            pct
-        );
+        let line = match r.grind {
+            // Grind: the wave reached first; every Mould spawned counts.
+            Some(run) => format!(
+                "WAVE {}     TIME {}     KILLS {}",
+                run.wave,
+                format_timer(r.duration_secs as f64),
+                r.team_kills
+            ),
+            None => format!(
+                "TIME {}{}     KILLS {}/{}{}",
+                format_timer(r.duration_secs as f64),
+                par,
+                r.team_kills,
+                r.total_enemies,
+                pct
+            ),
+        };
         list.text(
             vec2(x0 + 12.0, ty + 9.0),
             &line,
             &TextStyle::new(fade(t.bone, a)),
         );
+        if a > 0.0
+            && let Some((text, new)) = self.best_wave_line()
+        {
+            let col = if new { t.rank_color(7) } else { t.bone_dim };
+            list.text(
+                vec2(x1 - 12.0, ty + 9.0),
+                &text,
+                &TextStyle::new(fade(col, a)).right(),
+            );
+        }
         // Columns.
         let cols: [(&str, f32); 7] = [
             ("KILLS", 245.0),
@@ -441,7 +546,14 @@ impl ResultsScreen {
             ("DMG", 338.0),
             ("DEATHS", 388.0),
             ("REVIVES", 444.0),
-            ("T  K  S  D", 520.0),
+            (
+                if r.grind.is_some() {
+                    "W  K  S  D"
+                } else {
+                    "T  K  S  D"
+                },
+                520.0,
+            ),
             ("RANK", 578.0),
         ];
         let hy = ty + 38.0;
@@ -502,7 +614,7 @@ impl ResultsScreen {
                 &name,
                 &TextStyle::new(fade(t.bone, a)),
             );
-            if !p.extracted {
+            if !p.extracted && r.grind.is_none() {
                 list.text(
                     vec2(row.min.x + 16.0, y + 10.0),
                     "LEFT BEHIND",
@@ -531,7 +643,9 @@ impl ResultsScreen {
                 list.text(vec2(xs(x), y + 4.0), &text, &num);
             }
             if let Some(g) = p.grades {
-                let small = [g.time, g.kills, Some(g.style), Some(g.damage)];
+                // Grind: the run's wave grade in the first slot (no par time).
+                let first = r.grind.map(|run| run.grade).or(g.time);
+                let small = [first, g.kills, Some(g.style), Some(g.damage)];
                 for (k, gr) in small.iter().enumerate() {
                     // Under the header letters ("T  K  S  D", right-aligned at 520).
                     let gx = (xs(520.0) - 62.0 + k as f32 * 18.0).round();
@@ -588,6 +702,8 @@ impl ResultsScreen {
             ),
             EndReason::Exit => "LEVEL EXIT".into(),
             EndReason::Host => "ENDED BY THE HOST".into(),
+            EndReason::Overrun => "OVERRUN".into(),
+            EndReason::Ladder => "THE LADDER IS CLIMBED".into(),
         };
         title_block(
             list,
@@ -669,7 +785,14 @@ impl ResultsScreen {
         let a = ((age - 0.7) / 0.2).clamp(0.0, 1.0) as f32;
         let head = TextStyle::new(fade(t.ash, a));
         let cols = [
-            (330.0, "FRAGS"),
+            (
+                330.0,
+                if r.gun_game.is_some() {
+                    "TIER"
+                } else {
+                    "FRAGS"
+                },
+            ),
             (390.0, "DEATHS"),
             (470.0, "BEST RANK"),
             (515.0, "STYLE"),
@@ -748,16 +871,17 @@ impl ResultsScreen {
         list.text(vec2(name_x, y), &name, &TextStyle::new(fade(t.bone, a)));
         let xs = |x: f32| x0 + x * w / 520.0;
         let num = |c: Vec4| TextStyle::new(fade(c, a)).right();
-        let frag_col = if p.stats.frags < 0 {
-            t.crimson_bright
-        } else {
-            t.bone
+        // Gun game: the tier reached instead of the frags.
+        let (score, score_col) = match &self.results.gun_game {
+            Some(g) => {
+                let won = p.stats.tier as usize > g.ladder.len();
+                let col = if won { t.rank_color(7) } else { t.bone };
+                (result_tier_label(&g.ladder, p.stats.tier), col)
+            }
+            None if p.stats.frags < 0 => (format!("{}", p.stats.frags), t.crimson_bright),
+            None => (format!("{}", p.stats.frags), t.bone),
         };
-        list.text(
-            vec2(xs(330.0), y),
-            &format!("{}", p.stats.frags),
-            &num(frag_col).scale(1.0),
-        );
+        list.text(vec2(xs(330.0), y), &score, &num(score_col).scale(1.0));
         list.text(
             vec2(xs(390.0), y),
             &format!("{}", p.stats.deaths),
@@ -905,13 +1029,18 @@ fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
     let Some(winner) = r.players.first() else {
         return "DRAW";
     };
+    // What the standings rank by: frags, or (gun game) the tier, then kills.
+    let score = |p: &PlayerResult| match r.gun_game {
+        Some(_) => (p.stats.tier as i64, p.stats.kills as i64),
+        None => (p.stats.frags as i64, 0),
+    };
     let second = r.players.get(1);
     let dead_even = second.is_some_and(|b| {
-        b.stats.frags == winner.stats.frags
+        score(b) == score(winner)
             && b.stats.deaths == winner.stats.deaths
             && b.style_points == winner.style_points
     });
-    let tied = second.is_some_and(|b| b.stats.frags == winner.stats.frags);
+    let tied = second.is_some_and(|b| score(b).0 == score(winner).0);
     let me = Some(winner.player) == local;
     if dead_even {
         "DRAW"
@@ -921,6 +1050,15 @@ fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
         "TOP OF THE TABLE"
     } else {
         "WINNER"
+    }
+}
+
+/// A gun game tier on the results: "7 LANCET", "FIST" (the last tier), "WON" (past it).
+fn result_tier_label(ladder: &[shared::loadout::WeaponKind], tier: u8) -> String {
+    match ladder.get(tier as usize) {
+        Some(w) => format!("{} {}", tier as usize + 1, w.name().to_uppercase()),
+        None if tier as usize == ladder.len() => "FIST".into(),
+        None => "WON".into(),
     }
 }
 
@@ -975,6 +1113,8 @@ mod tests {
                 .collect(),
             team_grade: Some(Grade::A),
             winner: None,
+            grind: None,
+            gun_game: None,
         }
     }
 
@@ -991,6 +1131,31 @@ mod tests {
         s.skip(0.1);
         assert!(!s.finished(0.1), "not in the frame that skipped");
         assert!(s.finished(0.12));
+    }
+
+    #[test]
+    fn gun_game_ranks_by_tier() {
+        use shared::loadout::WeaponKind;
+        let mut r = results(GameMode::GunGame, 2);
+        r.gun_game = Some(shared::sim::GunGameResult {
+            ladder: vec![WeaponKind::Arclash, WeaponKind::Lancet],
+        });
+        r.players[0].stats.tier = 3;
+        r.players[1].stats.tier = 2;
+        assert_eq!(winner_headline(&r, Some(PlayerId(0))), "VICTORY");
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "WINNER");
+        r.players[1].stats.tier = 3;
+        assert_eq!(
+            winner_headline(&r, Some(PlayerId(0))),
+            "DRAW",
+            "level on everything"
+        );
+        r.players[0].stats.kills = 9;
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "TOP OF THE TABLE");
+        let ladder = &r.gun_game.as_ref().unwrap().ladder;
+        assert_eq!(result_tier_label(ladder, 1), "2 LANCET");
+        assert_eq!(result_tier_label(ladder, 2), "FIST");
+        assert_eq!(result_tier_label(ladder, 3), "WON");
     }
 
     #[test]

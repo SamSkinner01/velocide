@@ -22,16 +22,100 @@
 //! | `/encounters` | encounter states (docs/enemies.md) |
 //! | `/tp <x> <y> <z>` | teleports you to that point (feet) |
 //! | `/goto <exit / start / checkpoint n / encounter n>` | teleports you to the level exit, the start, checkpoint n's spawn or encounter n's rally point |
+//! | `/loadout [weapon[:ability,ability] ...]` | sets your loadout now, slot by slot (`-` = empty slot; abilities default to the weapon's), e.g. `/loadout longwick:pinning,ember kiln quill`; no arguments: shows it (docs/arsenal.md) |
 //! | `/help` | this list |
 
 use glam::Vec3;
 use shared::input::look_dir;
+use shared::loadout::{Ability, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponKind};
 use shared::protocol::kind;
 use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind, WeaponState};
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>";
+const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...]";
+
+/// Lower-case letters and digits only ("Triple Nock" → "triplenock").
+fn squash(s: &str) -> String {
+    s.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// The weapon or ability whose name starts with `word` (ignoring case, spaces and `_`).
+fn find_named<T: Copy>(word: &str, all: &[T], name: impl Fn(T) -> &'static str) -> Option<T> {
+    let word = squash(word);
+    if word.is_empty() {
+        return None;
+    }
+    all.iter()
+        .copied()
+        .find(|x| squash(name(*x)) == word)
+        .or_else(|| {
+            all.iter()
+                .copied()
+                .find(|x| squash(name(*x)).starts_with(&word))
+        })
+}
+
+/// Parses `/loadout` arguments: up to four `weapon[:ability[,ability]]` (or `-` for an empty
+/// slot). Abilities left out are the weapon's defaults; the result is sanitised.
+fn parse_loadout(args: &[&str]) -> Result<Loadout, String> {
+    if args.len() > LOADOUT_SLOTS {
+        return Err(format!("at most {LOADOUT_SLOTS} slots"));
+    }
+    let mut loadout = Loadout {
+        slots: [None; LOADOUT_SLOTS],
+    };
+    for (slot, arg) in args.iter().enumerate() {
+        if *arg == "-" || arg.eq_ignore_ascii_case("none") {
+            continue;
+        }
+        let (weapon, abilities) = arg.split_once(':').unwrap_or((arg, ""));
+        let weapon = find_named(weapon, &WeaponKind::ALL, WeaponKind::name)
+            .ok_or_else(|| format!("unknown weapon '{weapon}'"))?;
+        let mut build = weapon.default_build();
+        for (i, word) in abilities.split(',').filter(|w| !w.is_empty()).enumerate() {
+            let ability = find_named(word, weapon.abilities(), Ability::name).ok_or_else(|| {
+                let pool: Vec<&str> = weapon.abilities().iter().map(|a| a.name()).collect();
+                format!(
+                    "{} can't take '{word}' ({})",
+                    weapon.name(),
+                    pool.join(", ")
+                )
+            })?;
+            if let Some(a) = build.abilities.get_mut(i) {
+                *a = ability;
+            }
+        }
+        loadout.slots[slot] = Some(build);
+    }
+    if loadout.first_slot().is_none() {
+        return Err("no weapon given".into());
+    }
+    Ok(loadout.sanitized())
+}
+
+/// "1 LONGWICK (Triple Nock / Pinning Arrow)  2 KILN (...)".
+fn describe_loadout(loadout: &Loadout) -> String {
+    let builds: Vec<String> = loadout
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(i, b)| b.map(|b| (i, b)))
+        .map(|(i, WeaponBuild { weapon, abilities })| {
+            format!(
+                "{} {} ({} / {})",
+                i + 1,
+                weapon.name().to_uppercase(),
+                abilities[0].name(),
+                abilities[1].name()
+            )
+        })
+        .collect();
+    builds.join("  ")
+}
 
 impl Server {
     /// Runs one dev command for `player`; returns the reply.
@@ -41,7 +125,7 @@ impl Server {
         let args: Vec<&str> = words.collect();
         let tuning = self.tuning.clone();
         // A lobby without a warm-up world simulates nothing (docs/lobby.md).
-        if !self.world_running() && !matches!(cmd.as_str(), "help" | "" | "enemies") {
+        if !self.world_running() && !matches!(cmd.as_str(), "help" | "" | "enemies" | "loadout") {
             return "no match is running".into();
         }
         match cmd.as_str() {
@@ -105,7 +189,7 @@ impl Server {
                     p.combat.hard = 0.0;
                     p.combat.weapons = WeaponState {
                         prev_buttons: w.prev_buttons,
-                        ..WeaponState::fresh(w.weapon, w.mode)
+                        ..w.respawned(w.loadout)
                     };
                     "full health, thorns and weapons".into()
                 }
@@ -262,6 +346,23 @@ impl Server {
                     None => "no such place on this level".into(),
                 }
             }
+            "loadout" => {
+                if args.is_empty() {
+                    return format!("loadout: {}", describe_loadout(&self.world.loadout(player)));
+                }
+                let loadout = match parse_loadout(&args) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        return format!("{e}. usage: /loadout <weapon[:ability,ability]> ...");
+                    }
+                };
+                // The usual rules store it; a dev wants it in hand right now.
+                self.world.request_loadout(player, loadout);
+                if let Some(p) = self.world.players.get_mut(&player) {
+                    p.combat.weapons = p.combat.weapons.with_loadout(loadout);
+                }
+                format!("loadout: {}", describe_loadout(&loadout))
+            }
             other => format!("unknown command '/{other}'. {HELP}"),
         }
     }
@@ -273,5 +374,38 @@ impl Server {
         } else {
             "no living body to move".into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loadout_arguments_parse() {
+        let l = parse_loadout(&["longwick:pinning,ember", "-", "Kiln", "quill:splinter"]).unwrap();
+        assert_eq!(
+            l.slot(0).map(|b| b.abilities),
+            Some([Ability::PinningArrow, Ability::EmberArrow])
+        );
+        assert_eq!(l.slot(1), None);
+        assert_eq!(l.slot(2), Some(&WeaponKind::Kiln.default_build()));
+        // One ability given: it replaces A; B stays the default unless that repeats it.
+        assert_eq!(
+            l.slot(3).map(|b| b.abilities),
+            Some([Ability::Splinter, Ability::Brand])
+        );
+        assert!(l.is_valid());
+        assert_eq!(
+            parse_loadout(&["triple nock"]).unwrap_err(),
+            "unknown weapon 'triple nock'"
+        );
+        assert!(parse_loadout(&["quill:gust"]).is_err());
+        assert!(parse_loadout(&["-"]).is_err());
+        assert!(parse_loadout(&["quill"; 5]).is_err());
+        // The same weapon twice: the second is dropped.
+        let l = parse_loadout(&["lancet", "lancet"]).unwrap();
+        assert_eq!(l.slot(1), None);
+        assert!(describe_loadout(&l).starts_with("1 LANCET (Skewer / Flurry)"));
     }
 }

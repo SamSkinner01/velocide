@@ -2,8 +2,9 @@
 //!
 //! ```text
 //! velocide-server [--port 47420] [--bind 0.0.0.0] [--level proving_ground] [--max-players 8]
-//!                 [--mode campaign|deathmatch] [--frag-limit 20] [--time-limit 600]
-//!                 [--friendly-fire] [--autostart] [--no-lobby] [--no-warmup]
+//!                 [--mode campaign|deathmatch|gungame|grind] [--difficulty normal]
+//!                 [--frag-limit 20] [--time-limit 600] [--friendly-fire] [--autostart] [--no-lobby]
+//!                 [--no-warmup]
 //!                 [--tick-rate 60] [--snapshot-rate 30] [--netsim 100,20,2] [--tuning PATH]
 //!                 [--no-watch] [--no-delta] [--name NAME] [--dev-commands]
 //! ```
@@ -22,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use server::{LobbyConfig, NetSimConfig, Server, ServerConfig};
-use shared::lobby::{GameMode, LevelInfo, MatchSettings};
+use shared::lobby::{Difficulty, GameMode, LevelInfo, MatchSettings};
 
 const USAGE: &str = "\
 velocide-server: headless VELOCIDE dedicated server
@@ -35,7 +36,10 @@ OPTIONS:
     --bind <IP>              address to bind (default 0.0.0.0)
     --level <NAME>           first level (default proving_ground)
     --max-players <N>        player slots (default 8; co-op at most 4)
-    --mode <MODE>            campaign | deathmatch (default: the level's kind)
+    --mode <MODE>            campaign | deathmatch | gungame | grind (default: the level's
+                             kind)
+    --difficulty <LEVEL>     campaign / grind: easy | normal | hard | brutal | inferno
+                             (default normal; the lobby host can change it)
     --frag-limit <N>         deathmatch frags to win, 0 = none (default 20)
     --time-limit <SECONDS>   deathmatch length, 0 = none (default 600)
     --friendly-fire          co-op: players can hurt each other
@@ -101,10 +105,15 @@ fn parse_args() -> Result<ServerConfig, String> {
             }
             "--mode" => {
                 let v = value("--mode")?;
-                mode = Some(
-                    GameMode::parse(&v)
-                        .ok_or_else(|| format!("--mode: '{v}' is not campaign or deathmatch"))?,
-                )
+                mode = Some(GameMode::parse(&v).ok_or_else(|| {
+                    format!("--mode: '{v}' is not campaign, deathmatch, gungame or grind")
+                })?)
+            }
+            "--difficulty" => {
+                let v = value("--difficulty")?;
+                config.lobby.settings.difficulty = Difficulty::parse(&v).ok_or_else(|| {
+                    format!("--difficulty: '{v}' is not easy, normal, hard, brutal or inferno")
+                })?;
             }
             "--frag-limit" => {
                 config.lobby.settings.frag_limit = value("--frag-limit")?

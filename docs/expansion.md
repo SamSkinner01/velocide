@@ -138,6 +138,23 @@ Bow abilities change the *next release* rather than firing on their own: pressin
 arms them (HUD shows it); the following primary release uses it. **arsenal** may adjust this if
 it plays badly, documenting why.
 
+As built (milestone 1, details in `docs/arsenal.md`): pressing `ALT_FIRE` again disarms; the
+cooldown starts at the release. A request also applies at once to a body that hasn't processed
+an input yet (a player joining mid-match sends `SetLoadout` a moment after spawning). Requests
+live in `SimWorld::loadout_requests` (the server carries them into every new world), forced
+loadouts in `SimWorld::forced_loadouts`; the warm-up flag is `SimWorld::warmup` (**lobby** sets
+it). An ability is one `Attack` on every weapon, so `Attack::weapon()` is `None` for abilities
+several weapons can carry: **`KillInfo::weapon`** (new field) names the weapon that fired the
+killing blow — use it for the kill feed's weapon and gun-game tiers.
+
+As built (milestone 2): **Limpet** — a tap throws a charge, holding the ability 0.25 s
+detonates every charge out, and a throw with 3 already out detonates them instead. Read
+literally ("using Limpet again while charges are out detonates them all") a second use would
+always detonate the first charge, so "up to 3 live" could never happen; tap / hold keeps both.
+Ability damage on another weapon of the class: × the carrier's `ability_power` / the home
+weapon's, never above the listed numbers (`docs/arsenal.md`). Pinned players are slowed through
+their predicted `MoveState` (`slow_time`, `slow_scale`).
+
 ### Balance per mode (**arsenal**)
 
 `assets/tuning.ron` keeps the weapons' base numbers in `combat` and gains a `balance` section
@@ -146,7 +163,10 @@ each a per-weapon and per-ability set of multipliers (damage, fire interval / co
 radius, knockback, self-damage...) plus absolute overrides where a multiplier can't express it.
 `Tuning::for_mode(GameMode) -> Tuning` returns the effective tuning; the server runs a match
 with it and sends **that** to clients (`ServerMessage::Tuning`), so prediction always matches.
-Hot reload recomputes it. The PvE profile starts at 1.0 everywhere (today's campaign feel is
+Hot reload recomputes it. (As built: the server recomputes it from the world's
+`match_settings.mode` in `replace_world` and on reloads; whoever switches the running world's
+mode without a new world calls `Server::update_effective_tuning`. Overrides are field paths
+inside `combat`, e.g. `"thorn.charges": 0`.) The PvE profile starts at 1.0 everywhere (today's campaign feel is
 the reference); the PvP profile is tuned for time-to-kill and counterplay between players (time
 to kill in the 0.8–1.6 s band for a skilled player at the weapon's range; one-shots only from
 full-draw bow headshots, Slug/Skewer headshots at full charge). Document the reasoning in
@@ -207,6 +227,11 @@ hides the thorn pips (and the "Q" hint) when charges are 0.
   you up a tier (via `force_loadout`); a kill with the Fist on the last tier wins. A punch kill
   on someone (any tier) knocks the victim **down** a tier. Thorns are off (PvP profile).
 - Respawns are quick (deathmatch respawn rules). A time limit still applies (most tiers wins).
+- *As built (modes)*: the Fist tier keeps the last ladder build in hand and only a punch kill
+  counts there, because `force_loadout` turns an empty loadout into the default one and the
+  client would show / replicate it as the Quill. A real fists-only tier needs an unarmed
+  loadout from **arsenal** / **arsenal-client**; `sim::gungame::tier_loadout` is the one place
+  to switch to it.
 - HUD: your tier, the next weapon, the leader's tier. Results: winner, tiers reached.
 
 **modes** owns `shared/src/sim/modes.rs`, `shared/src/sim/encounter.rs`, new
@@ -261,6 +286,16 @@ main`), or report and wait to be resumed.
 - **lobby** owns `server/src/lobby.rs`, `client/src/menus/lobby.rs`, the screen flow in
   `client/src/app.rs`, `client/src/models/shrike.rs`, `client/src/ingame/remote_players.rs`, new
   `client/src/menus/customize.rs`, `PlayerInfo` / `LobbyPlayer` fields, and `docs/lobby.md`.
+- As built (details in `docs/lobby.md`): `LobbyState::warmup` tells clients the lobby has a
+  world; `shared::sim::warmup` holds the rules (`SimWorld::warmup_rules`, `in_warmup()`; it also
+  sets the arsenal's `SimWorld::warmup`); the hub's encounters are practice stations (a trigger
+  without volume = always-standing dummies, otherwise a USE console + pen) and its board and
+  console are level props (`level_gen`'s `emit` writes `props`); the "mirrors of the arenas'
+  tricks" are the movement course's stations (slide tunnel, wall-jump shaft, slam-bounce ledge,
+  dash gaps, pad tower). Keys: `Action::Ready` (F1 / d-pad down); in the warm-up the scoreboard
+  key (TAB / Select) opens the overlay. Results show a look swatch per row
+  (`ResultsScreen::looks`); the play-of-the-game card can draw a Shrike with
+  `menus::customize::draw_preview` or `ModelLibrary::draw_shrike`.
 
 ## Maps (area **maps**)
 

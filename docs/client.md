@@ -37,6 +37,7 @@ the debug overlay.
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
 | `ingame::match_flow` | lobby phase changes in game, results screen, scoreboard rows |
 | `ingame::warmup` | the lobby's warm-up on the game screen: lobby overlay, Ready key, HUD card, countdown banner, the hub's ready board and console signs (docs/lobby.md) |
+| `ingame::replay` | play of the game (docs/potg.md): `Recorder` (rolling 20 s of frames, events, `Fx`, own predicted shots), `Clip`, the title card and the first-person replay through the game's own drawers |
 | `ingame::style_hud`, `ingame::mode_hud` | style meter + style feed + rank banner; game-mode state and HUD (checkpoints, downed / revive, extraction, deathmatch clock), score cells, results glue (docs/style_modes.md) |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |

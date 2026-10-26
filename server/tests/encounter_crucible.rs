@@ -1,9 +1,9 @@
 //! Arena encounters end to end on `crucible_of_veins`: a real server and two real clients over
 //! UDP loopback (virtual clock). Player A walks into arena 1's trigger while B lags behind in
 //! the start hall: the entry door locks, B is pulled to the rally point (and its client snaps),
-//! the waves spawn in order with co-op scaling (2 players: 1.5x enemies, 1.5x health), killing
-//! everything opens the exit door, the encounter never restarts, and `restart_level` resets
-//! it. Also: the encounter entity carries "enemies left" to the clients.
+//! the waves spawn in order with co-op scaling (2 players on NORMAL: 1.6x enemies, 1.6x
+//! health), killing everything opens the exit door, the encounter never restarts, and
+//! `restart_level` resets it. Also: the encounter entity carries "enemies left" to the clients.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -189,14 +189,14 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         "A was inside already"
     );
 
-    // Wave 1 after 0.5 s: 4 authored gnawers x 1.5 = 6, 67.5 HP each.
+    // Wave 1 after 0.5 s: 4 authored gnawers x 1.6 = 6 (6.4), 72 HP each.
     assert!(n.run_until(1.0, |n| !n.living_enemies().is_empty()));
     n.run(0.1);
     let wave1 = n.living_enemies();
-    assert_eq!(wave1.len(), 6, "2 players: 1.5x the 4 authored gnawers");
+    assert_eq!(wave1.len(), 6, "2 players: 1.6x the 4 authored gnawers");
     assert!(
-        wave1.iter().all(|(_, max)| *max == 67.5),
-        "health x1.5: {wave1:?}"
+        wave1.iter().all(|(_, max)| (*max - 72.0).abs() < 1e-3),
+        "health x1.6: {wave1:?}"
     );
     // Every enemy stands somewhere sensible (inside the arena, not in the slag).
     for e in n.server.world().enemies.values() {
@@ -224,14 +224,14 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         );
     }
 
-    // Kill wave 1 through the damage pipeline: wave 2 comes 1.5 s later with 9 gnawers.
+    // Kill wave 1 through the damage pipeline: wave 2 comes 1.5 s later with 10 gnawers.
     n.server.kill_all_enemies();
     n.run(0.5);
     assert_eq!(n.phase(0), EncounterPhase::Active);
     assert!(n.living_enemies().is_empty(), "between waves");
     assert!(n.run_until(2.0, |n| !n.living_enemies().is_empty()));
     n.run(0.1);
-    assert_eq!(n.living_enemies().len(), 9, "6 authored x 1.5");
+    assert_eq!(n.living_enemies().len(), 10, "6 authored x 1.6 = 9.6");
     assert!(!n.door_open(2), "exit still closed during the fight");
 
     // Kill wave 2: cleared, the exit opens (and the entry too).
@@ -259,7 +259,7 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         .collect();
     assert_eq!(
         order,
-        ["start 0 2", "wave 0 1/2 6", "wave 0 2/2 9", "clear 0"]
+        ["start 0 2", "wave 0 1/2 6", "wave 0 2/2 10", "clear 0"]
     );
     for c in &n.clients {
         let got: Vec<&GameEvent> = c
@@ -283,7 +283,7 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
             GameEvent::WaveStarted {
                 wave: 2,
                 waves: 2,
-                enemies: 9,
+                enemies: 10,
                 ..
             }
         ));
@@ -304,7 +304,7 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
         "B's client got the teleport"
     );
     // Spawn effects for every enemy.
-    assert_eq!(n.count(|e| matches!(e, SimEvent::EnemySpawned { .. })), 15);
+    assert_eq!(n.count(|e| matches!(e, SimEvent::EnemySpawned { .. })), 16);
 
     // Cleared for good: walking through the trigger again does nothing.
     n.place(a, Vec3::new(0.0, 0.0, -20.0));
