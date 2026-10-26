@@ -157,6 +157,148 @@ fn spawn(game: &mut InGame, count: u32) {
     game.send_chat(&format!("/spawn {TARGET} {count}"));
 }
 
+/// The expansion arsenal's projectiles, blasts, burning patch and status effects, staged
+/// client-side with `InGame::preview_arsenal` (`arsenal_*.png`).
+fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::arsenal::{
+        ArsenalPreview as P, ArsenalProjectile as K, Blast, Status,
+    };
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 70, |g, _| hold(g, Buttons::NONE));
+    if let Some(t) = nearest_enemy(game, false) {
+        aim_at(game, t - Vec3::Y * 0.6);
+    }
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let launch = |side: f32| eye + fwd * 0.8 + right * side - Vec3::Y * 0.25;
+    let fire = |game: &mut InGame, kind, side: f32, speed: f32, up: f32, gravity: f32| {
+        game.preview_arsenal(P::Projectile {
+            kind,
+            from: launch(side),
+            velocity: fwd * speed + Vec3::Y * up + right * side * 2.0,
+            gravity,
+            life: 4.0,
+        });
+    };
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+
+    // Arrows in flight (taper, pinning, ember), then stuck / bursting.
+    fire(game, K::Arrow, -0.4, 45.0, 1.5, 6.0);
+    fire(game, K::PinningArrow, 0.0, 45.0, 2.5, 6.0);
+    fire(game, K::EmberArrow, 0.4, 45.0, 3.5, 6.0);
+    h.frames(game, 4, still);
+    h.shot("arsenal_arrows");
+    h.frames(game, 40, still);
+    h.shot("arsenal_arrows_landed");
+
+    // Rivets streaking, a cinder salvo (three rockets 0.08 s apart).
+    for k in 0..5 {
+        fire(
+            game,
+            K::Rivet,
+            -0.2 + k as f32 * 0.1,
+            90.0,
+            1.0 + k as f32 * 0.3,
+            4.0,
+        );
+    }
+    for k in 0..3 {
+        fire(
+            game,
+            K::CinderRocket,
+            (k as f32 - 1.0) * 0.15,
+            32.0,
+            0.5,
+            0.0,
+        );
+        h.frames(game, 5, still);
+    }
+    h.shot("arsenal_rivets_cinders");
+    h.frames(game, 30, still);
+    h.shot("arsenal_cinder_blasts");
+    h.frames(game, 40, still);
+
+    // A flak shell bursting into its ring of pellets.
+    fire(game, K::FlakShell, 0.0, 28.0, 2.0, 2.0);
+    h.frames(game, 8, still);
+    h.shot("arsenal_flak_shell");
+    game.preview_arsenal(P::FlakBurst {
+        position: eye + fwd * 9.0 + Vec3::Y * 0.8,
+        dir: fwd,
+    });
+    h.frames(game, 3, still);
+    h.shot("arsenal_flak_burst");
+    h.frames(game, 30, still);
+
+    // Limpets thrown onto the floor ahead, blinking, then detonated.
+    for k in 0..3 {
+        fire(game, K::Limpet, (k as f32 - 1.0) * 0.5, 9.0, 3.0, 18.0);
+    }
+    h.frames(game, 70, still);
+    h.shot("arsenal_limpets");
+    let ground = launch(0.0) + fwd * 6.0 - Vec3::Y * 1.3;
+    game.preview_arsenal(P::Blast {
+        blast: Blast::Limpet,
+        position: ground,
+        radius: 3.5,
+    });
+    h.frames(game, 3, still);
+    h.shot("arsenal_limpet_blast");
+    h.frames(game, 40, still);
+
+    // A mortar lobbed high, then its blast.
+    fire(game, K::MortarShell, 0.0, 14.0, 9.0, 20.0);
+    h.frames(game, 20, still);
+    h.shot("arsenal_mortar_shell");
+    h.frames(game, 60, |g, _| hold(g, Buttons::NONE));
+    game.preview_arsenal(P::Blast {
+        blast: Blast::Mortar,
+        position: ground + fwd * 4.0,
+        radius: 6.0,
+    });
+    h.frames(game, 4, still);
+    h.shot("arsenal_mortar_blast");
+    h.frames(game, 60, still);
+
+    // A flare lobbed ahead and the patch it leaves; statuses on the Moulds.
+    fire(game, K::Flare, 0.0, 10.0, 4.0, 12.0);
+    h.frames(game, 12, still);
+    h.shot("arsenal_flare");
+    game.preview_arsenal(P::BurningPatch {
+        position: ground,
+        radius: 3.0,
+        seconds: 4.0,
+    });
+    let moulds: Vec<_> = game
+        .net()
+        .map(|n| {
+            n.remote_entities()
+                .iter()
+                .filter(|e| kind::is_enemy(e.kind))
+                .map(|e| e.id)
+                .collect()
+        })
+        .unwrap_or_default();
+    for (i, id) in moulds.iter().enumerate() {
+        game.preview_arsenal(P::Status {
+            entity: *id,
+            status: if i % 2 == 0 {
+                Status::Burning
+            } else {
+                Status::Pinned
+            },
+            seconds: 3.0,
+        });
+    }
+    h.frames(game, 50, still);
+    h.shot("arsenal_burning_patch_status");
+    h.frames(game, 200, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -443,6 +585,8 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 9, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_ricochet");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
+
+    arsenal_previews(&mut h, &mut game);
 
     // Enemies attacking: walking, winding up (we're still god-moded).
     game.send_chat("/notarget");

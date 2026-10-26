@@ -254,6 +254,21 @@ impl Beams {
         }
     }
 
+    /// A beam drawn this frame only (per-frame shapes: the Pinned shackles).
+    pub fn frame_beam(&mut self, a: Vec3, b: Vec3, width: f32, color: Vec4) {
+        if !(a.is_finite() && b.is_finite()) || self.frame.len() >= MAX_FRAME_BEAMS {
+            return;
+        }
+        self.frame.push(Beam {
+            a,
+            b,
+            width,
+            color,
+            life: 0.0,
+            max_life: 1.0,
+        });
+    }
+
     /// A light that fades over `life` seconds.
     pub fn light(&mut self, position: Vec3, color: Vec3, radius: f32, life: f32) {
         if self.lights.len() >= MAX_TEMP_LIGHTS {

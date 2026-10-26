@@ -7,6 +7,8 @@
 //! * [`entities`]: enemies, projectiles, ember bursts, thorns and brand sigils.
 //! * [`hud`]: hit markers, damage numbers, damage direction, vignette, death screen, thorns,
 //!   cooldowns, the Discharge gauge, BRANDED.
+//! * [`arsenal`]: the expansion arsenal's projectiles, blasts, hazards and status effects, and
+//!   which build the local player holds.
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -200,6 +202,8 @@ pub struct CombatClient {
     pub queue: FxQueue,
     pub entities: EntityView,
     pub hud: CombatHud,
+    /// The expansion arsenal's visuals (`arsenal.rs`).
+    pub arsenal: arsenal::ArsenalView,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -228,6 +232,7 @@ impl CombatClient {
             queue: FxQueue::default(),
             entities: EntityView::new(),
             hud: CombatHud::new(),
+            arsenal: arsenal::ArsenalView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             charging: false,
@@ -247,6 +252,7 @@ impl CombatClient {
         self.queue.clear();
         self.entities.clear();
         self.hud.clear();
+        self.arsenal.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.heat = 0.0;
@@ -846,6 +852,36 @@ impl InGame {
         combat
             .entities
             .brand_sigils(entities, local, listener, &mut combat.beams);
+        // The arsenal's visuals (their per-frame shapes go in after the beams' update too).
+        let world = net.world().map(|w| &w.collision.world);
+        combat.arsenal.update(
+            entities,
+            world,
+            effects,
+            &mut combat.beams,
+            &mut common.audio,
+            &mut combat.rng,
+            vdt,
+        );
+        if combat.arsenal.has_pending() {
+            let view = &combat.entities;
+            let thorn_position = |id: NetId| view.thorn_position(id);
+            let mut ctx = FxCtx {
+                audio: &mut common.audio,
+                effects,
+                feedback,
+                beams: &mut combat.beams,
+                remote,
+                world,
+                entities,
+                local,
+                listener,
+                local_chest,
+                thorn_position: &thorn_position,
+                rng: &mut combat.rng,
+            };
+            combat.arsenal.play_pending(&mut ctx);
+        }
 
         // Viewmodel: Discharge glow + charge whine.
         let charge = combat.predictor.charge(t, rate);
@@ -900,6 +936,9 @@ impl InGame {
             &mut out.lights,
         );
         self.combat.beams.draw(&mut out.draws, &mut out.lights);
+        self.combat
+            .arsenal
+            .draw(common.models.as_ref(), &mut out.draws, &mut out.lights);
     }
 
     /// Combat HUD layer (after `Hud::draw`).
