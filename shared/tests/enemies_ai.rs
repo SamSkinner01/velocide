@@ -396,7 +396,7 @@ fn bastion_front_armour_and_weak_points() {
     let t = a.tuning.clone();
     let fwd = a.world.enemies[&id].forward();
     let hit = |a: &mut Arena, dir: Vec3, part: HitPart, flags: DamageFlags| {
-        let info = DamageInfo::new(100.0, Owner::Player(PlayerId(0)), Attack::Lancet)
+        let info = DamageInfo::new(100.0, Owner::Player(PlayerId(0)), Attack::Quill)
             .at(Vec3::new(0.0, 1.5, 0.0), dir)
             .part(part)
             .flags(flags);
@@ -426,7 +426,7 @@ fn light_enemies_fly_bastions_barely_move() {
     let bastion = spawn(&mut a, "bastion", Vec3::new(5.0, 0.0, 0.0), 0.0);
     let t = a.tuning.clone();
     for id in [husk, bastion] {
-        let info = DamageInfo::new(1.0, Owner::Player(PlayerId(0)), Attack::Slug)
+        let info = DamageInfo::new(1.0, Owner::Player(PlayerId(0)), Attack::Quill)
             .at(a.world.enemies[&id].center(), Vec3::X)
             .knockback(Vec3::new(20.0, 4.0, 0.0));
         a.world.apply_damage(&t, HitTarget::Entity(id), info);
@@ -605,7 +605,7 @@ fn hurting_an_unaware_enemy_alerts_it() {
     a.ticks(30);
     assert_eq!(a.world.enemies[&id].state, AiState::Idle, "80 m is out of sight range");
     let t = a.tuning.clone();
-    let info = DamageInfo::new(5.0, Owner::Player(p), Attack::Lancet).at(Vec3::new(0.0, 1.0, -80.0), Vec3::NEG_Z);
+    let info = DamageInfo::new(5.0, Owner::Player(p), Attack::Quill).at(Vec3::new(0.0, 1.0, -80.0), Vec3::NEG_Z);
     a.world.apply_damage(&t, HitTarget::Entity(id), info);
     a.ticks(5);
     let e = &a.world.enemies[&id];

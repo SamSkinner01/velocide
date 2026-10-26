@@ -276,7 +276,7 @@ fn main() -> anyhow::Result<()> {
         (
             4,
             0.8,
-            &[StyleKey::Lancet],
+            &[StyleKey::Quill],
             &[(Kill, 0), (Stale, 0), (Parry, 0)],
         ),
         (
@@ -476,7 +476,7 @@ fn main() -> anyhow::Result<()> {
             }],
         }),
     );
-    c.game.style.override_view = Some(view(5, 0.7, &[StyleKey::Thresher]));
+    c.game.style.override_view = Some(view(5, 0.7, &[StyleKey::Bellows]));
     feed(&mut c, &[(Frag, 0), (Airkill, 0), (Headshot, 0)]);
     s.run(&mut c, 15);
     s.capture(&mut c, "hud_deathmatch");

@@ -35,8 +35,8 @@ cargo test -p client                            # mesh validity, glTF round trip
   Gnat: origin = hover centre. Projectiles: centred, flying along -Z (orient with a look
   rotation towards the velocity). Weapons: **grip at the origin**, barrel along -Z.
 - Colours are sRGB 0..1 (shaded in gamma space). Hues mostly come from vertex colours; the
-  textures are neutral detail maps (chrome reflection bands, brushed plate, grime, veined skin,
-  bone, knurling, hazard stripes, emissive noise).
+  textures are neutral detail maps (leather grain, porcelain glaze, cloth wraps, reflection
+  bands, brushed plate, grime, veined skin, bone, knurling, hazard stripes, emissive noise).
 - Part shading (`rig::Shade`):
 
   | shade | drawn | colour |
@@ -44,12 +44,13 @@ cargo test -p client                            # mesh validity, glTF round trip
   | `Lit` | lit | vertex × texture × base colour × `Tint::body` |
   | `Team` | lit | … × `Tint::team` (player / team colour slot, vertex colours near-white) |
   | `Glow` | **unlit** | … × `Pose::glow` × `Tint::glow` — **attack telegraphs**, weapon glow |
-  | `Core` | **unlit** | … × `Pose::core` — steady emissive: weak points, lamps, the Shrike's blood core |
-  | `TeamGlow` | **unlit** | … × `Tint::team` × `Pose::glow` (Shrike visor) |
+  | `Core` | **unlit** | … × `Pose::core` — steady emissive: weak points, lamps, the heart of the Shrike's wick |
+  | `TeamGlow` | **unlit** | … × `Tint::team` × `Pose::glow` (Shrike wick flame and eye slits, first-person knuckle embers) |
 
   Emissive colours are not clamped before the framebuffer, so `glow` values > 1 push towards
   white (white-hot flashes). Translucent parts have base colour alpha < 1 (Gnat wings, Spitter
-  orb shell, exit portal, Gnat bolt) and go through the renderer's translucent pass.
+  orb shell, exit portal, Gnat bolt, the Arclash's glass capacitor, the Wisp's halo, the
+  Thorn's glass) and go through the renderer's translucent pass.
 
 ## Runtime API (`client::models`)
 
@@ -58,6 +59,8 @@ let lib = ModelLibrary::load(&mut renderer)?;           // once at startup
 
 // third-person player (other players / spectating); body faces anim.yaw
 let info: PlayerDrawInfo = lib.draw_player(&player_anim, feet_pos, &Tint::team(color), &mut draws);
+// other players are drawn 10 % larger (visual only): shrike::REMOTE_SCALE
+let info = lib.draw_player_scaled(&player_anim, feet_pos, shrike::REMOTE_SCALE, &tint, &mut draws);
 // info.muzzle / info.muzzle_dir (world) for remote tracers & flashes, info.head for name tags
 
 // enemies
@@ -68,10 +71,12 @@ let spit_from = lib.enemy_attack_point(&enemy_anim, root); // maw / emitters / c
 // first-person viewmodel (view space -> FrameDesc::viewmodel, viewmodel_fov_y_degrees ~60)
 let vm: ViewmodelDrawInfo = lib.draw_viewmodel(&vm_anim, &Tint::team(color), &mut viewmodel);
 // vm.muzzle / vm.muzzle_dir (view space; transform by the camera for world tracers),
-// vm.fist (knuckles / held prism, for punch sparks)
+// vm.fist (knuckles / the held thorn's tip, for punch sparks)
 
 // projectiles and props
-lib.draw_model(ModelId::Rocket, Mat4::from_rotation_translation(look_rot, pos), &Tint::default(), &mut draws);
+lib.draw_model(ModelId::Bomb, Mat4::from_rotation_translation(look_rot, pos), &Tint::default(), &mut draws);
+// a planted thorn: drawn at its planted position along its flight direction, the tip sinks
+// projectiles::THORN_TIP (0.22 m) into the surface
 lib.get(ModelId::Door).draw(&props::door_pose(open, locked), root, &Tint::default(), &mut draws);
 ```
 
@@ -102,24 +107,24 @@ telegraph parts on top of what the pose already does.
 | `on_ground`, `sliding`, `dashing`, `slamming`, `wall_cling: Option<normal>` | movement state (priority: slide > slam > dash > wall > air > ground) |
 | `firing` | recoil 0..1 (1 on the shot, decay over ~0.2 s) |
 | `punching` | punch progress 0..1 (left arm thrust; fast out in the first 25 %) |
-| `downed`, `dead` | kneeling with flickering core / flat on its back |
-| `time` | seconds (idle breathing, core heartbeat) |
-| `weapon` | 0 Lancet, 1 Thresher, 2 Riveter, 3 Cinderbox (Lancet one-handed, others two-handed) |
+| `downed`, `dead` | kneeling with a guttering wick / flat on its back, wick snuffed (flame hidden, eye slits dark, a dull smoulder) |
+| `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
+| `weapon` | 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler (`WeaponKind::two_handed`: the Quill is one-handed) |
 | `cycle` | locomotion phase — keep per player: `cycle = PlayerAnim::advance_cycle(cycle, velocity, dt)` (phase keeps legs continuous when speed changes; leg rate capped at 2.6 cycles/s) |
 
 ### `ViewmodelAnim` (first person)
 
 | field | meaning |
 |---|---|
-| `weapon`, `alt_mode` | weapon index; alt mode 0/1 changes the glow colour (Lancet teal/violet, Thresher amber/red, Riveter orange/green, Cinderbox orange/yellow) |
-| `fire_kick` | 1 on fire, decay (Lancet ~0.15 s, Riveter per rivet ~0.08 s, Thresher / Cinderbox ~0.35 s); Thresher pump racks back during the decay |
-| `alt_charge` | 0..1 Lancet overcharge: cell + coils brighten, turn white and the gun shakes above 0.6 |
+| `weapon`, `alt_mode` | weapon index; alt mode 0/1 sets the glow colour (`WeaponKind::glow_color`: Quill Brand crimson / Splinter ice, Bellows Gust sky / Both Barrels orange, Arclash Wisp violet / Discharge blue, Tumbler Breach orange-red / Gravewell green); `WeaponKind::primary_color` is each gun's primary-fire colour for tracers / beams |
+| `fire_kick` | 1 on fire, decay (~0.3 s); also drives the mechanisms: the Quill's crest folds flat front to back and rises again, the Bellows pumps (board swings shut half way through the decay, pleats squash, then refill) |
+| `alt_charge` | 0..1 Arclash Discharge: the capacitor's crawling light speeds up and brightens towards white, arcs jump between the prongs (flickering), the gun shakes above 0.6 |
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
-| `throw` | prism throw progress 0..1: left hand rises with a spinning prism, flicks it at ~0.5 |
+| `throw` | Thorn throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles, flicks it at ~0.5 |
 | `bob_phase`, `bob_amount` | walk bob (advance phase by ~speed × 1.2 rad/s; amount = ground speed / run speed) |
 | `sway` | smoothed look velocity (rad/s); the weapon lags |
-| `spin` | Riveter barrel angle — keep a `BarrelSpin` per local player: `spin.update(firing, dt)` |
+| `spin` | Tumbler drum angle — keep a `DrumTurn` per local player: `drum.kick()` on every Tumbler shot, `drum.update(dt)` every frame, `spin = drum.angle()` (one chamber = `DrumTurn::STEP`, eased in with ~10 % overshoot) |
 | `time` | seconds |
 
 Weapons are modelled at real scale (the third-person Shrike holds the same models) and drawn
@@ -152,18 +157,19 @@ The client only has to pass the state; `Tint::glow` can add extra flashing.
 
 | model | file | parts (parents in brackets) |
 |---|---|---|
-| Shrike (~1.88 m incl. crest) | `shrike.gltf` | pelvis, torso[pelvis], core[torso] *Core*, trim[torso] *Team* (pauldrons, back blades, chest V), head[torso], visor[head] *TeamGlow*, crest[head] *Team*, upper_arm_l/r[torso], forearm_l/r, hand_l/r, thigh_l/r[pelvis], shin_l/r, foot_l/r |
+| Shrike (~1.86 m incl. plume) | `shrike.gltf` | pelvis, torso[pelvis] (jerkin, coat lapels and back, collar, pauldrons, harness, lantern cage), wick[torso] *TeamGlow* (flame, flickers in height), trim[torso] *Team* (scarf, pauldron edging), head[torso] (hood + porcelain beaked mask), visor[head] *TeamGlow* (eye slits), crest[head] *Team* (beak ridge, plume), upper_arm_l/r[torso], forearm_l/r, hand_l/r, thigh_l/r[pelvis], shin_l/r, foot_l/r, coat_l/r[pelvis] (coat tails), ember[wick] *Core* (the wick's hot heart) |
 | Husk (~1.9 m) | `enemy_husk.gltf` | pelvis, spine, chest, head, eyes *Core*, jaw, upper_arm_l/r, forearm_l/r, hand_l/r, claws_l/r *Glow*, thigh_l/r, shin_l/r |
 | Spitter (~1.6 m) | `enemy_spitter.gltf` | pelvis, body, pustules *Glow*, neck, head, jaw, maw *Glow*, sac[neck] *Glow* (scaled by the pose), arm_l/r, forearm_l/r, thigh_l/r, shin_l/r |
 | Gnat (~1 m span) | `enemy_gnat.gltf` | thorax, head, emitters[head] *Glow*, abdomen, core[abdomen] *Core*, wing_fl/fr/bl/br (translucent), legs |
 | Bastion (~3 m) | `enemy_bastion.gltf` | pelvis, torso, armor[torso], furnace[torso] *Core*, head, visor *Glow*, beacon[torso] *Glow*, upper_arm_l/r, forearm_l/r, fist_l/r, lamp_l/r[fist] *Glow*, thigh_l/r, shin_l/r |
-| Lancet | `weapon_lancet.gltf` | body, cell *Glow* |
-| Thresher | `weapon_thresher.gltf` | body, pump (slides back), glow *Glow* |
-| Riveter | `weapon_riveter.gltf` | body, barrels (rotates about the bore), drum (side magazine, rotates), glow *Glow* |
-| Cinderbox | `weapon_cinderbox.gltf` | body, stripe (hazard band), core *Glow* (side windows + maw) |
-| right arm (1st person) | `vm_arm.gltf` | forearm, hand, trim *Team* |
-| left fist (1st person) | `vm_fist.gltf` | forearm, fist, trim *Team*, knuckles *Glow* |
-| projectiles | `proj_rivet/sawblade/rocket/flak/sticky/mortar/spitter_orb/gnat_bolt/prism.gltf`, `fx_blood_core.gltf` | `body` + `glow` (rivet, rocket, flak, sticky, mortar); `blade` + `edge` (sawblade, horizontal disc: spin it about Y); `core` + `shell` (orb); `bolt` + `core`; `shard` *Core* + `rim` *Glow* (prism, ~0.5 m, stands along Y); `core` |
+| Quill | `weapon_quill.gltf` | body, channel *Glow* (barrel flanks, nib slit), quill_0..4 (crest quills, each folds about its socket), tip_0..4[quill_i] *Glow* |
+| Bellows | `weapon_bellows.gltf` | body, board (lower bellows board, hinged at the front), pleats (squashed vertically about the hinge), glow *Glow* (gauge face, throat rings, vents) |
+| Arclash | `weapon_arclash.gltf` | body, glass (translucent capacitor), crawl *Glow* (filaments, turn about the bore), tips *Glow* (prong tips, strap spark, lamps, charge eye on the back), arcs *Glow* (hidden unless charging / on a strong shot) |
+| Tumbler | `weapon_tumbler.gltf` | body, drum (six chambers, turns about +Z), drum_glow[drum] *Glow* (fuse bands in the chamber mouths), glow *Glow* (muzzle throat, fuse windows) |
+| right arm (1st person) | `vm_arm.gltf` | forearm (cloth wraps), hand (glove), trim *Team* (cord round the bracer), bracer (brass) |
+| left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
+| player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
+| enemy projectiles / fx | `proj_spitter_orb/gnat_bolt.gltf`, `fx_blood_core.gltf` | `core` + `shell` (orb); `bolt` + `core`; `core` |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 
 Prop poses: `door_pose(open 0..1, locked)` slides the panels apart (unit door
@@ -172,8 +178,9 @@ amber = closed, green = open), `checkpoint_pose(active, time)` (dim red → brig
 bobs and spins), `jump_pad_pose(time)`, `exit_gate_pose(time)`. Glow parts of static models
 drawn with `draw_model` use the vertex colours as-is (`Pose::glow` = 1).
 
-Budget: ~1–1.4k triangles per character, 20–900 per weapon / projectile / prop; 2.0 MB of
-glTF in total (vertex data dominates: flat-shaded faces need their own vertices).
+Budget: ~1–2k triangles per character and weapon (the Shrike ~1.9k, Arclash / Tumbler ~1.7k),
+20–650 per projectile / prop; ~2.5 MB of glTF in total (vertex data dominates: flat-shaded
+faces need their own vertices).
 
 ## Visual verification
 
@@ -181,9 +188,10 @@ glTF in total (vertex data dominates: flat-shaded faces need their own vertices)
 on): `lineup` / `lineup_back` (scale and silhouettes, back = Bastion furnace weak point),
 `closeup_<enemy>` (front 3/4 + back), `shrike_0..3` + `shrike_closeup` (every movement state
 in profile, team colour), `husk_1/2`, `spitter_1/2`, `gnat_1/2`, `bastion_1/2` (idle, walk,
-wind-up early / late, attack, recover, stunned, dying, dead), `vm_00..19` (each weapon rest /
-kick / alt mode, overcharge, riveter spin, switch, punch, prism throw, bob + sway),
-`projectiles`, `props`.
+wind-up early / late, attack, recover, stunned, dying, dead), `vm_00..22` (each weapon rest /
+kick / alt mode, Quill crest folding, Bellows pump, Arclash Discharge 40 % / full, Tumbler drum
+turning, switch, punch, thorn throw, bob + sway), `weapons` / `weapons_34` (the guns at real
+scale), `projectiles`, `thorns` (planted at angles, lying, in flight), `props`.
 
 ## Known limitations
 
@@ -194,5 +202,10 @@ kick / alt mode, overcharge, riveter spin, switch, punch, prism throw, bob + swa
 - Gnat wing flaps at 23 Hz alias at 60 fps on purpose (reads as a buzz blur).
 - The Gnat `Dying` pose only drops ~0.5 m; let the corpse fall / remove it client-side.
 - Viewmodel arms are generic: one right arm grips every weapon (fingers don't wrap each grip
-  exactly), and the left fist doubles as the prism-throwing hand.
+  exactly), and the left fist doubles as the thorn-throwing hand.
+- In first person the Bellows' pump and the Arclash's prong arcs are mostly seen from behind
+  (the pleats bulge out to the left, the capacitor and its charge eye face the camera); the
+  third-person view shows them fully.
+- Planted thorns are small at a distance (~0.42 m sticks out); the client can add a glow
+  sprite / light to make relays easier to spot.
 - Labels in `models_view` sit at floor level (hovering Gnats are labelled below themselves).

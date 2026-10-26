@@ -15,6 +15,7 @@
 pub mod enemies;
 pub mod kit;
 mod library;
+pub mod projectiles;
 pub mod props;
 pub mod rig;
 pub mod shrike;
@@ -35,7 +36,7 @@ pub use enemies::{EnemyAnim, EnemyKind, EnemyState};
 pub use library::{ModelLibrary, PlayerDrawInfo, ViewmodelDrawInfo};
 pub use rig::{DEFAULT_TEAM_COLOR, JointDef, Pose, Rig, RigPart, Shade, Tint};
 pub use shrike::PlayerAnim;
-pub use weapons::{BarrelSpin, ViewmodelAnim, WeaponKind};
+pub use weapons::{DrumTurn, ViewmodelAnim, WeaponKind};
 
 /// Every model in the game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -48,25 +49,25 @@ pub enum ModelId {
     Gnat,
     Bastion,
     // Weapons: used both as first-person viewmodels and in the Shrike's hand.
-    Lancet,
-    Thresher,
-    Riveter,
-    Cinderbox,
-    /// First-person right forearm + hand that grips every weapon.
+    Quill,
+    Bellows,
+    Arclash,
+    Tumbler,
+    /// First-person right forearm + gloved hand that grips every weapon.
     ArmRight,
-    /// First-person left forearm + fist (punch / parry, prism throw).
+    /// First-person left forearm + fist (punch / parry, Thorn throw).
     Fist,
     // Projectiles.
-    Rivet,
-    Sawblade,
-    Rocket,
-    FlakGrenade,
-    StickyCharge,
-    MortarShell,
+    /// Tumbler bomb.
+    Bomb,
+    /// Tumbler alt B canister.
+    Gravewell,
+    /// Arclash alt A ball of lightning.
+    Wisp,
     SpitterOrb,
     GnatBolt,
-    /// Thrown ricochet shard (also shown spinning above the fist while throwing).
-    Prism,
+    /// Thrown relay spike (also shown between the knuckles while throwing).
+    Thorn,
     /// Optional core for blood-burst effects.
     BloodCore,
     // Level props.
@@ -77,27 +78,24 @@ pub enum ModelId {
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 25] = [
+    pub const ALL: [ModelId; 22] = [
         ModelId::Shrike,
         ModelId::Husk,
         ModelId::Spitter,
         ModelId::Gnat,
         ModelId::Bastion,
-        ModelId::Lancet,
-        ModelId::Thresher,
-        ModelId::Riveter,
-        ModelId::Cinderbox,
+        ModelId::Quill,
+        ModelId::Bellows,
+        ModelId::Arclash,
+        ModelId::Tumbler,
         ModelId::ArmRight,
         ModelId::Fist,
-        ModelId::Rivet,
-        ModelId::Sawblade,
-        ModelId::Rocket,
-        ModelId::FlakGrenade,
-        ModelId::StickyCharge,
-        ModelId::MortarShell,
+        ModelId::Bomb,
+        ModelId::Gravewell,
+        ModelId::Wisp,
         ModelId::SpitterOrb,
         ModelId::GnatBolt,
-        ModelId::Prism,
+        ModelId::Thorn,
         ModelId::BloodCore,
         ModelId::JumpPad,
         ModelId::Checkpoint,
@@ -118,21 +116,18 @@ impl ModelId {
             ModelId::Spitter => "enemy_spitter.gltf",
             ModelId::Gnat => "enemy_gnat.gltf",
             ModelId::Bastion => "enemy_bastion.gltf",
-            ModelId::Lancet => "weapon_lancet.gltf",
-            ModelId::Thresher => "weapon_thresher.gltf",
-            ModelId::Riveter => "weapon_riveter.gltf",
-            ModelId::Cinderbox => "weapon_cinderbox.gltf",
+            ModelId::Quill => "weapon_quill.gltf",
+            ModelId::Bellows => "weapon_bellows.gltf",
+            ModelId::Arclash => "weapon_arclash.gltf",
+            ModelId::Tumbler => "weapon_tumbler.gltf",
             ModelId::ArmRight => "vm_arm.gltf",
             ModelId::Fist => "vm_fist.gltf",
-            ModelId::Rivet => "proj_rivet.gltf",
-            ModelId::Sawblade => "proj_sawblade.gltf",
-            ModelId::Rocket => "proj_rocket.gltf",
-            ModelId::FlakGrenade => "proj_flak.gltf",
-            ModelId::StickyCharge => "proj_sticky.gltf",
-            ModelId::MortarShell => "proj_mortar.gltf",
+            ModelId::Bomb => "proj_bomb.gltf",
+            ModelId::Gravewell => "proj_gravewell.gltf",
+            ModelId::Wisp => "proj_wisp.gltf",
             ModelId::SpitterOrb => "proj_spitter_orb.gltf",
             ModelId::GnatBolt => "proj_gnat_bolt.gltf",
-            ModelId::Prism => "proj_prism.gltf",
+            ModelId::Thorn => "proj_thorn.gltf",
             ModelId::BloodCore => "fx_blood_core.gltf",
             ModelId::JumpPad => "prop_jump_pad.gltf",
             ModelId::Checkpoint => "prop_checkpoint.gltf",
@@ -149,12 +144,15 @@ impl ModelId {
             ModelId::Spitter => &enemies::spitter::JOINTS,
             ModelId::Gnat => &enemies::gnat::JOINTS,
             ModelId::Bastion => &enemies::bastion::JOINTS,
-            ModelId::Lancet => &weapons::lancet::JOINTS,
-            ModelId::Thresher => &weapons::thresher::JOINTS,
-            ModelId::Riveter => &weapons::riveter::JOINTS,
-            ModelId::Cinderbox => &weapons::cinderbox::JOINTS,
+            ModelId::Quill => &weapons::quill::JOINTS,
+            ModelId::Bellows => &weapons::bellows::JOINTS,
+            ModelId::Arclash => &weapons::arclash::JOINTS,
+            ModelId::Tumbler => &weapons::tumbler::JOINTS,
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
+            ModelId::Bomb | ModelId::Gravewell | ModelId::Wisp | ModelId::Thorn => {
+                projectiles::joints(self)
+            }
             other => props::joints(other),
         }
     }
@@ -168,12 +166,15 @@ impl ModelId {
             ModelId::Spitter => enemies::spitter::build(),
             ModelId::Gnat => enemies::gnat::build(),
             ModelId::Bastion => enemies::bastion::build(),
-            ModelId::Lancet => weapons::lancet::build(),
-            ModelId::Thresher => weapons::thresher::build(),
-            ModelId::Riveter => weapons::riveter::build(),
-            ModelId::Cinderbox => weapons::cinderbox::build(),
+            ModelId::Quill => weapons::quill::build(),
+            ModelId::Bellows => weapons::bellows::build(),
+            ModelId::Arclash => weapons::arclash::build(),
+            ModelId::Tumbler => weapons::tumbler::build(),
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
+            ModelId::Bomb | ModelId::Gravewell | ModelId::Wisp | ModelId::Thorn => {
+                projectiles::build(self)
+            }
             other => props::build(other),
         }
     }

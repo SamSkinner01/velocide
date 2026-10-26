@@ -49,7 +49,7 @@ slam bounces), `slide_jumped`, `dash_jumped`, `slam_bounced`, `wall_jumped`, `da
 **External impulses** (explosions, knockback) are added by the server directly to
 `state.velocity` between steps. An upward impulse while grounded lifts the player off on the
 next step (never re-snapped while `velocity.y > 0`), keeps horizontal knockback in the air,
-and grants coyote time (so jump + rocket stacks, Quake-style).
+and grants coyote time (so jump + blast stacks, Quake-style).
 
 ## State machine
 

@@ -155,7 +155,7 @@ impl Net {
         let t = self.server.tuning().clone();
         let w = self.server.world_mut();
         let at = w.players[&victim].movement.position + Vec3::Y;
-        let info = DamageInfo::new(amount, Owner::Player(by), Attack::Slug).at(at, Vec3::NEG_Z);
+        let info = DamageInfo::new(amount, Owner::Player(by), Attack::Quill).at(at, Vec3::NEG_Z);
         w.apply_damage(&t, HitTarget::Player(victim), info);
     }
 }

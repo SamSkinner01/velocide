@@ -120,7 +120,7 @@ fn husk_targets_the_nearest_player_and_switches_on_heavy_damage() {
     assert_eq!(a.world.enemies[&h].target, Some(near));
     // The far player deals > 30 % of its max health: aggro switches.
     let t = a.tuning.clone();
-    let info = shared::sim::DamageInfo::new(400.0, Owner::Player(far), Attack::Rocket);
+    let info = shared::sim::DamageInfo::new(400.0, Owner::Player(far), Attack::Tumble);
     a.world.apply_damage(&t, HitTarget::Entity(h), info);
     a.ticks(30);
     assert_eq!(a.world.enemies[&h].target, Some(far));
@@ -206,7 +206,7 @@ fn lag_compensated_hit_on_a_moving_husk() {
         let ev = a.tap(shooter, Buttons::FIRE, 0);
         damage_to(&ev, HitTarget::Entity(h))
     };
-    assert_eq!(run(true), 22.0, "hit as seen");
+    assert_eq!(run(true), 24.0, "hit as seen");
     assert_eq!(
         run(false),
         0.0,

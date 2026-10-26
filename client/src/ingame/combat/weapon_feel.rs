@@ -19,8 +19,8 @@ pub struct WeaponPredictor {
     applied_seq: u32,
     /// (tick, seq) of the authoritative state we last re-based on.
     based_on: Option<(u32, u32)>,
-    /// Re-bases whose replay disagreed with what we had predicted (cooldown / sticky / prism
-    /// differences decided by the server).
+    /// Re-bases whose replay disagreed with what we had predicted (should stay 0: nothing
+    /// server-side changes the weapon state).
     pub mismatches: u64,
 }
 
@@ -94,7 +94,7 @@ impl WeaponPredictor {
         Some(PredictedShot { input, intents })
     }
 
-    /// Overcharge fraction for the viewmodel glow.
+    /// Discharge charge fraction for the viewmodel glow and the HUD gauge.
     pub fn charge(&self, t: &CombatTuning, tick_rate: u32) -> f32 {
         self.state.charge_fraction(t, tick_rate)
     }
@@ -114,25 +114,17 @@ pub fn hitscan_dirs(
     };
     use shared::sim::Attack;
     match attack {
-        Attack::Lancet | Attack::Overcharge | Attack::Slug => vec![aim],
-        Attack::Fan => {
-            let n = t.lancet.fan_shots.max(1);
-            (0..n)
-                .map(|i| {
-                    let f = if n == 1 {
-                        0.0
-                    } else {
-                        i as f32 / (n - 1) as f32 * 2.0 - 1.0
-                    };
-                    glam::Quat::from_rotation_y((t.lancet.fan_spread_degrees * f).to_radians())
-                        * aim
-                })
-                .collect()
-        }
-        Attack::Pellet => {
-            let half = (t.thresher.cone_degrees * 0.5).to_radians().tan();
+        Attack::Quill | Attack::Brand | Attack::Splinter | Attack::Arc => vec![aim],
+        Attack::Blast | Attack::BothBarrels => {
+            let b = &t.bellows;
+            let (count, cone) = if attack == Attack::Blast {
+                (b.pellets, b.cone_degrees)
+            } else {
+                (b.both_pellets, b.both_cone_degrees)
+            };
+            let half = (cone * 0.5).to_radians().tan();
             let (right, up) = shared::sim::weapons::aim_basis(aim);
-            (0..t.thresher.pellets.max(1))
+            (0..count.max(1))
                 .map(|_| {
                     let r = rng.unit().sqrt() * half;
                     let a = rng.unit() * std::f32::consts::TAU;

@@ -81,14 +81,13 @@ fn run(s: &mut Server, cs: &mut [C], secs: f64, input: &dyn Fn(usize, u32) -> Op
     }
 }
 
-/// Fires, charges, switches, punches and throws prisms (no stickies: their count is decided
-/// by the server).
+/// Fires every weapon and mode, charges Discharges, switches, punches and throws thorns.
 fn script(t: u32) -> PlayerInput {
     let mut inp = PlayerInput {
         yaw: t as f32 * 0.01,
         pitch: 0.2,
-        weapon: ((t / 90) % 3) as u8,
-        weapon_mode: ((t / 270) % 2) as u8,
+        weapon: ((t / 90) % 4) as u8,
+        weapon_mode: ((t / 360) % 2) as u8,
         forward: if (t / 60).is_multiple_of(2) {
             100
         } else {
@@ -144,7 +143,13 @@ fn weapon_prediction_matches_the_server() {
     assert!(
         c.intents
             .iter()
-            .any(|i| matches!(i, FireIntent::ThrowPrism))
+            .any(|i| matches!(i, FireIntent::ThrowThorn))
+    );
+    assert!(
+        c.intents
+            .iter()
+            .any(|i| matches!(i, FireIntent::Alt { charge, .. } if *charge > 0.0)),
+        "a charged Discharge"
     );
 }
 
@@ -153,7 +158,7 @@ fn fx_arrive_once_and_own_state_follows_damage() {
     let mut s = server();
     let mut cs = vec![client(&s, 30.0, 2), client(&s, 30.0, 3)];
     run(&mut s, &mut cs, 2.0, &|_, _| Some(PlayerInput::default()));
-    // Client 0 fires rockets at the floor (explosions are repeated in two snapshots).
+    // Client 0 breaches the floor and lobs bombs (explosions are repeated in two snapshots).
     run(&mut s, &mut cs, 4.0, &|i, t| {
         let mut inp = PlayerInput {
             weapon: 3,
@@ -161,7 +166,7 @@ fn fx_arrive_once_and_own_state_follows_damage() {
             ..Default::default()
         };
         if i == 0 {
-            inp.buttons.set(Buttons::FIRE, t % 60 == 5);
+            inp.buttons.set(Buttons::FIRE | Buttons::ALT_FIRE, t % 80 == 5);
         }
         Some(inp)
     });
@@ -178,12 +183,12 @@ fn fx_arrive_once_and_own_state_follows_damage() {
     println!("client 1 got {n} fx ({explosions} explosions)");
     assert_eq!(seqs.len(), n, "every fx exactly once");
     assert!(explosions >= 3, "{explosions}");
-    // The shooter's rockets hurt it (35 % self damage): its own state shows it.
+    // The shooter's breaches hurt it (35 % self damage): its own state shows it.
     let own = cs[0].net.own_combat().unwrap();
     let id = cs[0].net.local_player_id().unwrap();
     assert_eq!(own.combat.damage, s.world().players[&id].combat.damage);
     assert!(own.combat.damage > 0.0);
-    // Shots of client 0 reach client 1 (rockets = projectile weapon: no tracer ends).
+    // Shots of client 0 reach client 1 (bombs = projectile weapon: no tracer ends).
     assert!(cs[1].fx.iter().any(|e| matches!(e.fx, Fx::Shot { .. })));
     assert!(
         !cs[0].fx.iter().any(|e| matches!(e.fx, Fx::Shot { .. })),

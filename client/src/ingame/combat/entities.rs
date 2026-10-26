@@ -5,27 +5,34 @@
 //!   the replicated AI state (+ wind-up progress in `aux`), speed and facing; a per-enemy walk
 //!   cycle; a white hurt flash + blood when `health` drops; a yellow strobe in the parryable
 //!   phase; gibs, blood and a fade when it dies.
-//! * **projectiles** (64..72): their model at the trajectory position for the render tick
+//! * **projectiles** (64..128): their model at the trajectory position for the render tick
 //!   (`shared::sim::projectiles::replicated_position`), facing their velocity; trails / glows
-//!   / lights per kind; `PARRIED` white-hot, `PENDING` hidden, stuck stickies blink.
-//! * **blood bursts** (128): red mist while the pool lasts.
-//! * **prisms** (160): a spinning mirrored shard with glints.
+//!   / lights per kind (bomb fuse sparks, Wisp crackle + hum, the stuck Gravewell's vortex and
+//!   hum); `PARRIED` white-hot, `PENDING` hidden.
+//! * **healing bursts** (128): mist while the pool lasts.
+//! * **thorns** (160): the glass spike flying along its path, planted tip-first in the
+//!   surface (a pulsing relay glint so it reads at a distance) or lying on the floor.
+//! * **brands**: a turning sigil over every branded enemy / player (`BRANDED` flag).
 
 use std::collections::HashMap;
 
 use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use shared::protocol::{EntityState, NetId, blood_flags, enemy_flags, kind, projectile_flags};
+use shared::protocol::{
+    EntityState, NetId, blood_flags, enemy_flags, kind, player_flags, projectile_flags,
+    thorn_flags,
+};
 use shared::sim::AiState;
 use shared::sim::projectiles::{ProjectileKind, replicated_position};
 use shared::tuning::CombatTuning;
 
 use super::super::effects::{Effects, FxTex, OnHit, Particle};
 use super::Rng;
-use super::fx::enemy_projectile_color;
+use super::fx::{BRAND_COLOR, Beams, enemy_projectile_color};
 use crate::models::enemies::{EnemyAnim, EnemyKind, EnemyState};
-use crate::models::{ModelId, ModelLibrary, Tint};
+use crate::models::projectiles::THORN_TIP;
+use crate::models::{ModelId, ModelLibrary, Tint, WeaponKind};
 
 /// Model kind for a replicated enemy kind (unknown kinds draw as Husks).
 pub fn enemy_kind(k: u16) -> EnemyKind {
@@ -103,12 +110,9 @@ pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
 /// Model of a projectile kind.
 pub fn projectile_model(k: u16) -> Option<ModelId> {
     Some(match ProjectileKind::from_net_kind(k)? {
-        ProjectileKind::Rivet => ModelId::Rivet,
-        ProjectileKind::Sawblade => ModelId::Sawblade,
-        ProjectileKind::Rocket => ModelId::Rocket,
-        ProjectileKind::Flak => ModelId::FlakGrenade,
-        ProjectileKind::Sticky => ModelId::StickyCharge,
-        ProjectileKind::Mortar => ModelId::MortarShell,
+        ProjectileKind::Bomb => ModelId::Bomb,
+        ProjectileKind::Gravewell => ModelId::Gravewell,
+        ProjectileKind::Wisp => ModelId::Wisp,
         ProjectileKind::SpitterOrb => ModelId::SpitterOrb,
         ProjectileKind::GnatBolt => ModelId::GnatBolt,
     })
@@ -140,6 +144,9 @@ struct ProjVis {
     trail: f32,
     seen: bool,
     position: Vec3,
+    /// Seconds to the next hum (Wisp) / the hum already started (stuck Gravewell).
+    hum: f32,
+    hummed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -149,11 +156,14 @@ struct BloodVis {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct PrismVis {
+struct ThornVis {
     glint: f32,
     seen: bool,
     position: Vec3,
 }
+
+/// Thorn colour (glints, relay glow).
+const THORN_COLOR: Vec4 = Vec4::new(0.75, 0.95, 1.0, 1.0);
 
 /// Inputs shared by update and draw.
 pub struct EntityFrame<'a> {
@@ -212,7 +222,7 @@ pub struct EntityView {
     enemies: HashMap<NetId, EnemyVis>,
     projectiles: HashMap<NetId, ProjVis>,
     blood: HashMap<NetId, BloodVis>,
-    prisms: HashMap<NetId, PrismVis>,
+    thorns: HashMap<NetId, ThornVis>,
     time: f64,
 }
 
@@ -225,12 +235,47 @@ impl EntityView {
         self.enemies.clear();
         self.projectiles.clear();
         self.blood.clear();
-        self.prisms.clear();
+        self.thorns.clear();
     }
 
-    /// Last drawn position of a prism.
-    pub fn prism_position(&self, id: NetId) -> Option<Vec3> {
-        self.prisms.get(&id).map(|p| p.position)
+    /// Last drawn position of a thorn.
+    pub fn thorn_position(&self, id: NetId) -> Option<Vec3> {
+        self.thorns.get(&id).map(|p| p.position)
+    }
+
+    /// A turning brand sigil over every branded enemy and other player this frame, facing the
+    /// camera (the local player's own brand shows on the HUD).
+    pub fn brand_sigils(
+        &self,
+        entities: &[EntityState],
+        local: Option<shared::sim::PlayerId>,
+        camera: Vec3,
+        beams: &mut Beams,
+    ) {
+        let angle = (self.time * 1.8 % std::f64::consts::TAU) as f32;
+        for e in entities {
+            let height = if kind::is_enemy(e.kind) {
+                if e.flags & enemy_flags::BRANDED == 0 || e.flags & enemy_flags::DYING != 0 {
+                    continue;
+                }
+                enemy_size(e.kind).1
+            } else if e.kind == kind::PLAYER {
+                if e.flags & player_flags::BRANDED == 0
+                    || e.flags & player_flags::DEAD != 0
+                    || e.id.as_player() == local
+                {
+                    continue;
+                }
+                2.0
+            } else {
+                continue;
+            };
+            let pulse = 0.85 + 0.15 * ((self.time * 7.0).sin() as f32);
+            let above = e.position + Vec3::Y * (height + 0.7);
+            let facing = (camera - above).normalize_or(Vec3::Z);
+            beams.sigil(above, facing, 0.5 * pulse, BRAND_COLOR, angle);
+            beams.sigil(above, facing, 0.28, BRAND_COLOR * 1.2, -angle * 1.6);
+        }
     }
 
     /// Living enemies within `radius` of `p` that have a target (music intensity).
@@ -248,6 +293,7 @@ impl EntityView {
 
     /// Advances animation state and spawns the effects / sounds of state changes. Runs on
     /// the visual clock (`dt`).
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
         f: &EntityFrame,
@@ -255,6 +301,7 @@ impl EntityView {
         effects: &mut Effects,
         audio: &mut Audio,
         rng: &mut Rng,
+        beams: &mut Beams,
     ) {
         self.time += dt as f64;
         for v in self.enemies.values_mut() {
@@ -266,7 +313,7 @@ impl EntityView {
         for v in self.blood.values_mut() {
             v.seen = false;
         }
-        for v in self.prisms.values_mut() {
+        for v in self.thorns.values_mut() {
             v.seen = false;
         }
         for e in f.entities {
@@ -294,26 +341,44 @@ impl EntityView {
                     v.puff = 0.001;
                     blood_mist(effects, rng, e.position, radius, big);
                 }
-            } else if e.kind == kind::PRISM {
+            } else if e.kind == kind::THORN {
                 let pos = replicated_position(e, f.render_tick, f.tick_rate, f.tuning);
-                let v = self.prisms.entry(e.id).or_default();
+                let v = self.thorns.entry(e.id).or_default();
                 v.seen = true;
                 v.position = pos;
+                let planted = e.flags & thorn_flags::PLANTED != 0;
+                // Planted thorns are lit relays you placed on purpose: a steady halo and a
+                // pulse ring so they read from across the arena.
+                if planted {
+                    effects.spawn(Particle {
+                        position: pos,
+                        max_life: dt.max(0.016) * 1.5,
+                        size: Vec2::splat(0.55),
+                        color: Vec4::new(0.6, 0.85, 1.0, 0.55),
+                        end_alpha: 1.0,
+                        texture: FxTex::Glow,
+                        additive: true,
+                        ..Default::default()
+                    });
+                }
                 v.glint -= dt;
                 if v.glint <= 0.0 {
-                    v.glint = rng.range(0.25, 0.7);
-                    let off = rng.dir() * 0.15;
-                    effects.glow(pos + off, Vec4::new(0.9, 1.0, 1.0, 0.9), 0.25, 0.12);
+                    v.glint = if planted { 0.6 } else { rng.range(0.15, 0.3) };
+                    if planted {
+                        let facing = e.velocity.normalize_or(Vec3::Y);
+                        beams.ring(pos, facing, 0.1, 0.7, 0.03, THORN_COLOR * 1.6, 0.4);
+                    }
+                    effects.glow(pos + rng.dir() * 0.05, THORN_COLOR, 0.35, 0.35);
                 }
             }
         }
         for (e, time, offset) in f.projectiles() {
-            self.update_projectile(e, time, offset, f, dt, effects, rng);
+            self.update_projectile(e, time, offset, f, dt, effects, audio, rng, beams);
         }
         self.enemies.retain(|_, v| v.seen);
         self.projectiles.retain(|_, v| v.seen);
         self.blood.retain(|_, v| v.seen);
-        self.prisms.retain(|_, v| v.seen);
+        self.thorns.retain(|_, v| v.seen);
     }
 
     fn update_enemy(
@@ -363,7 +428,9 @@ impl EntityView {
         f: &EntityFrame,
         dt: f32,
         effects: &mut Effects,
+        audio: &mut Audio,
         rng: &mut Rng,
+        beams: &mut Beams,
     ) {
         let pos = replicated_position(e, time, f.tick_rate, f.tuning) + offset;
         let v = self.projectiles.entry(e.id).or_default();
@@ -374,10 +441,24 @@ impl EntityView {
         }
         let stuck = e.flags & projectile_flags::STUCK != 0;
         let parried = e.flags & projectile_flags::PARRIED != 0;
+        // Hums: the Wisp crackles as it drifts, a stuck Gravewell drones once while it pulls.
+        v.hum -= dt;
+        if e.kind == kind::WISP && v.hum <= 0.0 {
+            v.hum = 0.45;
+            audio.play(Sfx::WispHum, PlayParams::at(pos));
+        }
+        if e.kind == kind::GRAVEWELL && stuck && !v.hummed {
+            v.hummed = true;
+            audio.play(Sfx::GravewellHum, PlayParams::at(pos));
+        }
+        if e.kind == kind::WISP && rng.unit() < dt * 14.0 {
+            let violet = WeaponKind::Arclash.glow_color(0);
+            let to = pos + rng.dir() * rng.range(0.4, 0.9);
+            beams.arc(pos, to, 0.03, (violet.truncate() * 1.8).extend(0.9), 0.07, rng);
+        }
         v.trail += dt;
         let interval = match e.kind {
-            kind::RIVET => 0.05,
-            kind::STICKY if stuck => 0.5,
+            kind::GRAVEWELL if stuck => 0.012,
             _ => 0.025,
         };
         if v.trail < interval {
@@ -400,61 +481,87 @@ impl EntityView {
             return;
         }
         match e.kind {
-            kind::ROCKET | kind::MORTAR => {
+            kind::BOMB => {
+                // The fuse spits sparks; a faint smoke line follows the bounces.
                 effects.spawn(Particle {
-                    position: pos + back * 0.3,
-                    velocity: rng.dir() * 0.4,
-                    gravity: -0.6,
-                    drag: 1.5,
-                    max_life: rng.range(0.5, 0.9),
-                    size: Vec2::splat(0.25),
-                    end_scale: 3.0,
-                    color: Vec4::new(0.5, 0.47, 0.45, 0.55),
-                    texture: FxTex::Smoke,
-                    rotation: rng.angle(),
-                    ..Default::default()
-                });
-                effects.spawn(Particle {
-                    position: pos + back * 0.25,
-                    max_life: 0.08,
-                    size: Vec2::splat(0.35),
-                    end_scale: 0.4,
-                    color: Vec4::new(1.0, 0.65, 0.3, 1.0),
-                    texture: FxTex::MuzzleFlash,
-                    additive: true,
-                    rotation: rng.angle(),
-                    ..Default::default()
-                });
-            }
-            kind::STICKY if stuck => {
-                effects.glow(pos, Vec4::new(1.0, 0.15, 0.1, 1.0), 0.45, 0.15);
-            }
-            kind::FLAK | kind::STICKY => {
-                effects.spawn(Particle {
-                    position: pos,
-                    max_life: 0.15,
-                    size: Vec2::splat(0.12),
-                    color: Vec4::new(1.0, 0.7, 0.3, 1.0),
+                    position: pos + Vec3::Y * 0.2,
+                    velocity: rng.dir() * 2.5 + Vec3::Y * 1.5,
+                    gravity: 10.0,
+                    max_life: 0.18,
+                    size: Vec2::splat(0.09),
+                    color: Vec4::new(1.0, 0.65, 0.2, 1.0),
                     texture: FxTex::Spark,
                     additive: true,
+                    collide: Some(OnHit::Die),
                     ..Default::default()
                 });
-            }
-            kind::SAWBLADE => {
-                if rng.unit() < 0.3 {
+                if rng.unit() < 0.4 {
                     effects.spawn(Particle {
-                        position: pos,
-                        velocity: rng.dir() * 4.0,
-                        gravity: 14.0,
-                        max_life: 0.2,
-                        size: Vec2::splat(0.06),
-                        color: Vec4::new(1.0, 0.8, 0.4, 1.0),
-                        texture: FxTex::Spark,
-                        additive: true,
-                        collide: Some(OnHit::Die),
+                        position: pos + back * 0.2,
+                        gravity: -0.4,
+                        drag: 1.5,
+                        max_life: rng.range(0.3, 0.5),
+                        size: Vec2::splat(0.18),
+                        end_scale: 2.4,
+                        color: Vec4::new(0.45, 0.42, 0.4, 0.4),
+                        texture: FxTex::Smoke,
+                        rotation: rng.angle(),
                         ..Default::default()
                     });
                 }
+            }
+            kind::GRAVEWELL if stuck => {
+                // Vortex: motes drawn in from the pull radius, spiralling to the core.
+                let green = WeaponKind::Tumbler.glow_color(1);
+                let r = f.tuning.tumbler.gravewell_pull_radius * rng.range(0.4, 1.0);
+                let d = rng.dir();
+                let start = pos + Vec3::new(d.x, d.y.abs() * 0.6, d.z) * r;
+                let to = pos - start;
+                let swirl = to.cross(Vec3::Y).normalize_or_zero() * to.length() * 0.6;
+                let time = rng.range(0.4, 0.7);
+                effects.spawn(Particle {
+                    position: start,
+                    velocity: (to + swirl) / time,
+                    drag: 0.8,
+                    max_life: time,
+                    size: Vec2::splat(rng.range(0.12, 0.22)),
+                    end_scale: 0.3,
+                    color: (green.truncate() * 1.6).extend(0.8),
+                    end_alpha: 1.0,
+                    texture: FxTex::Glow,
+                    additive: true,
+                    ..Default::default()
+                });
+                if rng.unit() < 0.15 {
+                    effects.glow(pos, Vec4::new(0.05, 0.12, 0.06, 1.0), 1.6, 0.3);
+                    effects.glow(pos, (green.truncate() * 1.4).extend(0.9), 0.9, 0.2);
+                }
+            }
+            kind::GRAVEWELL => {
+                let green = WeaponKind::Tumbler.glow_color(1);
+                effects.spawn(Particle {
+                    position: pos,
+                    max_life: 0.25,
+                    size: Vec2::splat(0.3),
+                    end_scale: 0.3,
+                    color: (green.truncate() * 1.5).extend(0.8),
+                    texture: FxTex::Glow,
+                    additive: true,
+                    ..Default::default()
+                });
+            }
+            kind::WISP => {
+                let violet = WeaponKind::Arclash.glow_color(0);
+                effects.spawn(Particle {
+                    position: pos + rng.dir() * 0.15,
+                    max_life: 0.25,
+                    size: Vec2::splat(0.6),
+                    end_scale: 0.4,
+                    color: (violet.truncate() * 1.4).extend(0.7),
+                    texture: FxTex::Glow,
+                    additive: true,
+                    ..Default::default()
+                });
             }
             kind::SPITTER_ORB | kind::GNAT_BOLT => {
                 let c = enemy_projectile_color(e.kind);
@@ -521,20 +628,28 @@ impl EntityView {
                 }
                 let root = EnemyAnim::root(e.position + root_offset(e.kind), e.yaw);
                 lib.draw_enemy(&anim, root, &tint, draws);
-            } else if e.kind == kind::PRISM {
-                let pos = replicated_position(e, f.render_tick, f.tick_rate, f.tuning);
-                let rot = Quat::from_rotation_y((time * 3.0) as f32 + e.id.0 as f32)
-                    * Quat::from_rotation_z(0.25);
+            } else if e.kind == kind::THORN {
+                let (rot, pos) = thorn_transform(e, f, time);
+                let pulse = 1.4 + 0.6 * ((time * 5.0 + e.id.0 as f64).sin() as f32);
                 let tint = Tint {
-                    glow: Vec4::splat(1.4 + 0.6 * ((time * 5.0).sin() as f32)),
+                    glow: Vec4::splat(pulse),
                     ..Default::default()
                 };
+                // Planted / lying thorns are drawn a little larger so the relay reads.
+                let scale = if e.flags & thorn_flags::PLANTED != 0 { 1.5 } else { 1.2 };
                 lib.draw_model(
-                    ModelId::Prism,
-                    Mat4::from_rotation_translation(rot, pos),
+                    ModelId::Thorn,
+                    Mat4::from_scale_rotation_translation(Vec3::splat(scale), rot, pos),
                     &tint,
                     draws,
                 );
+                if e.flags & thorn_flags::PLANTED != 0 && lights.len() < 48 {
+                    lights.push(PointLight {
+                        position: pos,
+                        color: Vec3::new(0.5, 0.75, 0.9) * (0.6 + 0.3 * pulse),
+                        radius: 2.5,
+                    });
+                }
             }
         }
         for (e, time, offset) in f.projectiles() {
@@ -551,19 +666,19 @@ impl EntityView {
             let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
             let parried = e.flags & projectile_flags::PARRIED != 0;
             let stuck = e.flags & projectile_flags::STUCK != 0;
-            let rot = if e.kind == kind::SAWBLADE {
-                let flat = Vec3::new(vel.x, 0.0, vel.z);
-                let yaw = if flat.length_squared() > 1e-4 {
-                    (-flat.x).atan2(-flat.z)
-                } else {
-                    0.0
-                };
-                Quat::from_rotation_y(yaw + (time * 40.0) as f32)
+            let rot = if e.kind == kind::GRAVEWELL && stuck {
+                // Claws (-Z) bitten into the floor, the core turning.
+                Quat::from_rotation_arc(Vec3::NEG_Z, Vec3::NEG_Y)
+                    * Quat::from_rotation_z((time * 3.0) as f32)
+            } else if e.kind == kind::WISP {
+                Quat::from_rotation_y((time * 7.0) as f32)
+                    * Quat::from_rotation_x((time * 4.3) as f32)
             } else if stuck || vel.length_squared() < 1e-4 {
                 Quat::from_rotation_y((e.id.0 % 7) as f32)
             } else {
-                let spin = if e.kind == kind::FLAK || e.kind == kind::MORTAR {
-                    Quat::from_rotation_z((time * 12.0) as f32)
+                // Bombs tumble end over end.
+                let spin = if e.kind == kind::BOMB {
+                    Quat::from_rotation_x((time * -11.0) as f32)
                 } else {
                     Quat::IDENTITY
                 };
@@ -573,9 +688,13 @@ impl EntityView {
             if parried {
                 tint.body = Vec4::new(2.6, 2.5, 2.3, 1.0);
                 tint.glow = Vec4::splat(3.0);
-            }
-            if stuck && e.kind == kind::STICKY && (time * 4.0).fract() < 0.5 {
-                tint.glow = Vec4::new(3.0, 0.4, 0.3, 1.0);
+            } else if e.kind == kind::BOMB {
+                // The fuse band flickers faster as it burns down.
+                let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
+                let rate = 6.0 + age * 14.0;
+                tint.glow = Vec4::splat(1.2 + 1.2 * ((age * rate).sin() * 0.5 + 0.5));
+            } else if e.kind == kind::GRAVEWELL && stuck {
+                tint.glow = Vec4::splat(1.6 + 0.8 * ((time * 9.0).sin() as f32));
             }
             lib.draw_model(
                 model,
@@ -585,7 +704,10 @@ impl EntityView {
             );
             let light = match e.kind {
                 _ if parried => Some((Vec3::new(1.5, 1.5, 1.4), 5.0)),
-                kind::ROCKET | kind::MORTAR => Some((Vec3::new(1.8, 0.9, 0.3), 5.0)),
+                kind::BOMB => Some((Vec3::new(1.6, 0.8, 0.25), 3.5)),
+                kind::GRAVEWELL if stuck => Some((Vec3::new(0.5, 2.0, 0.7), 7.0)),
+                kind::GRAVEWELL => Some((Vec3::new(0.3, 1.2, 0.4), 3.0)),
+                kind::WISP => Some((Vec3::new(1.2, 0.8, 2.2), 6.0)),
                 kind::SPITTER_ORB => Some((Vec3::new(0.5, 1.4, 0.3), 5.0)),
                 kind::GNAT_BOLT => Some((Vec3::new(1.2, 0.3, 1.2), 3.0)),
                 _ => None,
@@ -599,6 +721,38 @@ impl EntityView {
             }
         }
     }
+}
+
+/// Where and how a thorn is drawn: along its flight while flying, tumbling while dropping,
+/// tip-first in the surface while planted, flat on the floor while lying.
+fn thorn_transform(e: &EntityState, f: &EntityFrame, time: f64) -> (Quat, Vec3) {
+    let pos = replicated_position(e, f.render_tick, f.tick_rate, f.tuning);
+    let facing = e.velocity.normalize_or(Vec3::NEG_Z);
+    if e.flags & thorn_flags::LYING != 0 {
+        let flat = Vec3::new(facing.x, 0.0, facing.z).normalize_or(Vec3::X);
+        // Lying on its side, a little off the floor.
+        return (
+            Quat::from_rotation_arc(Vec3::NEG_Z, flat),
+            pos + Vec3::Y * 0.04,
+        );
+    }
+    if e.flags & thorn_flags::PLANTED != 0 {
+        // The model's tip is THORN_TIP ahead of its origin: drawn at the planted position the
+        // tip sinks into the surface. Quiver for a moment after planting.
+        let since = ((f.render_tick - e.aux as f64) / f.tick_rate.max(1) as f64).max(0.0) as f32;
+        let quiver = (-since * 6.0).exp() * (since * 70.0).sin() * 0.12;
+        let side = facing.any_orthonormal_vector();
+        let dir = (facing + side * quiver).normalize_or(facing);
+        return (Quat::from_rotation_arc(Vec3::NEG_Z, dir), pos - facing * (THORN_TIP * 0.2));
+    }
+    let g = f.tuning.thorn.gravity;
+    let dt = ((f.render_tick - e.aux as f64) / f.tick_rate.max(1) as f64).max(0.0) as f32;
+    let vel = e.velocity - Vec3::Y * g * dt;
+    let along = Quat::from_rotation_arc(Vec3::NEG_Z, vel.normalize_or(Vec3::NEG_Z));
+    if e.flags & thorn_flags::DROPPING != 0 {
+        return (along * Quat::from_rotation_x((time * 14.0) as f32), pos);
+    }
+    (along * Quat::from_rotation_z((time * 9.0) as f32), pos)
 }
 
 /// One slowly drifting puff of red mist.

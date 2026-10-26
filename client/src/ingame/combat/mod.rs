@@ -4,9 +4,9 @@
 //!   flash, viewmodel kick, punch / throw animations, sounds and tracers for our own shots.
 //! * [`fx`]: tracer beams, temporary lights, and playback of the server's cosmetic `Fx` events
 //!   (remote shots, explosions, ricochets, heals, enemy telegraphs...) at their render tick.
-//! * [`entities`]: enemies, projectiles, blood bursts and prisms.
-//! * [`hud`]: hit markers, damage numbers, damage direction, vignette, death screen, prisms,
-//!   stickies, cooldowns.
+//! * [`entities`]: enemies, projectiles, healing bursts, thorns and brand sigils.
+//! * [`hud`]: hit markers, damage numbers, damage direction, vignette, death screen, thorns,
+//!   cooldowns, the Discharge gauge, BRANDED.
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -22,9 +22,11 @@ use engine::gfx::UiDrawList;
 use engine::physics::MASK_SHOTS;
 use engine::render::Renderer;
 use glam::{Vec3, Vec4};
-use shared::input::{Buttons, look_dir};
+use shared::input::look_dir;
 use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
+
+use crate::models::WeaponKind;
 
 use super::{InGame, effects};
 use crate::app::Common;
@@ -94,6 +96,13 @@ pub struct AttackStyle {
     pub shake: f32,
     /// Muzzle flash size (m).
     pub flash: f32,
+    /// Drawn as a jagged electric arc instead of a straight tracer.
+    pub jagged: bool,
+}
+
+/// `c` boosted for unlit / additive drawing, with alpha `a`.
+fn glow(c: Vec4, k: f32, a: f32) -> Vec4 {
+    (c.truncate() * k).extend(a)
 }
 
 pub fn attack_style(a: Attack) -> AttackStyle {
@@ -105,45 +114,38 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         beam_life: life,
         shake,
         flash: 0.25 + 0.3 * kick,
+        jagged: false,
     };
-    let teal = Vec4::new(0.6, 1.6, 1.7, 0.9);
-    let amber = Vec4::new(1.6, 1.1, 0.5, 0.75);
+    let quill = WeaponKind::Quill;
+    let bellows = WeaponKind::Bellows;
     match a {
-        Attack::Lancet => s(Sfx::LancetFire, 0.55, 0.035, teal, 0.09, 0.04),
-        Attack::Overcharge => s(
-            Sfx::LancetBeam,
-            1.0,
-            0.16,
-            Vec4::new(1.4, 1.0, 2.0, 0.95),
-            0.3,
-            0.35,
-        ),
-        Attack::Fan => s(
-            Sfx::LancetFan,
-            0.7,
-            0.03,
-            Vec4::new(0.9, 0.7, 1.8, 0.9),
-            0.1,
-            0.08,
-        ),
-        Attack::Pellet => s(Sfx::ThresherFire, 1.0, 0.022, amber, 0.07, 0.22),
-        Attack::Slug => s(
-            Sfx::ThresherSlug,
-            1.0,
-            0.07,
-            Vec4::new(1.8, 0.7, 0.3, 0.95),
-            0.18,
-            0.32,
-        ),
-        Attack::Flak => s(Sfx::FlakLaunch, 0.8, 0.0, Vec4::ONE, 0.0, 0.1),
-        Attack::Rivet => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
-        Attack::Sawblade => s(Sfx::SawLaunch, 0.7, 0.0, Vec4::ONE, 0.0, 0.08),
-        Attack::Volley => s(Sfx::VolleyFire, 0.9, 0.0, Vec4::ONE, 0.0, 0.15),
-        Attack::Rocket => s(Sfx::CinderFire, 1.0, 0.0, Vec4::ONE, 0.0, 0.14),
-        Attack::Sticky => s(Sfx::StickyArm, 0.5, 0.0, Vec4::ONE, 0.0, 0.04),
-        Attack::Mortar => s(Sfx::MortarFire, 1.0, 0.0, Vec4::ONE, 0.0, 0.2),
+        Attack::Quill => s(Sfx::QuillFire, 0.5, 0.03, glow(quill.primary_color(), 1.7, 0.9), 0.1, 0.04),
+        Attack::Brand => s(Sfx::BrandFire, 0.6, 0.045, glow(quill.glow_color(0), 2.0, 0.95), 0.28, 0.07),
+        Attack::Splinter => s(Sfx::SplinterFire, 0.75, 0.05, glow(quill.glow_color(1), 1.9, 0.95), 0.18, 0.12),
+        Attack::Blast => s(Sfx::BellowsBlast, 1.0, 0.022, glow(bellows.primary_color(), 1.6, 0.75), 0.07, 0.22),
+        Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
+        Attack::BothBarrels => s(Sfx::BothBarrels, 1.0, 0.026, glow(bellows.glow_color(1), 1.8, 0.8), 0.09, 0.42),
+        Attack::Arc => AttackStyle {
+            jagged: true,
+            flash: 0.0,
+            ..s(Sfx::ArcZap, 0.12, 0.03, crate::ingame::combat::fx::ARC_COLOR, 0.08, 0.015)
+        },
+        Attack::Wisp => s(Sfx::WispLaunch, 0.6, 0.0, Vec4::ONE, 0.0, 0.08),
+        Attack::Discharge => s(Sfx::DischargeRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.45),
+        Attack::Tumble => s(Sfx::BombLaunch, 0.9, 0.0, Vec4::ONE, 0.0, 0.14),
+        Attack::Breach => s(Sfx::BreachBlast, 1.0, 0.0, Vec4::ONE, 0.0, 0.5),
+        Attack::Gravewell => s(Sfx::GravewellLaunch, 1.0, 0.0, Vec4::ONE, 0.0, 0.18),
         Attack::Fist => s(Sfx::Punch, 0.0, 0.0, Vec4::ONE, 0.0, 0.0),
-        _ => s(Sfx::LancetFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.0),
+        _ => s(Sfx::QuillFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.0),
+    }
+}
+
+/// Range of a hitscan attack's rays (client tracers).
+fn hitscan_range(attack: Attack, t: &shared::tuning::CombatTuning) -> f32 {
+    match attack {
+        Attack::Blast | Attack::BothBarrels => t.bellows.pellet_range,
+        Attack::Arc => t.arclash.zap_range,
+        _ => t.hitscan_range,
     }
 }
 
@@ -240,7 +242,7 @@ fn victim_name(net: &NetClient, k: &KillInfo) -> String {
     }
 }
 
-/// "LANCET", or the enemy's own attack ("SWIPE", "SLAM") instead of a generic "ENEMY".
+/// "QUILL", or the enemy's own attack ("SWIPE", "SLAM") instead of a generic "ENEMY".
 fn attack_name(net: &NetClient, attack: Attack) -> String {
     if let Attack::Enemy { kind, attack: index } = attack
         && let Some(name) = net
@@ -253,7 +255,7 @@ fn attack_name(net: &NetClient, attack: Attack) -> String {
     attack.name().to_uppercase()
 }
 
-/// "YOU [LANCET] HUSK  HEADSHOT" style kill feed line.
+/// "YOU [QUILL] <ENEMY>  HEADSHOT" style kill feed line.
 fn kill_line(net: &NetClient, k: &KillInfo) -> String {
     let mut s = format!(
         "{} [{}] {}",
@@ -527,6 +529,7 @@ impl InGame {
         let world = net.world().map(|w| &w.collision.world);
         let cam = *last_camera;
         let vm = viewmodel.last_draw();
+        let body = net.local_state().map(|s| s.position + Vec3::Y * 0.9);
         for shot in shots {
             let input = &shot.input;
             let aim = look_dir(input.yaw, input.pitch);
@@ -542,83 +545,113 @@ impl InGame {
                         let style = attack_style(attack);
                         common.audio.play_2d(style.sfx);
                         viewmodel.fire(style.kick);
-                        let angle = combat.rng.angle();
-                        effects.spawn(effects::Particle {
-                            position: muzzle + aim * 0.06,
-                            max_life: 0.06,
-                            size: glam::Vec2::splat(style.flash),
-                            end_scale: 1.3,
-                            color: Vec4::new(1.0, 0.85, 0.55, 1.0),
-                            texture: effects::FxTex::MuzzleFlash,
-                            additive: true,
-                            rotation: angle,
-                            ..Default::default()
-                        });
-                        combat
-                            .beams
-                            .light(muzzle + aim * 0.3, Vec3::new(1.8, 1.2, 0.7), 5.0, 0.05);
+                        if attack == Attack::Tumble {
+                            viewmodel.turn_drum();
+                        }
                         let charge = match intent {
                             FireIntent::Alt { charge, .. } => *charge,
                             _ => 1.0,
                         };
                         feedback.shake(
                             style.shake
-                                * if attack == Attack::Overcharge {
+                                * if attack == Attack::Discharge {
                                     0.4 + 0.6 * charge
                                 } else {
                                     1.0
                                 },
                         );
                         combat.heat = (combat.heat + 0.05).min(1.0);
+                        match attack {
+                            Attack::Gust => {
+                                fx::gust_puff(effects, &mut combat.beams, &mut combat.rng, muzzle, aim);
+                                continue;
+                            }
+                            Attack::Discharge => {
+                                let a = &t.arclash;
+                                let r = a.discharge_min_radius
+                                    + (a.discharge_max_radius - a.discharge_min_radius)
+                                        * charge.clamp(0.0, 1.0);
+                                let at = body.unwrap_or(cam.position - Vec3::Y * 0.7);
+                                fx::discharge_nova(effects, &mut combat.beams, &mut combat.rng, at, r);
+                                continue;
+                            }
+                            Attack::Arc => {
+                                effects.glow(muzzle, fx::ARC_COLOR, 0.25, 0.05);
+                            }
+                            _ => {
+                                let angle = combat.rng.angle();
+                                effects.spawn(effects::Particle {
+                                    position: muzzle + aim * 0.06,
+                                    max_life: 0.06,
+                                    size: glam::Vec2::splat(style.flash),
+                                    end_scale: 1.3,
+                                    color: Vec4::new(1.0, 0.85, 0.55, 1.0),
+                                    texture: effects::FxTex::MuzzleFlash,
+                                    additive: true,
+                                    rotation: angle,
+                                    ..Default::default()
+                                });
+                                combat.beams.light(
+                                    muzzle + aim * 0.3,
+                                    Vec3::new(1.8, 1.2, 0.7),
+                                    5.0,
+                                    0.05,
+                                );
+                            }
+                        }
                         let dirs = hitscan_dirs(intent, input, t, &mut combat.rng);
+                        let range = hitscan_range(attack, t);
                         for dir in dirs {
-                            let range = if attack == Attack::Pellet {
-                                t.thresher.pellet_range
-                            } else {
-                                t.hitscan_range
-                            };
                             let world_hit = world
                                 .and_then(|w| w.cast_ray(cam.position, dir, range, MASK_SHOTS));
                             let mut end_t = world_hit.map_or(range, |h| h.distance);
                             let mut hit_entity = false;
-                            if attack != Attack::Overcharge {
-                                for e in net.remote_entities() {
-                                    if let Some((a, b, r)) = entity_capsule(e) {
-                                        let shape = shared::sim::HitShape::capsule(
-                                            shared::sim::HitPart::Body,
-                                            a,
-                                            b,
-                                            r,
-                                        );
-                                        if let Some(d) = shape.ray_hit(cam.position, dir, end_t) {
-                                            end_t = d;
-                                            hit_entity = true;
-                                        }
+                            for e in net.remote_entities() {
+                                if let Some((a, b, r)) = entity_capsule(e) {
+                                    let shape = shared::sim::HitShape::capsule(
+                                        shared::sim::HitPart::Body,
+                                        a,
+                                        b,
+                                        r,
+                                    );
+                                    if let Some(d) = shape.ray_hit(cam.position, dir, end_t) {
+                                        end_t = d;
+                                        hit_entity = true;
                                     }
                                 }
                             }
                             let end = cam.position + dir * end_t;
-                            let width = if attack == Attack::Overcharge {
-                                style.beam_width * (0.4 + 0.6 * charge)
+                            if style.jagged {
+                                combat.beams.arc(
+                                    muzzle,
+                                    end,
+                                    style.beam_width,
+                                    style.beam_color,
+                                    style.beam_life,
+                                    &mut combat.rng,
+                                );
                             } else {
-                                style.beam_width
-                            };
-                            // Thin near the gun (it is right in front of the camera), full
-                            // width further out.
-                            let along = (end - muzzle).normalize_or_zero();
-                            let mid = muzzle + along * (end - muzzle).length().min(3.0);
-                            combat.beams.beam(
-                                muzzle,
-                                mid,
-                                width.min(0.03),
-                                style.beam_color,
-                                style.beam_life,
-                            );
-                            combat
-                                .beams
-                                .beam(mid, end, width, style.beam_color, style.beam_life);
+                                // Thin near the gun (it is right in front of the camera),
+                                // full width further out.
+                                let along = (end - muzzle).normalize_or_zero();
+                                let mid = muzzle + along * (end - muzzle).length().min(3.0);
+                                combat.beams.beam(
+                                    muzzle,
+                                    mid,
+                                    style.beam_width.min(0.03),
+                                    style.beam_color,
+                                    style.beam_life,
+                                );
+                                combat.beams.beam(
+                                    mid,
+                                    end,
+                                    style.beam_width,
+                                    style.beam_color,
+                                    style.beam_life,
+                                );
+                            }
                             if hit_entity {
-                                effects.blood(end, -dir, 0.4);
+                                fx::body_impact(effects, end, -dir, 0.4);
                             } else if world_hit.is_some() {
                                 fx::world_impact(effects, world, cam.position, end, 6);
                             }
@@ -628,12 +661,9 @@ impl InGame {
                         viewmodel.punch();
                         common.audio.play_2d(Sfx::Punch);
                     }
-                    FireIntent::ThrowPrism => {
-                        viewmodel.throw_prism();
-                        common.audio.play_2d(Sfx::PrismThrow);
-                    }
-                    FireIntent::DetonateStickies => {
-                        common.audio.play_2d(Sfx::StickyDetonate);
+                    FireIntent::ThrowThorn => {
+                        viewmodel.throw_thorn();
+                        common.audio.play_2d(Sfx::ThornThrow);
                     }
                 }
             }
@@ -641,7 +671,7 @@ impl InGame {
     }
 
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
-    /// visuals, viewmodel charge / spin, music intensity.
+    /// visuals (Discharge charge, brands), viewmodel charge, music intensity.
     pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32) {
         let InGame {
             session,
@@ -676,13 +706,20 @@ impl InGame {
             let vis = remote.visual_mut(e.id);
             vis.dead = e.flags & player_flags::DEAD != 0;
             if e.flags & player_flags::CHARGING != 0 && vis.muzzle != Vec3::ZERO {
+                // Arclash Discharge charging: the capacitor crackles brighter.
                 let c = (e.state >> 8) as f32 / 255.0;
                 effects.glow(
                     vis.muzzle,
-                    Vec4::new(0.6, 1.0, 1.0, 0.5 + 0.5 * c),
-                    0.15 + 0.35 * c,
+                    Vec4::new(0.55, 0.8, 1.0, 0.5 + 0.5 * c),
+                    0.2 + 0.45 * c,
                     0.05,
                 );
+                if combat.rng.unit() < vdt * (4.0 + 20.0 * c) {
+                    let to = vis.muzzle + combat.rng.dir() * (0.3 + 0.6 * c);
+                    combat
+                        .beams
+                        .arc(vis.muzzle, to, 0.025, fx::ARC_COLOR, 0.06, &mut combat.rng);
+                }
             }
             if e.flags & player_flags::PROTECTED != 0 && combat.rng.unit() < vdt * 8.0 {
                 effects.glow(
@@ -694,7 +731,7 @@ impl InGame {
             }
         }
 
-        // Entities first (so prisms' last positions are known for Fx).
+        // Entities first (so thorns' last positions are known for Fx).
         let (own, own_time, local_owner) = own_projectiles(net);
         let camera = last_camera.position;
         let own_offset = viewmodel
@@ -713,13 +750,13 @@ impl InGame {
         };
         combat
             .entities
-            .update(&frame, vdt, effects, &mut common.audio, &mut combat.rng);
+            .update(&frame, vdt, effects, &mut common.audio, &mut combat.rng, &mut combat.beams);
 
         // Fx due at the render tick.
         let due = combat.queue.due(render_tick, local);
         if !due.is_empty() {
             let view = &combat.entities;
-            let prism_position = |id: NetId| view.prism_position(id);
+            let thorn_position = |id: NetId| view.thorn_position(id);
             let mut ctx = FxCtx {
                 audio: &mut common.audio,
                 effects,
@@ -731,7 +768,7 @@ impl InGame {
                 local,
                 listener,
                 local_chest,
-                prism_position: &prism_position,
+                thorn_position: &thorn_position,
                 rng: &mut combat.rng,
             };
             for ev in &due {
@@ -739,23 +776,21 @@ impl InGame {
             }
         }
         combat.beams.update(vdt);
+        // Brand sigils (drawn this frame only, after the update).
+        combat
+            .entities
+            .brand_sigils(entities, local, listener, &mut combat.beams);
 
-        // Viewmodel: Overcharge glow + charge sound, Riveter spin.
+        // Viewmodel: Discharge glow + charge whine.
         let charge = combat.predictor.charge(t, rate);
         viewmodel.set_charge(charge);
         let charging = combat.predictor.state().charge > 0;
         if charging && !combat.charging {
-            common.audio.play_2d(Sfx::LancetCharge);
+            common.audio.play_2d(Sfx::DischargeCharge);
         } else if !charging && combat.charging {
-            common.audio.stop(Sfx::LancetCharge);
+            common.audio.stop(Sfx::DischargeCharge);
         }
         combat.charging = charging;
-        let last_buttons = net
-            .prediction()
-            .and_then(|p| p.unacked().last().map(|i| i.buttons))
-            .unwrap_or(Buttons::NONE);
-        viewmodel.spinning =
-            combat.predictor.state().weapon == 2 && last_buttons.contains(Buttons::FIRE);
 
         // Music: nearby alert enemies + recent combat.
         let near = combat.entities.alert_enemies_near(entities, listener, 40.0) as f32;
@@ -816,6 +851,10 @@ impl InGame {
         let protected = own.is_some_and(|c| c.combat.protection > 0);
         let weapons = *self.combat.predictor.state();
         let killed_by = self.combat.killed_by.clone();
+        let branded = net
+            .local_player_id()
+            .and_then(|p| net.frames().latest().and_then(|(_, f)| f.get(NetId::player(p))))
+            .is_some_and(|e| e.flags & player_flags::BRANDED != 0);
         let info = CombatHudInfo {
             camera: &self.last_camera,
             yaw: self.controls.yaw,
@@ -828,6 +867,7 @@ impl InGame {
             tuning: t,
             tick_rate: rate,
             killed_by: killed_by.as_deref(),
+            branded,
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);
