@@ -862,11 +862,18 @@ fn encounter_wave(difficulty: Difficulty, players: u8) -> Vec<f32> {
     a.ticks(2);
     a.world.start_encounter(0);
     a.ticks(5);
+    // The difficulty's health; an elite roll adds its type's elite bonus on top (enemies area).
     a.world
         .enemies
         .values()
         .filter(|e| e.encounter.is_some())
-        .map(|e| e.max_health)
+        .map(|e| {
+            if e.elite {
+                e.max_health / e.def.elite.health
+            } else {
+                e.max_health
+            }
+        })
         .collect()
 }
 

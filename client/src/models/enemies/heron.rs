@@ -404,7 +404,7 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             head_roll = 0.6 * m;
             legs = [(0.9 * e, -0.5 * e, 2.0 * e), (0.6 * e, 0.6 * e, 1.8 * e)];
         }
-        EnemyState::Idle | EnemyState::Walk => {}
+        EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
     }
     pose.glow = gray(glow);
     // The lens burns brighter while aiming.

@@ -98,6 +98,9 @@ pub struct AiWorld {
     pub nav: Option<Arc<NavGrid>>,
     scratch: NavScratch,
     pub stats: AiStats,
+    /// Counter damage of punches that threw a latched enemy off this tick: applied once every
+    /// enemy is back in the world (`special.rs`).
+    pub(crate) throws: Vec<(crate::protocol::NetId, crate::sim::combat::DamageInfo)>,
 }
 
 /// Per-tick navigation context (taken out of [`AiWorld`] while enemies step).

@@ -256,10 +256,11 @@ gentler than the old solo game; BRUTAL / INFERNO are for full squads that want t
   `SimWorld::expected_enemies(t)` counts the scaled waves for the results.
 * **Elites** are the enemies area's (a replicated flag, more health, a searing glow). Every
   PvE spawn rolls the elite chance (`ModeRng`, deterministic per tick) and goes through
-  `SimWorld::spawn_pve_enemy(name, pos, yaw, health, elite)`; until the enemies area's elite
-  spawn lands, an elite roll spawns a normal Mould there (the one place to hook it up).
-* Dev `/spawn` keeps the enemies area's own `enemy_health_scale` hook (1 + 0.5 per extra
-  player); only encounters and grind use the difficulty scaling.
+  `SimWorld::spawn_pve_enemy(name, pos, yaw, health, elite)`, which spawns it through the
+  enemies area's `SimWorld::spawn_enemy_with` (an elite gets its type's elite health bonus,
+  ×2.5 by default, on top of `health`; docs/enemies.md).
+* Dev `/spawn` uses the same difficulty × players health (`SimWorld::pve_scaling`; the old
+  `enemy_health_scale` hook, 1 + 0.5 per extra player, is no longer used by the server).
 
 ### Grind (`sim::grind`)
 

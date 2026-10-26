@@ -1,0 +1,94 @@
+// Bellwether: support (docs/enemies.md). A gaunt, stooped 3 m Mould on long knuckling arms,
+// grey wax over a brass ribcage, with a timber belfry yoke strapped to its back: a big bronze
+// bell hangs above and behind its hooded head, ropes running down to its hands. It hangs back
+// behind the others and keeps 14-26 m from its target.
+//
+// * Toll: it rears up and hauls the bell back on its ropes (1.6 s: the bell glows hotter and
+//   hotter, the yoke creaks, a rising hum), then lets it swing: one deep toll, and every other
+//   Mould within 18 m is frenzied for 5 s (faster, harder-hitting, glowing). It rings even
+//   without seeing you (it only needs a target within 40 m and an ally in reach). Shooting the
+//   bell during the wind-up (30 damage on the bell) cracks the swing: the toll is cancelled and
+//   the Bellwether staggers for 2 s.
+// * Clapper (players inside ~3 m): it swings the bell's clapper chain round, shoving them off.
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md and
+// docs/enemies.md. Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up,
+// -Z forward, from the feet. This file is also compiled into the game as the built-in Bellwether.
+(
+    name: "Bellwether",
+    net_kind: 25,
+    model: "bellwether",
+    health: 220.0,
+    speed: 5.5,
+    acceleration: 30.0,
+    turn_rate: 240.0,
+    radius: 0.7,
+    height: 3.1,
+    // The body hitbox stops at the hunched shoulders; the bell hangs above it on the yoke.
+    body_top: Some(2.2),
+    eye_height: 1.95,
+    step_height: 0.45,
+    locomotion: Ground,
+    knockback_scale: 0.5,
+    weak_points: [
+        (name: "bell", kind: Core, offset: (0.0, 2.62, 0.3), radius: 0.6, multiplier: 2.0),
+    ],
+    armour: None,
+    attacks: [
+        (
+            name: "clapper",
+            kind: Melee,
+            range: 2.3,
+            arc: 160.0,
+            damage: 16.0,
+            knockback: 14.0,
+            knockback_up: 0.3,
+            windup: 0.6,
+            strike: 0.15,
+            recover: 0.6,
+            cooldown: 1.4,
+            windup_move_scale: 0.0,
+            track_target: true,
+        ),
+        (
+            name: "toll",
+            kind: Toll,
+            range: 40.0,
+            damage: 0.0,
+            knockback: 0.0,
+            windup: 1.6,
+            strike: 0.3,
+            recover: 0.8,
+            cooldown: 6.0,
+            windup_move_scale: 0.0,
+            track_target: false,
+            toll: Some((
+                radius: 18.0,
+                duration: 5.0,
+                allies: 1,
+                frenzy: (speed: 1.3, aggression: 1.4, damage: 1.25, projectile_speed: 1.15),
+            )),
+            interrupt: Some((weak_point: "bell", damage: 30.0, stun: 2.0)),
+        ),
+    ],
+    ai: (
+        sight_range: 60.0,
+        reaction_time: 0.5,
+        lose_target_time: 6.0,
+        preferred_range: Some((14.0, 26.0)),
+        strafe: true,
+        target_stickiness: 0.6,
+        aggro_switch_fraction: 0.3,
+        retarget_interval: 0.3,
+        repath_interval: 0.8,
+    ),
+    drops: (heat: 40.0, heat_radius: 5.0),
+    colors: (
+        body: (0.6, 0.57, 0.52),
+        accent: (0.72, 0.5, 0.22),
+        glow: (1.0, 0.68, 0.22),
+        telegraph: (1.0, 0.62, 0.12),
+        parry: (1.0, 0.9, 0.1),
+    ),
+    death_time: 1.2,
+)

@@ -60,6 +60,13 @@ pub struct Palette {
     pub deflected: Vec4,
     /// The Quill's brand sigil on a marked target.
     pub brand: Vec4,
+    /// A Mould frenzied by a Bellwether's toll (its glow and aura).
+    pub frenzy: Vec4,
+    /// An elite Mould's searing glow and crown.
+    pub elite: Vec4,
+    /// Burning slag on the floor (the Smelter's lines once lit; their telegraph uses
+    /// `telegraph`).
+    pub hazard: Vec4,
 
     // --- the player ----------------------------------------------------------------------------
     /// Embers drawn into your wick (kindling), heal popups.
@@ -116,6 +123,9 @@ pub const STANDARD: Palette = Palette {
     hostile_projectile: c(1.0, 0.55, 0.15),
     deflected: c(1.0, 0.97, 0.9),
     brand: c(1.0, 0.3, 0.85),
+    frenzy: c(0.45, 0.75, 1.0),
+    elite: c(1.0, 0.88, 0.5),
+    hazard: c(1.0, 0.62, 0.1),
     heal: c(1.0, 0.62, 0.22),
     damage: rgb(238, 38, 44),
     flash_damage: Vec3::new(0.9, 0.05, 0.04),
@@ -166,6 +176,9 @@ pub const PROTANOPIA: Palette = Palette {
     hostile_projectile: c(0.75, 0.35, 1.0),
     deflected: c(1.0, 0.97, 0.9),
     brand: c(0.8, 1.0, 0.2),
+    frenzy: c(0.86, 1.0, 0.86),
+    elite: c(0.46, 0.86, 1.0),
+    hazard: c(1.0, 1.0, 0.9),
     heal: c(1.0, 0.8, 0.2),
     damage: rgb(255, 110, 40),
     flash_damage: Vec3::new(1.0, 0.3, 0.0),
@@ -206,6 +219,7 @@ pub const DEUTERANOPIA: Palette = Palette {
         rgb(255, 255, 85),  // yellow
     ],
     heal: c(1.0, 0.85, 0.25),
+    frenzy: c(1.0, 1.0, 0.93),
     damage: rgb(240, 60, 30),
     flash_damage: Vec3::new(0.95, 0.2, 0.0),
     health_low: rgb(240, 60, 30),
@@ -234,6 +248,9 @@ pub const TRITANOPIA: Palette = Palette {
     weak_point: c(1.0, 0.55, 0.6),
     aim_laser: c(0.2, 0.45, 1.0),
     hostile_projectile: c(0.25, 0.75, 1.0),
+    frenzy: c(0.86, 1.0, 0.86),
+    elite: c(1.0, 1.0, 0.32),
+    hazard: c(1.0, 1.0, 0.86),
     heal: c(1.0, 0.8, 0.45),
     flash_heal: Vec3::new(1.0, 0.8, 0.45),
     hard_damage: rgb(60, 140, 200),
@@ -549,6 +566,21 @@ mod tests {
                 World,
                 30.0,
             ),
+            // The third roster (docs/enemies.md).
+            ("frenzy / telegraph", p.frenzy, p.telegraph, World, 12.0),
+            (
+                "frenzy / parry window",
+                p.frenzy,
+                p.parry_window,
+                World,
+                12.0,
+            ),
+            ("frenzy / weak point", p.frenzy, p.weak_point, World, 12.0),
+            ("elite / weak point", p.elite, p.weak_point, World, 12.0),
+            ("elite / frenzy", p.elite, p.frenzy, World, 12.0),
+            ("elite / telegraph", p.elite, p.telegraph, World, 12.0),
+            ("hazard / telegraph", p.hazard, p.telegraph, World, 20.0),
+            ("hazard / dark wall", p.hazard, DARK_WALL, World, 25.0),
         ]
     }
 
@@ -598,6 +630,9 @@ mod tests {
                 ("aim laser", p.aim_laser),
                 ("hostile projectile", p.hostile_projectile),
                 ("deflected", p.deflected),
+                ("frenzy", p.frenzy),
+                ("elite", p.elite),
+                ("hazard", p.hazard),
             ] {
                 let d = FOUNDRY
                     .iter()

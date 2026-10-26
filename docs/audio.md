@@ -297,6 +297,24 @@ its index, so generation is deterministic.
     electric hum with a whine climbing towards the lock; **`HeronLock`** a hard mechanical click
     and a short high double beep (dodge now); `HeronNeedle` a hard crack and a zip falling
     away; `HeronKickWindup` a squeaky brass joint; `HeronKick`.
+  - The third roster (appended in a `// enemies` block of `Sfx`, docs/enemies.md):
+    Bellwether: `BellwetherAlert` a hollow groan through the hood over a humming bell;
+    **`BellwetherTollWindup`** (1.6 s, exactly the toll's wind-up) the yoke creaking and a
+    bowed-metal hum swelling to a shriek, cut before the strike; **`BellwetherToll`** one deep
+    bronze strike, inharmonic partials beating over a sub boom, ~3 s (among the loudest enemy
+    sounds: it means every Mould near it just got faster); `BellCrack` the bell shot mid-swing,
+    a crushed, buzzing clank (also when a Bellwether dies); `Frenzied` a hiss of flaring heat
+    and a snarl on each Mould the toll takes; `BellwetherClapperWindup` / `BellwetherClapper`.
+    Snuffer: `SnufferAlert` dry brass chittering (2 variants); `SnufferPounceWindup` a hiss
+    rising under the lifted cap with clicking legs (also its nip's wind-up); `SnufferLatch` a
+    muffled clank and a flame pressed out; `SnufferSmother` a muffled gutter, repeated every
+    0.55 s to the player it holds (non-spatial); `SnufferThrown` a ringing cap and skittering
+    legs; `SnufferNip` a brass snip. Smelter: `SmelterAlert` a furnace roar and a bellow;
+    **`SmelterPourWindup`** (1.1 s) iron grinding and slag bubbling up to the lip;
+    `SmelterPour` a molten gush hissing along the floor; `SlagBurn` (2 variants) a sizzle when a
+    line ignites or a Smelter's crucible spills; `SmelterSwingWindup` / `SmelterSwing` (the
+    heave); `SmelterStep` (2 variants) footfalls with a slosh. `EffigyHit` (2 variants) a thunk
+    into packed wax and the post creaking (instead of `EnemyHurt` on the training dummy).
 - **Enemy hits and deaths.** The Moulds don't bleed: wax cracking, a hiss of heat, slag thuds,
   sizzle. `EnemyHurt` (3 variants) is a wax snap, a thud and a puff of hiss; `EnemyDeath`
   (2 variants, pitched by the client for the body's size) wax splitting, a slag thud and a long

@@ -446,7 +446,7 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             legs = rx(1.0 * e);
             tail = -0.4 * e;
         }
-        EnemyState::Idle | EnemyState::Walk => {}
+        EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
     }
 
     // Wings held in a shallow V (they read from the side too), flapping around it.
