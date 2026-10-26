@@ -167,6 +167,7 @@ pub struct KillInfo {
     parried_projectile: bool,     // RETURN TO SENDER (flags also carry RETURNED when it hit its original owner)
     killer_health: f32, killer_effective_max: f32,   // CLOSE CALL
     overkill: f32,                // how violently it breaks apart
+    distance: f32,                // killer to victim (m; 0 without a body): kill feed, LONGSHOT
     tick: u32,                    // MULTIKILL timing
 }
 ```
@@ -459,6 +460,7 @@ parry, stick), so flying projectiles cost nothing per snapshot; the reproduction
 | `HitConfirm(HitReport)` | the attacker only, **merged per target per tick** (10 pellets = 1) | target, target kind, attack, damage, hits, flags (union), point, killed |
 | `Killed(KillInfo)` | everyone | see the damage pipeline |
 | `Parried(ParryEvent)` | everyone | player, target (projectile id + kind / melee enemy), position, healed, late ticks |
+| `HighlightMark(Highlight)`, `PlayOfTheGame(Highlight)` | everyone (PvP) | play of the game: player, start / end tick, score, title (docs/potg.md) |
 
 ### Cosmetic events (`SnapshotMessage::fx: Vec<FxEvent>`, unreliable)
 
@@ -549,7 +551,7 @@ spawn protected; death screen.
 | **THORN** | flying: the glass spike along its path; `DROPPING`: tumbling; `PLANTED`: tip-first in the surface along `velocity` (quivers after landing), drawn ×1.5 with a steady halo and a pulse ring so the relay reads at a distance; `LYING`: flat on the floor; disappears on removal (shatter via `Ricochet` / `ThornExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
 | `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
-| `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
+| `Killed` | kill feed (`KILLER [ATTACK] VICTIM 38m HEADSHOT RETURNED RICOCHET xN AIR`: the distance whenever the killer has a body and it wasn't a suicide; only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
 | `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
 | `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers (jagged arcs for `Arc`) from the shooter's muzzle to each end, impact sparks/decals at the ends; `Gust` → the air puff along the muzzle direction |

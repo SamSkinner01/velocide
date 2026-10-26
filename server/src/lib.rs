@@ -22,6 +22,7 @@
 
 pub mod combat;
 mod commands;
+pub mod highlights; // play of the game (PvP): docs/potg.md
 pub mod input_queue;
 pub mod lagcomp;
 // Style / game-mode messages and the end-of-match hook (docs/style_modes.md).
@@ -327,6 +328,8 @@ pub struct Server {
     /// Tick of the last and second-to-last snapshot (FX batching).
     last_snapshot_tick: u32,
     prev_snapshot_tick: u32,
+    /// Play of the game: the match's highlights (`highlights.rs`).
+    highlights: highlights::Highlights,
 }
 
 impl Server {
@@ -396,6 +399,7 @@ impl Server {
             event_log: Vec::new(),
             last_snapshot_tick: 0,
             prev_snapshot_tick: 0,
+            highlights: highlights::Highlights::new(tick_rate),
             config,
         };
         server.config.tick_rate = tick_rate;

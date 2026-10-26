@@ -30,9 +30,17 @@ pub struct SampleInfo {
 }
 
 /// Decoded frames by tick.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SnapshotBuffer {
     frames: BTreeMap<u32, Arc<NetFrame>>,
+    /// Frames more than this many ticks behind the newest are dropped.
+    retention: u32,
+}
+
+impl Default for SnapshotBuffer {
+    fn default() -> Self {
+        Self::with_retention(FRAME_RETENTION_TICKS)
+    }
 }
 
 impl SnapshotBuffer {
@@ -40,9 +48,18 @@ impl SnapshotBuffer {
         Self::default()
     }
 
-    /// Stores a frame and drops frames more than [`FRAME_RETENTION_TICKS`] behind the newest.
-    /// A frame that old itself is refused (returns false): late or replayed snapshots can't
-    /// grow the buffer.
+    /// A buffer keeping `ticks` of history instead of [`FRAME_RETENTION_TICKS`] (the play of
+    /// the game's recordings, `ingame::replay`; `u32::MAX` = prune only with `retain_from`).
+    pub fn with_retention(ticks: u32) -> Self {
+        Self {
+            frames: BTreeMap::new(),
+            retention: ticks,
+        }
+    }
+
+    /// Stores a frame and drops frames more than the retention (default
+    /// [`FRAME_RETENTION_TICKS`]) behind the newest. A frame that old itself is refused
+    /// (returns false): late or replayed snapshots can't grow the buffer.
     pub fn insert(&mut self, tick: u32, frame: Arc<NetFrame>) -> bool {
         if self.is_stale(tick) {
             return false;
@@ -55,7 +72,24 @@ impl SnapshotBuffer {
     /// Is `tick` too far behind the newest frame to be kept?
     pub fn is_stale(&self, tick: u32) -> bool {
         self.latest()
-            .is_some_and(|(latest, _)| tick < latest.saturating_sub(FRAME_RETENTION_TICKS))
+            .is_some_and(|(latest, _)| tick < latest.saturating_sub(self.retention))
+    }
+
+    /// Frames from tick `from` to `to` (inclusive), oldest first.
+    pub fn range(&self, from: u32, to: u32) -> impl Iterator<Item = (u32, &Arc<NetFrame>)> {
+        let to = to.max(from);
+        self.frames.range(from..=to).map(|(t, f)| (*t, f))
+    }
+
+    pub fn oldest(&self) -> Option<(u32, &Arc<NetFrame>)> {
+        self.frames.iter().next().map(|(t, f)| (*t, f))
+    }
+
+    /// Drops every frame older than `tick`.
+    pub fn retain_from(&mut self, tick: u32) {
+        if self.oldest().is_some_and(|(oldest, _)| oldest < tick) {
+            self.frames = self.frames.split_off(&tick);
+        }
     }
 
     pub fn get(&self, tick: u32) -> Option<&Arc<NetFrame>> {
@@ -82,11 +116,13 @@ impl SnapshotBuffer {
         self.frames.clear();
     }
 
-    /// Drops frames older than `FRAME_RETENTION_TICKS` behind the newest.
+    /// Drops frames more than the retention behind the newest.
     pub fn prune(&mut self) {
         if let Some((latest, _)) = self.latest() {
-            let min = latest.saturating_sub(FRAME_RETENTION_TICKS);
-            self.frames = self.frames.split_off(&min);
+            let min = latest.saturating_sub(self.retention);
+            if self.oldest().is_some_and(|(oldest, _)| oldest < min) {
+                self.frames = self.frames.split_off(&min);
+            }
         }
     }
 

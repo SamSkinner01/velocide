@@ -462,6 +462,8 @@
         freshness_regen: 0.02,      // per second, everything
         freshness_min: 0.2,
         stale_threshold: 0.5,       // "STALE" below this
+        longshot: 50.0,             // potg: hitscan / arrow kill from ...
+        longshot_distance: 40.0,    // ... at least this far (m)
     ),
     // Game modes (shared/src/sim/modes.rs, docs/style_modes.md). Deathmatch respawn delay and
     // spawn protection are combat.respawn_delay / combat.spawn_protection; frag / time limits

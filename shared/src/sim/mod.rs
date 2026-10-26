@@ -38,6 +38,7 @@ pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemi
 pub mod enemy;
 pub mod grind; // endless waves on an arena: docs/style_modes.md
 pub mod gungame; // the weapon ladder: docs/style_modes.md
+pub mod highlight; // play of the game (PvP highlights): docs/potg.md
 mod hitbox;
 pub mod hitscan;
 pub mod loadouts; // requested / forced loadouts and when they apply: docs/arsenal.md
@@ -68,6 +69,7 @@ pub use embers::{EmberBurst, HealSource};
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
 pub use grind::{GrindEvent, GrindResult, GrindStatus};
 pub use gungame::{GunGameEvent, GunGameResult};
+pub use highlight::{Highlight, HighlightRules, HighlightTracker};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
