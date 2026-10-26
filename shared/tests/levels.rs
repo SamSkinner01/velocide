@@ -7,6 +7,10 @@
 //! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry (with the
 //!   roster's sizes), harriers hover in open air, censers sit on deep ledges, gaolers have
 //!   room to be circled, herons have long sightlines;
+//! - campaign Moulds can walk to their rally point on the nav grid (with their own footprint);
+//! - every arena's grind spawns: room for any Mould, on the nav grid, out of sight of and away
+//!   from the player spawns, spread round the arena; the newer arenas' PvP spawns can't see
+//!   each other;
 //! - jump pads land somewhere solid;
 //! - no z-fighting (coplanar overlapping faces of different materials);
 //! - sealing: a flood fill through free space with every door closed never leaves the level
@@ -15,9 +19,9 @@
 //! - traversability: waypoint-following bots driven through the real movement code
 //!   (`shared::movement::step`) walk the whole critical path of every campaign level from
 //!   every spawn and every checkpoint to the exit with doors open, using only running,
-//!   jumping, sliding and pads; plus each level's alternate routes and scripted tech; every
-//!   arena has a full lap through its ramps, pads, tunnels and catwalks, and scripted checks
-//!   for its movement-tech spots (wall-jump shafts, slide routes).
+//!   jumping, sliding and pads; plus each level's alternate routes (which find its secrets)
+//!   and scripted tech; every arena has a full lap through its ramps, pads, tunnels and
+//!   catwalks, and scripted checks for its movement-tech spots (wall-jump shafts, slides).
 //!
 //! `cargo test -p shared --test levels -- --nocapture` prints route times (par suggestions).
 

@@ -21,19 +21,19 @@
         // R0 ceiling
         (min: (-13.0, 9.0, 63.0), max: (13.0, 10.0, 87.0), material: "wood", tint: (0.38, 0.36, 0.32)),
         // R0 wall N 
-        (min: (-13.0, -4.0, 63.0), max: (-2.5, 9.0, 64.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-13.0, -4.0, 63.0), max: (-2.5, 9.0, 64.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall N sill
-        (min: (-2.5, -4.0, 63.0), max: (2.5, 0.0, 64.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-2.5, -4.0, 63.0), max: (2.5, 0.0, 64.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall N lintel
-        (min: (-2.5, 5.0, 63.0), max: (2.5, 9.0, 64.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-2.5, 5.0, 63.0), max: (2.5, 9.0, 64.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall N 
-        (min: (2.5, -4.0, 63.0), max: (13.0, 9.0, 64.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (2.5, -4.0, 63.0), max: (13.0, 9.0, 64.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall S 
-        (min: (-13.0, -4.0, 86.0), max: (13.0, 9.0, 87.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-13.0, -4.0, 86.0), max: (13.0, 9.0, 87.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall W 
-        (min: (-13.0, -4.0, 64.0), max: (-12.0, 9.0, 86.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-13.0, -4.0, 64.0), max: (-12.0, 9.0, 86.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 wall E 
-        (min: (12.0, -4.0, 64.0), max: (13.0, 9.0, 86.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (12.0, -4.0, 64.0), max: (13.0, 9.0, 86.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // R0 dock
         (min: (-5.0, -4.0, 64.0), max: (12.0, 0.0, 86.0), material: "wood", tint: (0.56, 0.52, 0.44)),
         // R0 quay N
@@ -131,25 +131,25 @@
         // A1 ceiling
         (min: (-23.0, 14.0, 9.0), max: (23.0, 15.0, 45.0), material: "wood", tint: (0.38, 0.36, 0.32)),
         // A1 wall N 
-        (min: (-23.0, -3.0, 9.0), max: (14.0, 14.0, 10.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-23.0, -3.0, 9.0), max: (14.0, 14.0, 10.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall N sill
-        (min: (14.0, -3.0, 9.0), max: (19.0, 4.0, 10.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (14.0, -3.0, 9.0), max: (19.0, 4.0, 10.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall N lintel
-        (min: (14.0, 9.0, 9.0), max: (19.0, 14.0, 10.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (14.0, 9.0, 9.0), max: (19.0, 14.0, 10.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall N 
-        (min: (19.0, -3.0, 9.0), max: (23.0, 14.0, 10.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (19.0, -3.0, 9.0), max: (23.0, 14.0, 10.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall S 
-        (min: (-23.0, -3.0, 44.0), max: (-2.5, 14.0, 45.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-23.0, -3.0, 44.0), max: (-2.5, 14.0, 45.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall S sill
-        (min: (-2.5, -3.0, 44.0), max: (2.5, 0.0, 45.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-2.5, -3.0, 44.0), max: (2.5, 0.0, 45.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall S lintel
-        (min: (-2.5, 5.0, 44.0), max: (2.5, 14.0, 45.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-2.5, 5.0, 44.0), max: (2.5, 14.0, 45.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall S 
-        (min: (2.5, -3.0, 44.0), max: (23.0, 14.0, 45.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (2.5, -3.0, 44.0), max: (23.0, 14.0, 45.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall W 
-        (min: (-23.0, -3.0, 10.0), max: (-22.0, 14.0, 44.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-23.0, -3.0, 10.0), max: (-22.0, 14.0, 44.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 wall E 
-        (min: (22.0, -3.0, 10.0), max: (23.0, 14.0, 44.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (22.0, -3.0, 10.0), max: (23.0, 14.0, 44.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A1 floor N
         (min: (-22.0, -3.0, 10.0), max: (22.0, 0.0, 18.0), material: "tile", tint: (0.62, 0.7, 0.66)),
         // A1 floor S
@@ -345,25 +345,25 @@
         // A2 ceiling
         (min: (-5.0, 34.0, -55.0), max: (35.0, 35.0, -12.0), material: "concrete", tint: (0.42, 0.5, 0.48)),
         // A2 wall N 
-        (min: (-5.0, -1.0, -55.0), max: (35.0, 34.0, -54.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, -1.0, -55.0), max: (35.0, 34.0, -54.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall S 
-        (min: (-5.0, -1.0, -13.0), max: (14.0, 34.0, -12.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, -1.0, -13.0), max: (14.0, 34.0, -12.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall S sill
-        (min: (14.0, -1.0, -13.0), max: (19.0, 4.0, -12.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (14.0, -1.0, -13.0), max: (19.0, 4.0, -12.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall S lintel
-        (min: (14.0, 9.0, -13.0), max: (19.0, 34.0, -12.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (14.0, 9.0, -13.0), max: (19.0, 34.0, -12.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall S 
-        (min: (19.0, -1.0, -13.0), max: (35.0, 34.0, -12.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (19.0, -1.0, -13.0), max: (35.0, 34.0, -12.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall W 
-        (min: (-5.0, -1.0, -54.0), max: (-4.0, 34.0, -40.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, -1.0, -54.0), max: (-4.0, 34.0, -40.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall W sill
-        (min: (-5.0, -1.0, -40.0), max: (-4.0, 14.0, -35.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, -1.0, -40.0), max: (-4.0, 14.0, -35.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall W lintel
-        (min: (-5.0, 19.0, -40.0), max: (-4.0, 34.0, -35.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, 19.0, -40.0), max: (-4.0, 34.0, -35.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall W 
-        (min: (-5.0, -1.0, -35.0), max: (-4.0, 34.0, -13.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-5.0, -1.0, -35.0), max: (-4.0, 34.0, -13.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 wall E 
-        (min: (34.0, -1.0, -54.0), max: (35.0, 34.0, -13.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (34.0, -1.0, -54.0), max: (35.0, 34.0, -13.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A2 floor S
         (min: (-4.0, -1.0, -22.0), max: (34.0, 4.0, -13.0), material: "tile", tint: (0.62, 0.7, 0.66)),
         // A2 floor N
@@ -485,25 +485,25 @@
         // A3 ceiling
         (min: (-55.0, 28.0, -61.0), max: (-15.0, 29.0, -21.0), material: "wood", tint: (0.38, 0.36, 0.32)),
         // A3 wall N 
-        (min: (-55.0, 6.5, -61.0), max: (-15.0, 28.0, -60.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 6.5, -61.0), max: (-15.0, 28.0, -60.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall S 
-        (min: (-55.0, 6.5, -22.0), max: (-15.0, 28.0, -21.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 6.5, -22.0), max: (-15.0, 28.0, -21.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall W 
-        (min: (-55.0, 6.5, -60.0), max: (-54.0, 28.0, -30.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 6.5, -60.0), max: (-54.0, 28.0, -30.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall W sill
-        (min: (-55.0, 6.5, -30.0), max: (-54.0, 11.0, -25.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 6.5, -30.0), max: (-54.0, 11.0, -25.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall W lintel
-        (min: (-55.0, 16.0, -30.0), max: (-54.0, 28.0, -25.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 16.0, -30.0), max: (-54.0, 28.0, -25.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall W 
-        (min: (-55.0, 6.5, -25.0), max: (-54.0, 28.0, -22.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-55.0, 6.5, -25.0), max: (-54.0, 28.0, -22.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall E 
-        (min: (-16.0, 6.5, -60.0), max: (-15.0, 28.0, -40.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-16.0, 6.5, -60.0), max: (-15.0, 28.0, -40.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall E sill
-        (min: (-16.0, 6.5, -40.0), max: (-15.0, 14.0, -35.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-16.0, 6.5, -40.0), max: (-15.0, 14.0, -35.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall E lintel
-        (min: (-16.0, 19.0, -40.0), max: (-15.0, 28.0, -35.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-16.0, 19.0, -40.0), max: (-15.0, 28.0, -35.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 wall E 
-        (min: (-16.0, 6.5, -35.0), max: (-15.0, 28.0, -22.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-16.0, 6.5, -35.0), max: (-15.0, 28.0, -22.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A3 floor
         (min: (-42.0, 6.5, -60.0), max: (-16.0, 11.0, -22.0), material: "tile", tint: (0.62, 0.7, 0.66)),
         // A3 exit landing
@@ -619,25 +619,25 @@
         (min: (-57.56, 14.4, -31.06), max: (-57.44, 14.6, -30.94), material: "lava", tint: (1.0, 0.86, 0.58), no_collide: true),
         // ==== A4 The Great Wick (arena 4, the finale): a flooded well, the colossal candle ====
         // A4 wall N 
-        (min: (-111.0, 3.5, -51.0), max: (-91.0, 50.0, -50.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-111.0, 3.5, -51.0), max: (-91.0, 50.0, -50.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall N sill
-        (min: (-91.0, 3.5, -51.0), max: (-86.0, 21.0, -50.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-91.0, 3.5, -51.0), max: (-86.0, 21.0, -50.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall N lintel
-        (min: (-91.0, 26.0, -51.0), max: (-86.0, 50.0, -50.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-91.0, 26.0, -51.0), max: (-86.0, 50.0, -50.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall N 
-        (min: (-86.0, 3.5, -51.0), max: (-65.0, 50.0, -50.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-86.0, 3.5, -51.0), max: (-65.0, 50.0, -50.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall S 
-        (min: (-111.0, 3.5, -6.0), max: (-65.0, 50.0, -5.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-111.0, 3.5, -6.0), max: (-65.0, 50.0, -5.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall W 
-        (min: (-111.0, 3.5, -50.0), max: (-110.0, 50.0, -6.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-111.0, 3.5, -50.0), max: (-110.0, 50.0, -6.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall E 
-        (min: (-66.0, 3.5, -50.0), max: (-65.0, 50.0, -30.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-66.0, 3.5, -50.0), max: (-65.0, 50.0, -30.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall E sill
-        (min: (-66.0, 3.5, -30.0), max: (-65.0, 11.0, -25.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-66.0, 3.5, -30.0), max: (-65.0, 11.0, -25.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall E lintel
-        (min: (-66.0, 16.0, -30.0), max: (-65.0, 50.0, -25.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-66.0, 16.0, -30.0), max: (-65.0, 50.0, -25.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 wall E 
-        (min: (-66.0, 3.5, -25.0), max: (-65.0, 50.0, -6.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-66.0, 3.5, -25.0), max: (-65.0, 50.0, -6.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // A4 roof
         (min: (-111.0, 50.0, -51.0), max: (-65.0, 51.0, -32.0), material: "wood", tint: (0.38, 0.36, 0.32)),
         // A4 roof
@@ -810,19 +810,19 @@
         // Exit floor
         (min: (-97.0, 20.0, -82.0), max: (-80.0, 21.0, -67.0), material: "tile", tint: (0.62, 0.7, 0.66)),
         // Exit wall N 
-        (min: (-98.0, 20.0, -83.0), max: (-79.0, 29.0, -82.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-98.0, 20.0, -83.0), max: (-79.0, 29.0, -82.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall S 
-        (min: (-98.0, 20.0, -67.0), max: (-91.0, 29.0, -66.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-98.0, 20.0, -67.0), max: (-91.0, 29.0, -66.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall S sill
-        (min: (-91.0, 20.0, -67.0), max: (-86.0, 21.0, -66.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-91.0, 20.0, -67.0), max: (-86.0, 21.0, -66.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall S lintel
-        (min: (-91.0, 26.0, -67.0), max: (-86.0, 29.0, -66.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-91.0, 26.0, -67.0), max: (-86.0, 29.0, -66.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall S 
-        (min: (-86.0, 20.0, -67.0), max: (-79.0, 29.0, -66.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-86.0, 20.0, -67.0), max: (-79.0, 29.0, -66.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall W 
-        (min: (-98.0, 20.0, -82.0), max: (-97.0, 29.0, -67.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-98.0, 20.0, -82.0), max: (-97.0, 29.0, -67.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit wall E 
-        (min: (-80.0, 20.0, -82.0), max: (-79.0, 29.0, -67.0), material: "brick", tint: (0.62, 0.66, 0.58)),
+        (min: (-80.0, 20.0, -82.0), max: (-79.0, 29.0, -67.0), material: "brick", tint: (0.5, 0.64, 0.54)),
         // Exit sky clip
         (min: (-98.0, 29.0, -83.0), max: (-79.0, 30.0, -66.0), material: "concrete", tint: (1.0, 1.0, 1.0), clip_only: true),
         // Exit dais

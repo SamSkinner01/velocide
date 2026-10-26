@@ -127,8 +127,8 @@ impl Gate {
         [x, self.floor, z]
     }
 
-    /// Builds the chamber behind the opening and registers its grind spawns. Returns them.
-    pub fn build(&self, g: &mut Gen, name: &str, s: &GateStyle, spawns: Spawns) -> Vec<[f32; 3]> {
+    /// Builds the chamber behind the opening and registers its grind spawns.
+    pub fn build(&self, g: &mut Gen, name: &str, s: &GateStyle, spawns: Spawns) {
         let f = self.floor;
         let (w, d, h) = (HALF, DEPTH, HEIGHT);
         g.section(&format!("{name} (Mould gate: grind spawns)"));
@@ -277,10 +277,9 @@ impl Gate {
             Spawns::Middle => vec![middle],
             Spawns::All => vec![corners[0], middle, corners[1]],
         };
-        for p in &points {
-            g.grind(name, *p);
+        for p in points {
+            g.grind(name, p);
         }
-        points
     }
 }
 

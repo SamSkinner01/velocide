@@ -17,7 +17,7 @@ use super::{Gen, Mat, Room, Side, enemy, op, vol, wave};
 mod pal {
     use super::Mat;
     /// Drowned brick and mossy stone.
-    pub const BRICK: Mat = Mat("brick", [0.62, 0.66, 0.58]);
+    pub const BRICK: Mat = Mat("brick", [0.5, 0.64, 0.54]);
     pub const STONE: Mat = Mat("concrete", [0.6, 0.68, 0.64]);
     pub const STONE_DARK: Mat = Mat("concrete", [0.42, 0.5, 0.48]);
     pub const TILE: Mat = Mat("tile", [0.62, 0.7, 0.66]);
