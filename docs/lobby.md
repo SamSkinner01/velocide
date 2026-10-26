@@ -277,8 +277,8 @@ player shows ~11–17 ms).
 
 - **Lobby overlay**: the same `LobbyPanel` as the lobby screen (`PanelMode::Overlay`) over the
   dimmed world: players (identity swatch, look swatch, crown, name, ping, status), chat, the
-  match panel (host settings or read-only rows, READY, START / FORCE / CANCEL, CUSTOMISE, WARM UP,
-  LEAVE LOBBY). It opens **by itself on the first arrival** in a session (not for `--bot`
+  match panel (host settings or read-only rows, READY, START / FORCE / CANCEL, CUSTOMISE +
+  LOADOUT, WARM UP + LEAVE LOBBY). It opens **by itself on the first arrival** in a session (not for `--bot`
   clients); TAB / Select (the scoreboard binding: there is no scoreboard in the warm-up), Esc or
   WARM UP close it, TAB opens it again. While it is open you stand still (neutral inputs), the
   cursor is free and the HUD, name tags and chat log are hidden. With the overlay closed, Esc
@@ -297,7 +297,10 @@ player shows ~11–17 ms).
   shows `E SUMMON …` under the crosshair; a summon shows the banner `PRACTICE: 4 GNAWERS` with
   the wave sound.
 - **CUSTOMISE** (from the overlay): the customise sub-screen with the preview in front of the
-  world (`docs/models.md` "Cosmetics").
+  world (`docs/models.md` "Cosmetics"). **LOADOUT** (from the overlay, or the pause menu): the
+  arsenal's loadout screen (`menus::loadout`, docs/ui.md); the client sends the loadout each
+  change and the warm-up world (`SimWorld::warmup`) applies it at once. While a sub-screen is
+  open the overlay and Ready keys are off.
 
 ### Lobby screen layout
 
@@ -315,7 +318,8 @@ MODE / LEVEL (levels of the mode first, sandboxes marked TEST) / MAX PLAYERS / F
 TIME LIMIT (deathmatch, presets incl. NONE) / FRIENDLY FIRE (co-op); everyone else sees the
 same as read-only rows (`host_settings` / `settings_rows`: new settings go in both). Then READY
 (default focus), START MATCH (enabled when all are ready) + FORCE START or CANCEL START (host),
-the player's own buttons (`player_buttons`: CUSTOMISE; LOADOUT goes next to it), LEAVE LOBBY,
+the player's own buttons (`player_buttons`: CUSTOMISE + LOADOUT, sub-screens of the panel:
+`LobbyPanel::customize_ui` / `loadout_ui`), LEAVE LOBBY,
 and a status line. A countdown band (number
 pops in, settings summary) covers the lower screen. Esc while typing leaves the chat field;
 otherwise it asks "LEAVE LOBBY?" (hosts are warned everyone gets disconnected). Server notices
@@ -390,8 +394,8 @@ cargo test -p client --test lobby_screen   # real lobby + game screens on a head
 cargo test -p server --test warmup_net     # warm-up phases, rules, cosmetics over UDP
 cargo test -p shared --lib warmup          # practice stations, respawns, PvP by next mode
 cargo run -p client --release --example lobby_shots -- out/   # PNGs: the warm-up overlay (host
-        # / guest), the hub with the HUD card and the ready board, customise over the world, a
-        # practice pack, the countdown banner, match, scoreboard with pings, host pause menu,
+        # / guest), the hub with the HUD card and the ready board, customise and loadout over the
+        # world, the firing range's Effigies, a practice pack, the countdown banner, match, scoreboard with pings, host pause menu,
         # results, back in the warm-up, the lobby screen without a world + its leave dialog
 scripts/local_test.sh --release            # dedicated server (--autostart) + 2 clients (--ready)
 scripts/local_test.sh --lobby              # ... staying in the lobby (P1 hosts, starts by hand)

@@ -3,8 +3,9 @@
 //!
 //! - the **warm-up** (docs/lobby.md): the host arriving in the Vestry with the lobby overlay
 //!   open (`warmup_overlay_host`), the hub with the HUD card and the ready board
-//!   (`warmup_board`), the customise sub-screen over the world (`warmup_customize`), a guest's
-//!   overlay (`warmup_overlay_guest`), a practice pack summoned at the console
+//!   (`warmup_board`), the customise sub-screen over the world (`warmup_customize`), the
+//!   overlay's LOADOUT (`warmup_loadout`), the firing range's Effigies (`warmup_range`), a
+//!   guest's overlay (`warmup_overlay_guest`), a practice pack summoned at the console
 //!   (`warmup_practice`), the countdown banner (`warmup_countdown`);
 //! - the match it starts (`match_started`), the scoreboard with pings, the host pause menu,
 //!   the results (`match_results`) and the warm-up after it (`warmup_after_match`);
