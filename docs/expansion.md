@@ -219,6 +219,11 @@ hides the thorn pips (and the "Q" hint) when charges are 0.
   you up a tier (via `force_loadout`); a kill with the Fist on the last tier wins. A punch kill
   on someone (any tier) knocks the victim **down** a tier. Thorns are off (PvP profile).
 - Respawns are quick (deathmatch respawn rules). A time limit still applies (most tiers wins).
+- *As built (modes)*: the Fist tier keeps the last ladder build in hand and only a punch kill
+  counts there, because `force_loadout` turns an empty loadout into the default one and the
+  client would show / replicate it as the Quill. A real fists-only tier needs an unarmed
+  loadout from **arsenal** / **arsenal-client**; `sim::gungame::tier_loadout` is the one place
+  to switch to it.
 - HUD: your tier, the next weapon, the leader's tier. Results: winner, tiers reached.
 
 **modes** owns `shared/src/sim/modes.rs`, `shared/src/sim/encounter.rs`, new

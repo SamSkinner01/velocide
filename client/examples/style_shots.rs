@@ -4,7 +4,9 @@
 //! revive (two real clients on a real server: one goes down via `/kill`, the other walks up and
 //! holds USE), the campaign (solo + co-op) and deathmatch results screens mid-reveal and
 //! finished, and a real solo grind run (breather, wave, scoreboard, cleared, a boss wave,
-//! the overrun, its results) plus grind results with a new record and in co-op.
+//! the overrun, its results) plus grind results with a new record and in co-op, and gun game
+//! (a real server with two bots: the tier block, a promotion, the Fist tier, the scoreboard,
+//! the results).
 //!
 //! ```text
 //! cargo run -p client --release --example style_shots -- [out_dir]   # default target/style_shots
@@ -26,12 +28,12 @@ use engine::render::Renderer;
 use engine::ui::{UiInput, UiKey};
 use glam::{Vec2, Vec3};
 use server::lobby::LobbyCommand;
-use server::{ServerCommand, ServerConfig, ServerHandle};
-use shared::lobby::{Difficulty, GameMode};
+use server::{LobbyConfig, ServerCommand, ServerConfig, ServerHandle};
+use shared::lobby::{Difficulty, GameMode, MatchSettings};
 use shared::sim::{
-    EndReason, Grade, Grades, GrindEvent, GrindStatus, LifeState, MatchPhase, MatchResults,
-    ModeEvent, ModeRules, PlayerId, PlayerResult, PlayerStats, ScoreEntry, Scoreboard, StyleBonus,
-    StyleEvent, StyleKey, StyleView,
+    EndReason, Grade, Grades, GrindEvent, GrindStatus, GunGameEvent, LifeState, MatchPhase,
+    MatchResults, ModeEvent, ModeRules, PlayerId, PlayerResult, PlayerStats, ScoreEntry,
+    Scoreboard, StyleBonus, StyleEvent, StyleKey, StyleView,
 };
 
 /// A HUD capture: rank, meter fill, stale keys, style feed lines.
@@ -248,6 +250,7 @@ fn stats(kills: u32, deaths: u32, frags: i32, damage: f32, revives: u32) -> Play
         frags,
         damage_taken: damage,
         revives,
+        tier: 0,
     }
 }
 
@@ -378,6 +381,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: Some(Grade::A),
         winner: None,
         grind: None,
+        gun_game: None,
     });
     s.run(&mut c, 80);
     s.capture(&mut c, "results_campaign_reveal");
@@ -403,6 +407,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: Some(Grade::S),
         winner: None,
         grind: None,
+        gun_game: None,
     });
     s.run(&mut c, 260);
     s.capture(&mut c, "results_campaign_s");
@@ -449,6 +454,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: Some(Grade::B),
         winner: None,
         grind: None,
+        gun_game: None,
     });
     s.run(&mut c, 40);
     s.capture(&mut c, "results_coop_reveal");
@@ -492,6 +498,7 @@ fn main() -> anyhow::Result<()> {
                 style: 6420,
                 life: LifeState::Alive,
                 revives: 0,
+                tier: 0,
             }],
             grind: None,
         }),
@@ -537,6 +544,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: None,
         winner: Some(me),
         grind: None,
+        gun_game: None,
     });
     s.run(&mut c, 50);
     s.capture(&mut c, "results_deathmatch_reveal");
@@ -667,6 +675,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: Some(Grade::A),
         winner: None,
         grind: Some(grind_result(19, 18, Grade::A)),
+        gun_game: None,
     });
     if let Some(screen) = c.game.modes.results.as_mut() {
         screen.previous_best_wave = Some(12);
@@ -711,6 +720,7 @@ fn main() -> anyhow::Result<()> {
         team_grade: Some(Grade::A),
         winner: None,
         grind: Some(grind_result(23, 22, Grade::S)),
+        gun_game: None,
     });
     if let Some(screen) = c.game.modes.results.as_mut() {
         screen.previous_best_wave = Some(25);
@@ -718,6 +728,143 @@ fn main() -> anyhow::Result<()> {
     s.run(&mut c, 240);
     s.capture(&mut c, "results_grind_coop");
     c.game.shutdown(&mut s.renderer, &mut c.common);
+
+    // ---- gun game: a real server with two bots, tiers injected on the client ------------------
+    let server = ServerHandle::spawn(ServerConfig {
+        bind: "127.0.0.1:0".parse()?,
+        level: "cistern_nine".into(),
+        max_players: 8,
+        watch_tuning: false,
+        lobby: LobbyConfig {
+            settings: MatchSettings::new(GameMode::GunGame, "cistern_nine"),
+            ..Default::default()
+        },
+        ..Default::default()
+    })?;
+    for name in ["Vex", "Molt"] {
+        server.send(ServerCommand::AddBot { name: name.into() });
+    }
+    let address = server.connect_addr().to_string();
+    let mut c = client(&mut s.renderer, StartMode::Join { address }, "Solo")?;
+    wait_in_game(&mut s, &mut c);
+    let me = c
+        .game
+        .net()
+        .and_then(|n| n.local_player_id())
+        .unwrap_or_default();
+    // (tier, kills, deaths) per player: Solo 4, Vex 7, Molt 2.
+    let board_with = |c: &Client, tiers: &[(u8, u32, u32)]| {
+        let mut board = c.game.modes.scoreboard.clone();
+        if let Some(b) = board.as_mut() {
+            let others = b.rows.iter().filter(|r| r.player != me).count();
+            let mut k = 1;
+            for row in &mut b.rows {
+                let (tier, kills, deaths) = if row.player == me {
+                    tiers[0]
+                } else {
+                    let v = tiers[k.min(others)];
+                    k += 1;
+                    v
+                };
+                (row.tier, row.kills, row.deaths) = (tier, kills, deaths);
+            }
+        }
+        board
+    };
+    let vex = c
+        .game
+        .modes
+        .scoreboard
+        .as_ref()
+        .and_then(|b| b.rows.iter().find(|r| r.player != me))
+        .map_or(PlayerId(1), |r| r.player);
+    if let Some(board) = board_with(&c, &[(4, 6, 3), (7, 11, 4), (2, 3, 8)]) {
+        mode_event(&mut c, &ModeEvent::Scoreboard(board));
+    }
+    mode_event(
+        &mut c,
+        &ModeEvent::GunGame(GunGameEvent::Promoted {
+            player: me,
+            tier: 4,
+            victim: vex,
+        }),
+    );
+    c.game.style.override_view = Some(view(4, 0.6, &[]));
+    feed(&mut c, &[(Frag, 0), (Headshot, 0)]);
+    s.run(&mut c, 15);
+    s.capture(&mut c, "hud_gungame");
+    c.input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::Select, true));
+    s.run(&mut c, 10);
+    s.capture(&mut c, "scoreboard_gungame");
+    c.input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::Select, false));
+    s.run(&mut c, 2);
+    // The Fist tier.
+    if let Some(board) = board_with(&c, &[(10, 15, 4), (7, 11, 6), (2, 3, 9)]) {
+        mode_event(&mut c, &ModeEvent::Scoreboard(board));
+    }
+    mode_event(
+        &mut c,
+        &ModeEvent::GunGame(GunGameEvent::Promoted {
+            player: me,
+            tier: 10,
+            victim: vex,
+        }),
+    );
+    s.run(&mut c, 15);
+    s.capture(&mut c, "hud_gungame_fist");
+    // Punched down (the banner), then the results of a ladder win.
+    mode_event(
+        &mut c,
+        &ModeEvent::GunGame(GunGameEvent::Demoted {
+            player: me,
+            tier: 9,
+            by: vex,
+        }),
+    );
+    s.run(&mut c, 15);
+    s.capture(&mut c, "hud_gungame_demoted");
+    server.send(ServerCommand::Lobby(LobbyCommand::EndMatch));
+    for _ in 0..300 {
+        s.run(&mut c, 1);
+        if c.game.results_open() {
+            break;
+        }
+    }
+    let gg = |id: u8, name: &str, tier: u8, kills: u32, deaths: u32, best: u8, style: u32| {
+        let mut r = result(id, name, stats(kills, deaths, 0, 0.0, 0), style, best, None);
+        r.stats.tier = tier;
+        r
+    };
+    let ladder = shared::tuning::GunGameTuning::default()
+        .ladder
+        .iter()
+        .map(|b| b.weapon)
+        .collect();
+    c.game.show_results(MatchResults {
+        rules: ModeRules::gun_game(600.0),
+        reason: EndReason::Ladder,
+        level: "Cistern Nine".into(),
+        duration_secs: 431.0,
+        par_secs: 0.0,
+        total_enemies: 0,
+        team_kills: 0,
+        players: vec![
+            gg(me.0, "Solo", 11, 19, 6, 7, 12840),
+            gg(3, "Vex", 8, 15, 9, 6, 9930),
+            gg(1, "Grinder", 6, 12, 11, 5, 7010),
+            gg(5, "Molt", 3, 6, 14, 3, 3020),
+        ],
+        team_grade: None,
+        winner: Some(me),
+        grind: None,
+        gun_game: Some(shared::sim::GunGameResult { ladder }),
+    });
+    s.run(&mut c, 170);
+    s.capture(&mut c, "results_gungame");
+    c.game.shutdown(&mut s.renderer, &mut c.common);
+    server.stop();
 
     // ---- co-op downed / revive: two real clients on a real server ----------------------------------
     let server = ServerHandle::spawn(ServerConfig {

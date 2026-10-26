@@ -25,6 +25,8 @@ pub struct Tuning {
     // docs/style_modes.md).
     pub difficulty: DifficultyTuning,
     pub grind: GrindTuning,
+    /// Gun game: the weapon ladder (`sim::gungame`).
+    pub gun_game: GunGameTuning,
     /// PvE / PvP balance profiles over `combat` ([`Tuning::for_mode`], docs/arsenal.md).
     pub balance: BalanceTuning,
 }
@@ -1672,6 +1674,33 @@ impl Default for GrindTuning {
     }
 }
 
+/// Gun game (`sim::gungame`): the fixed ladder of weapon builds players climb with kills (the
+/// Fist comes after the last one) and what a punch kill costs the victim. See
+/// `docs/style_modes.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GunGameTuning {
+    /// One build per tier, first to last. A kill with your tier's weapon moves you up.
+    pub ladder: Vec<crate::loadout::WeaponBuild>,
+    /// Tiers a punch kill knocks the victim down.
+    pub punch_demotes: u32,
+}
+
+impl Default for GunGameTuning {
+    fn default() -> Self {
+        use crate::loadout::WeaponKind::*;
+        // From forgiving (chaining beams, cones, spreads) to demanding (splash, precision,
+        // the bow), each with its default build.
+        let ladder = [
+            Arclash, Kiln, Thresher, Riveter, Bellows, Tumbler, Cinderbox, Lancet, Quill, Longwick,
+        ];
+        Self {
+            ladder: ladder.iter().map(|w| w.default_build()).collect(),
+            punch_demotes: 1,
+        }
+    }
+}
+
 // ---- range checks ([`Tuning::sanitize`]) ------------------------------------------------------
 //
 // Tuning comes from a file anyone can edit and, on clients, from the server. Absurd values
@@ -2192,6 +2221,22 @@ impl DifficultyTuning {
 const MAX_GRIND_ROSTER: usize = 64;
 const MAX_ENEMY_NAME: usize = 64;
 
+/// Longest gun game ladder accepted (tiers ride in a byte on the scoreboard).
+const MAX_LADDER: usize = 32;
+
+impl GunGameTuning {
+    pub fn sanitize(&mut self) {
+        self.ladder.truncate(MAX_LADDER);
+        for b in &mut self.ladder {
+            *b = b.sanitized();
+        }
+        if self.ladder.is_empty() {
+            self.ladder = Self::default().ladder;
+        }
+        self.punch_demotes = self.punch_demotes.min(MAX_LADDER as u32);
+    }
+}
+
 impl GrindTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
@@ -2243,6 +2288,7 @@ impl Tuning {
         self.modes.sanitize();
         self.difficulty.sanitize();
         self.grind.sanitize();
+        self.gun_game.sanitize();
         self.balance.sanitize();
         *self != before
     }
@@ -2364,6 +2410,7 @@ mod tests {
         ] {
             *n = 3;
         }
+        expected.gun_game.punch_demotes = 3;
         for e in &mut expected.grind.roster {
             e.from_wave = 3;
         }

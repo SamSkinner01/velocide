@@ -542,6 +542,24 @@
             (enemy: "smelter", cost: 6.0, from_wave: 12, weight: 2.0, heavy: true),
         ],
     ),
+    // Gun game (shared/src/sim/gungame.rs): a kill with your tier's weapon moves you up; after
+    // the last tier comes the Fist, and a punch kill there wins. A punch kill knocks the victim
+    // down `punch_demotes` tiers.
+    gun_game: (
+        ladder: [
+            (weapon: Arclash, abilities: (Wisp, Discharge)),
+            (weapon: Kiln, abilities: (Flare, Discharge)),
+            (weapon: Thresher, abilities: (Slug, Flak)),
+            (weapon: Riveter, abilities: (Volley, Wisp)),
+            (weapon: Bellows, abilities: (Gust, BothBarrels)),
+            (weapon: Tumbler, abilities: (Breach, Gravewell)),
+            (weapon: Cinderbox, abilities: (Limpet, Mortar)),
+            (weapon: Lancet, abilities: (Skewer, Flurry)),
+            (weapon: Quill, abilities: (Brand, Splinter)),
+            (weapon: Longwick, abilities: (TripleNock, PinningArrow)),
+        ],
+        punch_demotes: 1,
+    ),
     // Balance per mode (docs/arsenal.md). `combat` above is the reference; a profile scales
     // it per weapon (primary) and per ability -- `(damage, interval, radius, knockback,
     // speed)`, 1.0 if left out -- then sets absolute `overrides` by field path inside

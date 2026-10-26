@@ -12,6 +12,8 @@
 //!   CONTINUE TO LOBBY → a second match.
 //! * **Deathmatch** (host + guest + 2 server bots, Cistern Nine): frags, respawns, scoreboard
 //!   with pings, chat, name tags, frag limit → results → lobby.
+//! * **Gun game** (host + 2 server bots, Cistern Nine): the first build only, kills climb the
+//!   ladder (the next build in the host's own state), tiers on the scoreboard, results by tier.
 //! * **Robustness**: the host vanishes mid-match, a guest quits mid-match, a full server, a
 //!   bad address, a killed dedicated server, menu key spam.
 //! * **Settings**: every retro / view / HUD option changes the picture live; saved settings
@@ -996,6 +998,130 @@ fn coop(rig: &mut Rig) {
     rig.leave(&mut host);
 }
 
+// ---- gun game ------------------------------------------------------------------------------------
+
+/// The local player's gun game tier on the client's scoreboard.
+fn gun_tier(c: &Client) -> Option<u8> {
+    let me = c.me()?;
+    let board = c.game_ref()?.modes.scoreboard.as_ref()?;
+    Some(board.rows.iter().find(|r| r.player == me)?.tier)
+}
+
+/// Gun game: a host and two server bots on Cistern Nine. The host carries the first build
+/// only, kills with it climb the ladder (the next build arrives in its own state at once), the
+/// scoreboard shows tiers, ending the match ranks by tier.
+fn gun_game(rig: &mut Rig) {
+    println!("\n== gun game: host + 2 bots in Cistern Nine ==");
+    let mut host = rig.client(
+        "Host",
+        LaunchOptions {
+            ready: true,
+            mode: Some(GameMode::GunGame),
+            add_bots: 2,
+            ..Default::default()
+        },
+    );
+    rig.transition(
+        &mut host,
+        Transition::Start(StartMode::Host {
+            port: Some(0),
+            level: Some("cistern_nine".into()),
+        }),
+    );
+    let ok = rig.until(&mut [&mut host], 8.0, |cs| lobby_ready(cs[0], 3));
+    rig.check(ok, "GG: host and 2 bots in the lobby");
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
+        force: true,
+    }));
+    let ok = wait_playing(rig, &mut [&mut host], 12.0);
+    rig.check(ok, "GG: in Cistern Nine");
+    rig.run(&mut [&mut host], 60);
+    let ladder = host
+        .game_ref()
+        .and_then(InGame::net)
+        .map(|n| n.tuning().gun_game.ladder.clone())
+        .unwrap_or_default();
+    let held = |c: &Client| {
+        c.game_ref()
+            .and_then(InGame::net)
+            .and_then(|n| n.own_combat())
+            .map(|o| o.combat.weapons.loadout)
+    };
+    rig.check(
+        !ladder.is_empty()
+            && held(&host) == Some(shared::loadout::Loadout::single(ladder[0]))
+            && gun_tier(&host) == Some(0),
+        "GG: everyone starts with the first build only",
+    );
+    rig.shot(&mut host, "gg_01_start");
+    // Hunt the bots (dev teleport next to the nearest, fire held) until tier 3.
+    let host_id = host.me().unwrap_or(PlayerId(0));
+    c_fire(&mut host, true);
+    for _ in 0..(60 * 40) {
+        if gun_tier(&host).is_some_and(|t| t >= 3) {
+            break;
+        }
+        let me = host.feet().unwrap_or_default();
+        let target = host.game_ref().and_then(InGame::net).and_then(|n| {
+            n.remote_players()
+                .filter(|e| e.flags & player_flags::DEAD == 0)
+                .filter(|e| PlayerId(e.id.0 as u8) != host_id)
+                .map(|e| e.position)
+                .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
+        });
+        if let Some(p) = target {
+            if p.distance(me) > 6.0 {
+                host.chat(&format!("/tp {} {} {}", p.x + 3.0, p.y + 0.1, p.z));
+                rig.run(&mut [&mut host], 10);
+            }
+            host.aim(p + Vec3::Y * 1.2);
+        }
+        rig.run(&mut [&mut host], 1);
+    }
+    c_fire(&mut host, false);
+    let tier = gun_tier(&host).unwrap_or(0);
+    rig.check(
+        tier >= 3,
+        &format!("GG: kills climb the ladder (tier {tier})"),
+    );
+    let ok = rig.until(&mut [&mut host], 2.0, |cs| {
+        held(cs[0])
+            == ladder
+                .get(tier as usize)
+                .map(|b| shared::loadout::Loadout::single(*b))
+    });
+    rig.check(ok, "GG: the host holds its tier's build");
+    host.pad(GamepadButton::Select, true);
+    rig.run(&mut [&mut host], 10);
+    rig.shot(&mut host, "gg_02_scoreboard");
+    host.pad(GamepadButton::Select, false);
+    let rows = host.game_ref().map(|g| g.score_rows()).unwrap_or_default();
+    rig.check(
+        rows.0.first().is_some_and(|c| c.title == "TIER")
+            && rows.1.first().is_some_and(|r| r.is_local),
+        "GG: the scoreboard ranks by tier, the host on top",
+    );
+    host.command(ServerCommand::Lobby(LobbyCommand::EndMatch));
+    let ok = rig.until(&mut [&mut host], 5.0, |cs| {
+        cs[0].game_ref().is_some_and(InGame::results_open)
+    });
+    rig.run(&mut [&mut host], 200);
+    rig.shot(&mut host, "gg_03_results");
+    let results = host
+        .game_ref()
+        .and_then(|g| g.modes.results.as_ref())
+        .map(|r| r.results.clone());
+    rig.check(
+        ok && results.as_ref().is_some_and(|r| {
+            r.gun_game.is_some()
+                && r.winner == Some(host_id)
+                && r.players.first().is_some_and(|p| p.stats.tier == tier)
+        }),
+        "GG: results rank by tier (the host wins)",
+    );
+    rig.leave(&mut host);
+}
+
 // ---- deathmatch --------------------------------------------------------------------------------------
 
 fn deathmatch(rig: &mut Rig) {
@@ -1741,6 +1867,9 @@ fn main() -> anyhow::Result<()> {
     }
     if want("dm") {
         deathmatch(&mut rig);
+    }
+    if want("gungame") {
+        gun_game(&mut rig);
     }
     if want("robust") {
         robustness(&mut rig);

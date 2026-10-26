@@ -7,6 +7,8 @@
 //!   (kills, style, damage, deaths, revives, the four grades, overall), "LEFT BEHIND" for
 //!   anyone who missed the extraction.
 //! * **Deathmatch**: winner banner and the final standings (frags, deaths, best rank, style).
+//! * **Gun game**: the deathmatch layout with the tier reached (and its weapon / FIST / WON) in
+//!   place of the frags.
 //! * **Grind**: OVERRUN; solo, the campaign tally with WAVE (time survived, the wave grade) in
 //!   place of TIME; co-op, the team line with the wave and one row per player (wave, kills,
 //!   style and damage grades). The local best wave on this arena and difficulty, or NEW BEST.
@@ -687,6 +689,7 @@ impl ResultsScreen {
             EndReason::Exit => "LEVEL EXIT".into(),
             EndReason::Host => "ENDED BY THE HOST".into(),
             EndReason::Overrun => "OVERRUN".into(),
+            EndReason::Ladder => "THE LADDER IS CLIMBED".into(),
         };
         title_block(
             list,
@@ -768,7 +771,14 @@ impl ResultsScreen {
         let a = ((age - 0.7) / 0.2).clamp(0.0, 1.0) as f32;
         let head = TextStyle::new(fade(t.ash, a));
         let cols = [
-            (330.0, "FRAGS"),
+            (
+                330.0,
+                if r.gun_game.is_some() {
+                    "TIER"
+                } else {
+                    "FRAGS"
+                },
+            ),
             (390.0, "DEATHS"),
             (470.0, "BEST RANK"),
             (515.0, "STYLE"),
@@ -836,16 +846,17 @@ impl ResultsScreen {
         list.text(vec2(x0 + 30.0, y), &name, &TextStyle::new(fade(t.bone, a)));
         let xs = |x: f32| x0 + x * w / 520.0;
         let num = |c: Vec4| TextStyle::new(fade(c, a)).right();
-        let frag_col = if p.stats.frags < 0 {
-            t.crimson_bright
-        } else {
-            t.bone
+        // Gun game: the tier reached instead of the frags.
+        let (score, score_col) = match &self.results.gun_game {
+            Some(g) => {
+                let won = p.stats.tier as usize > g.ladder.len();
+                let col = if won { t.rank_color(7) } else { t.bone };
+                (result_tier_label(&g.ladder, p.stats.tier), col)
+            }
+            None if p.stats.frags < 0 => (format!("{}", p.stats.frags), t.crimson_bright),
+            None => (format!("{}", p.stats.frags), t.bone),
         };
-        list.text(
-            vec2(xs(330.0), y),
-            &format!("{}", p.stats.frags),
-            &num(frag_col).scale(1.0),
-        );
+        list.text(vec2(xs(330.0), y), &score, &num(score_col).scale(1.0));
         list.text(
             vec2(xs(390.0), y),
             &format!("{}", p.stats.deaths),
@@ -993,13 +1004,18 @@ fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
     let Some(winner) = r.players.first() else {
         return "DRAW";
     };
+    // What the standings rank by: frags, or (gun game) the tier, then kills.
+    let score = |p: &PlayerResult| match r.gun_game {
+        Some(_) => (p.stats.tier as i64, p.stats.kills as i64),
+        None => (p.stats.frags as i64, 0),
+    };
     let second = r.players.get(1);
     let dead_even = second.is_some_and(|b| {
-        b.stats.frags == winner.stats.frags
+        score(b) == score(winner)
             && b.stats.deaths == winner.stats.deaths
             && b.style_points == winner.style_points
     });
-    let tied = second.is_some_and(|b| b.stats.frags == winner.stats.frags);
+    let tied = second.is_some_and(|b| score(b).0 == score(winner).0);
     let me = Some(winner.player) == local;
     if dead_even {
         "DRAW"
@@ -1009,6 +1025,15 @@ fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
         "TOP OF THE TABLE"
     } else {
         "WINNER"
+    }
+}
+
+/// A gun game tier on the results: "7 LANCET", "FIST" (the last tier), "WON" (past it).
+fn result_tier_label(ladder: &[shared::loadout::WeaponKind], tier: u8) -> String {
+    match ladder.get(tier as usize) {
+        Some(w) => format!("{} {}", tier as usize + 1, w.name().to_uppercase()),
+        None if tier as usize == ladder.len() => "FIST".into(),
+        None => "WON".into(),
     }
 }
 
@@ -1064,6 +1089,7 @@ mod tests {
             team_grade: Some(Grade::A),
             winner: None,
             grind: None,
+            gun_game: None,
         }
     }
 
@@ -1080,6 +1106,31 @@ mod tests {
         s.skip(0.1);
         assert!(!s.finished(0.1), "not in the frame that skipped");
         assert!(s.finished(0.12));
+    }
+
+    #[test]
+    fn gun_game_ranks_by_tier() {
+        use shared::loadout::WeaponKind;
+        let mut r = results(GameMode::GunGame, 2);
+        r.gun_game = Some(shared::sim::GunGameResult {
+            ladder: vec![WeaponKind::Arclash, WeaponKind::Lancet],
+        });
+        r.players[0].stats.tier = 3;
+        r.players[1].stats.tier = 2;
+        assert_eq!(winner_headline(&r, Some(PlayerId(0))), "VICTORY");
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "WINNER");
+        r.players[1].stats.tier = 3;
+        assert_eq!(
+            winner_headline(&r, Some(PlayerId(0))),
+            "DRAW",
+            "level on everything"
+        );
+        r.players[0].stats.kills = 9;
+        assert_eq!(winner_headline(&r, Some(PlayerId(1))), "TOP OF THE TABLE");
+        let ladder = &r.gun_game.as_ref().unwrap().ladder;
+        assert_eq!(result_tier_label(ladder, 1), "2 LANCET");
+        assert_eq!(result_tier_label(ladder, 2), "FIST");
+        assert_eq!(result_tier_label(ladder, 3), "WON");
     }
 
     #[test]

@@ -927,6 +927,8 @@ fn settings_rows(ui: &mut Ui, s: &MatchSettings, levels: &[LevelInfo]) {
     if s.mode.has_score_limits() {
         ui.value_row("FRAG LIMIT", &frag_text(s.frag_limit));
         ui.value_row("TIME LIMIT", &time_text(s.time_limit_secs));
+    } else if s.mode.has_time_limit() {
+        ui.value_row("TIME LIMIT", &time_text(s.time_limit_secs));
     }
     if s.mode.has_friendly_fire() {
         ui.value_row("FRIENDLY FIRE", if s.friendly_fire { "ON" } else { "OFF" });
@@ -983,6 +985,15 @@ fn host_settings(ui: &mut Ui, s: &mut MatchSettings, levels: &[LevelInfo]) -> bo
             &FRAG_PRESETS,
             frag_text,
         );
+        changed |= preset_choice(
+            ui,
+            "TIME LIMIT",
+            &mut s.time_limit_secs,
+            &TIME_PRESETS,
+            time_text,
+        );
+    } else if s.mode.has_time_limit() {
+        // Gun game: no frag limit (the ladder ends it), the time limit ranks by tier.
         changed |= preset_choice(
             ui,
             "TIME LIMIT",

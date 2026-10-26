@@ -2,10 +2,11 @@
 
 The per-player **style meter** (ranks, bonuses, freshness, the style feed), the **game-mode
 rules** (campaign checkpoints, solo checkpoint restarts, co-op downed / revive / team wipes, the
-level exit, deathmatch frags and limits, grind waves — i.e. *the* death / respawn rule), the
+level exit, deathmatch frags and limits, grind waves, the gun game ladder — i.e. *the* death /
+respawn rule), the
 **PvE difficulty** and co-op scaling, the **scoreboard** and the **results screens** with
 grades. Everything is server-authoritative and runs inside `SimWorld::step`; numbers live in
-`assets/tuning.ron` (`style`, `modes`, `difficulty`, `grind`). Base rules: `docs/gameplay.md`
+`assets/tuning.ron` (`style`, `modes`, `difficulty`, `grind`, `gun_game`). Base rules: `docs/gameplay.md`
 ("Style", "Game modes"); match flow / lobby: `docs/lobby.md`; the expansion's contract:
 `docs/expansion.md`.
 
@@ -15,7 +16,8 @@ grades. Everything is server-authoritative and runs inside `SimWorld::step`; num
 | `shared::sim::modes` | `ModeRules`, `ModeState` (`SimWorld::mode`), `ModePlayer`, `LifeState`, `MatchPhase`, `PlayerStats`, `ModeEvent`, `Scoreboard`, `MatchResults`, `Grade` / `Grades` / `grade_player`, the death rule, checkpoints, revives, exit, deathmatch, `end_match`, results |
 | `shared::sim::difficulty` | `PveScaling` (difficulty × players: health, count, elite chance, `EnemyScale`, downed time, revive health), `SimWorld::pve_scaling`, `spawn_pve_enemy`, `ModeRng` |
 | `shared::sim::grind` | `GrindState` (`ModeState::grind`), `GrindStatus`, `GrindEvent`, `GrindResult`, `plan_wave` / `wave_budget`, the grind step, spawn points |
-| `shared::tuning` | `StyleTuning`, `ModeTuning`, `DifficultyTuning`, `GrindTuning` (sections `style`, `modes`, `difficulty`, `grind`) |
+| `shared::sim::gungame` | `GunGameEvent`, `GunGameResult`, `Tier` / `tier_of` / `tier_loadout` / `fist_tier`, the gun game step (promotions, punch demotions, the ladder win) |
+| `shared::tuning` | `StyleTuning`, `ModeTuning`, `DifficultyTuning`, `GrindTuning`, `GunGameTuning` (sections `style`, `modes`, `difficulty`, `grind`, `gun_game`) |
 | `server::modes` | routing (`GameEvent::Style` to the owner, `GameEvent::Mode` to everyone), match end → `Server::end_match` |
 | `client::ingame::style_hud` | `StyleHud`: meter, rank animation, STALE + freshness pips, style feed, rank-up banner, rank sounds, music floor |
 | `client::ingame::mode_hud` | `ModeHud`: client mode state (scoreboard, downed, revives, exit, wipe), mode HUD (incl. the grind block and the difficulty tag), `InGame` glue (events, score cells, results, the grind record) |
@@ -130,7 +132,7 @@ the combat rules). Phases: `Waiting` (no players) → `Playing` → `Ended` (res
 | situation | state | respawn | where |
 |---|---|---|---|
 | match over (results) | dead | `combat.respawn_delay` | spawn; kill volumes don't kill at all (put back instead) |
-| deathmatch | dead | `combat.respawn_delay` (2 s) | spawn farthest from the living opponents, `combat.spawn_protection` (1.5 s) |
+| deathmatch, gun game | dead | `combat.respawn_delay` (2 s) | spawn farthest from the living opponents, `combat.spawn_protection` (1.5 s); gun game: the tier's build |
 | campaign, one player | dead | `modes.sp_death_time` (1.5 s death cam) | last checkpoint (or the start); the level is reset to the checkpoint state first |
 | campaign co-op, kill volume | dead (no body to revive) | `modes.fall_respawn_time` (4 s) | last checkpoint |
 | campaign co-op | **downed** | `modes.downed_time` (15 s, × difficulty / players) unless revived | last checkpoint |
@@ -321,10 +323,44 @@ cistern_nine`.
   run's `GrindStatus { wave, left, total, next_wave_tick, heavy, boss, overrun_tick }` on every
   scoreboard (the HUD and late joiners).
 
+### Gun game (`sim::gungame`)
+
+A PvP free-for-all on an arena (up to 8 players) where everyone climbs the same fixed ladder of
+weapon builds (`gun_game.ladder`), then the **Fist**. Host it from the lobby (MODE GUN GAME, a
+TIME LIMIT, no frag limit), `velocide-server --mode gungame --level knell_yard`.
+
+* **The ladder** (one tier per weapon, each with its default build, from forgiving to
+  demanding): 1 Arclash, 2 Kiln, 3 Thresher, 4 Riveter, 5 Bellows, 6 Tumbler, 7 Cinderbox, 8
+  Lancet, 9 Quill, 10 Longwick, 11 the Fist. Each player carries only their tier's build: a
+  forced loadout (`SimWorld::force_loadout`, the arsenal's API), so it survives respawns and
+  wins over the player's own loadout; `step_gun_game` keeps everyone's forced loadout on their
+  tier every tick (joins, restarts, a hot-reloaded ladder).
+* **Promotion**: a kill with the weapon of your tier (`KillInfo::weapon`: the weapon that fired
+  the killing blow, its abilities included) moves you up a tier at once (the next build
+  replaces the weapon in your hands, slot 1 selected) — `GunGameEvent::Promoted`. Kills with
+  anything else don't count: a bomb of your previous weapon still bouncing, slams, thorns
+  (off anyway: the PvP balance profile), knocking someone into a kill volume.
+* **Punch kills** (`Attack::Fist`) knock the victim down `punch_demotes` (1) tier, whatever
+  tiers either player is on (never below the first) — `GunGameEvent::Demoted`. The puncher only
+  climbs if the Fist is their tier: **a punch kill on the Fist tier wins** the match
+  (`EndReason::Ladder`; the winner's tier is set one past the Fist).
+* **The Fist tier** keeps the last build (the Longwick) in hand: an unarmed loadout needs
+  support from the arsenal (`force_loadout` sanitises an empty loadout into the default one, and
+  the client would draw and replicate it as a Quill). Weapon kills on the Fist tier count for
+  nothing; the HUD says PUNCH A KILL TO WIN.
+* **Respawns, protection, time limit**: deathmatch's. When time runs out the most tiers wins,
+  then kills, then fewer deaths, then style. Gun game has no frag limit
+  (`ModeRules::gun_game(time_limit_secs)`); frags aren't counted, kills are.
+* **Late joiners** start on the lowest tier anyone holds (a chance to catch up).
+* **Network**: `ModeEvent::GunGame(GunGameEvent::{Promoted { player, tier, victim },
+  Demoted { player, tier, by }})` to everyone; tiers on the scoreboard (`ScoreEntry::tier`) and
+  in the results (`PlayerStats::tier`, `MatchResults::gun_game = GunGameResult { ladder }`);
+  clients read the ladder from the tuning the server sent (`Tuning::gun_game`).
+
 ### Match end
 
-`SimWorld::end_match(t, reason)` (exit, frag limit, time limit, grind overrun, or
-`EndReason::Host`) builds the
+`SimWorld::end_match(t, reason)` (exit, frag limit, time limit, grind overrun, the gun game
+ladder, or `EndReason::Host`) builds the
 `MatchResults`, emits `ModeEvent::Ended(results)`, switches to `Ended` and sets the shared
 results freeze **`SimWorld::frozen`** (also set by `Server::end_match`; a world frozen from
 outside ends its match at the next tick): nothing scores, enemies idle where they stand and
@@ -339,8 +375,9 @@ from the lobby side (`LobbyCommand::EndMatch`, `Server::end_match`) also ends th
 
 `MatchResults { rules, reason, level, duration_secs, par_secs, total_enemies, team_kills,
 players: [PlayerResult], team_grade, winner, grind: Option<GrindResult> }`, `PlayerResult { player, name, stats:
-PlayerStats { kills, deaths, frags, damage_taken, revives }, style_points, best_rank, extracted,
-grades }`. Deathmatch players are in standings order.
+PlayerStats { kills, deaths, frags, damage_taken, revives, tier }, style_points, best_rank,
+extracted, grades }`, `gun_game: Option<GunGameResult>`. Deathmatch and gun game players are in
+standings order.
 
 Campaign grades per player (`grade_player`). Thresholds are S / A / B / C, anything worse is D
 (`modes.grade_*`); *share* = level enemies / players:
@@ -378,6 +415,9 @@ Enter / Esc / click skips the reveal; the buttons appear when it's done.
   BEST!" (flashing) or "BEST: WAVE 25" under it. Co-op: the team line (WAVE, TIME, KILLS, the
   best wave on the right) and the co-op table with W K S D (the wave grade first). The PvE
   layouts name the difficulty in the subtitle ("CRUCIBLE OF VEINS // HARD").
+* **Gun game**: the deathmatch layout ("THE LADDER IS CLIMBED" / TIME LIMIT) with TIER in place of
+  FRAGS: "9 QUILL", "FIST" (on the last tier), "WON" (white-hot, the ladder's winner); the
+  winner banner and DRAW / TOP OF THE TABLE compare tiers, then kills.
 * **Deathmatch**: MATCH OVER + level and reason, winner banner in the winner's colour (VICTORY
   for you; DRAW / DEAD EVEN when frags, deaths and style are all level), standings (#, frags — negative in red —, deaths, best rank in its colour, style),
   rows revealed one by one.
@@ -393,7 +433,8 @@ and HUD are hidden.
 on it changes (joins / leaves, kills, deaths, rank changes, checkpoint, life state, phase), at most
 every `scoreboard_interval` (0.25 s). Tab columns (`scoreboard::columns_for`): deathmatch FRAGS,
 KILLS, DEATHS, RANK, STYLE; campaign KILLS, DEATHS, RANK, STYLE; grind KILLS, DEATHS, REVIVES,
-RANK, STYLE; then the lobby's PING and STATUS (ALIVE / DOWNED / DEAD / OUT (grind) / BOT /
+RANK, STYLE; gun game TIER ("5 BELLOWS", "FIST"), KILLS, DEATHS, RANK, STYLE, rows by tier then
+kills; then the lobby's PING and STATUS (ALIVE / DOWNED / DEAD / OUT (grind) / BOT /
 HOST). The title names the mode and, in PvE, the difficulty ("KNELL YARD // SOLO GRIND // HARD"). `InGame::score_rows` fills the cells
 (`fill_score_row`, rank in its colour, negative frags red) and sorts deathmatch rows by frags.
 Adding a column: an entry in `columns_for` and a match arm in `fill_score_row`.
@@ -410,6 +451,7 @@ Adding a column: an entry in `columns_for` and a match arm in `fill_score_row`.
 | `…::Scoreboard(Scoreboard)` | all | throttled |
 | `…::Ended(Box<MatchResults>)` | all | then the lobby's Results phase |
 | `…::Grind(GrindEvent::{WaveStarted, WaveCleared, Overrun})` | all | banners and sounds; the state rides on the scoreboard (`Scoreboard::grind`) |
+| `…::GunGame(GunGameEvent::{Promoted, Demoted})` | all | banners, sounds, feed lines; tiers ride on the scoreboard (`ScoreEntry::tier`) |
 | `OwnState::style: StyleView` | owner | every snapshot |
 | `player_flags::DOWNED` | all | on the player entity, `DEAD` cleared |
 
@@ -434,6 +476,11 @@ player) to everyone.
   TEAM WIPED banner + "REGROUPING AT THE CHECKPOINT" (the death view counts down); EXTRACTION countdown (urgent red in the
   last seconds, `Countdown` beeps); solo death: "BACK TO THE CHECKPOINT".
 * **Deathmatch**: frags / limit and place (top left), TIME LEFT (top centre).
+* **Gun game** (top left): "TIER 5 / 11 BELLOWS", "NEXT: TUMBLER" (on the Fist tier "FIST",
+  flashing, and "PUNCH A KILL TO WIN"), the place (1ST / TIED / 2ND…), under it the leader
+  ("LEADER: VEX - 8 LANCET") or "YOU LEAD - NEXT BEST: …"; TIME LEFT top centre. Banners: your
+  promotion "TIER 5 - BELLOWS" (`RankUp`), "THE FIST" (`RankUp`, lower), "PUNCHED DOWN"
+  (`RankDown`); feed lines "VEX HAS THE FIST", "VEX PUNCHED YOU DOWN A TIER".
 * **Difficulty** (campaign): the difficulty under the level timer.
 * **Grind** (top centre, under the timer): "WAVE 7" (+ HEAVY / BOSS) with "HARD // 12 LEFT //
   BEST: WAVE 23" under it, or in the breather "WAVE 8 IN 3" (red for the last three seconds,
@@ -469,15 +516,17 @@ Difficulty section above.
 `min_spawn_distance` 14, `end_delay` 2.5, `grade_wave` (20, 15, 10, 5), `roster` (the table in
 the Grind section).
 
+`gun_game` (`GunGameTuning`): `ladder` (the ten builds above, first to last), `punch_demotes` 1.
+
 ## Tests and tools
 
 ```text
 cargo test -p shared --test style      # style math + scoring real combat in the sim (15)
-cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind (37)
-cargo test -p shared --lib difficulty grind   # scaling numbers, wave plans, budgets, unlocks, heavies / bosses
-cargo test -p server --test modes_net  # over UDP with real clients (6)
+cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind, gun game (44)
+cargo test -p shared --lib difficulty grind gungame   # scaling numbers, wave plans, budgets, unlocks, heavies / bosses, the ladder
+cargo test -p server --test modes_net  # over UDP with real clients (7)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive / grind
-PLAYTHROUGH=grind cargo run -p client --example playthrough   # solo grind from the menu
+PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo grind from the menu, a gun game against bots
 ```
 
 * `style.rs`: every kill bonus trigger (incl. no AIRSHOT on flyers, FRAG vs KILL), ricochet chain
@@ -511,20 +560,32 @@ PLAYTHROUGH=grind cargo run -p client --example playthrough   # solo grind from 
   the next wave, counts down in the breather and is back, protected, when it starts; both
   players down → Overrun → results 2.5 s later (wave 2 reached, 1 cleared, grade D, per-player
   grades without a par time); a solo death ends the run; lobby settings start a grind run;
-  without any usable spawn point the wave still comes (at the farthest level spawn).
+  without any usable spawn point the wave still comes (at the farthest level spawn). Gun game:
+  everyone starts with the first build only; a kill with another weapon or a slam counts
+  nothing, a kill with the tier's weapon promotes at once (event, the next build in hand) and
+  survives a respawn, tiers ride on the scoreboard; a punch kill knocks the victim down a tier
+  (never below the first) without promoting the puncher; on the Fist tier weapon kills count for
+  nothing and a punch kill wins (winner one past the Fist, standings by tier, the ladder in the
+  results, a frozen world); the time limit ranks by tier, not kills, and gun game never ends on
+  frags; late joiners start on the lowest tier; lobby settings start a gun game.
 * `modes_net.rs`: style events reach only the killer, `OwnState` carries the meter, everyone's
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
   teammate (both clients see DOWNED, Reviving, Revived); the campaign exit sends graded results;
   a grind run on HARD for two: wave 1 (eleven Gnawers) and its scoreboard status on both
-  clients, the breather, wave 2, both killed → Overrun → grind results and the Results phase.
+  clients, the breather, wave 2, both killed → Overrun → grind results and the Results phase;
+  a gun game for two: the PvP profile (no Thorns), the first build in every owner's own state,
+  a promotion reaching everyone and the next build in the owner's prediction, a punch kill on
+  the Fist tier → results (`Ladder`) and the Results phase.
 * `style_shots`: the style meter at DULL / FERAL / MERCILESS (STALE) / SEARING (grouped
   multikill feed) / VELOCIDE, the rank-up banner, CHECKPOINT, the deathmatch HUD and Tab
   scoreboard, solo / perfect / co-op / deathmatch results mid-reveal and finished, and a real
   two-client co-op revive (teammate marker with the prompt, the downed panel, both progress bars,
   REVIVED); a real solo grind run on Knell Yard (HARD, record 12): the first breather, wave 1
   with its banner, the Tab scoreboard, WAVE 1 CLEARED, an injected BOSS WAVE 10, the overrun,
-  its results, a deep run with NEW BEST!, a co-op grind table.
+  its results, a deep run with NEW BEST!, a co-op grind table; a gun game on a real server with
+  two bots (tiers injected): the tier block with a promotion banner, the Tab scoreboard, the Fist
+  tier, PUNCHED DOWN, results won on the ladder.
 
 ## Known limitations / next steps
 
@@ -540,3 +601,7 @@ PLAYTHROUGH=grind cargo run -p client --example playthrough   # solo grind from 
   reach the player spawns; a Mould may still appear somewhere awkward on an arena with odd
   geometry (the maps area adds `grind_spawns` to every arena).
 * Grind best waves are per machine (settings file), not per player profile or server.
+* Gun game's Fist tier keeps the last build in hand (see Gun game): a true fists-only tier needs
+  an unarmed loadout from the arsenal (accepted by `force_loadout`, replicated and drawn as "no
+  weapon"). Until the arsenal-client work lands the HUD's weapon block and the viewmodel don't
+  follow forced loadouts yet (the sim, the replicated own state and the weapon prediction do).

@@ -138,6 +138,11 @@ impl GameMode {
         self == GameMode::Deathmatch
     }
 
+    /// A time limit applies (deathmatch; gun game: most tiers wins when it runs out).
+    pub fn has_time_limit(self) -> bool {
+        matches!(self, GameMode::Deathmatch | GameMode::GunGame)
+    }
+
     /// Friendly fire is a choice (co-op).
     pub fn has_friendly_fire(self) -> bool {
         self.is_pve()
@@ -389,6 +394,8 @@ impl MatchSettings {
                 frag_limit_text(self.frag_limit),
                 time_limit_text(self.time_limit_secs)
             ));
+        } else if self.mode.has_time_limit() {
+            s.push_str(&format!(" // {}", time_limit_text(self.time_limit_secs)));
         }
         if self.mode.has_difficulty() {
             s.push_str(&format!(" // {}", self.difficulty.title()));
@@ -629,6 +636,8 @@ mod tests {
         let mut s = MatchSettings::new(GameMode::Grind, "cistern_nine");
         s.difficulty = Difficulty::Hard;
         assert_eq!(s.summary(&catalog()), "GRIND // CISTERN NINE // HARD");
+        let s = MatchSettings::new(GameMode::GunGame, "cistern_nine");
+        assert_eq!(s.summary(&catalog()), "GUN GAME // CISTERN NINE // 10 MIN");
         assert_eq!(Difficulty::parse(" Inferno"), Some(Difficulty::Inferno));
         assert_eq!(Difficulty::parse("nightmare"), None);
         for (i, d) in Difficulty::ALL.iter().enumerate() {

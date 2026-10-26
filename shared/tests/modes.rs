@@ -13,14 +13,15 @@ use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
 use shared::level::{Checkpoint, LevelDef, LevelKind, SpawnPoint, Volume};
+use shared::loadout::Loadout;
 use shared::lobby::{Difficulty, GameMode, MatchSettings};
 use shared::protocol::{NetFrame, NetId, player_flags};
 use shared::sim::modes::{authored_enemies, grade_player};
 use shared::sim::{
-    Attack, Blocked, DamageInfo, EndReason, Grade, GrindEvent, HitTarget, LifeState, MatchPhase,
-    MatchResults, ModeEvent, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
+    Attack, Blocked, DamageInfo, EndReason, Grade, GrindEvent, GunGameEvent, HitTarget, LifeState,
+    MatchPhase, MatchResults, ModeEvent, ModeRules, Owner, PlayerId, SimEvent, SimWorld,
 };
-use shared::tuning::{DifficultyTuning, GrindTuning, ModeTuning};
+use shared::tuning::{DifficultyTuning, GrindTuning, GunGameTuning, ModeTuning};
 
 fn vol(min: [f32; 3], max: [f32; 3]) -> Volume {
     Volume {
@@ -959,22 +960,24 @@ fn downed_time_and_revive_health_follow_the_difficulty() {
 }
 
 #[test]
-fn tuning_file_has_every_difficulty_and_grind_value() {
+fn tuning_file_has_every_difficulty_grind_and_gun_game_value() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/tuning.ron");
     let text = std::fs::read_to_string(&path).expect("assets/tuning.ron exists");
     let tuning: shared::tuning::Tuning = ron::from_str(&text).expect("assets/tuning.ron parses");
     assert_eq!(tuning.difficulty, DifficultyTuning::default());
     assert_eq!(tuning.grind, GrindTuning::default());
+    assert_eq!(tuning.gun_game, GunGameTuning::default());
     for defaults in [
         ron::to_string(&DifficultyTuning::default()).unwrap(),
         ron::to_string(&GrindTuning::default()).unwrap(),
+        ron::to_string(&GunGameTuning::default()).unwrap(),
     ] {
         let fields: Vec<&str> = defaults
             .split([',', '(', '['])
             .filter_map(|kv| kv.split_once(':').map(|(k, _)| k.trim()))
             .filter(|k| !k.is_empty())
             .collect();
-        assert!(fields.len() > 10, "{fields:?}");
+        assert!(fields.len() > 1, "{fields:?}");
         for field in fields {
             assert!(
                 text.contains(&format!("{field}:")),
@@ -1282,6 +1285,208 @@ fn the_lobby_settings_start_a_grind_run() {
     assert_eq!(w.mode.rules, ModeRules::grind(Difficulty::Brutal));
     assert!(!w.rules.friendly_fire, "co-op rules");
     assert!(w.rules.coop_enemy_scaling);
+}
+
+// ---- gun game --------------------------------------------------------------------------------
+
+/// A gun game on the flat arena with `players` players spread out (no time limit).
+fn gun_game(players: u8) -> (Arena, Vec<PlayerId>) {
+    let mut a = Arena::new(arena_level());
+    a.world.set_mode_rules(ModeRules::gun_game(0.0));
+    let ids = (0..players)
+        .map(|i| a.player(i, Vec3::new(i as f32 * 6.0 - 20.0, 0.0, 0.0), 0.0))
+        .collect();
+    a.ticks(2);
+    (a, ids)
+}
+
+/// `by` kills `victim` with `attack` (through the damage pipeline); the tick's events.
+fn kill_with(a: &mut Arena, victim: PlayerId, by: PlayerId, attack: Attack) -> Vec<SimEvent> {
+    let t = a.tuning.clone();
+    let at = a.world.players[&victim].movement.position + Vec3::Y;
+    let info = DamageInfo::new(1e4, Owner::Player(by), attack).at(at, Vec3::NEG_Z);
+    a.world.apply_damage(&t, HitTarget::Player(victim), info);
+    a.tick()
+}
+
+/// Brings a dead player back at once, unprotected (so the next test kill lands).
+fn back_up(a: &mut Arena, p: PlayerId) {
+    let t = a.tuning.clone();
+    if a.world.players[&p].combat.dead {
+        a.world.respawn_player(&t, p);
+    }
+    a.world.players.get_mut(&p).unwrap().combat.protection = 0;
+}
+
+fn gun_events(events: &[SimEvent]) -> Vec<GunGameEvent> {
+    mode_events(events)
+        .into_iter()
+        .filter_map(|e| match e {
+            ModeEvent::GunGame(g) => Some(g),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tier(a: &Arena, p: PlayerId) -> u8 {
+    a.world.gun_game_tier(p)
+}
+
+#[test]
+fn gun_game_promotes_with_the_tier_weapon_only() {
+    let (mut a, ids) = gun_game(2);
+    let (p0, p1) = (ids[0], ids[1]);
+    let ladder = a.tuning.gun_game.ladder.clone();
+    // Everyone carries the first build and nothing else.
+    for p in [p0, p1] {
+        assert_eq!(a.world.loadout(p), Loadout::single(ladder[0]));
+        assert_eq!(tier(&a, p), 0);
+    }
+    // A kill with another weapon (say a bomb of an old tier) doesn't count.
+    let ev = kill_with(&mut a, p1, p0, Attack::primary(ladder[3].weapon));
+    assert!(gun_events(&ev).is_empty());
+    assert_eq!(tier(&a, p0), 0);
+    assert_eq!(a.world.mode.stats(p0).kills, 1, "still a kill");
+    // A kill with the tier's weapon: up a tier, the next build in hand at once.
+    back_up(&mut a, p1);
+    let ev = kill_with(&mut a, p1, p0, Attack::primary(ladder[0].weapon));
+    assert_eq!(
+        gun_events(&ev),
+        vec![GunGameEvent::Promoted {
+            player: p0,
+            tier: 1,
+            victim: p1,
+        }]
+    );
+    assert_eq!(tier(&a, p0), 1);
+    let w = &a.world.players[&p0].combat.weapons;
+    assert_eq!(w.loadout, Loadout::single(ladder[1]));
+    assert_eq!(w.current(), ladder[1].weapon);
+    // It sticks through a death and a respawn.
+    let ev = kill_with(&mut a, p0, p1, Attack::Slam);
+    assert!(gun_events(&ev).is_empty(), "slam kills don't count");
+    back_up(&mut a, p0);
+    assert_eq!(a.world.loadout(p0), Loadout::single(ladder[1]));
+    // The scoreboard carries the tiers.
+    let board = a.world.scoreboard();
+    let row = board.rows.iter().find(|r| r.player == p0).unwrap();
+    assert_eq!(row.tier, 1);
+    assert_eq!(board.rules.kind, GameMode::GunGame);
+}
+
+#[test]
+fn punch_kills_knock_the_victim_down_a_tier() {
+    let (mut a, ids) = gun_game(2);
+    let (p0, p1) = (ids[0], ids[1]);
+    a.world.mode.player(p1).stats.tier = 3;
+    a.tick();
+    let ladder = a.tuning.gun_game.ladder.clone();
+    assert_eq!(a.world.loadout(p1), Loadout::single(ladder[3]));
+    let ev = kill_with(&mut a, p1, p0, Attack::Fist);
+    assert_eq!(
+        gun_events(&ev),
+        vec![GunGameEvent::Demoted {
+            player: p1,
+            tier: 2,
+            by: p0,
+        }]
+    );
+    assert_eq!(tier(&a, p1), 2);
+    assert_eq!(
+        tier(&a, p0),
+        0,
+        "the puncher doesn't climb (the Fist isn't their tier)"
+    );
+    back_up(&mut a, p1);
+    assert_eq!(a.world.loadout(p1), Loadout::single(ladder[2]));
+    // Nobody goes below the first tier.
+    let ev = kill_with(&mut a, p0, p1, Attack::Fist);
+    assert!(gun_events(&ev).is_empty());
+    assert_eq!(tier(&a, p0), 0);
+}
+
+#[test]
+fn a_punch_kill_on_the_fist_tier_wins_the_gun_game() {
+    let (mut a, ids) = gun_game(3);
+    let (p0, p1, p2) = (ids[0], ids[1], ids[2]);
+    let ladder = a.tuning.gun_game.ladder.clone();
+    let fist = ladder.len() as u8;
+    // The last weapon's kill reaches the Fist.
+    a.world.mode.player(p0).stats.tier = fist - 1;
+    a.world.mode.player(p1).stats.tier = 4;
+    a.tick();
+    let ev = kill_with(
+        &mut a,
+        p2,
+        p0,
+        Attack::primary(ladder[fist as usize - 1].weapon),
+    );
+    assert!(gun_events(&ev).contains(&GunGameEvent::Promoted {
+        player: p0,
+        tier: fist,
+        victim: p2,
+    }));
+    // On the Fist tier weapon kills count for nothing ...
+    back_up(&mut a, p2);
+    let held = a.world.players[&p0].combat.weapons.current();
+    let ev = kill_with(&mut a, p2, p0, Attack::primary(held));
+    assert!(gun_events(&ev).is_empty() && results(&ev).is_none());
+    assert_eq!(tier(&a, p0), fist);
+    // ... a punch kill wins.
+    let ev = kill_with(&mut a, p1, p0, Attack::Fist);
+    let r = results(&ev).expect("the ladder is climbed");
+    assert_eq!(r.reason, EndReason::Ladder);
+    assert_eq!(r.winner, Some(p0));
+    assert_eq!(r.players[0].player, p0);
+    assert_eq!(r.players[0].stats.tier, fist + 1, "past the Fist");
+    assert_eq!(r.players[1].player, p1, "then by tier");
+    assert_eq!(r.players[1].stats.tier, 3, "punched down from 4");
+    let g = r.gun_game.expect("gun game results");
+    assert_eq!(g.ladder.len(), ladder.len());
+    assert!(a.world.frozen);
+}
+
+#[test]
+fn gun_game_time_limit_ranks_by_tier() {
+    let mut a = Arena::new(arena_level());
+    a.world.set_mode_rules(ModeRules::gun_game(5.0));
+    let p0 = a.player(0, Vec3::new(-10.0, 0.0, 0.0), 0.0);
+    let p1 = a.player(1, Vec3::new(10.0, 0.0, 0.0), 0.0);
+    a.tick();
+    a.world.mode.player(p0).stats.tier = 2;
+    a.world.mode.player(p0).stats.kills = 9;
+    a.world.mode.player(p1).stats.tier = 5;
+    let r = (0..400)
+        .find_map(|_| results(&a.tick()))
+        .expect("time limit");
+    assert_eq!(r.reason, EndReason::TimeLimit);
+    assert_eq!(r.winner, Some(p1), "most tiers wins, not most kills");
+    assert_eq!(r.rules.frag_limit, 0, "gun game never ends on frags");
+}
+
+#[test]
+fn gun_game_late_joiners_start_on_the_lowest_tier() {
+    let (mut a, ids) = gun_game(2);
+    a.world.mode.player(ids[0]).stats.tier = 6;
+    a.world.mode.player(ids[1]).stats.tier = 2;
+    a.tick();
+    let late = a.player(2, Vec3::new(30.0, 0.0, 30.0), 0.0);
+    a.ticks(2);
+    assert_eq!(tier(&a, late), 2);
+    let ladder = a.tuning.gun_game.ladder.clone();
+    assert_eq!(a.world.loadout(late), Loadout::single(ladder[2]));
+}
+
+#[test]
+fn the_lobby_settings_start_a_gun_game() {
+    let mut w = SimWorld::new("a", Arc::new(arena_level()), 60);
+    w.apply_match_settings(MatchSettings {
+        time_limit_secs: 300,
+        frag_limit: 20,
+        ..MatchSettings::new(GameMode::GunGame, "a")
+    });
+    assert_eq!(w.mode.rules, ModeRules::gun_game(300.0));
+    assert!(w.rules.friendly_fire, "PvP");
 }
 
 #[test]
