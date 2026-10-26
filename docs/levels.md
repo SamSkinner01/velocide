@@ -1,21 +1,28 @@
 # Levels
 
-Five shipping levels live in `assets/levels/` (the movement playground `movement_test.ron` is
-documented in `docs/movement.md`). All of them are set in the Foundry (`docs/premise.md`): molten
-pools are slag or bronze, walls are brick, stone, wax and brass — no blood or flesh.
+Nine shipping levels live in `assets/levels/` (the movement playground `movement_test.ron` is
+documented in `docs/movement.md`; the warm-up hub Vestry in `docs/lobby.md`). All of them are set
+in the Foundry (`docs/premise.md`): molten pools are slag, bronze, tallow or wax, walls are brick,
+stone, wax and brass — no blood or flesh.
 
 | file | name | kind | players | brushes | lights | notes |
 |---|---|---|---|---|---|---|
 | `crucible_of_veins.ron` | **Crucible of Veins** | `Campaign` | 1–4 co-op | 341 | 67 | the first campaign level: 5 locked-room arenas, 86 enemies (SP), exit |
 | `spire_of_wicks.ron` | **Spire of Wicks** | `Campaign` | 1–4 co-op | 365 | 57 | the second: a vertical climb, 4 locked-room arenas, 66 enemies (SP), exit |
-| `cistern_nine.ron` | **Cistern Nine** | `Arena` | up to 8 | 115 | 15 | deathmatch, 10 spawns, no doors/encounters |
-| `knell_yard.ron` | **Knell Yard** | `Arena` | 2–5 (up to 8) | 272 | 26 | compact, vertical pinwheel; 12 spawns, 12 pads |
-| `ingot_run.ron` | **Ingot Run** | `Arena` | 4–8 | 122 | 21 | long, three lanes; 10 spawns, slide route end to end |
+| `drowned_chandlery.ron` | **The Drowned Chandlery** | `Campaign` | 1–4 co-op | 424 | 51 | the third: a flooded candle factory, 4 arenas, 67 enemies (SP), 2 secrets, exit |
+| `cistern_nine.ron` | **Cistern Nine** | `Arena` | up to 8 | 191 | 23 | deathmatch, 10 spawns, 4 Mould gates (12 grind spawns) |
+| `knell_yard.ron` | **Knell Yard** | `Arena` | 2–5 (up to 8) | 348 | 34 | compact, vertical pinwheel; 12 spawns, 12 pads, 4 loft gates (12 grind spawns) |
+| `ingot_run.ron` | **Ingot Run** | `Arena` | 4–8 | 198 | 29 | long, three lanes; 10 spawns, 4 gates (12 grind spawns) |
+| `furnace_ring.ron` | **Furnace Ring** | `Arena` | grind 1–4, PvP 4–8 | 475 | 70 | round tiered pit built for grind: 12 Mould tunnels (16 grind spawns), 12 spawns |
+| `tallow_works.ron` | **Tallow Works** | `Arena` | 2–8 | 194 | 31 | roofed, vertical rendering house; 8 spawns, 4 gates (12 grind spawns) |
+| `wickmarket.ron` | **Wickmarket** | `Arena` | 4–8 | 268 | 37 | open market, long sightlines; 8 spawns, 3 gates (9 grind spawns) |
 | `vestry.ron` | **The Vestry** | `Hub` | the lobby | 94 | 24 | the warm-up hub, never a match level (below, `docs/lobby.md`) |
 
 Levels are scanned from `assets/levels/` by the menus and the lobby (`shared::lobby::scan_levels`),
 so a new file shows up in the single-player list and the host's level picker on its own; new
-players still start on Crucible of Veins (`Settings::last_level`).
+players still start on Crucible of Veins (`Settings::last_level`). Every arena is also a grind
+and gun-game arena (`docs/style_modes.md`). Music follows the level kind (`arena` /
+`campaign`); the client picks the track from `LevelKind`, so there are no per-level variants.
 
 ## Tools
 
@@ -28,7 +35,9 @@ cargo test -p shared --test levels [-- --nocapture]   # checks + bot traversal (
 ```
 
 - **`client/examples/level_gen.rs` is the source of truth** (with one module per newer level in
-  `client/examples/level_gen/` — `spire.rs`, `knell_yard.rs`, `ingot_run.rs` — declared with
+  `client/examples/level_gen/` — `spire.rs`, `knell_yard.rs`, `ingot_run.rs`,
+  `furnace_ring.rs`, `tallow_works.rs`, `wickmarket.rs`, `drowned_chandlery.rs` — and the shared
+  `gates.rs` (Mould gates, the jump-pad solver), declared with
   `#[path = "level_gen/<name>.rs"] mod <name>;` because an example's root resolves `mod x;` next
   to itself; `main()` lists every generated file). The RON files are generated (and
   round-trip checked) from it; they carry a comment per brush and per section, so they are
@@ -37,7 +46,10 @@ cargo test -p shared --test levels [-- --nocapture]   # checks + bot traversal (
   always sealed; doors are derived from openings (0.6 m thick, recessed in the 1 m wall,
   overlapping jambs/lintel by 0.25 m so they seal without z-fighting). Ramps are rotated boxes
   computed from their two surface end points (`ramp_x`/`ramp_z`, low end buried 1 m); thick
-  ramps fill the wedge underneath so there are no dead-end nooks under them.
+  ramps fill the wedge underneath so there are no dead-end nooks under them. Octagonal pieces
+  (Furnace Ring, the Great Wick's well) come from `furnace_ring::seg_around`: axis-aligned boxes
+  on the axis sides, boxes turned 45° on the diagonals with their tops 2 cm lower (so no two
+  differently turned faces are coplanar where they overlap).
 - **`client/examples/level_view.rs`** renders headless PNGs (default `captures/levels/<level>/`):
   every player spawn and checkpoint (along its yaw), each encounter centre looking N/W/S/E, a
   top-down overview (fog off; roofs removed for indoor levels: flat brushes nothing visible sits
@@ -47,7 +59,8 @@ cargo test -p shared --test levels [-- --nocapture]   # checks + bot traversal (
   Casting Floor) don't hide it. The overview always has the debug overlay: encounter triggers
   orange, checkpoints green, exit white, kill volumes red, doors red (closed) / green (open),
   player spawns cyan with facing, jump pads cyan with their ballistic arc, enemies gnawer
-  yellow / censer magenta / harrier light blue / gaoler red / heron white.
+  yellow / censer magenta / harrier light blue / gaoler red / heron white, grind spawns pink
+  posts with a ring, secrets yellow boxes.
 
 ## Conventions and metrics
 
@@ -82,6 +95,51 @@ Wax uses two materials: `wax` (poured ivory wax with drip runs: drapes, sheets, 
 effigies, the Spire's wax runs) and `waxstone` (set wax poured in layers, with pour lines and
 hairline cracks: the Crucible's pillars, ribs and columns). Level files written before the
 re-theme say `flesh` / `bone`; those names still load as `wax` / `waxstone`.
+
+Deep water (the Drowned Chandlery) uses the same contract: water snuffs a Shrike's wick. A
+flooded pit is a dark bed (`panel`), a translucent `glass` surface with no collision, and a kill
+volume from the bed to 10 cm over the surface (every floor round it is ≥ 0.5 m above the
+surface). Ankle-deep shallows are decoration only (a `glass` film on the floor).
+
+## Grind spawns and Mould gates
+
+Every arena is a grind arena (`docs/style_modes.md`); `LevelDef::grind_spawns` (feet positions)
+mark where waves of Moulds appear. Grind picks a random point far enough from every living
+player (else the farthest one) and lifts flyers off it. All the shipped arenas put their points
+in **Mould gates** (`client/examples/level_gen/gates.rs`):
+
+```text
+      arena                          a 5 x 5 m opening in the outer wall (framed, a raised
+  =====[ opening ]=====  wall        portcullis in it); behind it a chamber 24 x 12 x 6 m
+  |      passage 5 m      |          with a baffle wall 5 m in, so from the arena you see the
+  |   [=== baffle ===]    |          baffle (a molten grate in it marks every gate), never the
+  |  *     strip 5 m    * |          strip behind it where the grind spawns (*) are; Moulds come
+  |__________*____________|          round the baffle on either side (5 m passages: a Gaoler fits)
+```
+
+Gates build their own front wall either side of the opening (where it coincides with the
+arena's wall it is the same material), so a gate near a corner never opens a hole. Each gate
+registers its back corners, the middle of the strip, or all three.
+
+Rules (tested, `grind_spawns_are_valid`):
+
+- 8–16 grind spawns per arena, spread over 3+ compass sectors seen from the arena's middle, ≥ 4 m
+  apart.
+- On navigable floor where any Mould fits: ground right below, room for a Gaoler's capsule (r 1.45
+  × 4 m) and floor 1.5 m all round; the Gaoler's wide nav footprint stands there and can walk
+  to a player spawn; narrow Moulds walk to at least half the player spawns and back from at least
+  one (drops off ledges are one-way).
+- Out of sight of every player spawn (eye to the Mould's feet, middle and head; anything that
+  stops a shot hides it) and ≥ 12 m from each.
+
+| arena | gates | grind spawns |
+|---|---|---|
+| Cistern Nine | north (x 18) and south (x −18) walls under the catwalks, west (z 5.5) and east (z −5.5) walls | 12 |
+| Knell Yard | a **loft gate** in each quarter's wall over the pattern shed (y 5): Moulds come out onto the shed roof, down its ramp, over the deck bridge or drop into the yard | 12 |
+| Ingot Run | four in the north wall, under the gantry and the end walkways (the end walls have no room: the tapping-floor corners only connect through 2 m gaps a Gaoler can't pass) | 12 |
+| Furnace Ring | twelve tunnels: on each axis side a bore at the pit floor and one at tier 1 run back through the tiers to gates behind the outer wall, and a gate opens onto the rim (stacked chambers share their slabs) | 16 |
+| Tallow Works | one in each wall: under the mezzanines (long walls), beside the press houses (short walls) | 12 |
+| Wickmarket | north wall under the guild walk, west and east walls between the shophouses and the balustrade | 9 |
 
 ## Crucible of Veins (campaign)
 
@@ -353,6 +411,119 @@ herons and three gaolers). `par_time: 300.0` (**5:00**); suggested grades: S ≤
 B ≤ 8:30, C ≤ 11:00, else D. A first playthrough lands around 6–9 minutes. Kills: 66 total in
 single player.
 
+## The Drowned Chandlery (campaign)
+
+The third campaign level, generated by `client/examples/level_gen/drowned_chandlery.rs`: a
+candle factory of the Foundry, flooded when its cistern burst. **Water snuffs a Shrike's wick**:
+the deep water kills (a dark bed under a translucent surface), the shallows are only seeping
+water on the floors. Wax still melts in the dipping vats and candles still burn on every dry
+shelf. You come in by the loading dock and fight through four halls to the set piece: the
+**Great Wick**, an unfinished candle as tall as a bell tower, standing in a flooded well and
+burning under a hole in the roof.
+
+Palette (against Crucible's red brick and the Spire's cold stone): drowned grey-green brick and
+mossy stone, waterlogged timber, verdigris copper, teal water glowing from below, ivory and
+yellowed wax, pale-gold molten wax; warm candle light against cold teal; green-grey fog 20–125 m,
+ambient `(0.5, 0.57, 0.55)`, sky `(0.06, 0.1, 0.11)` (it shows through the Great Wick's smoke
+hole and over the exit terrace). Music `campaign`.
+
+```text
+Plan (N up).                           x: -110      -66 -54      -16 -4          34
+                                                                                      z
+          +-------+  EXIT: the Wick Terrace (y 21, open sky)                        -82
+          +---+---+
+              | C5 (y 21)                                                            -51
+  +-----------+--------+  +------------------------+  +-------------------------+
+  | A4 THE GREAT WICK  |  | A3 THE WAX PRESS       |  | A2 THE CISTERN          |    -54..
+  | galleries y 21     |C4| drowned W third, floes |C3| north + west galleries  |
+  | (W, N, E), S ramp  |==| press bed y 15 (pad)   |==| y 14, east ramp, the    |
+  |   [ well ~~~~~~ ]  |  | balcony y 14 (entry),  |  | burst tank y 24..30     |
+  |   [ ~ GREAT  ~  ]  |  | ramp down west         |  | pouring into the pool   |
+  |   [ ~ WICK  ~ ~ ]  |  | floor y 11             |  | floor y 4               |
+  |   [ ~~~~~~~~~~~ ]  |  +------------------------+  +-----------+-------------+    -13
+  | floor ring y 11    |                                          | C2 Spool Walk (y 4,
+  +--------------------+                                          | a flooded break)
+                                                     +------------+------------+       9
+                                                     | A1 DIPPING HALL  (y 0)  |
+                                                     | gantry y 4 (N), ramps   |
+                                                     | [vat]  spool   [vat]    |
+                                                     +-----------+-------------+      44
+                                                                 | C1 Culvert (a 4 m sluice)
+                                                     +-----------+-------------+      64
+                                                     | R0 LOADING DOCK (start) |
+                                                     | [slip ~ barge]          |
+                                                     +-------------------------+      86
+```
+
+| area | interior (x, z) | floor / ceiling | features |
+|---|---|---|---|
+| R0 Loading Dock | -12..12, 64..86 | 0 / 9 | spawns z 79 facing north; the barge slip (deep water) with the moored barge and its cabin (secret 1); crates |
+| C1 Culvert | -4..4, 45..63 | 0 / 6 | a 4 m flooded sluice across it (jump), the raised sluice gate, shallows |
+| A1 Dipping Hall | -22..22, 10..44 | 0 / 14 | two dipping vats of molten wax (x ±9..±19 west / east, z 18..34, 0.7 m rims) under racks of half-dipped candles; the gantry along the north wall (y 4, 7 m deep) with ramps up both side walls and a pad; the great wick spool (cover); the exit on the gantry |
+| C2 Spool Walk | 13..20, -12..9 | 4 / 10 | a 6 m flooded break with a wax floe in it |
+| A2 The Cistern | -4..34, -54..-13 | 4 / 34 | the cistern pool (x 6..24, z -44..-22), the burst tank over it (y 24..30) still pouring; walks round the pool; galleries y 14 along the north (8 m) and west (8 m) walls; an east ramp and landing up to them; a pad to the west gallery; the exit on the west gallery |
+| C3 Pipe Gallery | -15..-5, -41..-34 | 14 / 20 | slide under the pipes (north lane, 1.2 m) or hop the valve box (south lane, 1 m) |
+| A3 The Wax Press | -54..-16, -60..-22 | 11 / 28 | the entry balcony (y 14) with a ramp down west; the press bed (y 15, 12 × 12, a pad) with its screw and platen; the west third drowned (x -54..-42) with four wax floes; the exit landing beyond the water; mould racks |
+| C4 Wick Passage | -65..-55, -31..-24 | 11 / 17 | candle shelves |
+| A4 The Great Wick | -110..-66, -50..-6 | 11 / 50 | the octagonal well (apothem 13, deep water) and the Great Wick in it (apothem 5, top y 38, wick and flame under the smoke hole); five wax floes, the south-west one with a pad onto the candle's top (secret 2); galleries y 21 along the west, north and east walls; a ramp along the south wall up to the west gallery; a pad to the north gallery; the exit on the north gallery |
+| C5 + the Wick Terrace | -91.5..-85.5 / -97..-80, -82..-51 | 21 / open sky | the exit dais |
+
+### Encounters
+
+Same rules as Crucible (checkpoint just inside the entry door, `arena` = the room, `rally` = the
+checkpoint spawn, entry doors lock, exit doors open on the win).
+
+| # | arena | checkpoint spawn | lock → unlock | wave 1 | wave 2 | wave 3 | total |
+|---|---|---|---|---|---|---|---|
+| 1 | Dipping Hall | (0, 0, 41) | 1 → 2 | 5 gnawer | 3 **snuffer**, 2 gnawer, 2 censer (gantry) | | 12 |
+| 2 | The Cistern | (16.5, 4, -16) | 3 → 4 | 3 harrier, 3 gnawer | 2 heron (north gallery), 2 censer (galleries), 2 harrier, **bellwether**, 2 gnawer | | 15 |
+| 3 | The Wax Press | (-19, 14, -37.5) | 5 → 6 | **gaoler**, 3 gnawer, 2 **snuffer** | **smelter**, censer (press bed), heron, 2 harrier, 2 gnawer | | 13 |
+| 4 | The Great Wick | (-69, 11, -27.5) | 7 → 8 | 4 gnawer, 2 snuffer, 2 censer (galleries), bellwether | smelter, 2 heron (galleries), 3 harrier (over the well), 2 gnawer | gaoler, heron, 2 censer, 3 harrier, 2 snuffer, bellwether | 27 |
+
+67 Moulds single-player. **The new Moulds** (`bellwether`, `snuffer`, `smelter`, **enemies**
+area) are placed through a table in the module: until they are on main each spawns as the
+stand-in of its size and role (bellwether → censer, snuffer → gnawer, smelter → gaoler);
+`NEW_MOULDS = true` swaps them in. The escalation: gnawers, then snuffers leaping off the
+floor and censers on the gantry; harriers out of the Cistern's spray and herons across its pool,
+with the first bellwether frenzying them; the first gaoler on the Wax Press floor (38 × 38 m),
+then a smelter pouring slag between the press and the balcony; the finale round the well with
+everything, two heavies on the north floor ring.
+
+### Routes and movement tech
+
+Critical path (running, jumping, ramps; verified by the bots: **~26 s** of pure movement from
+every spawn, splits 2.4 / 7.0 / 13.8 / 17.7 / 26.0 s):
+
+1. R0 → C1: jump the sluice → A1 vestibule.
+2. A1: east ramp to the gantry → exit door 2 → C2: jump the flooded break → A2 vestibule.
+3. A2: east ramp, the landing, the north and west galleries → exit door 4 → C3: hop the valve
+   box → A3 balcony.
+4. A3: the balcony ramp down west, across the floor, jump the drowned strip past the floe →
+   exit door 6 → C4 → A4 vestibule.
+5. A4: round the east floor ring to the south ramp, up to the west gallery, along the north
+   gallery → exit door 8 → C5 → the terrace.
+
+Alternate routes (bots): the Dipping Hall pad onto the gantry; the Cistern pad onto the west
+gallery; the slide under the Pipe Gallery's pipes; off the Wax Press balcony and its pad onto
+the press bed; the Great Wick's floor pad onto the north gallery.
+
+Tech (scripted, tested): a **dash-jump across the Cistern pool** from the west walk to the east
+walk (a shortcut to the east ramp; a short jump drowns); a **slam bounce onto the press bed**
+(4 m); a **floe hop** onto a wax floe, braking in the air.
+
+**Secrets** (`LevelDef::secrets`; tested: an alternate route finds each, the critical path
+never enters one):
+
+1. **The barge cabin**: hop from the dock onto the moored barge and into its cabin, a candle
+   shrine.
+2. **The top of the Great Wick**: jump onto the south-west wax floe in the well; its pad throws
+   you 27 m up onto the candle's top, beside the wick and its flame under the smoke hole.
+
+### Par (results grading)
+
+Bot traversal is ~26 s; the four fights are the bulk (67 Moulds, three heavies). `par_time:
+300.0` (**5:00**); suggested grades: S ≤ 5:00, A ≤ 6:30, B ≤ 8:30, C ≤ 11:00, else D.
+
 ## Cistern Nine (deathmatch arena)
 
 An open-air coolant cistern at night: cold teal concrete and tile, violet accents, cyan
@@ -397,6 +568,9 @@ pillar caps 9.6.
   carelessness are punished.
 - **Spawns** (10): four tower tops, two in the bowl, four on the ring (one per side), every
   quadrant covered, ≥ 10 m apart, three heights, all facing the centre.
+
+Grind: four Mould gates (north and south walls under the catwalks, west and east walls), 12
+grind spawns; the clip ceiling reaches over their chambers.
 
 Suggested match settings: frag limit 20 / 10 minutes (gameplay.md defaults) for 4–8 players.
 
@@ -480,6 +654,10 @@ For the roster: Tumbler bombs and Breach in the arcade and round the bell; Gust 
 edge, the moat bridges and the pad arcs into the bronze; Thorns on the tower and kiln faces;
 the Quill from the kiln roofs; Arclash chains on a crowded deck.
 
+Grind: a loft gate in each quarter's wall over the pattern shed (y 5), 12 grind spawns: Moulds
+come out onto the shed roofs, then down the ramps, over the deck bridges or drop into the yard
+(walkers can't walk back up the shed ramps).
+
 Suggested match settings: 2–5 players, frag limit 15 / 8 minutes (up to 8 players works with
 the defaults, 20 / 10, but it's hectic).
 
@@ -552,7 +730,155 @@ For the roster: the Quill down the gantry and the trough; Gust and Both Barrels 
 bridge and the duct roof (into the slag); Tumbler bombs bouncing round the racks and platform
 corners; Thorns on the racks and walls to ricochet across lanes.
 
+Grind: four Mould gates in the north wall (under the gantry and the end walkways), 12 grind
+spawns; waves come from the north and both ends of it.
+
 Suggested match settings: 4–8 players, frag limit 20–25 / 10 minutes.
+
+## Furnace Ring (round grind / PvP arena)
+
+Generated by `client/examples/level_gen/furnace_ring.rs`. An open-air smelting pit at night,
+built for grind: an octagonal bowl of charcoal stone stepping up in three rings round the
+**Great Crucible**, which stands in a pool of white-hot slag. Charcoal stone, ash-pale floor
+flags, iron coping, firebrick bands; white-hot slag and furnace-orange vents against a cold
+night sky; charcoal-blue fog 45–190 m, ambient `(0.56, 0.55, 0.64)`, music `arena`. Four-fold
+rotational symmetry: one quarter (an axis side and the diagonal after it, clockwise) is described
+and turned four times.
+
+```text
+            N gates (floor, tier 1, rim: stacked behind the outer wall)
+                      |||
+         +------------------------+          rings (apothem):
+        /   rim y 14   [rim gate]  \           slag pool 0..8.5 (kill), crucible 0..5
+       /  +--------------------+    \          pit floor 8.5..20 (y 0)
+      /  / tier 1 y 7 [t1 bore] \  NE\         tier 1 20..30 (y 7)
+     /  /  +--------------+ ramp \ ramp\       rim 30..40 (y 14), outer wall to y 24
+  W |  | pit floor [floor bore]  |     | E    ramps on the diagonal faces (pinwheel),
+    |  |    ( ~ CRUCIBLE ~ )     |     |      each rising towards the next axis side
+     \  \  +--------------+     /    /       wall-jump slots in the tier 2 face
+      \  \ alcoves, pads       /    /        (tier 1 -> rim), spawn alcoves on every
+       \  +--------------------+    /        ring, rim alcoves in the diagonal walls
+        \                          /
+         +------------------------+
+```
+
+- **The pit floor** (y 0): an 11.5 m ring round the slag pool (kill) and the crucible; four pads
+  onto the crucible's top (y 10, a 3 m ring round its flue: the king spot), four pads (in front
+  of the diagonal ramps) up to tier 1. Spawn alcoves in the tier 1 face.
+- **Tier 1** (y 7) and **the rim** (y 14): 10 m wide rings, joined by ramps on the diagonal
+  faces (22.9° and 18.4°: gentle enough for the Gaoler's wide footprint), by wall-jump slots
+  (3.5 m) in the tier 2 face, and by drops. Spawn alcoves in the tier 2 face (with a pig-iron
+  stack in front for cover) and in the diagonal outer walls (also covered).
+- **Twelve Mould tunnels**: on each axis side a 5 × 5 m bore at the floor and one at tier 1 run
+  back through the tiers to gate chambers behind the outer wall; a third gate opens straight
+  onto the rim. In grind, waves pour out of all three rings from four directions; the 10 m
+  rings leave room to kite. In PvP the bores are flanking routes and the ring is one big
+  rotating fight round the crucible.
+- **Spawns** (12): an alcove on each axis side at the floor and at tier 1, one in each diagonal
+  outer wall at the rim; three heights, every quadrant, no spawn in sight of another (the
+  crucible and its flue cut the lines through the middle).
+
+Tech (tested): wall-jump up a slot from tier 1 onto the rim; a dash-jump from the rim's edge
+across the pit onto the crucible's top beside the flue. Lap (~20 s, four pads): every ring,
+both kinds of pad, a rim ramp, round the rim past the gates.
+
+Suggested match settings: grind for 1–4; PvP 4–8 players, frag limit 20 / 10 minutes.
+
+## Tallow Works (roofed, vertical arena)
+
+Generated by `client/examples/level_gen/tallow_works.rs`. The Foundry's rendering house, the
+only roofed arena: a 64 × 52 m brick hall, 28 m to its iron roof, thick with yellow steam.
+Sooty brick, greasy tiles, limewash, iron and timber, blocks of yellow tallow; sickly gas lamps,
+the amber glow of the vats and the boiler's fire; yellow-brown fog 18–95 m (short sightlines),
+ambient `(0.56, 0.53, 0.43)`, music `arena`. A clip lid sits on the roof. Point-symmetric
+(180°): the north half is described once and turned.
+
+```text
+                                    N (-Z)
+  +---------------------------------------------------------------+
+  |#########  mezzanine y 6 (timber on posts)       ramp \\\\\\\\\ |  # solid end (storage)
+  |#########         [N gate under the mezzanine]          \\\\\\\ |
+  |~~shaft~~ (3.5 m: wall-jump onto the mezzanine)            NE  |  E gate in the nook
+  |PPPPPPPP ==== belt (housing) rising west to the loft ====      |
+  |PRESS   |     [vat ~~ skimmer y 8 ~~]                    PPPPPP|  P press houses,
+  |HOUSE   |                 [ BOILER ]  (top y 9, flue)    PRESS |    lofts y 12 with
+  |loft y12|                            [vat ~~ skimmer ~~] HOUSE |    parapets
+  |PPPPPPPP     ==== belt rising east to the east loft ==== PPPPPP|
+  |  SW  /////                                     ~~~shaft~~~~~~~|
+  |W gate ////      mezzanine y 6           [S gate]    ##########|
+  +---------------------------------------------------------------+
+```
+
+Layers: floor 0, mezzanines 6, skimmers 8, the boiler's top 9, lofts 12.
+
+- **Rendering vats** (kill): molten tallow behind 0.6 m iron rims; over each a **skimmer
+  platform** (y 8) hangs from the hoist rail on chains, reached by a pad from the floor.
+- **The boiler** in the middle: fireboxes on all sides, its flue up through the roof (it cuts
+  every line through the middle); pads up onto its top ring (y 9) from both sides, placed 7 m
+  out so a player steering at it rises above the rim before reaching it.
+- **Conveyor belts** in solid housings rise from the floor (by the boiler) to the press lofts at
+  the ends: a slide down a belt reaches ~38 m/s. The housings wall off the strip under each
+  mezzanine from the middle of the hall up to the belt's foot.
+- **Mezzanines** (y 6) along the long walls: solid at the press-house end, timber on posts the
+  rest; a ramp at the other end; a pad from the mezzanine onto the loft; a **wall-jump shaft**
+  between the solid end and the press house, from the floor onto the mezzanine.
+- **Press lofts** (y 12) with tallow stacks and a parapet along the edge (cover for whoever
+  holds them; you see over it standing at it).
+- **Spawns** (8): per half the loft, the mezzanine, under the mezzanine, the corner by the gate;
+  three heights, no spawn in sight of another.
+
+Tech (tested): the shaft (floor → mezzanine), the belt slide. Lap (~20 s, three pads): down a
+belt, both boiler pads, up the other way, the shaft, the mezzanine ramp and its pad to the loft.
+
+Suggested match settings: 2–8 players, frag limit 15–20 / 8–10 minutes.
+
+## Wickmarket (open market arena)
+
+Generated by `client/examples/level_gen/wickmarket.rs`. The Foundry's candle market under a smoky
+red sky: an open square, 88 × 68 m, between guild sandstone walls. Sandstone, cobbles, timber,
+canvas awnings in madder, indigo, saffron and verdigris, a bronze bell; candle light and lanterns
+against a low red sun and the glow of the slag below the south edge; smoky mauve fog 35–175 m
+(the long sightlines stay readable), music `arena`. Mirror-symmetric west ↔ east.
+
+```text
+                                       N (-Z)
+  +---------------------------------------------------------------------------+
+  | [kiosk]   guild walk y 7 (parapet)    [N gate]    guild walk   [kiosk]     |
+  |/////// arcade (pillars), guild stairs W and E ///////                     |
+  |SHOP|  ##  awn   ##  awn          | GALLOWS |          awn ##   awn  ##|SHOP|
+  |HOUS|  ##  ##    ##  ##           |  bell   |          ## ##    ## ## |HOUS|  ## stalls (rows
+  |E   |  ##  awn   ##  awn          |  dais   |          awn ##   awn  ##|E   |     of 4 and 3)
+  |roof|  ##  ##    ##  ##           +---------+          ## ##    ## ## |roof|
+  |y 4 |  ramp ////                                             //// ramp |y 4 |
+  |[W gate]                                                       [E gate]    |
+  |=====balustrade==  ==  jetty ==========  ========  jetty  ==  ===========  |
+  |  ~~~~~~~~~~~~~~~~~~~~~~~~~ the gorge: molten slag, 15 m down ~~~~~~~~~~~~~~ |
+  +---------------------------------------------------------------------------+
+```
+
+Layers: gorge -15 (kill), cobbles 0, awnings 3.6, shophouse roofs 4, guild walk 7, the gallows'
+beam 14.2.
+
+- **The guild walk** (y 7) along the north: a parapet (1.1 m) along its front, a kiosk at each
+  end, guild stairs down to the market, pads up from it. The **bow lane**: from the walk the
+  whole market down to the jetties, 60 m.
+- **Shophouses** along the west and east walls: candle-shop alcoves at the market (spawns), flat
+  roofs (y 4) with chimneys, a ramp up from the south.
+- **Stalls**: two rows a side; their awnings (y 3.6, 6 m apart) are a broken high road to hop
+  across, their back boards and counters break the ground-level sightlines.
+- **The bell gallows** in the middle: a dais with steps, two uprights, the beam (y 14.2) and the
+  bell hanging from it (its lip 6.9 m above the dais: walk under it); pads from the dais onto
+  the beam — the most exposed perch, and a dash-jump from it lands on the guild walk.
+- **The gorge** (kill) along the south: a balustrade with gaps (knockback in) and two timber
+  jetties out over it.
+- **Spawns** (8): per half two candle shops, the shophouse roof behind a chimney, the walk's
+  kiosk; three heights, no spawn in sight of another.
+
+Tech (tested): a slam bounce from the cobbles onto an awning; a dash-jump from the gallows'
+beam onto the guild walk. Lap (~15 s, two pads): a guild stair, the walk end to end, the other
+stair, the gallows pad onto the beam, the walk pad.
+
+Suggested match settings: 4–8 players, frag limit 20 / 10 minutes; for the Longwick.
 
 ## The Vestry (warm-up hub)
 
@@ -581,8 +907,8 @@ Vestry has any). `shared/tests/levels.rs` accepts `effigy` spawns in hub levels.
   encounter door references exist. Shipped levels (every level except the movement
   playground): no zero-volume brushes, < 600 brushes, a kill volume under the whole level,
   lights and music set.
-Every `Campaign` level listed in `CAMPAIGNS` (Crucible of Veins, Spire of Wicks) gets every
-campaign check below; its routes are registered in `campaign_route` / `alternate_routes`
+Every `Campaign` level listed in `CAMPAIGNS` (Crucible of Veins, Spire of Wicks, the Drowned
+Chandlery) gets every campaign check below; its routes are registered in `campaign_route` / `alternate_routes`
 (a campaign level without them fails), its scripted tech in a test of its own.
 
 - Campaign structure: 4 spawns, exit, 4–5 encounters each with a checkpoint whose spawn is
@@ -608,6 +934,12 @@ campaign check below; its routes are registered in `campaign_route` / `alternate
   harriers in open air 4–11 m above ground with 3 m above; censers with floor at their height
   3 m out in every direction (deep ledges); gaolers with level floor 4 m out in every direction
   (room to circle them); herons ≥ 20 m from their rally point with a clear line of sight to it.
+- Enemy spawns on the nav grid (every campaign, doors open): each Mould stands on a node of its
+  class (footprint and headroom) and walks to its rally point (the Gaoler with its wide
+  footprint), and players can walk to it; censers may sit on pad-only ledges.
+- Grind spawns (every arena): see "Grind spawns and Mould gates" above.
+- PvP spawn fairness (the arenas built with the rule: Furnace Ring, Tallow Works, Wickmarket):
+  no player spawn sees another (eye to chest, both ways).
 - Jump pads: with no input each one lands on ground ≥ 2 m higher, never in a kill volume.
 - No z-fighting: no coplanar same-facing overlapping faces between differently textured
   axis-aligned brushes (including doors).
@@ -619,19 +951,26 @@ campaign check below; its routes are registered in `campaign_route` / `alternate
 - Traversal bots: waypoint followers driven by `shared::movement::step` (steer, auto-jump at
   hurdles/gaps/ledges or when stuck, slide on slide segments, take pads) run the full critical
   path of every campaign level from all four spawns and from every checkpoint to the exit
-  (doors open), never touching a kill volume, entering checkpoint/encounter triggers in order;
-  five alternate routes per campaign level. Every arena has a full lap through its ramps,
+  (doors open), never touching a kill volume, entering checkpoint/encounter triggers in order
+  (and never a secret); 4+ alternate routes per campaign level, which between them find every
+  secret. Every arena has a full lap through its ramps,
   catwalks, tunnels and pads that must take a minimum of distinct pads: Cistern Nine (~20 s),
   Knell Yard (~20 s, all four quarters: kiln pad, crown pad, moat pad, both bridge levels, the
   arcade, a casting-table slide) and Ingot Run (~26 s: the whole high U, the trough slide end
-  to end, the furnace and both floor pads, the pour bridge, a platform).
+  to end, the furnace and both floor pads, the pour bridge, a platform), Furnace Ring (~20 s,
+  all three rings, four pads), Tallow Works (~20 s, both boiler pads, a belt, the shaft, the
+  mezzanine pad) and Wickmarket (~15 s, the guild walk end to end, the gallows pad).
 - Advanced tech, scripted: Crucible's R1 perch dash-jump, R3 wall-jump shaft and spillway slide
   (> 40 m/s), Cistern Nine's wall-jump shafts; the Spire's Casting Floor chimney, slam bounce
   onto a bell mould, wax-run slide-jump over the Rood's chasm (> 33 m/s), Wick Stair
   slide-climb (< 80 % of the running time) and dash-jump onto the great bell's rim; Knell
   Yard's kiln shaft (onto 7.5 m) and its slide-only casting table (a runner is stopped, a slide
   passes at full speed); Ingot Run's rack and furnace shafts (onto 7 m ledges, landing on a
-  narrow walkway) and the end-to-end trough slide (< 4.5 s, never below slide speed).
+  narrow walkway) and the end-to-end trough slide (< 4.5 s, never below slide speed); the
+  Drowned Chandlery's pool dash-jump, slam bounce onto the press bed and floe hop; Furnace
+  Ring's wall-jump slot and dash-jump onto the crucible; Tallow Works' shaft and belt slide
+  (> 33 m/s); Wickmarket's slam bounce onto an awning and dash-jump from the gallows' beam onto
+  the guild walk.
 - Chaos: random jump/dash/slide/slam input for 40 s from every spawn and checkpoint (doors open
   and closed) never leaves the level bounds.
 
@@ -640,8 +979,11 @@ All of it is deterministic (same inputs, same results) and runs in well under a 
 ## Level-format wishes
 
 Already added (and used by these levels): `Encounter::arena` / `Encounter::rally` (co-op
-lock-out fix), `LevelDef::par_time`, and the feet-position kill-volume contract. Still missing
-(worked around or left to game code):
+lock-out fix), `LevelDef::par_time`, the feet-position kill-volume contract,
+`LevelDef::grind_spawns` (validated like the other points) and `LevelDef::secrets` (hidden
+places, `Volume`s: entering one counts as finding it — data for a results line such as
+"SECRETS 1/2"; nothing in the game reads it yet). Still missing (worked around or left to game
+code):
 
 - **`display_name` / `description`** on `LevelDef` for the lobby.
 - **Per-area environment** (fog/ambient zones) — one `Environment` per level today (the Spire

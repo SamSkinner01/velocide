@@ -1,0 +1,50 @@
+// Effigy: the training dummy for the warm-up lobby (docs/enemies.md). A 2.2 m wax figure
+// moulded roughly in the shape of a Mould, bound to a timber post on an iron foot, a target
+// sigil branded on its chest and a glowing wick-knot for a head. Never in encounters or waves.
+//
+// No attacks, never targets anyone, never moves (no knockback), can't be killed (its health
+// stops at 1); it flinches at every hit (wax spray, a wobble on its post) and heals back to full
+// 3 s after the last hit. The head is a HEADSHOT (x2), the chest sigil a weak point (x1.5).
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md and
+// docs/enemies.md. Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up,
+// -Z forward, from the feet. This file is also compiled into the game as the built-in Effigy.
+(
+    name: "Effigy",
+    net_kind: 28,
+    model: "effigy",
+    health: 1000.0,
+    speed: 0.0,
+    acceleration: 0.0,
+    turn_rate: 0.0,
+    radius: 0.5,
+    height: 2.2,
+    body_top: Some(1.75),
+    eye_height: 1.95,
+    step_height: 0.0,
+    locomotion: Ground,
+    knockback_scale: 0.0,
+    weak_points: [
+        (name: "head", kind: Head, offset: (0.0, 1.97, -0.04), radius: 0.3, multiplier: 2.0),
+        (name: "sigil", kind: Core, offset: (0.0, 1.35, -0.28), radius: 0.22, multiplier: 1.5),
+    ],
+    armour: None,
+    attacks: [],
+    ai: (
+        sight_range: 0.0,
+        reaction_time: 0.0,
+        lose_target_time: 0.0,
+        preferred_range: None,
+        strafe: false,
+    ),
+    drops: (heat: 0.0, heat_radius: 1.0),
+    colors: (
+        body: (0.78, 0.74, 0.66),
+        accent: (0.5, 0.36, 0.2),
+        glow: (1.0, 0.62, 0.2),
+        telegraph: (1.0, 0.5, 0.1),
+        parry: (1.0, 0.9, 0.1),
+    ),
+    death_time: 0.6,
+    dummy: Some((regen_delay: 3.0, regen_rate: 400.0)),
+)

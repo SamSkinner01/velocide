@@ -241,12 +241,18 @@ impl SimWorld {
         let wave = st.next_wave % enc.waves.len();
         st.next_wave = wave + 1;
         for spawn in &enc.waves[wave].spawns {
-            if let Some(id) = self.spawn_enemy(&spawn.enemy, spawn.position, spawn.yaw.to_radians())
-            {
-                if let Some(e) = self.enemies.get_mut(&id) {
-                    // They know where the players are (no waiting to be found in the pen).
-                    e.aware = true;
-                }
+            // Base health, and they know where the players are (no waiting to be found in
+            // the pen).
+            let options = super::enemy::SpawnOptions {
+                aware: true,
+                ..Default::default()
+            };
+            if let Some(id) = self.spawn_enemy_with(
+                &spawn.enemy,
+                spawn.position,
+                spawn.yaw.to_radians(),
+                options,
+            ) {
                 st.pack.push((id, spawn.position));
             }
         }
@@ -277,6 +283,11 @@ mod tests {
     use crate::sim::{BUILTIN_LEVEL, DEFAULT_TICK_RATE, TickInputs, builtin_level};
 
     fn hub() -> SimWorld {
+        hub_with(&["gnawer", "no_such_mould"])
+    }
+
+    /// A hub whose range (encounter 0) stands `range` in a row.
+    fn hub_with(range: &[&str]) -> SimWorld {
         let mut level = builtin_level(BUILTIN_LEVEL).unwrap();
         level.kind = LevelKind::Hub;
         let spawn = |enemy: &str, x: f32| EnemySpawn {
@@ -296,7 +307,11 @@ mod tests {
             unlock_doors: vec![],
             waves: vec![Wave {
                 delay: 0.0,
-                spawns: vec![spawn("gnawer", 12.0), spawn("no_such_mould", 14.0)],
+                spawns: range
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| spawn(e, 12.0 + 2.0 * i as f32))
+                    .collect(),
             }],
         });
         level.encounters.push(Encounter {
@@ -365,6 +380,29 @@ mod tests {
             1,
             "back again"
         );
+    }
+
+    #[test]
+    fn the_range_stands_effigies_that_never_fall() {
+        let mut w = hub_with(&["effigy", "effigy"]);
+        w.add_player(PlayerId(0), "A");
+        step(&mut w, &TickInputs::new(), 2);
+        assert_eq!(w.enemies.len(), 2, "the Vestry's dummies are real Effigies");
+        let id = *w.enemies.keys().next().unwrap();
+        assert!(w.enemies[&id].is_dummy());
+        let t = Tuning::default();
+        let hit = super::super::DamageInfo::new(
+            40.0,
+            Owner::Player(PlayerId(0)),
+            super::super::combat::Attack::Dev,
+        );
+        for _ in 0..20 {
+            w.apply_damage(&t, super::super::HitTarget::Entity(id), hit);
+        }
+        step(&mut w, &TickInputs::new(), 30);
+        let e = &w.enemies[&id];
+        assert!(e.is_alive() && e.health >= 1.0, "an Effigy can't die");
+        assert_eq!(w.enemies.len(), 2, "nothing respawned, nothing removed");
     }
 
     #[test]

@@ -75,11 +75,13 @@ Rules (`shared::sim::warmup`, hooked into the death / respawn rule and `step_mod
   play-of-the-game recording only run during a match.
 - **Practice stations** read from the hub's encounters (`step_encounters` only runs campaign
   levels): an encounter whose trigger has no volume is a **fixture** — its first wave stands from
-  the start (the firing range's Effigy dummies; names the registry doesn't know, e.g. `effigy`
-  before the enemies area lands, are skipped) and each dummy is back 3 s after it dies. Any other
-  encounter is a **console**: a living player *pressing* `USE` inside its trigger summons its
-  next wave (cycling; the previous pack is removed) into its `arena` (the pen), the Moulds aware
-  of the players; a Mould more than 2 m out of the pen is put back where it was summoned; each summon reports
+  the start (the firing range's six **Effigies**, docs/enemies.md: they show every hit, never
+  attack or move, can't die and heal to full 3 s after the last hit; names the registry doesn't
+  know are skipped) and a dummy that does die is back 3 s later. Any other encounter is a
+  **console**: a living player *pressing* `USE` inside its trigger summons its next wave
+  (cycling; the previous pack is removed) into its `arena` (the pen) at base health
+  (`SpawnOptions { aware: true, .. }`: no difficulty scaling, no elites, they know where the
+  players are); a Mould more than 2 m out of the pen is put back where it was summoned; each summon reports
   `SimEvent::WaveStarted { index, wave, waves, enemies }` (clients name the pack).
 - Dev chat commands (host) work in the warm-up; `spawn_enemies` works there.
 

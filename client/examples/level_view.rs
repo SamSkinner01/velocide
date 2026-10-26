@@ -17,7 +17,8 @@
 //!
 //! Overlay colours: encounter triggers orange, checkpoints green, exit white, kill volumes red,
 //! doors (closed red / open green), player spawns cyan (with facing), jump pads cyan with
-//! their ballistic arc, enemies: gnawer yellow, censer magenta, harrier light blue, gaoler red, heron white.
+//! their ballistic arc, enemies: gnawer yellow, censer magenta, harrier light blue, gaoler red, heron white;
+//! grind spawns pink posts with a ring, secrets yellow boxes.
 
 use std::path::{Path, PathBuf};
 
@@ -191,6 +192,20 @@ fn overlay(level: &LevelDef) -> Vec<DebugLine> {
         marker(&mut out, s.position, 1.8, 0.5, cyan);
         let eye = s.position + Vec3::Y * 1.6;
         line(&mut out, eye, eye + yaw_dir(s.yaw) * 2.0, cyan);
+    }
+    // Grind spawns: a tall magenta-orange post with a ring (where waves of Moulds appear).
+    let grind = Vec4::new(1.0, 0.35, 0.6, 1.0);
+    for &p in &level.grind_spawns {
+        marker(&mut out, p, 4.0, 1.4, grind);
+        box_lines(
+            &mut out,
+            p - Vec3::new(1.4, 0.0, 1.4),
+            p + Vec3::new(1.4, 0.1, 1.4),
+            grind,
+        );
+    }
+    for s in &level.secrets {
+        volume_lines(&mut out, s, Vec4::new(1.0, 0.9, 0.2, 1.0));
     }
     for p in &level.jump_pads {
         volume_lines(&mut out, &p.trigger, cyan);

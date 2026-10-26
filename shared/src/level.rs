@@ -240,6 +240,9 @@ pub struct LevelDef {
     /// Grind mode: where waves of Moulds may appear (arenas). Empty = the mode picks points on
     /// the nav grid away from the players.
     pub grind_spawns: Vec<Vec3>,
+    /// Hidden places (campaign): entering one counts as finding that secret. Data for the
+    /// results screen; nothing happens in the world.
+    pub secrets: Vec<Volume>,
 }
 
 // ---- limits checked by [`LevelDef::validate`] -------------------------------------------------
@@ -457,6 +460,10 @@ impl LevelDef {
             check_vec("rotation", p.rotation, MAX_LEVEL_COORD)?;
             check_num("scale", p.scale, -1000.0, 1000.0)
         })?;
+        check_each("grind spawn", &self.grind_spawns, MAX_SPAWNS, |&p| {
+            check_point("position", p)
+        })?;
+        check_each("secret", &self.secrets, MAX_CHECKPOINTS, check_volume)?;
         check_num("par_time", self.par_time, 0.0, MAX_LEVEL_TIME)
     }
 
@@ -579,6 +586,14 @@ mod tests {
         });
         bad(&|l| l.environment.fog_end = f32::INFINITY);
         bad(&|l| l.par_time = -1.0);
+        bad(&|l| l.grind_spawns.push(Vec3::new(0.0, f32::NAN, 0.0)));
+        bad(&|l| l.grind_spawns = vec![Vec3::ZERO; MAX_SPAWNS + 1]);
+        bad(&|l| {
+            l.secrets.push(Volume {
+                min: Vec3::ZERO,
+                max: Vec3::splat(2.0e4),
+            })
+        });
         bad(&|l| l.name = "x".repeat(MAX_LEVEL_STRING_BYTES + 1));
         bad(&|l| l.brushes[1].material = "m".repeat(10_000));
         let e = bad(&|l| {

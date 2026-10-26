@@ -17,6 +17,8 @@
 //! * **thorns** (160): the glass spike flying along its path, planted tip-first in the
 //!   surface (a pulsing relay glint so it reads at a distance) or lying on the floor.
 //! * **brands**: a turning sigil over every branded enemy / player (`BRANDED` flag).
+//! * **the third roster** (`enemy_fx.rs`): frenzied / elite looks, the toll's ring, a Snuffer
+//!   latched onto the local player drawn clamped below the view, slag lines (kinds 140..144).
 
 use std::collections::HashMap;
 
@@ -73,6 +75,7 @@ pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
         Some(AiState::Strike) => EnemyState::Attack(progress),
         Some(AiState::Recover) => EnemyState::Recover(progress),
         Some(AiState::Stunned) => EnemyState::Stunned,
+        Some(AiState::Latched) => EnemyState::Latched,
         Some(AiState::Dying) => EnemyState::Dying(progress),
         _ if speed > 0.2 => EnemyState::Walk,
         _ => EnemyState::Idle,
@@ -145,6 +148,8 @@ struct EnemyVis {
     smoulder: f32,
     /// The aim laser this frame: (origin, end, locked).
     laser: Option<(Vec3, Vec3, bool)>,
+    /// Frenzy / elite / latch effects state.
+    extra: enemy_fx::ExtraVis,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -236,6 +241,8 @@ pub struct EntityView {
     projectiles: HashMap<NetId, ProjVis>,
     embers: HashMap<NetId, EmberVis>,
     thorns: HashMap<NetId, ThornVis>,
+    /// The Smelter's slag lines.
+    slag: enemy_fx::SlagView,
     time: f64,
 }
 
@@ -249,6 +256,7 @@ impl EntityView {
         self.projectiles.clear();
         self.embers.clear();
         self.thorns.clear();
+        self.slag.clear();
     }
 
     /// Last drawn position of a thorn.
@@ -330,8 +338,11 @@ impl EntityView {
         for v in self.thorns.values_mut() {
             v.seen = false;
         }
+        self.slag.begin();
         for e in f.entities {
-            if kind::is_enemy(e.kind) {
+            if kind::is_enemy_hazard(e.kind) {
+                self.slag.update(e, f.world, dt, effects, audio, rng);
+            } else if kind::is_enemy(e.kind) {
                 self.update_enemy(e, f, dt, effects, audio, rng);
             } else if e.kind == kind::EMBER_BURST {
                 let v = self.embers.entry(e.id).or_default();
@@ -393,6 +404,7 @@ impl EntityView {
         self.projectiles.retain(|_, v| v.seen);
         self.embers.retain(|_, v| v.seen);
         self.thorns.retain(|_, v| v.seen);
+        self.slag.end();
     }
 
     fn update_enemy(
@@ -436,7 +448,7 @@ impl EntityView {
                 wax,
                 heat,
             );
-            audio.play(Sfx::EnemyHurt, PlayParams::at(center));
+            audio.play(enemy_fx::hurt_sfx(e.kind), PlayParams::at(center));
         }
         v.last_health = e.health;
         if dying && !v.died {
@@ -444,11 +456,7 @@ impl EntityView {
             v.died = true;
             let size = (height / 2.2).clamp(0.7, 1.8);
             enemy_fx::ember_burst(effects, rng, center, size, wax, heat);
-            let death = if k == EnemyKind::Gaoler {
-                Sfx::GaolerDeath
-            } else {
-                Sfx::EnemyDeath
-            };
+            let death = enemy_fx::death_sfx(e.kind);
             audio.play(death, PlayParams::at(center).with_pitch(1.25 / size.sqrt()));
             audio.play(Sfx::EmberRelease, PlayParams::at(center));
         }
@@ -570,6 +578,16 @@ impl EntityView {
             audio.play(Sfx::GaolerStep, PlayParams::at(e.position));
             effects.dust(e.position, 3, 1.2);
         }
+        let frame = enemy_fx::ExtraFrame {
+            center,
+            height,
+            camera: f.camera,
+            local_owner: f.local_owner,
+            dt,
+            cycle_before: before,
+            cycle: v.cycle,
+        };
+        enemy_fx::enemy_extras(e, v.state, &mut v.extra, &frame, effects, audio, rng);
         v.state = e.state;
     }
 
@@ -812,12 +830,27 @@ impl EntityView {
                 {
                     tint.body.w = ((1.0 - p) / 0.3).clamp(0.05, 1.0);
                 }
+                enemy_fx::decorate_tint(e, time, &mut tint);
                 // Burning (arsenal): an ember flicker over the body.
                 if e.flags & enemy_flags::BURNING != 0 {
                     tint.body *= super::arsenal::burn_tint(time, e.id.0);
                 }
-                let root = EnemyAnim::root(e.position + root_offset(e.kind), e.yaw);
+                // A Snuffer latched onto you is drawn clamped below your view (its replicated
+                // position trails the predicted camera).
+                let root = if enemy_fx::latched_on_local(e, f.local_owner) {
+                    enemy_fx::latched_root(e, f.camera)
+                } else {
+                    EnemyAnim::root(e.position + root_offset(e.kind), e.yaw)
+                };
                 lib.draw_enemy(&anim, root, &tint, draws);
+                if let Some((scale, shell)) = enemy_fx::elite_shell(e, time) {
+                    let pivot = Vec3::Y * (enemy_kind(e.kind).height() * 0.5);
+                    let grow = Mat4::from_translation(pivot)
+                        * Mat4::from_scale(Vec3::splat(scale))
+                        * Mat4::from_translation(-pivot);
+                    lib.draw_enemy(&anim, root * grow, &shell, draws);
+                }
+                enemy_fx::enemy_lights(e, v.position, time, lights);
                 // The aim laser (every client draws it from the replicated aim).
                 if let Some((origin, end, locked)) = v.laser {
                     draw_beam(
@@ -849,6 +882,8 @@ impl EntityView {
                         radius: 4.0 + 4.0 * enemy_kind(e.kind).height() / 3.7,
                     });
                 }
+            } else if kind::is_enemy_hazard(e.kind) {
+                self.slag.draw(lib, e, time, draws, lights);
             } else if e.kind == kind::THORN {
                 let (rot, pos) = thorn_transform(e, f, time);
                 let pulse = 1.4 + 0.6 * ((time * 5.0 + e.id.0 as f64).sin() as f32);

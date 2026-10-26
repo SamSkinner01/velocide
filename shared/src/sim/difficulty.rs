@@ -17,8 +17,9 @@
 //!
 //! [`SimWorld::step_modes`] recomputes `enemy_scale` every tick (players joining or leaving
 //! change it at once); spawns read [`SimWorld::pve_scaling`] when they happen. PvP modes get no
-//! scaling. The enemies area applies `enemy_scale` inside the AI and provides elites; until its
-//! elite spawn lands, an elite roll spawns a normal Mould ([`SimWorld::spawn_pve_enemy`]).
+//! scaling. The enemies area applies `enemy_scale` inside the AI and provides elites: an elite
+//! roll spawns an elite ([`SimWorld::spawn_pve_enemy`] → `SimWorld::spawn_enemy_with`,
+//! docs/enemies.md).
 
 use glam::Vec3;
 
@@ -174,10 +175,10 @@ impl SimWorld {
     }
 
     /// Spawns a Mould for an encounter or grind wave with `health` × its definition's health;
-    /// it knows where the players are (`aware`). `elite` is the difficulty's elite roll:
-    /// elites belong to the enemies area (docs/expansion.md). Until their elite spawn lands an
-    /// elite roll spawns a normal Mould (the roll is still made, so wave contents don't shift
-    /// when it does). `None` if the name is unknown or the world is full.
+    /// it knows where the players are (`aware`). `elite` is the difficulty's elite roll: the
+    /// Mould spawns as an elite (`EnemyDef::elite`: its own health bonus on top of `health`,
+    /// faster attacks, replicated `ELITE`; docs/enemies.md). `None` if the name is unknown or
+    /// the world is full.
     pub(crate) fn spawn_pve_enemy(
         &mut self,
         name: &str,
@@ -186,14 +187,16 @@ impl SimWorld {
         health: f32,
         elite: bool,
     ) -> Option<NetId> {
-        let id = self.spawn_enemy_scaled(name, position, yaw, health)?;
-        if elite {
-            log::debug!("elite {name} rolled (spawned as a normal Mould for now)");
-        }
-        if let Some(e) = self.enemies.get_mut(&id) {
-            e.aware = true;
-        }
-        Some(id)
+        self.spawn_enemy_with(
+            name,
+            position,
+            yaw,
+            super::enemy::SpawnOptions {
+                health_scale: health,
+                elite,
+                aware: true,
+            },
+        )
     }
 }
 

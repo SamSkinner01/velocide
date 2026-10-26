@@ -103,6 +103,15 @@ pub mod kind {
     pub const HARRIER: u16 = 22;
     pub const GAOLER: u16 = 23;
     pub const HERON: u16 = 24;
+    // 25..=31: the third roster (enemies area, docs/enemies.md).
+    /// Support: rings its bell to frenzy nearby Moulds.
+    pub const BELLWETHER: u16 = 25;
+    /// Skitterer that latches onto a player (`state` = `AiState::Latched`, `owner` = victim).
+    pub const SNUFFER: u16 = 26;
+    /// Slow heavy that pours slag lines (`SLAG_LINE` hazards).
+    pub const SMELTER: u16 = 27;
+    /// Training dummy (warm-up lobby only).
+    pub const EFFIGY: u16 = 28;
 
     // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
     // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–71 and 75–79 are
@@ -142,7 +151,7 @@ pub mod kind {
     /// The Heron's needle (fast, straight, parryable).
     pub const NEEDLE: u16 = 81;
 
-    // 128..160: pickups / ember bursts.
+    // 128..160: pickups / ember bursts / hazards.
     /// Ember burst (heal pool): `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
     pub const EMBER_BURST: u16 = 128;
     // 136..=139: hazards of the arsenal (docs/arsenal.md); 140..=143: enemies' hazards.
@@ -150,6 +159,11 @@ pub mod kind {
     /// `state` = radius (dm), `aux` = tick it burns out. Burns hostiles inside.
     pub const BURNING_PATCH: u16 = 136;
     // 137..=139: reserved for the arsenal.
+    // 140..=143: enemy hazards (enemies area, docs/enemies.md).
+    /// The Smelter's slag line on the ground: `position` = start, `velocity` = end − start
+    /// (it follows the floor between them), `flags` = [`super::slag_flags`], `state` = width
+    /// (cm), `aux` = ignition tick, `owner` = `OWNER_ENEMY`.
+    pub const SLAG_LINE: u16 = 140;
 
     // 160..176: thorns.
     /// Thrown relay spike, replicated by trajectory like projectiles (gravity
@@ -164,6 +178,11 @@ pub mod kind {
 
     pub fn is_projectile(kind: u16) -> bool {
         (PROJECTILE_FIRST..=PROJECTILE_LAST).contains(&kind)
+    }
+
+    /// Hazards left by enemies (140..=143).
+    pub fn is_enemy_hazard(kind: u16) -> bool {
+        (140..=143).contains(&kind)
     }
 }
 
@@ -235,7 +254,13 @@ pub mod enemy_flags {
     pub const AIMING: u32 = 1 << 6;
     /// The aim laser has locked (the last moments before the shot: dodge now).
     pub const AIM_LOCKED: u32 = 1 << 7;
-    // Bits 8–12: the enemies area (docs/expansion.md).
+    // Bits 8..=12: enemies area (docs/enemies.md); 13, 14: arsenal (`BURNING`, `PINNED`).
+    /// Frenzied by a Bellwether's toll: faster, harder-hitting (glows).
+    pub const FRENZIED: u32 = 1 << 8;
+    /// An elite: more health, faster attacks (searing glow, a crown of embers).
+    pub const ELITE: u32 = 1 << 9;
+    /// Latched onto a player (`owner` = the victim; the Snuffer).
+    pub const LATCHED: u32 = 1 << 10;
     /// Burning (Burn status): ember flicker on the body (arsenal).
     pub const BURNING: u32 = 1 << 13;
     /// Pinned by a Pinning Arrow: rooted in place (arsenal).
@@ -308,6 +333,14 @@ pub mod thorn_flags {
     pub const LYING: u32 = 1 << 1;
     /// Dropping to the floor after hitting a target (tumbling, trajectory with gravity).
     pub const DROPPING: u32 = 1 << 2;
+}
+
+/// Flag bits of `kind::SLAG_LINE` hazards.
+pub mod slag_flags {
+    /// Burning (after the telegraph: hurts whoever stands in it).
+    pub const LIVE: u32 = 1 << 0;
+    /// The last second before it is gone (cooling, fading).
+    pub const COOLING: u32 = 1 << 1;
 }
 
 /// Flag bits of door entities.

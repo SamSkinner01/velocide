@@ -1638,7 +1638,7 @@ pub struct GrindTuning {
     pub heavy_budget: f32,
     pub heavy_elite_chance: f32,
     /// Every `boss_every`th wave also brings a boss-grade elite: a heavy with `boss_health` ×
-    /// its health.
+    /// its health, on top of the elite health multiplier (1.6 × the elite's 2.5 = ×4 overall).
     pub boss_every: u32,
     pub boss_health: f32,
     /// Most wave enemies alive at once (the rest wait their turn): `max_alive +
@@ -1673,7 +1673,7 @@ impl Default for GrindTuning {
             heavy_budget: 1.25,
             heavy_elite_chance: 0.15,
             boss_every: 10,
-            boss_health: 4.0,
+            boss_health: 1.6,
             max_alive: 14,
             alive_per_player: 5,
             spawn_burst: 6,
