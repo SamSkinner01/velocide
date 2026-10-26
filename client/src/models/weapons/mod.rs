@@ -549,7 +549,7 @@ fn draw_fists(
         Mat4::from_scale_rotation_translation(
             Vec3::splat(VIEWMODEL_SCALE),
             Quat::from_euler(EulerRot::YXZ, -0.12, 0.25, 0.35),
-            Vec3::new(-0.11, -0.16, -0.3) + bob,
+            Vec3::new(-0.11, -0.135, -0.3) + bob,
         )
     });
     let mut pose = Pose::rest(fist::JOINTS.len());

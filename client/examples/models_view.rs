@@ -854,6 +854,21 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
                 ..with(WeaponKind::Kiln, Ability::Discharge)
             },
         ),
+        (
+            "UNARMED (FIST TIER)",
+            ViewmodelAnim {
+                unarmed: true,
+                ..x(WeaponKind::Quill)
+            },
+        ),
+        (
+            "UNARMED PUNCH",
+            ViewmodelAnim {
+                unarmed: true,
+                punch: 0.2,
+                ..x(WeaponKind::Quill)
+            },
+        ),
     ];
     for (i, (name, anim)) in cases.into_iter().enumerate() {
         let mut shot = Shot::new(look_at(

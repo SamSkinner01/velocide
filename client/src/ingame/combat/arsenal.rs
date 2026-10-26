@@ -18,7 +18,7 @@ use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use shared::loadout::{Ability, WeaponKind};
+use shared::loadout::{Ability, Loadout, WeaponKind};
 use shared::protocol::{EntityState, NetId, kind};
 use shared::sim::{FireIntent, WeaponState};
 use shared::tuning::CombatTuning;
@@ -72,7 +72,11 @@ impl InGame {
             (live, t.limpet.max_live)
         });
         HudWeapons {
-            loadout: s.loadout,
+            loadout: if s.is_unarmed() {
+                Loadout { slots: [None; 4] }
+            } else {
+                s.loadout
+            },
             slot: s.slot,
             mode: s.mode,
             cooldown,
@@ -209,7 +213,7 @@ impl ArsenalView {
         audio: &mut Audio,
     ) {
         // Nothing carried (gun game's Fist tier): fists only.
-        viewmodel.set_unarmed(s.loadout.first_slot().is_none());
+        viewmodel.set_unarmed(s.is_unarmed());
         viewmodel.set_charge(s.charge_fraction(t, tick_rate));
         let whine = (s.charge > 0).then(|| match s.ability() {
             Ability::Skewer => Sfx::SkewerCharge,

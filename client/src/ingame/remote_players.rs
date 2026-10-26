@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use glam::Vec3;
 use glam::Vec4;
 use shared::input::look_dir;
-use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags, player_weapon};
+use shared::protocol::{
+    EntityState, NetId, dequantize_yaw, player_armed, player_flags, player_weapon,
+};
 use shared::sim::PlayerId;
 
 use crate::models::shrike::REMOTE_SCALE;
@@ -84,8 +86,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
             0.0
         },
         cycle: v.cycle,
-        // Every replicated player holds a weapon until the protocol says otherwise.
-        unarmed: false,
+        unarmed: !player_armed(e.state),
     }
 }
 

@@ -41,7 +41,8 @@ use glam::{Vec2, Vec3, Vec4, vec2};
 use shared::loadout::{Ability, WeaponKind};
 use shared::movement::{MoveMode, MoveState};
 use shared::protocol::{
-    EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_flags, player_weapon,
+    EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_armed, player_flags,
+    player_weapon,
 };
 use shared::sim::{Attack, FireIntent, Highlight, HitPart, HitShape, KillInfo, Owner, PlayerId};
 
@@ -1000,6 +1001,7 @@ impl InGame {
             }
             pb.weapon = Some((weapon, mode));
             pb.viewmodel.set_charge(if drawing { 0.0 } else { charge });
+            pb.viewmodel.set_unarmed(!player_armed(e.state));
             pb.viewmodel
                 .update(vdt, &state, e.yaw, e.pitch, common.settings.view_bob);
         }
