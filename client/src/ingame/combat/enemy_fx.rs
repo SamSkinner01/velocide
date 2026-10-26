@@ -1,24 +1,31 @@
-//! Presentation of the Moulds (docs/roster.md, docs/combat.md "Client presentation
-//! contract"): which model / name / size a replicated enemy kind has, the sounds of their
-//! telegraphs and strikes, the Heron's aim laser, and the wax-and-ember effects — a hit
-//! cracks a Mould and sprays molten wax and sparks, a kill releases its heat as one big ember
-//! burst while the corpse slumps and melts, ember bombs trail smoke and burst into embers,
-//! the Gaoler's bash kicks up dust and its sweep draws a burning arc.
+//! Presentation of the Moulds (docs/roster.md, docs/enemies.md, docs/combat.md "Client
+//! presentation contract"): which model / name / size a replicated enemy kind has, the sounds
+//! of their telegraphs and strikes, the Heron's aim laser, and the wax-and-ember effects — a
+//! hit cracks a Mould and sprays molten wax and sparks, a kill releases its heat as one big
+//! ember burst while the corpse slumps and melts, ember bombs trail smoke and burst into
+//! embers, the Gaoler's bash kicks up dust and its sweep draws a burning arc. The third roster
+//! (the end of this file): the Bellwether's toll rings out in a shockwave and frenzied Moulds
+//! burn blue-white (`palette().frenzy`), elites wear a searing glow and a crown of embers, a
+//! latched Snuffer smothers the view, the Smelter's slag lines glow on the floor first and
+//! then burn, the Effigy thunks.
 //!
 //! The client reads the same enemy definitions as the server (the built-ins compiled from
 //! `assets/enemies/*.ron`), so attack names and the laser's muzzle come from the data.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use engine::audio::Sfx;
+use engine::audio::{Audio, PlayParams, Sfx};
+use engine::gfx::{DrawItem, PointLight};
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use glam::{Quat, Vec2, Vec3, Vec4};
-use shared::protocol::{EntityState, enemy_flags, kind, player_flags};
-use shared::sim::{EnemyDef, EnemyRegistry, HitPart, HitShape};
+use shared::protocol::{EntityState, NetId, enemy_flags, kind, player_flags, slag_flags};
+use shared::sim::{AiState, EnemyDef, EnemyRegistry, HitPart, HitShape};
 
 use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::Rng;
-use crate::models::EnemyKind;
+use crate::models::enemies::slag;
+use crate::models::{EnemyKind, ModelId, ModelLibrary, Tint};
 use crate::palette::palette;
 
 /// The enemy definitions the client knows (the built-ins: the same files the server loads).
@@ -38,6 +45,10 @@ pub fn enemy_kind(k: u16) -> EnemyKind {
         kind::HARRIER => EnemyKind::Harrier,
         kind::GAOLER => EnemyKind::Gaoler,
         kind::HERON => EnemyKind::Heron,
+        kind::BELLWETHER => EnemyKind::Bellwether,
+        kind::SNUFFER => EnemyKind::Snuffer,
+        kind::SMELTER => EnemyKind::Smelter,
+        kind::EFFIGY => EnemyKind::Effigy,
         _ => EnemyKind::Gnawer,
     }
 }
@@ -49,6 +60,10 @@ pub fn enemy_name(k: u16) -> &'static str {
         kind::HARRIER => "HARRIER",
         kind::GAOLER => "GAOLER",
         kind::HERON => "HERON",
+        kind::BELLWETHER => "BELLWETHER",
+        kind::SNUFFER => "SNUFFER",
+        kind::SMELTER => "SMELTER",
+        kind::EFFIGY => "EFFIGY",
         _ => "GNAWER",
     }
 }
@@ -90,8 +105,37 @@ pub fn attack_sfx(k: u16, index: u8, strike: bool) -> Option<Sfx> {
         ("needle", true) => return None,
         ("kick", false) => Sfx::HeronKickWindup,
         ("kick", true) => Sfx::HeronKick,
+        // The third roster. The latch's leap is silent: it clanks on when it lands
+        // (`SnufferLatch`); the pour's line ignites with the strike.
+        ("toll", false) => Sfx::BellwetherTollWindup,
+        ("toll", true) => Sfx::BellwetherToll,
+        ("clapper", false) => Sfx::BellwetherClapperWindup,
+        ("clapper", true) => Sfx::BellwetherClapper,
+        ("latch" | "nip", false) => Sfx::SnufferPounceWindup,
+        ("latch", true) => return None,
+        ("nip", true) => Sfx::SnufferNip,
+        ("pour", false) => Sfx::SmelterPourWindup,
+        ("pour", true) => Sfx::SmelterPour,
+        ("heave", false) => Sfx::SmelterSwingWindup,
+        ("heave", true) => Sfx::SmelterSwing,
         _ => return None,
     })
+}
+
+/// A hit on an enemy of kind `k` (the training dummy thunks).
+pub fn hurt_sfx(k: u16) -> Sfx {
+    match k {
+        kind::EFFIGY => Sfx::EffigyHit,
+        _ => Sfx::EnemyHurt,
+    }
+}
+
+/// The heavy death sound (Gaoler, Smelter) or the ordinary one.
+pub fn death_sfx(k: u16) -> Sfx {
+    match k {
+        kind::GAOLER | kind::SMELTER => Sfx::GaolerDeath,
+        _ => Sfx::EnemyDeath,
+    }
 }
 
 /// The bark when an enemy notices a player.
@@ -101,6 +145,9 @@ pub fn alert_sfx(k: u16) -> Sfx {
         kind::HARRIER => Sfx::HarrierAlert,
         kind::GAOLER => Sfx::GaolerAlert,
         kind::HERON => Sfx::HeronAlert,
+        kind::BELLWETHER => Sfx::BellwetherAlert,
+        kind::SNUFFER => Sfx::SnufferAlert,
+        kind::SMELTER => Sfx::SmelterAlert,
         _ => Sfx::GnawerAlert,
     }
 }
@@ -506,4 +553,630 @@ pub fn dive_streak(effects: &mut Effects, rng: &mut Rng, at: Vec3, back: Vec3) {
 pub fn swat_burst(effects: &mut Effects, rng: &mut Rng, at: Vec3, wax: Vec4, heat: Vec4) {
     wax_hit(effects, rng, at, Vec3::NEG_Y, 3.0, wax, heat);
     effects.glow(at, Vec4::new(1.0, 1.0, 0.9, 1.0), 1.5, 0.15);
+}
+
+// ---- the third roster: tolls, frenzy, elites, latches, slag lines ----------------------------
+
+/// Client-side state of one enemy for the third roster's effects (kept in `EnemyVis`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExtraVis {
+    /// Replicated flags last frame (flag changes).
+    flags: u32,
+    /// Seconds to the next frenzy aura spark, elite crown ember, smother puff / sound.
+    aura: f32,
+    crown: f32,
+    smother: f32,
+    smother_sound: f32,
+}
+
+/// What [`enemy_extras`] needs to know about the frame.
+pub struct ExtraFrame {
+    /// Middle of the enemy's body.
+    pub center: Vec3,
+    /// Model height.
+    pub height: f32,
+    pub camera: Vec3,
+    /// Owner code of the local player (a Snuffer latched on them smothers the view).
+    pub local_owner: Option<u16>,
+    pub dt: f32,
+    /// Walk cycle before and after this frame (footfalls).
+    pub cycle_before: f32,
+    pub cycle: f32,
+}
+
+/// World position of weak point `name` of a replicated enemy.
+fn weak_point_at(e: &EntityState, name: &str) -> Option<Vec3> {
+    let d = def(e.kind)?;
+    let w = d.weak_points.iter().find(|w| w.name == name)?;
+    Some(e.position + Quat::from_rotation_y(e.yaw) * w.offset)
+}
+
+/// Is this enemy a Snuffer clinging to the local player?
+pub fn latched_on_local(e: &EntityState, local_owner: Option<u16>) -> bool {
+    e.flags & enemy_flags::LATCHED != 0 && local_owner == Some(e.owner)
+}
+
+/// Where to draw a Snuffer latched onto the local player: clinging to their chest, belly
+/// against it, its body hanging below the view and the cap clamped just under the eyes, legs
+/// reaching up the sides (the replicated position trails the predicted camera, so this is
+/// placed from the camera).
+pub fn latched_root(e: &EntityState, camera: Vec3) -> glam::Mat4 {
+    let to = e.position + Vec3::Y * 0.7 - camera;
+    let dir = Vec3::new(to.x, 0.0, to.z).normalize_or(Vec3::NEG_Z);
+    // Local −Z (the cap's facing) points up and back at the camera, local +Y (its back) away.
+    let (a, b) = (0.35, 0.94);
+    let fwd = -dir * a + Vec3::Y * b;
+    let up = dir * b + Vec3::Y * a;
+    let x = up.cross(-fwd);
+    let rot = glam::Mat3::from_cols(x, up, -fwd);
+    // Drawn a little smaller than life so the cap sits along the bottom of the view.
+    let scale = 0.75;
+    let center = camera + dir * 0.75 - Vec3::Y * 1.65;
+    let origin = center - rot * Vec3::new(0.0, 0.65, 0.1) * scale;
+    glam::Mat4::from_translation(origin)
+        * glam::Mat4::from_mat3(rot)
+        * glam::Mat4::from_scale(Vec3::splat(scale))
+}
+
+/// State / flag changes and continuous effects of the third roster: frenzy flares and auras,
+/// elite crowns, the toll's ring and a cracked bell, a Snuffer clamping on (and smothering the
+/// view of the player it holds) or thrown off, the Smelter's footfalls, dripping crucible and
+/// the slag it spills when it dies.
+pub fn enemy_extras(
+    e: &EntityState,
+    prev_state: u16,
+    x: &mut ExtraVis,
+    f: &ExtraFrame,
+    effects: &mut Effects,
+    audio: &mut Audio,
+    rng: &mut Rng,
+) {
+    let p = palette();
+    let dt = f.dt;
+    let state = AiState::from_u16(e.state);
+    let prev = AiState::from_u16(prev_state);
+    let entered = |s: AiState| prev != Some(s) && state == Some(s);
+    let dying = e.flags & enemy_flags::DYING != 0;
+    let attack = attack_name(e.kind, ((e.aux >> 8) & 0xFF) as u8);
+    let attack = attack.as_deref();
+    let progress = (e.aux & 0xFF) as f32 / 255.0;
+
+    // Frenzy: a flare when the toll takes, a blue-white aura while it lasts.
+    let frenzied = e.flags & enemy_flags::FRENZIED != 0 && !dying;
+    if frenzied && x.flags & enemy_flags::FRENZIED == 0 {
+        let c = p.effect(Vec4::new(0.55, 0.8, 1.0, 1.0), p.frenzy, 1.2);
+        effects.glow(f.center, c, 1.6 + 0.4 * f.height, 0.3);
+        for _ in 0..14 {
+            spark(
+                effects,
+                f.center + rng.dir() * 0.5,
+                rng.dir() * 4.0 + Vec3::Y * 2.0,
+                c,
+                rng,
+            );
+        }
+        audio.play(Sfx::Frenzied, PlayParams::at(f.center));
+    }
+    if frenzied {
+        x.aura -= dt;
+        while x.aura <= 0.0 {
+            x.aura += 0.03;
+            // Blue-white flame tongues licking up its body, and sparks.
+            let c = p.effect(Vec4::new(0.5, 0.78, 1.0, 1.0), p.frenzy, 1.1);
+            let r = 0.35 + 0.15 * f.height;
+            let a = rng.angle();
+            let at =
+                e.position + Vec3::new(a.cos() * r, rng.range(0.1, f.height * 0.9), a.sin() * r);
+            effects.spawn(Particle {
+                position: at,
+                velocity: Vec3::Y * rng.range(1.5, 3.0),
+                gravity: -1.0,
+                drag: 1.5,
+                max_life: rng.range(0.25, 0.45),
+                size: Vec2::new(0.22, 0.4) * (0.6 + 0.25 * f.height),
+                end_scale: 0.2,
+                color: Vec4::new(c.x, c.y, c.z, 0.7),
+                texture: FxTex::Glow,
+                additive: true,
+                ..Default::default()
+            });
+            spark(
+                effects,
+                at,
+                Vec3::new(0.0, rng.range(1.5, 3.5), 0.0),
+                c,
+                rng,
+            );
+        }
+    }
+    // Elites: a crown of searing embers circling over the head.
+    if e.flags & enemy_flags::ELITE != 0 && !dying {
+        x.crown -= dt;
+        while x.crown <= 0.0 {
+            x.crown += 0.03;
+            let c = p.effect(Vec4::new(1.0, 0.85, 0.45, 1.0), p.elite, 1.3);
+            let r = 0.25 + 0.12 * f.height;
+            let a = rng.angle();
+            let top = e.position + Vec3::Y * (f.height + 0.25);
+            let at = top + Vec3::new(a.cos() * r, 0.0, a.sin() * r);
+            let swirl = Vec3::new(-a.sin(), 0.0, a.cos()) * 1.5;
+            spark(effects, at, swirl + Vec3::Y * rng.range(1.0, 2.2), c, rng);
+        }
+    }
+
+    match e.kind {
+        kind::BELLWETHER => {
+            let bell = weak_point_at(e, "bell").unwrap_or(f.center);
+            if attack == Some("toll") {
+                // Heat shimmering off the bell as it is hauled back, more and more.
+                if state == Some(AiState::Windup) && rng.unit() < dt * (8.0 + 40.0 * progress) {
+                    let c = p.effect(Vec4::new(1.0, 0.7, 0.3, 1.0), p.telegraph, 1.0);
+                    let at = bell + rng.dir() * 0.5;
+                    spark(effects, at, Vec3::Y * rng.range(1.0, 2.5), c, rng);
+                }
+                if entered(AiState::Strike) {
+                    let radius = def(e.kind)
+                        .and_then(|d| d.attacks.iter().find_map(|a| a.toll.clone()))
+                        .map_or(18.0, |t| t.radius);
+                    toll_ring(effects, rng, bell, e.position, radius);
+                }
+                // Shot mid-swing: the bell cracks, the toll is cancelled.
+                if entered(AiState::Stunned) && prev == Some(AiState::Windup) {
+                    effects.glow(bell, Vec4::new(1.0, 0.9, 0.7, 1.0), 1.8, 0.15);
+                    effects.sparks(bell, Vec3::Y, 16);
+                    for _ in 0..8 {
+                        effects.spawn(Particle {
+                            position: bell,
+                            velocity: rng.dir() * rng.range(3.0, 7.0) + Vec3::Y * 2.0,
+                            gravity: 16.0,
+                            max_life: rng.range(0.6, 1.1),
+                            size: Vec2::splat(rng.range(0.08, 0.16)),
+                            color: Vec4::new(0.75, 0.52, 0.25, 1.0),
+                            end_alpha: 0.3,
+                            texture: FxTex::Shard,
+                            rotation: rng.angle(),
+                            spin: rng.range(-12.0, 12.0),
+                            collide: Some(OnHit::Bounce(0.3)),
+                            ..Default::default()
+                        });
+                    }
+                    audio.play(Sfx::BellCrack, PlayParams::at(bell));
+                }
+            }
+            if entered(AiState::Dying) {
+                // The bell comes down with it.
+                audio.play(Sfx::BellCrack, PlayParams::at(bell).with_pitch(0.8));
+            }
+        }
+        kind::SNUFFER => {
+            if entered(AiState::Latched) {
+                effects.glow(f.center, Vec4::new(1.0, 0.6, 0.25, 0.8), 1.0, 0.15);
+                effects.smoke(f.center, 2);
+                audio.play(Sfx::SnufferLatch, PlayParams::at(f.center));
+            }
+            if state == Some(AiState::Latched) && local_owner_is(e, f.local_owner) {
+                // Your wick being smothered: soot closing in from below, a muffled gutter.
+                x.smother -= dt;
+                while x.smother <= 0.0 {
+                    x.smother += 0.05;
+                    let to = Vec3::new(e.position.x - f.camera.x, 0.0, e.position.z - f.camera.z)
+                        .normalize_or(Vec3::NEG_Z);
+                    let side = Vec3::new(-to.z, 0.0, to.x);
+                    let at = f.camera + to * 0.55 + side * rng.range(-0.45, 0.45)
+                        - Vec3::Y * rng.range(0.2, 0.45);
+                    effects.spawn(Particle {
+                        position: at,
+                        velocity: Vec3::Y * rng.range(0.1, 0.4),
+                        max_life: rng.range(0.3, 0.6),
+                        size: Vec2::splat(rng.range(0.25, 0.4)),
+                        end_scale: 1.8,
+                        color: Vec4::new(0.06, 0.05, 0.05, 0.5),
+                        end_alpha: 0.0,
+                        texture: FxTex::Smoke,
+                        rotation: rng.angle(),
+                        ..Default::default()
+                    });
+                }
+                x.smother_sound -= dt;
+                if x.smother_sound <= 0.0 {
+                    x.smother_sound = 0.55;
+                    audio.play(Sfx::SnufferSmother, PlayParams::default());
+                }
+            } else if state == Some(AiState::Latched) && rng.unit() < dt * 12.0 {
+                // Seen from outside: soot and sparks squeezed out from under the cap.
+                effects.smoke(f.center, 1);
+                effects.sparks(f.center, Vec3::Y, 2);
+            }
+            if entered(AiState::Stunned) && prev == Some(AiState::Latched) {
+                effects.sparks(f.center, Vec3::Y, 12);
+                audio.play(Sfx::SnufferThrown, PlayParams::at(f.center));
+            }
+        }
+        kind::SMELTER => {
+            let speed = Vec3::new(e.velocity.x, 0.0, e.velocity.z).length();
+            if !dying && speed > 0.4 && (f.cycle * 2.0).floor() != (f.cycle_before * 2.0).floor() {
+                audio.play(Sfx::SmelterStep, PlayParams::at(e.position));
+                effects.dust(e.position, 3, 1.4);
+            }
+            if attack == Some("pour")
+                && matches!(state, Some(AiState::Windup | AiState::Strike))
+                && rng.unit()
+                    < dt * if state == Some(AiState::Strike) {
+                        60.0
+                    } else {
+                        15.0
+                    }
+            {
+                // Slag slopping over the lip as it tips, then a stream as it pours.
+                let lip = e.position + Quat::from_rotation_y(e.yaw) * Vec3::new(0.0, 1.9, -1.55);
+                let c = p.effect(Vec4::new(1.0, 0.6, 0.15, 1.0), p.hazard, 1.0);
+                effects.spawn(Particle {
+                    position: lip + rng.dir() * 0.15,
+                    velocity: Quat::from_rotation_y(e.yaw) * Vec3::new(0.0, -1.0, -1.5)
+                        + rng.dir() * 0.5,
+                    gravity: 14.0,
+                    max_life: rng.range(0.3, 0.6),
+                    size: Vec2::splat(rng.range(0.14, 0.26)),
+                    end_scale: 0.6,
+                    color: c,
+                    texture: FxTex::Glow,
+                    additive: true,
+                    collide: Some(OnHit::Splat(DecalKind::Scorch, 0.5)),
+                    ..Default::default()
+                });
+            }
+            if entered(AiState::Dying) {
+                // The crucible tips out of its fists: a spill of slag and glowing lumps.
+                let spill = e.position + Quat::from_rotation_y(e.yaw) * Vec3::new(0.0, 0.8, -1.4);
+                let c = p.effect(Vec4::new(1.0, 0.55, 0.12, 1.0), p.hazard, 1.0);
+                effects.glow(spill, c, 2.5, 0.5);
+                for _ in 0..14 {
+                    effects.spawn(Particle {
+                        position: spill,
+                        velocity: rng.dir() * rng.range(2.0, 5.0) + Vec3::Y * 3.0,
+                        gravity: 16.0,
+                        drag: 0.3,
+                        max_life: rng.range(1.0, 2.0),
+                        size: Vec2::splat(rng.range(0.15, 0.3)),
+                        end_scale: 0.7,
+                        color: c,
+                        end_alpha: 0.2,
+                        texture: FxTex::Lump,
+                        rotation: rng.angle(),
+                        spin: rng.range(-6.0, 6.0),
+                        collide: Some(OnHit::Splat(DecalKind::Scorch, 0.9)),
+                        ..Default::default()
+                    });
+                }
+                audio.play(Sfx::SlagBurn, PlayParams::at(spill));
+            }
+        }
+        _ => {}
+    }
+    x.flags = e.flags;
+}
+
+fn local_owner_is(e: &EntityState, local_owner: Option<u16>) -> bool {
+    local_owner == Some(e.owner)
+}
+
+/// A short-lived additive spark.
+fn spark(effects: &mut Effects, at: Vec3, velocity: Vec3, color: Vec4, rng: &mut Rng) {
+    effects.spawn(Particle {
+        position: at,
+        velocity,
+        gravity: -0.5,
+        drag: 1.0,
+        max_life: rng.range(0.35, 0.7),
+        size: Vec2::splat(rng.range(0.07, 0.13)),
+        end_scale: 0.3,
+        color,
+        texture: FxTex::Spark,
+        additive: true,
+        ..Default::default()
+    });
+}
+
+/// The toll rings out: a flash at the bell, a ring racing out to the toll's reach at bell
+/// height and a shockwave along the floor (the frenzy colour: this is what frenzies them).
+pub fn toll_ring(effects: &mut Effects, rng: &mut Rng, bell: Vec3, feet: Vec3, radius: f32) {
+    let p = palette();
+    let c = p.effect(Vec4::new(1.0, 0.82, 0.45, 0.9), p.frenzy, 1.0);
+    effects.glow(bell, Vec4::new(1.0, 0.95, 0.8, 1.0), 2.4, 0.25);
+    for (life, size) in [(0.5, 2.0), (0.8, 1.2)] {
+        effects.spawn(Particle {
+            position: bell,
+            max_life: life,
+            size: Vec2::splat(size),
+            end_scale: radius * 2.0 / size,
+            color: c,
+            end_alpha: 0.0,
+            texture: FxTex::Ring,
+            additive: true,
+            ..Default::default()
+        });
+    }
+    effects.shockwave(feet, radius * 0.5);
+    for _ in 0..20 {
+        let v = (rng.dir() + Vec3::Y * 0.4).normalize_or(Vec3::Y) * rng.range(4.0, 9.0);
+        spark(effects, bell, v, c, rng);
+    }
+}
+
+/// Elite and frenzy looks on an enemy's draw tint: an elite's wax runs hot (warm body, hotter
+/// glows); a frenzied Mould's telegraph parts flare and pulse.
+pub fn decorate_tint(e: &EntityState, time: f64, tint: &mut Tint) {
+    if e.flags & enemy_flags::DYING != 0 {
+        return;
+    }
+    if e.flags & enemy_flags::ELITE != 0 {
+        tint.body *= Vec4::new(1.3, 1.1, 0.88, 1.0);
+        tint.glow *= 1.35;
+    }
+    if e.flags & enemy_flags::FRENZIED != 0 {
+        let pulse = 0.5 + 0.5 * ((time * 9.0 + (e.id.0 % 13) as f64).sin() as f32);
+        tint.glow *= 1.3 + 0.7 * pulse;
+        tint.body *= Vec4::new(
+            0.95 + 0.15 * pulse,
+            0.95 + 0.2 * pulse,
+            1.0 + 0.3 * pulse,
+            1.0,
+        );
+    }
+}
+
+/// An elite's searing aura: the same pose drawn again a little larger, translucent and lit in
+/// the elite colour.
+pub fn elite_shell(e: &EntityState, time: f64) -> Option<(f32, Tint)> {
+    if e.flags & enemy_flags::ELITE == 0 || e.flags & enemy_flags::DYING != 0 {
+        return None;
+    }
+    let p = palette();
+    let c = p.effect(Vec4::new(1.0, 0.7, 0.3, 1.0), p.elite, 1.0);
+    let flicker = 0.22 + 0.06 * ((time * 13.0 + e.id.0 as f64).sin() as f32);
+    let tint = Tint {
+        body: (c.truncate() * 2.2).extend(flicker),
+        glow: Vec4::new(1.0, 1.0, 1.0, flicker),
+        ..Default::default()
+    };
+    Some((1.07, tint))
+}
+
+/// Extra lights: an elite sears, a frenzied Mould pulses in the frenzy colour.
+pub fn enemy_lights(e: &EntityState, center: Vec3, time: f64, lights: &mut Vec<PointLight>) {
+    if e.flags & enemy_flags::DYING != 0 || lights.len() >= 48 {
+        return;
+    }
+    let p = palette();
+    if e.flags & enemy_flags::ELITE != 0 {
+        lights.push(PointLight {
+            position: center,
+            color: p.light(Vec3::new(2.0, 1.4, 0.6), p.elite, 1.8),
+            radius: 5.0,
+        });
+    }
+    if e.flags & enemy_flags::FRENZIED != 0 {
+        let pulse = 0.6 + 0.4 * ((time * 9.0).sin() as f32).abs();
+        lights.push(PointLight {
+            position: center,
+            color: p.light(Vec3::new(0.8, 1.3, 2.2), p.frenzy, 1.6) * pulse,
+            radius: 4.5,
+        });
+    }
+}
+
+// ---- slag lines (`kind::SLAG_LINE`) ------------------------------------------------------------
+
+#[derive(Clone, Debug, Default)]
+struct SlagVis {
+    /// Floor points (traced like the server's).
+    points: Vec<Vec3>,
+    seen: bool,
+    lit: bool,
+}
+
+/// The Smelter's slag lines: a glowing telegraph line on the floor during the pour's wind-up,
+/// then a burning strip that smokes and spits embers, cooling for its last second and leaving
+/// scorch marks.
+#[derive(Default)]
+pub struct SlagView {
+    lines: HashMap<NetId, SlagVis>,
+}
+
+/// Half-width (m) of a replicated slag line (`state` = width in cm).
+fn slag_half_width(e: &EntityState) -> f32 {
+    (e.state as f32 / 200.0).max(0.1)
+}
+
+impl SlagView {
+    pub fn clear(&mut self) {
+        self.lines.clear();
+    }
+
+    /// Call before updating this frame's lines.
+    pub fn begin(&mut self) {
+        for v in self.lines.values_mut() {
+            v.seen = false;
+        }
+    }
+
+    /// Forgets lines that are gone (after [`SlagView::update`] for every line).
+    pub fn end(&mut self) {
+        self.lines.retain(|_, v| v.seen);
+    }
+
+    /// One replicated slag line this frame: its floor path (first sight), ignition (embers,
+    /// scorch marks, a sizzle), embers and smoke while it burns.
+    pub fn update(
+        &mut self,
+        e: &EntityState,
+        world: Option<&CollisionWorld>,
+        dt: f32,
+        effects: &mut Effects,
+        audio: &mut Audio,
+        rng: &mut Rng,
+    ) {
+        let v = self.lines.entry(e.id).or_insert_with(|| {
+            let flat = Vec3::new(e.velocity.x, 0.0, e.velocity.z);
+            let points = match world {
+                Some(w) => {
+                    shared::sim::enemy::trace_floor(w, e.position, flat, flat.length() + 0.05)
+                }
+                None => Vec::new(),
+            };
+            SlagVis {
+                points: if points.len() >= 2 {
+                    points
+                } else {
+                    vec![e.position, e.position + e.velocity]
+                },
+                ..Default::default()
+            }
+        });
+        v.seen = true;
+        let live = e.flags & slag_flags::LIVE != 0;
+        let cooling = e.flags & slag_flags::COOLING != 0;
+        let p = palette();
+        let n = v.points.len();
+        let at = |rng: &mut Rng, pts: &[Vec3]| {
+            let i = ((rng.unit() * (pts.len() - 1) as f32) as usize).min(pts.len() - 2);
+            pts[i].lerp(pts[i + 1], rng.unit())
+        };
+        let half = slag_half_width(e);
+        if live && !v.lit {
+            v.lit = true;
+            let mid = v.points[n / 2];
+            audio.play(Sfx::SlagBurn, PlayParams::at(mid));
+            for (i, pt) in v.points.iter().enumerate() {
+                if i % 2 == 0 {
+                    effects.decal(*pt + Vec3::Y * 0.02, Vec3::Y, half * 2.2, DecalKind::Scorch);
+                }
+            }
+            let c = p.effect(Vec4::new(1.0, 0.65, 0.2, 1.0), p.hazard, 1.2);
+            for _ in 0..(n * 2).min(40) {
+                let pt = at(rng, &v.points);
+                spark(effects, pt, rng.dir() * 2.0 + Vec3::Y * 3.0, c, rng);
+            }
+        }
+        if !live {
+            // The telegraph: sparks skipping along the line.
+            if rng.unit() < dt * (6.0 + 0.6 * n as f32) {
+                let c = p.effect(Vec4::new(1.0, 0.3, 0.1, 1.0), p.telegraph, 1.0);
+                let pt = at(rng, &v.points) + Vec3::Y * 0.05;
+                spark(effects, pt, Vec3::Y * rng.range(0.8, 2.0), c, rng);
+            }
+            return;
+        }
+        let rate = if cooling { 0.3 } else { 1.0 };
+        if rng.unit() < dt * rate * (10.0 + 1.5 * n as f32) {
+            let c = p.effect(Vec4::new(1.0, 0.62, 0.2, 1.0), p.hazard, 1.0);
+            let side = Vec3::new(rng.range(-half, half), 0.05, rng.range(-half, half)) * 0.7;
+            spark(
+                effects,
+                at(rng, &v.points) + side,
+                Vec3::Y * rng.range(1.0, 3.0) + rng.dir() * 0.4,
+                c,
+                rng,
+            );
+        }
+        if rng.unit() < dt * (if cooling { 6.0 } else { 2.0 }) {
+            let pt = at(rng, &v.points);
+            effects.spawn(Particle {
+                position: pt + Vec3::Y * 0.2,
+                velocity: Vec3::Y * rng.range(0.6, 1.2),
+                gravity: -0.3,
+                drag: 1.0,
+                max_life: rng.range(1.0, 1.8),
+                size: Vec2::splat(rng.range(0.4, 0.7)),
+                end_scale: 2.4,
+                color: Vec4::new(0.3, 0.27, 0.25, 0.4),
+                end_alpha: 0.0,
+                texture: FxTex::Smoke,
+                rotation: rng.angle(),
+                ..Default::default()
+            });
+        }
+    }
+
+    /// Draws a replicated slag line: the telegraph line (its rims, pulsing in the telegraph
+    /// colour, over a faint strip), then the molten strip (the hazard colour in the
+    /// colour-blind palettes) with a few lights along it.
+    pub fn draw(
+        &self,
+        lib: &ModelLibrary,
+        e: &EntityState,
+        time: f64,
+        draws: &mut Vec<DrawItem>,
+        lights: &mut Vec<PointLight>,
+    ) {
+        let Some(v) = self.lines.get(&e.id) else {
+            return;
+        };
+        let rig = lib.get(ModelId::SlagStrip);
+        let p = palette();
+        let live = e.flags & slag_flags::LIVE != 0;
+        let cooling = e.flags & slag_flags::COOLING != 0;
+        let width = slag_half_width(e) * 2.0;
+        let flicker = 0.85 + 0.15 * ((time * 11.0 + e.id.0 as f64).sin() as f32);
+        let pulse = 0.5 + 0.5 * ((time * 8.0).sin() as f32);
+        let mut strip = rig.rest_pose();
+        let mut rims = rig.rest_pose();
+        strip.hide(slag::RIMS);
+        rims.hide(slag::STRIP);
+        let (strip_tint, rim_tint) = if !live {
+            let c = p.telegraph;
+            (
+                Tint {
+                    glow: Vec4::new(0.45 + 0.3 * pulse, 0.45 + 0.3 * pulse, 0.45, 0.45),
+                    glow_color: Some(c),
+                    ..Default::default()
+                },
+                Tint {
+                    glow: Vec4::splat(1.0),
+                    glow_color: Some(c),
+                    ..Default::default()
+                },
+            )
+        } else {
+            let heat = if cooling { 0.55 } else { 1.7 * flicker };
+            let strip = Tint {
+                glow: Vec4::new(heat, heat * if cooling { 0.6 } else { 1.0 }, heat, 1.0),
+                glow_color: p.model_glow(p.hazard),
+                ..Default::default()
+            };
+            (strip, strip)
+        };
+        for w in v.points.windows(2) {
+            // Lifted clear of the floor (no depth fighting at grazing angles).
+            let (a, b) = (w[0] + Vec3::Y * 0.08, w[1] + Vec3::Y * 0.08);
+            let d = b - a;
+            let len = d.length();
+            if len < 1e-3 {
+                continue;
+            }
+            let root = glam::Mat4::from_scale_rotation_translation(
+                Vec3::new(width, 1.0, len * 1.04),
+                Quat::from_rotation_arc(Vec3::NEG_Z, d / len),
+                a,
+            );
+            rig.draw(&strip, root, &strip_tint, draws);
+            if !live {
+                rig.draw(&rims, root, &rim_tint, draws);
+            }
+        }
+        if live && v.points.len() >= 2 {
+            let n = v.points.len();
+            let heat = if cooling { 0.4 } else { 1.0 };
+            for i in [n / 6, n / 2, (5 * n) / 6] {
+                if lights.len() >= 48 {
+                    break;
+                }
+                lights.push(PointLight {
+                    position: v.points[i.min(n - 1)] + Vec3::Y * 0.6,
+                    color: p.light(Vec3::new(2.2, 1.0, 0.3), p.hazard, 1.8) * heat * flicker,
+                    radius: 4.5,
+                });
+            }
+        }
+    }
 }

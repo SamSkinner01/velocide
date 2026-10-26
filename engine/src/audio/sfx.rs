@@ -130,6 +130,43 @@ pub enum Sfx {
     Countdown,
     MatchStart,
     MatchEnd,
+    // enemies: the third roster (docs/enemies.md)
+    /// A Bellwether notices you: a hollow groan through the hood, the bell humming.
+    BellwetherAlert,
+    /// The 1.6 s toll wind-up: the yoke creaking, a bowed-metal hum swelling to a shriek.
+    BellwetherTollWindup,
+    /// The toll: one deep bronze strike (the sound that means "frenzy").
+    BellwetherToll,
+    /// The bell shot mid-swing: a cracked, dissonant clank, the toll cancelled.
+    BellCrack,
+    /// A Mould frenzied by the toll: a hiss of flaring heat and a snarl.
+    Frenzied,
+    BellwetherClapperWindup,
+    BellwetherClapper,
+    /// A Snuffer: dry brass chittering, legs ticking.
+    SnufferAlert,
+    /// Rearing to leap: a rising hiss under the cap, legs clicking.
+    SnufferPounceWindup,
+    /// It clamps on: a muffled brass clank and a flame snuffed.
+    SnufferLatch,
+    /// Smothering your wick: a muffled, guttering flame (repeats while latched on you).
+    SnufferSmother,
+    /// Punched / shaken off: a ringing clang and skittering legs.
+    SnufferThrown,
+    SnufferNip,
+    /// A Smelter: a furnace roar through the grate, chains shaken.
+    SmelterAlert,
+    /// Tipping the crucible: iron grinding, slag bubbling up to the lip.
+    SmelterPourWindup,
+    /// The pour: a heavy molten gush hissing along the floor.
+    SmelterPour,
+    /// Standing in slag: a sharp sizzle.
+    SlagBurn,
+    SmelterSwingWindup,
+    SmelterSwing,
+    SmelterStep,
+    /// A hit on the training dummy: a wax thunk and the post creaking.
+    EffigyHit,
 }
 
 /// Mixing and playback metadata of one sound.
@@ -273,6 +310,28 @@ impl Sfx {
         Sfx::Countdown,
         Sfx::MatchStart,
         Sfx::MatchEnd,
+        // enemies
+        Sfx::BellwetherAlert,
+        Sfx::BellwetherTollWindup,
+        Sfx::BellwetherToll,
+        Sfx::BellCrack,
+        Sfx::Frenzied,
+        Sfx::BellwetherClapperWindup,
+        Sfx::BellwetherClapper,
+        Sfx::SnufferAlert,
+        Sfx::SnufferPounceWindup,
+        Sfx::SnufferLatch,
+        Sfx::SnufferSmother,
+        Sfx::SnufferThrown,
+        Sfx::SnufferNip,
+        Sfx::SmelterAlert,
+        Sfx::SmelterPourWindup,
+        Sfx::SmelterPour,
+        Sfx::SlagBurn,
+        Sfx::SmelterSwingWindup,
+        Sfx::SmelterSwing,
+        Sfx::SmelterStep,
+        Sfx::EffigyHit,
     ];
 
     /// Number of sounds; `sfx as usize` is a valid index below this.
@@ -399,6 +458,29 @@ impl Sfx {
             Countdown => info(-16.0, 2, 0.0, 0.1),
             MatchStart => info(-13.0, 1, 0.0, 0.2),
             MatchEnd => info(-13.0, 1, 0.0, 0.2),
+
+            // enemies
+            BellwetherAlert => info(-16.0, 3, 0.05, 0.1),
+            BellwetherTollWindup => info(-13.0, 3, 0.0, 0.2),
+            BellwetherToll => info(-9.0, 3, 0.02, 0.2),
+            BellCrack => info(-11.0, 3, 0.04, 0.1),
+            Frenzied => info(-17.0, 4, 0.08, 0.06),
+            BellwetherClapperWindup => info(-16.0, 3, 0.05, 0.05),
+            BellwetherClapper => info(-14.0, 3, 0.06, 0.05),
+            SnufferAlert => variants(info(-18.0, 4, 0.1, 0.1), 2),
+            SnufferPounceWindup => info(-14.0, 4, 0.06, 0.05),
+            SnufferLatch => info(-12.0, 3, 0.04, 0.05),
+            SnufferSmother => info(-16.0, 2, 0.06, 0.2),
+            SnufferThrown => info(-13.0, 3, 0.05, 0.05),
+            SnufferNip => info(-17.0, 4, 0.08, 0.03),
+            SmelterAlert => info(-14.0, 2, 0.04, 0.2),
+            SmelterPourWindup => info(-13.0, 3, 0.0, 0.2),
+            SmelterPour => info(-12.0, 3, 0.04, 0.1),
+            SlagBurn => variants(info(-17.0, 4, 0.1, 0.12), 2),
+            SmelterSwingWindup => info(-15.0, 3, 0.04, 0.1),
+            SmelterSwing => info(-12.0, 3, 0.04, 0.1),
+            SmelterStep => variants(info(-18.0, 4, 0.06, 0.1), 2),
+            EffigyHit => variants(info(-18.0, 4, 0.1, 0.04), 2),
         }
     }
 }
@@ -2438,6 +2520,250 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut b = layer(&[(&horn, 0.8, 0.0), (&gong, 0.5, 0.0)]);
             reverb(&mut b, 0.7, 0.5, 0.2, 0.6);
             b
+        }
+        // ----- enemies: the third roster (docs/enemies.md) ---------------------------------
+        BellwetherAlert => {
+            // A hollow groan through the hood over the bell humming in sympathy.
+            let groan = growl(r, 1.0, 70.0, 58.0, [380.0, 820.0], 0.04, 0.2, 0.45);
+            let hum = metal(
+                1.2,
+                98.0,
+                &[(1.0, 0.6, 0.9), (2.4, 0.4, 0.6), (3.1, 0.25, 0.5)],
+            );
+            let mut b = layer(&[(&groan, 1.0, 0.0), (&hum, 0.35, 0.05)]);
+            drive(&mut b, 1.8);
+            reverb(&mut b, 0.6, 0.5, 0.2, 0.5);
+            b
+        }
+        BellwetherTollWindup => {
+            // Hauling the bell back: the yoke's timbers creak, a bowed-metal hum swells and
+            // climbs into a shriek, cut just before the strike (1.6 s).
+            let dur = 1.6;
+            let mut creak = tone(dur, Wave::Saw, 140.0, 95.0, dur, 0.2, 0.9);
+            lowpass(&mut creak, 900.0);
+            stutter(&mut creak, 23.0, 0.0);
+            let mut bow = {
+                let mut o = Osc::new(Wave::Saw);
+                let mut o2 = Osc::new(Wave::Saw);
+                render(dur, |t, _| {
+                    let f = sweep(t, 196.0, 523.0, dur);
+                    let env =
+                        smoothstep(0.0, dur * 0.9, t) * (1.0 - smoothstep(dur - 0.08, dur, t));
+                    (o.next(f) + 0.6 * o2.next(f * 2.73)) * env
+                })
+            };
+            lowpass(&mut bow, 2600.0);
+            let hiss = noise(r, dur, Pass::High, 2500.0, 7000.0, 0.7, 1.2, 0.3);
+            let mut b = layer(&[(&creak, 0.6, 0.0), (&bow, 0.8, 0.0), (&hiss, 0.25, 0.0)]);
+            fade_out(&mut b, 0.03);
+            b
+        }
+        BellwetherToll => {
+            // One deep bronze strike: a long inharmonic bell over a sub boom, the beating of its
+            // partials swelling the tail. Loud: it means every Mould near it is about to come
+            // at you twice as hard.
+            let strike = metal(
+                3.2,
+                73.4,
+                &[
+                    (0.5, 0.9, 2.6),
+                    (1.0, 1.0, 2.2),
+                    (1.19, 0.7, 1.8),
+                    (1.5, 0.45, 1.5),
+                    (2.0, 0.5, 1.2),
+                    (2.52, 0.35, 0.8),
+                    (3.01, 0.25, 0.6),
+                ],
+            );
+            let beat = metal(3.0, 74.1, &[(1.0, 0.6, 2.0), (2.0, 0.3, 1.0)]);
+            let boom = thump(1.4, 70.0, 30.0, 0.05, 0.45);
+            let clank = click(r, 0.004);
+            let mut b = layer(&[
+                (&strike, 1.0, 0.0),
+                (&beat, 0.6, 0.0),
+                (&boom, 0.9, 0.0),
+                (&clank, 0.5, 0.0),
+            ]);
+            drive(&mut b, 1.4);
+            reverb(&mut b, 0.8, 0.5, 0.25, 0.6);
+            b
+        }
+        BellCrack => {
+            // The bell hit mid-swing: a cracked, buzzing clank (no ring), a wooden crack.
+            let mut clank = metal(
+                0.6,
+                233.0,
+                &[
+                    (1.0, 1.0, 0.18),
+                    (1.37, 0.8, 0.12),
+                    (2.71, 0.6, 0.08),
+                    (4.4, 0.4, 0.05),
+                ],
+            );
+            crush(&mut clank, 6, 3.0);
+            let crack = noise(r, 0.25, Pass::Band, 2400.0, 700.0, 1.2, 0.0005, 0.05);
+            let thud = thump(0.3, 160.0, 60.0, 0.01, 0.08);
+            let mut b = layer(&[(&clank, 1.0, 0.0), (&crack, 0.8, 0.0), (&thud, 0.6, 0.0)]);
+            drive(&mut b, 2.2);
+            b
+        }
+        Frenzied => {
+            // Heat flaring up inside a Mould: a rising hiss and a short snarl.
+            let flare = noise(r, 0.45, Pass::Band, 900.0, 4200.0, 1.3, 0.04, 0.2);
+            let snarl = growl(r, 0.35, 140.0, 260.0, [800.0, 1700.0], 0.12, 0.03, 0.15);
+            let mut b = layer(&[(&flare, 1.0, 0.0), (&snarl, 0.6, 0.05)]);
+            drive(&mut b, 2.0);
+            b
+        }
+        BellwetherClapperWindup => {
+            // A fist drawn back: knuckles creaking, the bell clinking as it shifts.
+            let dur = 0.6;
+            let creak = noise(r, dur, Pass::Band, 500.0, 1100.0, 5.0, 0.3, 0.3);
+            let clink = metal(0.4, 880.0, &[(1.0, 0.6, 0.15), (2.7, 0.3, 0.08)]);
+            layer(&[(&creak, 1.0, 0.0), (&clink, 0.35, 0.2)])
+        }
+        BellwetherClapper => {
+            let air = whoosh(r, 0.35, 2000.0, 400.0, 1.2);
+            let thud = thump(0.3, 130.0, 55.0, 0.01, 0.08);
+            let ding = metal(0.6, 196.0, &[(1.0, 0.5, 0.3), (2.4, 0.3, 0.2)]);
+            layer(&[(&air, 1.0, 0.0), (&thud, 0.8, 0.0), (&ding, 0.3, 0.02)])
+        }
+        SnufferAlert => {
+            // Brass legs ticking, a dry chitter under the cap.
+            let ticks = crackle(r, 0.5, 90.0, 0.3);
+            let mut chitter = growl(r, 0.45, 300.0, 380.0, [1500.0, 2900.0], 0.2, 0.02, 0.2);
+            stutter(&mut chitter, 30.0, 0.0);
+            let mut b = layer(&[(&ticks, 0.8, 0.0), (&chitter, 0.8, 0.03)]);
+            highpass(&mut b, 300.0);
+            b
+        }
+        SnufferPounceWindup => {
+            // Rearing back: air hissing out from under the lifted cap, rising; legs clicking.
+            let dur = 0.7;
+            let hiss = noise(r, dur, Pass::Band, 1200.0, 5200.0, 2.0, 0.5, 0.2);
+            let clicks = crackle(r, dur, 50.0, 2.0);
+            let mut b = layer(&[(&hiss, 1.0, 0.0), (&clicks, 0.6, 0.0)]);
+            fade_out(&mut b, 0.02);
+            b
+        }
+        SnufferLatch => {
+            // Clamped on: a muffled brass clank, the flame inside it pressed out with a puff.
+            let mut clank = metal(0.35, 520.0, &[(1.0, 1.0, 0.08), (2.2, 0.6, 0.05)]);
+            lowpass(&mut clank, 2200.0);
+            let thud = thump(0.3, 150.0, 60.0, 0.01, 0.07);
+            let puff = noise(r, 0.35, Pass::Low, 1800.0, 300.0, 0.8, 0.01, 0.08);
+            layer(&[(&clank, 0.9, 0.0), (&thud, 0.9, 0.0), (&puff, 0.7, 0.04)])
+        }
+        SnufferSmother => {
+            // Your wick being smothered: a muffled flame guttering under a cap.
+            let mut flame = gutter(r, 0.6, 700.0, 240.0, 14.0, 0.3);
+            lowpass(&mut flame, 1500.0);
+            let hum = tone(0.6, Wave::Sine, 110.0, 95.0, 0.6, 0.05, 0.3);
+            layer(&[(&flame, 1.0, 0.0), (&hum, 0.3, 0.0)])
+        }
+        SnufferThrown => {
+            // Punched off: the cap rings, legs skitter on the floor.
+            let ring = metal(
+                0.7,
+                660.0,
+                &[(1.0, 1.0, 0.3), (2.76, 0.5, 0.15), (5.4, 0.25, 0.08)],
+            );
+            let skitter = crackle(r, 0.5, 120.0, 0.3);
+            let thud = thump(0.2, 180.0, 70.0, 0.01, 0.05);
+            layer(&[(&ring, 0.8, 0.0), (&skitter, 0.6, 0.08), (&thud, 0.8, 0.0)])
+        }
+        SnufferNip => {
+            // The cap's rim snapping shut: a brass snip.
+            let snip = metal(0.15, 1400.0, &[(1.0, 1.0, 0.03), (1.6, 0.6, 0.02)]);
+            let snap = click(r, 0.002);
+            layer(&[(&snip, 0.9, 0.0), (&snap, 0.8, 0.0)])
+        }
+        SmelterAlert => {
+            // A furnace roaring up through the grate, chains shaken.
+            let dur = 1.1;
+            let mut n = Rng::new(r.next_u64());
+            let mut lp = Svf::default();
+            let roar = render(dur, |t, _| {
+                let env = smoothstep(0.0, 0.15, t) * (-(t - 0.15).max(0.0) / 0.4).exp();
+                lp.lowpass(n.bipolar(), sweep(t, 250.0, 900.0, 0.3), 1.2) * env
+            });
+            let bellow = growl(r, 0.9, 52.0, 45.0, [300.0, 600.0], 0.05, 0.1, 0.4);
+            let rattle = crackle(r, 0.7, 160.0, 0.4);
+            let mut b = layer(&[(&roar, 1.0, 0.0), (&bellow, 0.6, 0.0), (&rattle, 0.4, 0.1)]);
+            drive(&mut b, 2.0);
+            reverb(&mut b, 0.6, 0.5, 0.2, 0.5);
+            b
+        }
+        SmelterPourWindup => {
+            // The crucible tipping (1.1 s): iron grinding, slag bubbling up to the lip.
+            let dur = 1.1;
+            let grind = noise(r, dur, Pass::Band, 300.0, 900.0, 5.0, 0.4, 0.4);
+            let mut bubbles = crackle(r, dur, 60.0, 4.0);
+            lowpass(&mut bubbles, 1200.0);
+            let rumble = tone(dur, Wave::Saw, 48.0, 62.0, dur, 0.5, 0.6);
+            let mut b = layer(&[
+                (&grind, 0.9, 0.0),
+                (&bubbles, 0.9, 0.0),
+                (&rumble, 0.3, 0.0),
+            ]);
+            fade_out(&mut b, 0.03);
+            b
+        }
+        SmelterPour => {
+            // A heavy molten gush that hisses as it hits the floor and runs along it.
+            let gush = noise(r, 1.2, Pass::Low, 1200.0, 400.0, 0.8, 0.05, 0.5);
+            let hiss = noise(r, 1.4, Pass::High, 4000.0, 2500.0, 0.7, 0.1, 0.6);
+            let spits = crackle(r, 1.2, 220.0, 0.6);
+            let thud = thump(0.4, 90.0, 40.0, 0.02, 0.12);
+            let mut b = layer(&[
+                (&gush, 1.0, 0.0),
+                (&hiss, 0.5, 0.1),
+                (&spits, 0.5, 0.1),
+                (&thud, 0.6, 0.0),
+            ]);
+            drive(&mut b, 1.6);
+            b
+        }
+        SlagBurn => {
+            // Standing in slag: a sharp sizzle.
+            let sizzle = noise(r, 0.35, Pass::High, 5000.0, 3000.0, 0.8, 0.003, 0.12);
+            let spits = crackle(r, 0.3, 300.0, 0.15);
+            layer(&[(&sizzle, 1.0, 0.0), (&spits, 0.6, 0.0)])
+        }
+        SmelterSwingWindup => {
+            // Hauling the crucible round: chains snapping taut, iron groaning.
+            let dur = 0.8;
+            let links = crackle(r, dur, 200.0, 1.5);
+            let mut groan = tone(dur, Wave::Saw, 90.0, 70.0, dur, 0.2, 0.5);
+            lowpass(&mut groan, 600.0);
+            layer(&[(&links, 0.8, 0.0), (&groan, 0.6, 0.0)])
+        }
+        SmelterSwing => {
+            let air = whoosh(r, 0.55, 250.0, 1400.0, 1.4);
+            let clang = metal(
+                0.8,
+                110.0,
+                &[(1.0, 1.0, 0.4), (2.3, 0.6, 0.25), (3.8, 0.4, 0.15)],
+            );
+            let links = crackle(r, 0.4, 350.0, 0.2);
+            let mut b = layer(&[(&air, 1.0, 0.0), (&clang, 0.4, 0.15), (&links, 0.5, 0.0)]);
+            drive(&mut b, 1.6);
+            b
+        }
+        SmelterStep => {
+            // A heavy footfall, the slag in the crucible sloshing.
+            let thud = thump(0.35, 75.0, 35.0, 0.02, 0.1);
+            let slosh = noise(r, 0.3, Pass::Low, 700.0, 250.0, 1.0, 0.03, 0.1);
+            layer(&[(&thud, 1.0, 0.0), (&slosh, 0.4, 0.04)])
+        }
+        EffigyHit => {
+            // A shot into packed wax and the post creaking as it rocks.
+            let thunk = thump(0.2, 210.0, 90.0, 0.01, 0.05);
+            let crack = noise(r, 0.12, Pass::Band, 1800.0, 900.0, 1.0, 0.0005, 0.03);
+            let mut creak = tone(0.35, Wave::Saw, 180.0, 140.0, 0.35, 0.05, 0.15);
+            lowpass(&mut creak, 1000.0);
+            stutter(&mut creak, 30.0, 0.0);
+            layer(&[(&thunk, 1.0, 0.0), (&crack, 0.6, 0.0), (&creak, 0.35, 0.06)])
         }
     }
 }

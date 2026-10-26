@@ -1,8 +1,11 @@
-//! Enemies, the Moulds (docs/roster.md): things poured and set in the Foundry, grey wax-flesh,
-//! slag, brass and chain, lit from inside where the heat collects. Gnawer (knuckle-walking
-//! pack crawler), Censer (robed brazier-head with a chained censer), Harrier (wax-winged
-//! carrion flyer), Gaoler (iron jailer with a cell-door shield, a chain flail and a caged
-//! lantern on its back), Heron (stilt-legged lens-eyed sniper). Each has a readable silhouette,
+//! Enemies, the Moulds (docs/roster.md, docs/enemies.md): things poured and set in the Foundry,
+//! grey wax-flesh, slag, brass and chain, lit from inside where the heat collects. Gnawer
+//! (knuckle-walking pack crawler), Censer (robed brazier-head with a chained censer), Harrier
+//! (wax-winged carrion flyer), Gaoler (iron jailer with a cell-door shield, a chain flail and a
+//! caged lantern on its back), Heron (stilt-legged lens-eyed sniper), Bellwether (stooped
+//! bell-ringer with a belfry yoke), Snuffer (six-legged skitterer with a snuffer-cap head),
+//! Smelter (bow-legged hulk with a slung crucible), Effigy (a wax training dummy on a post).
+//! Each has a readable silhouette,
 //! bright `Core` weak points, `Glow` telegraph parts that the pose functions drive from the
 //! attack state, and pure time-based poses.
 //!
@@ -11,11 +14,16 @@
 //! peaks on `Attack` and fades during `Recover`; `Stunned` / `Dying` go dark. Enemies with
 //! several attacks pose (and light) by [`EnemyAnim::attack`] (the definition's attack index).
 
+pub mod bellwether;
 pub mod censer;
+pub mod effigy;
 pub mod gaoler;
 pub mod gnawer;
 pub mod harrier;
 pub mod heron;
+pub mod slag;
+pub mod smelter;
+pub mod snuffer;
 
 use engine::glam::{Mat4, Quat, Vec3, Vec4};
 
@@ -29,15 +37,23 @@ pub enum EnemyKind {
     Harrier,
     Gaoler,
     Heron,
+    Bellwether,
+    Snuffer,
+    Smelter,
+    Effigy,
 }
 
 impl EnemyKind {
-    pub const ALL: [EnemyKind; 5] = [
+    pub const ALL: [EnemyKind; 9] = [
         EnemyKind::Gnawer,
         EnemyKind::Censer,
         EnemyKind::Harrier,
         EnemyKind::Gaoler,
         EnemyKind::Heron,
+        EnemyKind::Bellwether,
+        EnemyKind::Snuffer,
+        EnemyKind::Smelter,
+        EnemyKind::Effigy,
     ];
 
     /// From an enemy definition name (`assets/enemies/<name>.ron` file stem).
@@ -48,6 +64,10 @@ impl EnemyKind {
             "harrier" => Some(EnemyKind::Harrier),
             "gaoler" => Some(EnemyKind::Gaoler),
             "heron" => Some(EnemyKind::Heron),
+            "bellwether" => Some(EnemyKind::Bellwether),
+            "snuffer" => Some(EnemyKind::Snuffer),
+            "smelter" => Some(EnemyKind::Smelter),
+            "effigy" => Some(EnemyKind::Effigy),
             _ => None,
         }
     }
@@ -59,6 +79,10 @@ impl EnemyKind {
             EnemyKind::Harrier => ModelId::Harrier,
             EnemyKind::Gaoler => ModelId::Gaoler,
             EnemyKind::Heron => ModelId::Heron,
+            EnemyKind::Bellwether => ModelId::Bellwether,
+            EnemyKind::Snuffer => ModelId::Snuffer,
+            EnemyKind::Smelter => ModelId::Smelter,
+            EnemyKind::Effigy => ModelId::Effigy,
         }
     }
 
@@ -70,6 +94,10 @@ impl EnemyKind {
             EnemyKind::Harrier => 6.0,
             EnemyKind::Gaoler => 3.4,
             EnemyKind::Heron => 4.2,
+            EnemyKind::Bellwether => 3.0,
+            EnemyKind::Snuffer => 1.8,
+            EnemyKind::Smelter => 3.0,
+            EnemyKind::Effigy => 1.0,
         }
     }
 
@@ -87,6 +115,10 @@ impl EnemyKind {
             EnemyKind::Harrier => 1.3,
             EnemyKind::Gaoler => 3.7,
             EnemyKind::Heron => 3.4,
+            EnemyKind::Bellwether => 3.1,
+            EnemyKind::Snuffer => 1.4,
+            EnemyKind::Smelter => 3.4,
+            EnemyKind::Effigy => 2.2,
         }
     }
 
@@ -115,8 +147,10 @@ pub enum EnemyState {
     Attack(f32),
     /// Back to neutral after the strike.
     Recover(f32),
-    /// Parried / swatted: helpless.
+    /// Parried / swatted / interrupted / thrown off: helpless.
     Stunned,
+    /// Clinging to a player (a latched Snuffer).
+    Latched,
     /// Death: slumps, splits and melts (progress over the corpse time).
     Dying(f32),
 }
@@ -177,6 +211,10 @@ pub fn pose(anim: &EnemyAnim) -> Pose {
         EnemyKind::Harrier => harrier::pose(anim),
         EnemyKind::Gaoler => gaoler::pose(anim),
         EnemyKind::Heron => heron::pose(anim),
+        EnemyKind::Bellwether => bellwether::pose(anim),
+        EnemyKind::Snuffer => snuffer::pose(anim),
+        EnemyKind::Smelter => smelter::pose(anim),
+        EnemyKind::Effigy => effigy::pose(anim),
     }
 }
 
@@ -229,6 +267,7 @@ pub(crate) fn telegraph(state: EnemyState, time: f64, flicker_from: f32) -> f32 
             }
         }
         EnemyState::Attack(p) => 2.6 - 1.2 * p.clamp(0.0, 1.0),
+        EnemyState::Latched => 2.0 + 0.5 * wave(time, 2.2, 0.0),
         EnemyState::Recover(p) => 1.4 - 0.95 * p.clamp(0.0, 1.0),
         EnemyState::Stunned => 0.15 + 0.25 * strobe(time, 5.0),
         EnemyState::Dying(p) => 0.8 * (1.0 - p.clamp(0.0, 1.0)),

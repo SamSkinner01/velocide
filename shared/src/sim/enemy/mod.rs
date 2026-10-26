@@ -22,7 +22,7 @@ mod steer;
 
 pub use ai::{is_targetable, lob_velocity};
 pub use def::*;
-pub use hazard::SlagLine;
+pub use hazard::{SlagLine, trace_floor};
 pub use steer::{AiStats, AiWorld, NavAgent, PathMode};
 
 use std::sync::Arc;

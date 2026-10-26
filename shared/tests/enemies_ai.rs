@@ -256,7 +256,7 @@ fn every_attack_of_every_type_is_telegraphed_before_it_hurts() {
         },
         Scenario {
             def: "smelter",
-            attack: "swing",
+            attack: "heave",
             enemy: Vec3::new(0.0, 0.0, -3.2),
             secs: 4.0,
             run: None,

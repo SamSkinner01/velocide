@@ -545,7 +545,7 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             // The brazier tips off its shoulders.
             pose.rotate_move(HEAD, head, Vec3::new(0.35 * m, -0.4 * m, -0.3 * m));
         }
-        EnemyState::Idle | EnemyState::Walk => {}
+        EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
     }
 
     pose.set(

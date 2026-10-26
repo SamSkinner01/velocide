@@ -201,10 +201,13 @@ impl ModelLibrary {
 
     /// World-space point an enemy attacks from in its current pose: the Gnawer's jaw, the
     /// Censer's censer pot (ember bombs leave it), the Harrier's beak, the Gaoler's door (bash)
-    /// or flail ball, the Heron's lens (needle and laser). For muzzle flashes / impact
-    /// effects; gameplay positions come from the server.
+    /// or flail ball, the Heron's lens (needle and laser), the Bellwether's bell (toll) or fist,
+    /// the Snuffer's cap, the Smelter's crucible lip (pour) or crucible, the Effigy's sigil.
+    /// For muzzle flashes / impact effects; gameplay positions come from the server.
     pub fn enemy_attack_point(&self, anim: &EnemyAnim, root: Mat4) -> Vec3 {
-        use enemies::{EnemyKind, censer, gaoler, gnawer, harrier, heron};
+        use enemies::{
+            EnemyKind, bellwether, censer, effigy, gaoler, gnawer, harrier, heron, smelter, snuffer,
+        };
         let (part, offset) = match anim.kind {
             EnemyKind::Gnawer => (gnawer::JAW, Vec3::new(0.0, -0.1, -0.55)),
             EnemyKind::Censer => (censer::CENSER, Vec3::ZERO),
@@ -214,6 +217,16 @@ impl ModelLibrary {
             }
             EnemyKind::Gaoler => (gaoler::FLAIL, Vec3::ZERO),
             EnemyKind::Heron => (heron::LENS, Vec3::new(0.0, 0.14, -0.26)),
+            EnemyKind::Bellwether if anim.attack == bellwether::TOLL => {
+                (bellwether::BELL, Vec3::new(0.0, -0.5, 0.0))
+            }
+            EnemyKind::Bellwether => (bellwether::FOREARM_R, Vec3::new(0.0, -0.85, -0.2)),
+            EnemyKind::Snuffer => (snuffer::CAP, Vec3::new(0.0, -0.4, -0.14)),
+            EnemyKind::Smelter if anim.attack == smelter::POUR => {
+                (smelter::CRUCIBLE, Vec3::new(0.0, 0.05, -0.08))
+            }
+            EnemyKind::Smelter => (smelter::CRUCIBLE, Vec3::new(0.0, -0.5, 0.55)),
+            EnemyKind::Effigy => (effigy::SIGIL, Vec3::new(0.0, 0.85, -0.35)),
         };
         let pose = enemies::pose(anim);
         self.get(anim.kind.model())

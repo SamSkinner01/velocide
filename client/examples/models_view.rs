@@ -3,8 +3,11 @@
 //!
 //! - `lineup.png`: every character side by side (scale check);
 //! - `closeup_*.png`: each enemy from the front three-quarter and from behind;
+//! - `lineup_third.png`: the third roster (Bellwether, Snuffer, Smelter, Effigy) beside a
+//!   Shrike and a Gaoler for scale;
 //! - `shrike_*.png`, `gnawer_*.png`, `censer_*.png`, `harrier_*.png`, `gaoler_*.png`,
-//!   `heron_*.png`: animation states, every attack's wind-up and strike;
+//!   `heron_*.png`, `bellwether_*.png`, `snuffer_*.png`, `smelter_*.png`, `effigy_*.png`:
+//!   animation states, every attack's wind-up and strike;
 //! - `vm_*.png`: first-person viewmodels (rest, kick, alt modes, crest fold, bellows pump,
 //!   discharge charge, drum turn, switch, punch, thorn throw...);
 //! - `weapons.png`, `weapons_34.png`: the four guns at real scale (side, three-quarter front);
@@ -620,6 +623,119 @@ fn enemy_sheets() -> Vec<Sheet> {
             2.6,
             1.7,
         ),
+        // The third roster (docs/enemies.md).
+        (
+            "bellwether_1",
+            "BELLWETHER: TOLL",
+            EnemyKind::Bellwether,
+            vec![
+                ("IDLE", Idle, 0.0, 1, 0.0),
+                ("WALK", Walk, 5.0, 1, 0.0),
+                ("TOLL .4", Windup(0.4), 0.0, 1, 0.0),
+                ("TOLL .9", Windup(0.9), 0.0, 1, 0.0),
+                ("RING", Attack(0.5), 0.0, 1, 0.0),
+            ],
+            2.4,
+            10.0,
+            2.6,
+            1.8,
+        ),
+        (
+            "bellwether_2",
+            "BELLWETHER: CLAPPER, CRACKED, DEATH",
+            EnemyKind::Bellwether,
+            vec![
+                ("CLAP WIND", Windup(0.8), 0.0, 0, 0.0),
+                ("CLAPPER", Attack(0.4), 0.0, 0, 0.0),
+                ("CRACKED", Stunned, 0.0, 1, 0.0),
+                ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+                ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+            ],
+            2.4,
+            10.0,
+            2.6,
+            1.7,
+        ),
+        (
+            "snuffer_1",
+            "SNUFFER: LATCH",
+            EnemyKind::Snuffer,
+            vec![
+                ("IDLE", Idle, 0.0, 0, 0.0),
+                ("WALK", Walk, 10.0, 0, 0.0),
+                ("REAR .5", Windup(0.5), 0.0, 0, 0.0),
+                ("REAR .9", Windup(0.9), 0.0, 0, 0.0),
+                ("LEAP", Attack(0.4), 0.0, 0, 0.0),
+                ("LATCHED", Latched, 0.0, 0, 0.0),
+            ],
+            2.4,
+            8.0,
+            2.0,
+            0.7,
+        ),
+        (
+            "snuffer_2",
+            "SNUFFER: NIP, THROWN OFF, DEATH",
+            EnemyKind::Snuffer,
+            vec![
+                ("NIP WIND", Windup(0.8), 0.0, 1, 0.0),
+                ("NIP", Attack(0.4), 0.0, 1, 0.0),
+                ("THROWN", Stunned, 0.0, 0, 0.0),
+                ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+                ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+            ],
+            2.4,
+            8.0,
+            2.0,
+            0.7,
+        ),
+        (
+            "smelter_1",
+            "SMELTER: POUR",
+            EnemyKind::Smelter,
+            vec![
+                ("IDLE", Idle, 0.0, 1, 0.0),
+                ("WALK", Walk, 3.6, 1, 0.0),
+                ("TIP .5", Windup(0.5), 0.0, 1, 0.0),
+                ("TIP .9", Windup(0.9), 0.0, 1, 0.0),
+                ("POURING", Attack(0.5), 0.0, 1, 0.0),
+            ],
+            3.0,
+            12.0,
+            2.8,
+            1.8,
+        ),
+        (
+            "smelter_2",
+            "SMELTER: HEAVE, STUN, DEATH",
+            EnemyKind::Smelter,
+            vec![
+                ("HEAVE WIND", Windup(0.8), 0.0, 0, 0.0),
+                ("HEAVE", Attack(0.4), 0.0, 0, 0.0),
+                ("STUNNED", Stunned, 0.0, 0, 0.0),
+                ("MELTING", Dying(0.5), 0.0, 0, 0.0),
+                ("DEAD", Dying(1.0), 0.0, 0, 0.0),
+            ],
+            3.0,
+            12.0,
+            2.8,
+            1.8,
+        ),
+        (
+            "effigy_1",
+            "EFFIGY: IDLE, HIT, HIT",
+            EnemyKind::Effigy,
+            vec![
+                ("IDLE", Idle, 0.0, 0, 0.0),
+                ("HIT .1", Recover(0.1), 0.0, 0, 0.0),
+                ("HIT .3", Recover(0.3), 0.0, 0, 0.0),
+                ("HIT .6", Recover(0.6), 0.0, 0, 0.0),
+            ],
+            2.0,
+            7.0,
+            2.0,
+            1.2,
+        ),
     ]
 }
 
@@ -1030,6 +1146,49 @@ fn main() -> anyhow::Result<()> {
             );
         }
         shots.push(("lineup_back".into(), "LINEUP FROM BEHIND".into(), shot));
+        // The third roster beside a Shrike and a Gaoler (the five-slot lineup above is full).
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.3, 2.3, 10.5),
+            Vec3::new(0.3, 1.6, 0.0),
+            60.0,
+        ));
+        lib.draw_player(
+            &PlayerAnim {
+                yaw: FACE_CAMERA,
+                ..player(1.0)
+            },
+            Vec3::new(xs[0], 0.0, 0.0),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+        shot.labels
+            .push((Vec3::new(xs[0], -0.2, 0.0), "SHRIKE".into()));
+        let third = [
+            EnemyKind::Gaoler,
+            EnemyKind::Bellwether,
+            EnemyKind::Snuffer,
+            EnemyKind::Smelter,
+            EnemyKind::Effigy,
+        ];
+        for (kind, x) in third.iter().zip(&xs[1..]) {
+            let anim = EnemyAnim {
+                time: 1.0,
+                ..EnemyAnim::new(*kind)
+            };
+            lib.draw_enemy(
+                &anim,
+                EnemyAnim::root(Vec3::new(*x, 0.0, 0.0), FACE_CAMERA),
+                &Tint::default(),
+                &mut shot.draws,
+            );
+            shot.labels
+                .push((Vec3::new(*x, -0.2, 0.0), format!("{kind:?}").to_uppercase()));
+        }
+        shots.push((
+            "lineup_third".into(),
+            "LINEUP: THE THIRD ROSTER".into(),
+            shot,
+        ));
     }
     // Close-ups: each enemy idle (front three-quarter) next to the same model from behind.
     for (kind, dist, height) in [
@@ -1038,6 +1197,10 @@ fn main() -> anyhow::Result<()> {
         (EnemyKind::Harrier, 5.6, 1.6),
         (EnemyKind::Gaoler, 7.6, 2.0),
         (EnemyKind::Heron, 6.4, 1.8),
+        (EnemyKind::Bellwether, 7.0, 1.7),
+        (EnemyKind::Snuffer, 5.0, 0.8),
+        (EnemyKind::Smelter, 8.0, 1.8),
+        (EnemyKind::Effigy, 5.0, 1.2),
     ] {
         let mut shot = Shot::new(look_at(
             Vec3::new(0.0, height + 0.4, dist),

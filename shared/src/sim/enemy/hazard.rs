@@ -115,8 +115,9 @@ impl SlagLine {
 
 /// The floor path of a line from `from` (feet level) along horizontal `dir` for up to `len`
 /// metres: a point every [`STEP`] m on the floor, stopping where a wall is in the way (knee
-/// height), at a ledge or a step it can't flow over, or off the level.
-pub(crate) fn trace_floor(world: &CollisionWorld, from: Vec3, dir: Vec3, len: f32) -> Vec<Vec3> {
+/// height), at a ledge or a step it can't flow over, or off the level. Clients trace the same path
+/// from the replicated start and end to draw the line.
+pub fn trace_floor(world: &CollisionWorld, from: Vec3, dir: Vec3, len: f32) -> Vec<Vec3> {
     let dir = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero();
     let floor_at = |p: Vec3, y: f32| {
         world

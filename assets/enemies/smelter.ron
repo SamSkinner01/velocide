@@ -7,7 +7,7 @@
 //   where you are heading; then the slag floods down that line and burns for 5 s (22 damage per
 //   second to anyone standing in it). Step off the line during the wind-up, jump over it, or
 //   dash through it on i-frames. It stops at walls and ledges.
-// * Swing (close): it heaves the crucible round on its chains.
+// * Heave (close): it heaves the crucible round on its chains.
 //
 // Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md and
 // docs/enemies.md. Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up,
@@ -35,7 +35,7 @@
     armour: None,
     attacks: [
         (
-            name: "swing",
+            name: "heave",
             kind: Melee,
             range: 2.2,
             arc: 140.0,

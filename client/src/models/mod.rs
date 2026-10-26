@@ -49,6 +49,11 @@ pub enum ModelId {
     Harrier,
     Gaoler,
     Heron,
+    Bellwether,
+    Snuffer,
+    Smelter,
+    /// The warm-up's training dummy.
+    Effigy,
     // Weapons: used both as first-person viewmodels and in the Shrike's hand.
     Quill,
     Bellows,
@@ -71,6 +76,8 @@ pub enum ModelId {
     Needle,
     /// Unit glowing beam (the Heron's aim laser, needle streaks).
     AimLaser,
+    /// Unit strip of molten slag on the floor (the Smelter's slag lines).
+    SlagStrip,
     /// Thrown relay spike (also shown between the knuckles while throwing).
     Thorn,
     /// Optional glowing core for ember-burst effects (a cluster of live coals).
@@ -83,13 +90,17 @@ pub enum ModelId {
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 24] = [
+    pub const ALL: [ModelId; 29] = [
         ModelId::Shrike,
         ModelId::Gnawer,
         ModelId::Censer,
         ModelId::Harrier,
         ModelId::Gaoler,
         ModelId::Heron,
+        ModelId::Bellwether,
+        ModelId::Snuffer,
+        ModelId::Smelter,
+        ModelId::Effigy,
         ModelId::Quill,
         ModelId::Bellows,
         ModelId::Arclash,
@@ -102,6 +113,7 @@ impl ModelId {
         ModelId::EmberBomb,
         ModelId::Needle,
         ModelId::AimLaser,
+        ModelId::SlagStrip,
         ModelId::Thorn,
         ModelId::EmberCore,
         ModelId::JumpPad,
@@ -124,6 +136,10 @@ impl ModelId {
             ModelId::Harrier => "enemy_harrier.gltf",
             ModelId::Gaoler => "enemy_gaoler.gltf",
             ModelId::Heron => "enemy_heron.gltf",
+            ModelId::Bellwether => "enemy_bellwether.gltf",
+            ModelId::Snuffer => "enemy_snuffer.gltf",
+            ModelId::Smelter => "enemy_smelter.gltf",
+            ModelId::Effigy => "enemy_effigy.gltf",
             ModelId::Quill => "weapon_quill.gltf",
             ModelId::Bellows => "weapon_bellows.gltf",
             ModelId::Arclash => "weapon_arclash.gltf",
@@ -136,6 +152,7 @@ impl ModelId {
             ModelId::EmberBomb => "proj_ember_bomb.gltf",
             ModelId::Needle => "proj_needle.gltf",
             ModelId::AimLaser => "fx_aim_laser.gltf",
+            ModelId::SlagStrip => "fx_slag_strip.gltf",
             ModelId::Thorn => "proj_thorn.gltf",
             ModelId::EmberCore => "fx_ember_core.gltf",
             ModelId::JumpPad => "prop_jump_pad.gltf",
@@ -154,6 +171,11 @@ impl ModelId {
             ModelId::Harrier => &enemies::harrier::JOINTS,
             ModelId::Gaoler => &enemies::gaoler::JOINTS,
             ModelId::Heron => &enemies::heron::JOINTS,
+            ModelId::Bellwether => &enemies::bellwether::JOINTS,
+            ModelId::Snuffer => &enemies::snuffer::JOINTS,
+            ModelId::Smelter => &enemies::smelter::JOINTS,
+            ModelId::Effigy => &enemies::effigy::JOINTS,
+            ModelId::SlagStrip => &enemies::slag::JOINTS,
             ModelId::Quill => &weapons::quill::JOINTS,
             ModelId::Bellows => &weapons::bellows::JOINTS,
             ModelId::Arclash => &weapons::arclash::JOINTS,
@@ -177,6 +199,11 @@ impl ModelId {
             ModelId::Harrier => enemies::harrier::build(),
             ModelId::Gaoler => enemies::gaoler::build(),
             ModelId::Heron => enemies::heron::build(),
+            ModelId::Bellwether => enemies::bellwether::build(),
+            ModelId::Snuffer => enemies::snuffer::build(),
+            ModelId::Smelter => enemies::smelter::build(),
+            ModelId::Effigy => enemies::effigy::build(),
+            ModelId::SlagStrip => enemies::slag::build(),
             ModelId::Quill => weapons::quill::build(),
             ModelId::Bellows => weapons::bellows::build(),
             ModelId::Arclash => weapons::arclash::build(),
