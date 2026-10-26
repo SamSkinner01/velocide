@@ -12,6 +12,8 @@
 //!   `level_gen/drowned_chandlery.rs`).
 //! - `tallow_works.ron` — "Tallow Works", the roofed, vertical PvP / grind arena
 //!   (`level_gen/tallow_works.rs`).
+//! - `wickmarket.ron` — "Wickmarket", the open market arena with long sightlines
+//!   (`level_gen/wickmarket.rs`).
 //!
 //! Every arena has Mould gates for grind mode (`level_gen/gates.rs`).
 //!
@@ -51,6 +53,8 @@ mod knell_yard;
 mod spire;
 #[path = "level_gen/tallow_works.rs"]
 mod tallow_works;
+#[path = "level_gen/wickmarket.rs"]
+mod wickmarket;
 
 // ------------------------------------------------------------------------------------------
 // Builder
@@ -2661,6 +2665,11 @@ fn main() -> anyhow::Result<()> {
             "tallow_works.ron",
             tallow_works::tallow_works(),
             "Tallow Works — roofed, vertical arena for PvP (2-8 players) and grind. See docs/levels.md.\nGenerator module: client/examples/level_gen/tallow_works.rs.",
+        ),
+        (
+            "wickmarket.ron",
+            wickmarket::wickmarket(),
+            "Wickmarket — open market arena with long sightlines (4-8 players) and grind. See docs/levels.md.\nGenerator module: client/examples/level_gen/wickmarket.rs.",
         ),
         (
             "drowned_chandlery.ron",

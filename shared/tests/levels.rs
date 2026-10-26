@@ -46,6 +46,7 @@ const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
 const FURNACE: &str = "furnace_ring";
 const TALLOW: &str = "tallow_works";
+const WICKMARKET: &str = "wickmarket";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
 const SHIPPED: [&str; 8] = [
@@ -1965,6 +1966,36 @@ fn arena_laps() -> Vec<(&'static str, usize, Vec<Wp>, usize)> {
             ],
             3,
         ),
+        // Wickmarket: out of the east candle shop across the market, up the east guild stair to
+        // the guild walk, along it past both kiosks, down the west stair, onto the gallows dais
+        // and its pad up onto the beam, off it, the east pad back up onto the guild walk.
+        (
+            WICKMARKET,
+            0,
+            vec![
+                run(33.0, 0.0, -18.0),
+                run(22.0, 0.0, -19.5),
+                run(20.5, 0.0, -23.5),
+                run(36.0, 7.0, -23.5),
+                run(34.0, 7.0, -28.0),
+                run(20.0, 7.0, -27.5),
+                run(-20.0, 7.0, -27.5),
+                run(-34.0, 7.0, -27.5),
+                run(-36.0, 7.0, -23.5),
+                run(-20.0, 0.0, -23.5),
+                run(-8.0, 0.0, -12.0),
+                run(-3.0, 0.45, -6.0),
+                pad(-3.0, 0.9, 3.0),
+                run(-3.0, 14.2, 0.0),
+                run(0.0, 14.2, 0.0),
+                run(0.0, 0.0, -9.0),
+                run(6.0, 0.0, -14.0),
+                pad(8.0, 0.0, -19.0),
+                run(8.0, 7.0, -31.0),
+                run(16.0, 7.0, -30.0),
+            ],
+            2,
+        ),
         // Furnace Ring, all three rings: out of the north floor alcove, the crucible pad onto
         // the crucible's top, jump off over the slag, the south-east floor pad onto tier 1, up
         // the south-east ramp to the rim, round the rim (east and north sides, past the rim
@@ -2477,6 +2508,69 @@ fn drowned_chandlery_tech() {
 }
 
 #[test]
+fn wickmarket_tech() {
+    let level = load(WICKMARKET);
+    let col = collision(&level, None);
+
+    // Slam bounce from the cobbles onto a stall's awning (3.6 m).
+    let mut b = Script::new(&level, &col, Vec3::new(15.8, 0.0, -18.0));
+    for _ in 0..5 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    b.tick(Vec3::ZERO, Buttons::JUMP);
+    while b.s.velocity.y > 0.0 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    assert!(
+        b.tick(Vec3::ZERO, Buttons::CROUCH).slam_started,
+        "slam from the jump's apex"
+    );
+    assert!(
+        (0..60).any(|_| b.tick(Vec3::ZERO, Buttons::JUMP).slam_bounced),
+        "slam bounce off the cobbles"
+    );
+    let mut landed = false;
+    for _ in 0..120 {
+        // Steer over the awning once above it, then brake.
+        let dir = if b.s.position.y > 3.9 && b.s.position.x > 12.8 {
+            Vec3::NEG_X
+        } else if b.s.velocity.x < -0.5 {
+            Vec3::X
+        } else {
+            Vec3::ZERO
+        };
+        if b.tick(dir, Buttons::NONE).landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (b.s.position.y - 3.6).abs() < 0.05,
+        "the slam bounce should land on the awning, got {}",
+        b.s.position
+    );
+
+    // Dash-jump from the gallows' beam over the market onto the guild walk (31 m north,
+    // 7 m down, over the parapet).
+    let north = Vec3::NEG_Z;
+    let mut d = Script::new(&level, &col, Vec3::new(-2.0, 14.2, 0.0));
+    for _ in 0..3 {
+        d.tick(north, Buttons::NONE);
+    }
+    d.tick(north, Buttons::DASH);
+    assert!(
+        d.tick(north, Buttons::JUMP).dash_jumped,
+        "dash-jump off the beam"
+    );
+    assert!(d.until_landed(north, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        (d.s.position.y - 7.0).abs() < 0.05 && d.s.position.z < -26.0,
+        "the dash-jump should land on the guild walk, got {}",
+        d.s.position
+    );
+}
+
+#[test]
 fn tallow_works_tech() {
     let level = load(TALLOW);
     let col = collision(&level, None);
@@ -2898,7 +2992,7 @@ fn grind_spawns_are_valid() {
 }
 
 /// Arenas built with the PvP spawn rule: no player spawn can see another (eye to chest).
-const FAIR_SPAWNS: [&str; 2] = [FURNACE, TALLOW];
+const FAIR_SPAWNS: [&str; 3] = [FURNACE, TALLOW, WICKMARKET];
 
 #[test]
 fn pvp_spawns_cannot_see_each_other() {
