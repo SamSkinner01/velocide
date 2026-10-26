@@ -153,8 +153,10 @@ impl Hud {
             } else {
                 (format!("-{}", (-popup.amount).round() as i32), p.damage)
             };
-            let y = (anchor.y - 12.0 * age - i as f32 * 10.0).round();
-            let style = TextStyle::new(fade(color, alpha)).outline(fade(t.ink, 0.9 * alpha));
+            let y = (anchor.y - 12.0 * age - i as f32 * 18.0).round();
+            let style = TextStyle::new(fade(color, alpha))
+                .scale(2.0)
+                .outline(fade(t.ink, 0.9 * alpha));
             list.text(vec2(anchor.x, y), &text, &style);
         }
     }
@@ -273,7 +275,7 @@ impl Hud {
         );
         self.track_health(info.health, now);
         if shape_cues() {
-            self.draw_popups(list, t, vec2(14.0, c.max.y - 60.0), now);
+            self.draw_popups(list, t, vec2(14.0, c.max.y - 66.0), now);
         }
         let pip = vec2(14.0, 5.0);
         hud::pips(

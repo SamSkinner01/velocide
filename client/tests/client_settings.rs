@@ -2,9 +2,13 @@
 
 use client::cli::{self, Cli, StartMode};
 use client::controls::Action;
+use client::menus::settings_menu::{ACCESSIBILITY_TAB, SettingsMenu, SettingsResponse};
 use client::settings::{Accessibility, CueMode, Settings};
 use engine::color_vision::{ColorVision, ColorVisionMode};
-use engine::input::{Binding, Key};
+use engine::gfx::UiDrawList;
+use engine::input::{Binding, InputState, Key};
+use engine::ui::{Rect, Theme, Ui, UiInput, UiKey, UiState};
+use glam::{Vec2, vec2};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -127,7 +131,10 @@ fn accessibility_values_are_repaired_and_cues_follow_the_mode() {
         "(accessibility: (color_vision: (mode: Protanopia, strength: 7.5), future: 1))",
     )
     .unwrap();
-    assert_eq!(s.accessibility.color_vision.mode, ColorVisionMode::Protanopia);
+    assert_eq!(
+        s.accessibility.color_vision.mode,
+        ColorVisionMode::Protanopia
+    );
     assert_eq!(s.accessibility.color_vision.strength, 1.0);
     // AUTO turns the shape cues on with any colour mode.
     assert_eq!(s.accessibility.shape_cues, CueMode::Auto);
@@ -139,6 +146,63 @@ fn accessibility_values_are_repaired_and_cues_follow_the_mode() {
         ..Default::default()
     };
     assert!(on.shape_cues_on());
+}
+
+/// One frame of the settings screen with scripted UI keys.
+fn settings_frame(
+    menu: &mut SettingsMenu,
+    state: &mut UiState,
+    s: &mut Settings,
+    keys: &[UiKey],
+) -> SettingsResponse {
+    let theme = Theme::default();
+    let mut list = UiDrawList::new(vec2(640.0, 360.0));
+    let ui_input = UiInput {
+        mouse_pos: Vec2::splat(-100.0),
+        keys: keys.to_vec(),
+        ..Default::default()
+    };
+    let mut ui = Ui::new(&mut list, state, &ui_input, &theme);
+    let rect = Rect::from_center_size(vec2(320.0, 180.0), vec2(460.0, 330.0));
+    menu.ui(&mut ui, s, &InputState::new(), rect)
+}
+
+#[test]
+fn accessibility_tab_changes_colour_vision_live() {
+    let mut menu = SettingsMenu::new();
+    menu.tab = ACCESSIBILITY_TAB;
+    let mut state = UiState::new();
+    let mut s = Settings::default();
+    settings_frame(&mut menu, &mut state, &mut s, &[]);
+    // Focus order: tabs, COLOUR MODE, (FILTER STRENGTH only when a mode is on), SHAPE CUES.
+    settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Down]);
+    let r = settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Right]);
+    assert!(r.changed, "applied live");
+    assert_eq!(
+        s.accessibility.color_vision.mode,
+        ColorVisionMode::Protanopia
+    );
+    let r = settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Right]);
+    assert!(r.changed);
+    assert_eq!(
+        s.accessibility.color_vision.mode,
+        ColorVisionMode::Deuteranopia
+    );
+    assert!(s.accessibility.shape_cues_on(), "AUTO follows the mode");
+    // The strength slider is enabled now.
+    settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Down]);
+    let r = settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Left, UiKey::Left]);
+    assert!(r.changed);
+    assert!((s.accessibility.color_vision.strength - 0.9).abs() < 1e-4);
+    assert_eq!(
+        s.render_settings().color_vision,
+        s.accessibility.color_vision
+    );
+    // SHAPE CUES: AUTO -> ON -> OFF.
+    settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Down]);
+    settings_frame(&mut menu, &mut state, &mut s, &[UiKey::Right, UiKey::Right]);
+    assert_eq!(s.accessibility.shape_cues, CueMode::Off);
+    assert!(!s.accessibility.shape_cues_on());
 }
 
 #[test]

@@ -131,9 +131,13 @@ pub fn in_parry_window(e: &EntityState) -> bool {
         && e.flags & enemy_flags::DYING == 0
 }
 
-/// A parry icon over every enemy [`in_parry_window`]. `height(kind)` is the enemy's height
-/// (the icon floats above it). Icons halve in size beyond 14 m and fade out from 40 to 60 m.
-/// Call it when `palette::shape_cues()` is on.
+/// Icons stay below this canvas y (the level timer and status line sit above it).
+const ICON_TOP: f32 = 40.0;
+
+/// A parry icon over every enemy [`in_parry_window`]. `height(kind)` is the enemy's height:
+/// the icon floats above its head, or, when the head is above the screen (a big enemy up
+/// close), is held at the top of the view over the enemy. Icons halve in size beyond 14 m
+/// and fade out from 40 to 60 m. Call it when `palette::shape_cues()` is on.
 pub fn parry_icons<'a>(
     list: &mut UiDrawList,
     camera: &Camera,
@@ -145,17 +149,25 @@ pub fn parry_icons<'a>(
 ) {
     let canvas = list.canvas_size;
     for e in entities.into_iter().filter(|e| in_parry_window(e)) {
-        let top = e.position + Vec3::Y * (height(e.kind).unwrap_or(2.0) + 0.5);
-        let Some(at) = project(camera, canvas, top) else {
+        let h = height(e.kind).unwrap_or(2.0);
+        let top = e.position + Vec3::Y * (h + 0.5);
+        let body = e.position + Vec3::Y * (h * 0.5);
+        let Some(at) = project(camera, canvas, top).or_else(|| project(camera, canvas, body))
+        else {
             continue;
         };
-        let dist = camera.position.distance(top);
+        let dist = camera.position.distance(body);
         let alpha = (1.0 - (dist - 40.0) / 20.0).clamp(0.0, 1.0);
         if alpha <= 0.0 {
             continue;
         }
         let unit = if dist < 14.0 { 2.0 } else { 1.0 };
-        draw_parry_icon(list, at - vec2(0.0, 6.0 * unit), unit, alpha, p, ink, time);
+        let half = 4.5 * unit + 1.0;
+        let center = vec2(
+            at.x.clamp(half, canvas.x - half),
+            (at.y - 6.0 * unit).clamp(ICON_TOP + half, canvas.y - half),
+        );
+        draw_parry_icon(list, center, unit, alpha, p, ink, time);
     }
 }
 
@@ -246,5 +258,21 @@ mod tests {
             ..enemy(ahead, enemy_flags::PARRYABLE)
         };
         assert!(count(&[player]).is_empty());
+        // A 3.7 m heavy right in front: its head is off screen, the icon stays in view and
+        // below the timer.
+        let close = enemy(Vec3::new(0.0, 0.0, -3.0), enemy_flags::PARRYABLE);
+        let mut list = UiDrawList::new(vec2(640.0, 360.0));
+        parry_icons(
+            &mut list,
+            &camera,
+            &[close],
+            &|_| Some(3.7),
+            p,
+            Vec4::ONE,
+            0.0,
+        );
+        assert!(!list.quads.is_empty());
+        let top = list.quads.iter().map(|q| q.min.y).fold(f32::MAX, f32::min);
+        assert!(top >= ICON_TOP, "icon top {top}");
     }
 }
