@@ -3,9 +3,11 @@
 //! with normal colour vision can check the palettes and the full-screen correction.
 //!
 //! Moments: the ACCESSIBILITY settings page over the menu backdrop, a hosted co-op game with
-//! bots (team colours, name-tag markers, the campaign level's colours), an enemy in its
-//! parryable window (telegraph glow, parry strobe + icon), the HUD after a hit (hard damage,
-//! health popups for a hit and a heal) and the scoreboard.
+//! bots (team colours, name-tag markers, the campaign level's colours) and its scoreboard;
+//! then the Moulds in single-player: the Gaoler's bash parry window (strobe + "!" icon), a
+//! Gnawer's bite wind-up, the Heron's aim laser tracking and locked, Censer ember bombs in
+//! flight, a diving Harrier (parryable throughout); and the HUD after a hit and a heal (hard
+//! damage, health popups).
 //!
 //! For each moment `<m>` it writes `<m>_<mode>.png` (what the screen shows) and, per
 //! deficiency, `<m>_<mode>_compare.png`: three panels at half size — the standard look, how
@@ -35,7 +37,8 @@ use engine::ui::{UiInput, UiKey};
 use glam::{Vec2, Vec3};
 use server::{LobbyCommand, ServerCommand};
 use shared::input::Buttons;
-use shared::protocol::{enemy_flags, kind};
+use shared::protocol::{EntityState, enemy_flags, kind, projectile_flags};
+use shared::sim::AiState;
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -227,18 +230,58 @@ fn hold(game: &mut InGame) {
     game.controls.override_move = Some((0.0, 0.0, Buttons::NONE));
 }
 
-/// Nearest living enemy (position) and whether it is in its parry window.
-fn nearest_enemy(game: &InGame) -> Option<(Vec3, bool)> {
-    let net = game.net()?;
-    let me = eye(game)?;
-    net.remote_entities()
+/// The living enemy of kind `k`, if any.
+fn enemy_of(game: &InGame, k: u16) -> Option<EntityState> {
+    game.net()?
+        .remote_entities()
         .iter()
-        .filter(|e| kind::is_enemy(e.kind) && e.flags & enemy_flags::DYING == 0)
-        .min_by(|a, b| {
-            let (da, db) = (a.position.distance(me), b.position.distance(me));
-            da.total_cmp(&db)
-        })
-        .map(|e| (e.position, e.flags & enemy_flags::PARRYABLE != 0))
+        .find(|e| e.kind == k && e.flags & enemy_flags::DYING == 0)
+        .copied()
+}
+
+/// Spawns one `name` (net kind `k`) in front of us, looks at it and plays until `ready` holds
+/// (or `max` frames pass). Returns whether it happened.
+fn stage(
+    h: &mut Harness,
+    game: &mut InGame,
+    name: &str,
+    k: u16,
+    max: usize,
+    ready: impl Fn(&InGame, &EntityState) -> bool,
+) -> bool {
+    game.send_chat("/killall");
+    h.play(game, 20, hold);
+    game.send_chat(&format!("/spawn {name} 1"));
+    for _ in 0..max {
+        let Some(e) = enemy_of(game, k) else {
+            h.play(game, 1, hold);
+            continue;
+        };
+        if ready(game, &e) {
+            return true;
+        }
+        let height = if k == kind::HARRIER { 0.0 } else { 1.6 };
+        h.play(game, 1, |g| {
+            hold(g);
+            aim_at(g, e.position + Vec3::Y * height);
+        });
+    }
+    false
+}
+
+fn flag(e: &EntityState, bit: u32) -> bool {
+    e.flags & bit != 0
+}
+
+/// One staged moment in every mode (`ok` = the scripted situation was reached).
+fn snap(h: &mut Harness, game: &mut InGame, name: &str, ok: bool) {
+    let what = if ok {
+        "caught"
+    } else {
+        "NOT caught (shot anyway)"
+    };
+    println!("{name}: {what}");
+    h.moment(name, |h| h.frame(Screen::Game(&mut *game), &[], 1e-4));
 }
 
 fn main() -> anyhow::Result<()> {
@@ -365,26 +408,85 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(game.is_playing(), "single-player didn't start");
     // God mode keeps us alive; enemies still target us.
     game.send_chat("/god");
-    // Whichever heavy the roster has (the other name is just an unknown-enemy reply).
-    game.send_chat("/spawn gaoler 1");
-    game.send_chat("/spawn bastion 1");
-    let mut caught = false;
-    for _ in 0..1200 {
-        let Some((pos, parryable)) = nearest_enemy(&game) else {
-            h.play(&mut game, 1, hold);
-            continue;
+
+    // Gaoler shield bash: the rim's wind-up, then the parry window (strobe + "!" icon).
+    let ok = stage(&mut h, &mut game, "gaoler", kind::GAOLER, 1500, |_, e| {
+        flag(e, enemy_flags::PARRYABLE)
+    });
+    snap(&mut h, &mut game, "gaoler_parry", ok);
+
+    // Gnawer bite wind-up next to molten slag: stand in the first hall facing the slag wall
+    // (the slag channel runs under the floor grate between us), the throat glow a telegraph.
+    game.send_chat("/tp 0 0 14");
+    game.controls.yaw = std::f32::consts::PI;
+    game.controls.pitch = -0.1;
+    h.play(&mut game, 20, hold);
+    let ok = stage(&mut h, &mut game, "gnawer", kind::GNAWER, 900, |_, e| {
+        AiState::from_u16(e.state) == Some(AiState::Windup) && (e.aux & 0xFF) > 110
+    });
+    snap(&mut h, &mut game, "gnawer_windup", ok);
+
+    // Heron: the aim laser tracking, then locked.
+    let ok = stage(&mut h, &mut game, "heron", kind::HERON, 1800, |_, e| {
+        flag(e, enemy_flags::AIMING) && !flag(e, enemy_flags::AIM_LOCKED) && (e.aux & 0xFF) > 80
+    });
+    snap(&mut h, &mut game, "heron_tracking", ok);
+    let mut locked = false;
+    for _ in 0..600 {
+        if enemy_of(&game, kind::HERON).is_some_and(|e| flag(&e, enemy_flags::AIM_LOCKED)) {
+            locked = true;
+            break;
+        }
+        h.play(&mut game, 1, hold);
+    }
+    snap(&mut h, &mut game, "heron_locked", locked);
+
+    // Censer: ember bombs in flight.
+    let ok = stage(&mut h, &mut game, "censer", kind::CENSER, 1800, |g, _| {
+        let me = eye(g).unwrap_or_default();
+        g.net().is_some_and(|n| {
+            n.remote_entities().iter().any(|p| {
+                p.kind == kind::EMBER_BOMB
+                    && p.flags & projectile_flags::PENDING == 0
+                    && p.position.distance(me) > 6.0
+            })
+        })
+    });
+    // Let them fly a little.
+    h.play(&mut game, 8, hold);
+    snap(&mut h, &mut game, "censer_bombs", ok);
+
+    // Brand the Censer with the Quill's alt fire: the sigil over it.
+    game.controls.weapons.current = 0;
+    game.controls.weapons.modes[0] = 0;
+    let mut branded = false;
+    for i in 0..240 {
+        let Some(e) = enemy_of(&game, kind::CENSER) else {
+            break;
         };
-        if parryable {
-            caught = true;
+        if flag(&e, enemy_flags::BRANDED) {
+            branded = true;
             break;
         }
         h.play(&mut game, 1, |g| {
-            hold(g);
-            aim_at(g, pos + Vec3::Y * 1.6);
+            aim_at(g, e.position + Vec3::Y * 1.3);
+            let fire = if i % 20 == 5 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            };
+            g.controls.override_move = Some((0.0, 0.0, fire));
         });
     }
-    println!("caught a parry window: {caught}");
-    h.moment("parry", |h| h.frame(Screen::Game(&mut game), &[], 1e-4));
+    h.play(&mut game, 6, hold);
+    snap(&mut h, &mut game, "brand", branded);
+
+    // Harrier dive (parryable from start to end: the swat), caught early in the dive.
+    let ok = stage(&mut h, &mut game, "harrier", kind::HARRIER, 1500, |g, e| {
+        let far = eye(g).is_some_and(|me| e.position.distance(me) > 8.0);
+        flag(e, enemy_flags::PARRYABLE) && far
+    });
+    snap(&mut h, &mut game, "harrier_dive", ok);
     game.send_chat("/killall");
     h.play(&mut game, 60, hold);
 

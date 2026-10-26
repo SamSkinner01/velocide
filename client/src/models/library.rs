@@ -10,7 +10,7 @@ use engine::gfx::{DrawItem, MeshData, TextureData, TextureId};
 use engine::glam::{Mat4, Vec3, Vec4};
 use engine::render::Renderer;
 
-use super::rig::{Rig, Tint, validate_joints};
+use super::rig::{Rig, Shade, Tint, neutral_mesh, validate_joints};
 use super::{EnemyAnim, ModelId, PlayerAnim, ViewmodelAnim, enemies, shrike, weapons};
 
 /// All models, uploaded and ready to draw.
@@ -111,7 +111,7 @@ impl ModelLibrary {
                     match_parts(id, &id.build())?
                 }
             };
-            let rig = Rig::new(id.joints(), |i| {
+            let mut rig = Rig::new(id.joints(), |i| {
                 let (mesh, texture, color) = &parts[i];
                 let texture = match texture {
                     Some(t) => *textures
@@ -121,6 +121,13 @@ impl ModelLibrary {
                 };
                 (renderer.create_mesh(mesh), texture, *color)
             });
+            // Telegraph glows and weak points can be recoloured by the colour-blind palettes
+            // (`Tint::glow_color` / `core_color`): upload a greyscale copy of each.
+            for (part, (mesh, _, _)) in rig.parts.iter_mut().zip(&parts) {
+                if matches!(part.shade, Shade::Glow | Shade::Core) {
+                    part.recolour_mesh = Some(renderer.create_mesh(&neutral_mesh(mesh)));
+                }
+            }
             rigs.push(rig);
         }
         Ok(ModelLibrary { rigs, regenerated })

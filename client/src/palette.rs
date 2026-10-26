@@ -360,6 +360,43 @@ pub fn marker_shape(index: usize) -> MarkerShape {
     MarkerShape::ALL[index % MarkerShape::ALL.len()]
 }
 
+/// World art (models, particles, beams, lights) and the palette.
+impl Palette {
+    /// Whether world art takes its signal colours from this palette. The standard palette keeps
+    /// the art's own colours (every enemy and effect has its own shade of red, orange or
+    /// yellow, often an HDR multiplier); the colour-blind palettes replace them by role.
+    pub fn recolours_world(&self) -> bool {
+        self.mode != ColorVisionMode::Off
+    }
+
+    /// A model's emissive override for `role` (`models::Tint::glow_color` / `core_color`):
+    /// `None` in the standard palette (the model's own colours).
+    pub fn model_glow(&self, role: Vec4) -> Option<Vec4> {
+        self.recolours_world().then_some(role)
+    }
+
+    /// An effect colour (particle, glow sprite, beam colour): `standard` in the standard
+    /// palette; otherwise `role` scaled by `level` with `standard`'s alpha. Additive effects
+    /// may use `level` > 1 like the art does (the core then whitens a little, the halo keeps
+    /// the hue).
+    pub fn effect(&self, standard: Vec4, role: Vec4, level: f32) -> Vec4 {
+        if self.recolours_world() {
+            (role.truncate() * level).extend(standard.w)
+        } else {
+            standard
+        }
+    }
+
+    /// A light colour (a plain multiplier): `standard`, or `role` scaled by `level`.
+    pub fn light(&self, standard: Vec3, role: Vec4, level: f32) -> Vec3 {
+        if self.recolours_world() {
+            role.truncate() * level
+        } else {
+            standard
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,5 +703,22 @@ mod tests {
         assert_eq!(palette(), &TRITANOPIA);
         set_accessibility(ColorVisionMode::Off, false);
         assert_eq!(palette(), &STANDARD);
+    }
+
+    #[test]
+    fn world_art_keeps_its_own_colours_in_the_standard_palette() {
+        let art = Vec4::new(2.2, 0.35, 0.6, 0.95);
+        let light = Vec3::new(1.6, 0.25, 0.15);
+        assert!(!STANDARD.recolours_world());
+        assert_eq!(STANDARD.effect(art, STANDARD.brand, 1.6), art);
+        assert_eq!(STANDARD.light(light, STANDARD.aim_laser, 1.6), light);
+        assert_eq!(STANDARD.model_glow(STANDARD.telegraph), None);
+        for p in PALETTES.iter().filter(|p| p.mode != ColorVisionMode::Off) {
+            assert!(p.recolours_world());
+            let c = p.effect(art, p.brand, 1.6);
+            assert_eq!(c, (p.brand.truncate() * 1.6).extend(0.95), "{:?}", p.mode);
+            assert_eq!(p.light(light, p.aim_laser, 2.0), p.aim_laser.truncate() * 2.0);
+            assert_eq!(p.model_glow(p.telegraph), Some(p.telegraph));
+        }
     }
 }

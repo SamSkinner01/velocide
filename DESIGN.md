@@ -39,22 +39,36 @@ is exactly one code path for SP, co-op and PvP.
 
 ## Original names
 
-- **Game:** VELOCIDE. Players are *Shrikes*: chrome-plated, blood-fuelled machines.
-- **Weapons** (each has primary fire + 2 alt-fire modes, cycled by pressing the slot key again):
-  1. **Lancet** (hitscan sidearm) — alt modes: *Overcharge* (hold to charge a piercing beam),
-     *Fan* (3-round horizontal fan).
-  2. **Thresher** (hitscan scattergun) — alt modes: *Slug* (single heavy pellet with knockback),
-     *Flak* (lobbed grenade; explodes; parryable).
-  3. **Riveter** (projectile nailer) — alt modes: *Sawblade* (bouncing piercing disc),
-     *Volley* (ring of rivets).
-  4. **Cinderbox** (explosive launcher) — alt modes: *Sticky* (adhesive charge, detonate with alt
-     again), *Mortar* (high arc, big blast).
-  - **Fist**: punch / parry. **Prism**: a throwable mirrored shard; hitscan shots that hit it
-    ricochet to the nearest enemy, chaining through other prisms for bonus damage.
-- **Enemies:** *Husk* (fodder melee), *Spitter* (ranged projectile), *Gnat* (flying),
-  *Bastion* (heavy armoured, telegraphed parryable slam).
-- **Style ranks** (low → high): DULL, CRUDE, FERAL, VICIOUS, MERCILESS, GRISLY, SANGUINE,
+- **Game:** VELOCIDE. Premise (full text: `docs/premise.md`): the Foundry never stopped pouring;
+  its wax-and-slag *Moulds* hold every scrap of heat left in the world. Players are *Shrikes*:
+  masked hunters whose life is a flame (the *wick*) in a chest lantern. Healing is *kindling*
+  (drawing in the embers that hits knock out of Moulds); hard damage is *smother*.
+- **Weapons** (each has primary fire + 2 alt-fire modes, cycled by pressing the slot key again;
+  full design and as-built notes: `docs/roster.md`):
+  1. **Quill** (precision spike-caster, hitscan) — *Brand* (marks a target: ×1.35 damage taken
+     from everyone for 5 s), *Splinter* (bursts into secondary traces, reflects off walls).
+  2. **Bellows** (twin-barrel blast cannon) — *Gust* (air blast: knockback, turns hostile
+     projectiles around, self-recoil), *Both Barrels* (double blast, blast-jump recoil).
+  3. **Arclash** (arc caster) — primary chains between nearby targets; *Wisp* (slow ball
+     lightning that zaps what's near), *Discharge* (hold to charge a nova around you).
+  4. **Tumbler** (bouncing-bomb launcher) — *Breach* (point-blank blast, blast-jump),
+     *Gravewell* (sticks, pulls enemies in, implodes).
+  - **Fist**: punch / parry. **Thorn**: a thrown relay spike that plants itself in surfaces;
+    Quill shots that pass it ricochet to the next thorn, a branded target or the nearest enemy,
+    ×1.5 damage per bounce.
+- **Enemies** (the Moulds, `docs/enemies.md`): *Gnawer* (fodder melee, pounces), *Censer*
+  (ranged lobber, parryable ember bombs), *Harrier* (flying dive-bomber, swattable mid-dive),
+  *Gaoler* (heavy shielded, parryable bash, jumpable sweep, lantern weak point), *Heron*
+  (sniper with a replicated aim laser that locks before it fires).
+- **Hit assist:** player-owned attacks test against hit shapes inflated by `combat.hit_assist`
+  (enemies +0.2 m body / +0.1 m weak points; PvP players +0.12 / +0.06); enemy attacks don't.
+- **Style ranks** (low → high): DULL, CRUDE, FERAL, VICIOUS, MERCILESS, GRISLY, SEARING,
   VELOCIDE.
+- **Levels:** campaigns *Crucible of Veins* and *Spire of Wicks*; arenas *Cistern Nine*,
+  *Knell Yard* and *Ingot Run* (`docs/levels.md`).
+- **Accessibility:** colour-vision modes (protan / deutan / tritan + strength) correct the 3D
+  view in the post pass and switch gameplay-critical colours to a semantic palette
+  (`client::palette`), plus shape cues (`docs/render.md`, `docs/ui.md`).
 
 ## Module contracts
 
@@ -135,8 +149,9 @@ errors and bad normals otherwise).
   `NetFrame` of quantised `NetEntity`s (delta-compressed per client against its last ack).
 - Combat: one damage pipeline `SimWorld::apply_damage`; weapons are pure tick-based
   (`step_weapons`) so clients can predict firing; enemies are data-driven (`assets/enemies/*.ron`).
-  Player entity packing: `state` = weapon | mode<<4 | charge<<8; `aux` = hard | prisms<<8 |
-  stickies<<12 | wall-yaw<<16; flags in `protocol::player_flags`. Details: `docs/combat.md`.
+  Player entity packing: `state` = weapon | mode<<4 | Discharge charge<<8; `aux` = hard |
+  thorns<<8 | wall-yaw<<16; flags in `protocol::player_flags` (bit 15 `BRANDED`). Details:
+  `docs/combat.md`.
 - Server: `Server::new(ServerConfig)`, `ServerHandle::spawn(config)` (own thread, used for SP and
   listen servers), `velocide-server` binary. Lag compensation in `server::lagcomp`.
 - Client: `client::net::Session::{single_player, host, join}` → `NetClient` (`update(dt)` per
@@ -196,13 +211,22 @@ then merged and checked against the whole test suite with zero clippy warnings.
 | 5 | Retro post-processing, viewmodel pass | `engine::render` (shaders in `assets/shaders/`) |
 | 6 | First weapon, lag-compensated hits, server enemy, hitstop/shake | `shared::sim::{weapons,hitscan,enemy}`, `server::lagcomp`, `client::ingame::{feedback,combat}` |
 | 7 | Parry with network tolerance, proximity healing, hard damage, explosions | `shared::sim::{parry,blood,combat,projectiles}` |
-| 8 | Full weapon set with alt-fires, ricochet prisms | `shared::sim::{weapons,prism}` |
+| 8 | Full weapon set with alt-fires, ricochet thorns | `shared::sim::{weapons,thorn,brand}` |
 | 9 | Style meter, ranks, results with scoreboard | `shared::sim::style`, `client::ingame::{style_hud,match_flow}` |
 | 10 | All enemy types, navigation, wave encounters, co-op scaling | `shared::sim::{enemy,nav,encounter}`, `assets/enemies/` |
 | 11 | PvP deathmatch, respawns | `shared::sim::modes` |
 | 12 | Lobby, host/join, chat, scoreboard, name tags | `shared::lobby`, `server::lobby`, `client::menus::lobby` |
 | 13 | Audio and dynamic music | `engine::audio`, `client::ingame::audio_hooks` |
 | 14 | Menus, settings, rebinding, campaign level, PvP arena | `client::menus`, `client::settings`, `assets/levels/` |
+
+### After the milestones: roster, premise, levels, accessibility
+The first weapons, enemies and premise mapped too closely onto another game's signature
+designs, so all of them were replaced (`docs/roster.md`, `docs/premise.md`; the mechanics the
+spec requires — parry, ricochet object, close-range healing, hard damage — stayed, with new
+fiction and new designs). The same pass made enemies bigger and easier to read, made
+player-owned hits more forgiving (hit assist), added the campaign *Spire of Wicks* and the
+arenas *Knell Yard* and *Ingot Run*, and added colour-vision accessibility.
+`PROTOCOL_VERSION` 7.
 
 ### Deliberate deviations from the spec
 - **Netcode transport.** Connection authentication uses `renet_netcode`'s types

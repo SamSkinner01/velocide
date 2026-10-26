@@ -94,9 +94,16 @@ pure: `shrike::pose(&PlayerAnim)`, `enemies::pose(&EnemyAnim)`,
 `weapons::weapon_pose(..)`, `weapons::viewmodel_transform(&ViewmodelAnim)`,
 `props::{door_pose, checkpoint_pose, jump_pad_pose, exit_gate_pose}`.
 
-`Tint { body, team, glow }`: `body` multiplies everything (hit flash > 1, fade-out alpha < 1),
-`team` is the player colour (`DEFAULT_TEAM_COLOR` = blood red), `glow` lets the client flash
-telegraph parts on top of what the pose already does.
+`Tint { body, team, glow, glow_color, core_color }`: `body` multiplies everything (hit flash
+> 1, fade-out alpha < 1), `team` is the player colour (`DEFAULT_TEAM_COLOR` = blood red), `glow`
+lets the client flash telegraph parts on top of what the pose already does. `glow_color` /
+`core_color` (default `None`) *replace* the colours of `Glow` / `Core` parts with a palette role
+(the colour-blind palettes: `palette().model_glow(palette().telegraph)`, `weak_point`,
+`parry_window`, `hostile_projectile`, `aim_laser`): the library uploads a greyscale copy of
+every `Glow` / `Core` mesh (`rig::neutral_mesh`) and draws that in the role colour at the
+brightness of `Pose::glow × Tint::glow` (or `Pose::core`) **capped at full**, so the hue
+survives where the art's HDR multipliers would wash it out to white. With `None` nothing
+changes, so the standard look keeps each model's own glow colours.
 
 ## Animation inputs
 

@@ -316,7 +316,7 @@ impl CombatHud {
             list.text(
                 vec2(c.center().x, center.y + 30.0),
                 "BRANDED",
-                &TextStyle::new(fade(Vec4::new(1.0, 0.25, 0.4, 1.0), pulse))
+                &TextStyle::new(fade(branded_text_color(), pulse))
                     .centered()
                     .outline(outline),
             );
@@ -364,6 +364,12 @@ impl CombatHud {
 }
 
 /// Darkened, coloured screen edges (concentric bands, strongest at the border).
+/// "BRANDED" warning colour (`palette().brand` in the colour-blind palettes).
+fn branded_text_color() -> Vec4 {
+    let p = crate::palette::palette();
+    p.effect(Vec4::new(1.0, 0.25, 0.4, 1.0), p.brand, 1.0)
+}
+
 fn vignette(list: &mut UiDrawList, c: Rect, color: Vec4, strength: f32) {
     if strength <= 0.01 {
         return;

@@ -35,10 +35,11 @@ use shared::tuning::CombatTuning;
 use super::super::effects::{Effects, FxTex, OnHit, Particle};
 use super::Rng;
 use super::enemy_fx;
-use super::fx::{BRAND_COLOR, Beams, enemy_projectile_color};
+use super::fx::{Beams, brand_color, enemy_projectile_color};
 use crate::models::enemies::{EnemyAnim, EnemyKind, EnemyState};
 use crate::models::projectiles::THORN_TIP;
 use crate::models::{ModelId, ModelLibrary, Tint, WeaponKind};
+use crate::palette::palette;
 
 /// Model kind for a replicated enemy kind (unknown kinds draw as Gnawers).
 pub fn enemy_kind(k: u16) -> EnemyKind {
@@ -284,8 +285,9 @@ impl EntityView {
             let pulse = 0.85 + 0.15 * ((self.time * 7.0).sin() as f32);
             let above = e.position + Vec3::Y * (height + 0.7);
             let facing = (camera - above).normalize_or(Vec3::Z);
-            beams.sigil(above, facing, 0.5 * pulse, BRAND_COLOR, angle);
-            beams.sigil(above, facing, 0.28, BRAND_COLOR * 1.2, -angle * 1.6);
+            let brand = brand_color();
+            beams.sigil(above, facing, 0.5 * pulse, brand, angle);
+            beams.sigil(above, facing, 0.28, brand * 1.2, -angle * 1.6);
         }
     }
 
@@ -462,10 +464,13 @@ impl EntityView {
             (origin, enemy_fx::laser_end(f.world, origin, dir, f.entities, f.camera), locked)
         });
         if let Some((origin, end, locked)) = v.laser {
+            let p = palette();
             let c = if locked {
                 Vec4::new(1.0, 0.85, 0.8, 1.0)
             } else {
-                Vec4::new(1.0, 0.15, 0.08, 0.9)
+                // A dim role colour: these sprites overlap and add up (a bright blue would sum to
+                // white, like the locked glare).
+                p.effect(Vec4::new(1.0, 0.15, 0.08, 0.9), p.aim_laser, 0.45)
             };
             // The dot where it lands, and a glare on the lens.
             effects.glow(end, c, if locked { 0.45 } else { 0.32 }, 0.05);
@@ -497,7 +502,7 @@ impl EntityView {
                         max_life: rng.range(0.3, 0.6),
                         size: Vec2::splat(0.09),
                         end_scale: 0.3,
-                        color: Vec4::new(1.0, 0.6, 0.2, 1.0),
+                        color: palette().effect(Vec4::new(1.0, 0.6, 0.2, 1.0), palette().telegraph, 1.0),
                         texture: FxTex::Spark,
                         additive: true,
                         ..Default::default()
@@ -518,7 +523,7 @@ impl EntityView {
                             max_life: rng.range(0.3, 0.6),
                             size: Vec2::splat(0.2),
                             end_scale: 0.3,
-                            color: Vec4::new(1.0, 0.25, 0.08, 1.0),
+                            color: palette().effect(Vec4::new(1.0, 0.25, 0.08, 1.0), palette().telegraph, 1.0),
                             texture: FxTex::Spark,
                             additive: true,
                             ..Default::default()
@@ -603,7 +608,7 @@ impl EntityView {
                 max_life: 0.25,
                 size: Vec2::splat(0.35),
                 end_scale: 0.3,
-                color: Vec4::new(1.0, 0.95, 0.85, 0.9),
+                color: palette().effect(Vec4::new(1.0, 0.95, 0.85, 0.9), palette().deflected, 1.0),
                 texture: FxTex::Glow,
                 additive: true,
                 ..Default::default()
@@ -742,13 +747,22 @@ impl EntityView {
                 let mut tint = Tint::default();
                 let flash = 1.0 + 2.0 * v.flash;
                 tint.body = Vec4::new(flash, flash * 0.9, flash * 0.9, 1.0);
+                // Colour-blind palettes: telegraph glows and weak points in their roles (the
+                // standard palette keeps each Mould's own colours).
+                let pal = palette();
+                tint.glow_color = pal.model_glow(pal.telegraph);
+                tint.core_color = pal.model_glow(pal.weak_point);
                 if e.flags & enemy_flags::PARRYABLE != 0 {
-                    let strobe = if (time * 18.0).fract() < 0.5 {
-                        3.0
+                    let on = (time * 18.0).fract() < 0.5;
+                    if pal.recolours_world() {
+                        // Strobe the parry colour between full and dim (brightness is capped
+                        // so the hue survives).
+                        tint.glow_color = Some(pal.parry_window);
+                        tint.glow = Vec4::splat(if on { 1.0 } else { 0.55 });
                     } else {
-                        1.6
-                    };
-                    tint.glow = Vec4::new(strobe, strobe * 0.9, 0.4, 1.0);
+                        let strobe = if on { 3.0 } else { 1.6 };
+                        tint.glow = Vec4::new(strobe, strobe * 0.9, 0.4, 1.0);
+                    }
                 }
                 if let EnemyState::Dying(p) = anim.state
                     && p > 0.7
@@ -760,9 +774,10 @@ impl EntityView {
                 // The aim laser (every client draws it from the replicated aim).
                 if let Some((origin, end, locked)) = v.laser {
                     draw_beam(lib, origin, end, if locked { 0.07 } else { 0.045 }, laser_tint(locked, time), draws);
+                    let tracking = pal.light(Vec3::new(1.6, 0.25, 0.15), pal.aim_laser, 1.6);
                     lights.push(PointLight {
                         position: origin,
-                        color: if locked { Vec3::new(2.0, 1.2, 1.0) } else { Vec3::new(1.6, 0.25, 0.15) },
+                        color: if locked { Vec3::new(2.0, 1.2, 1.0) } else { tracking },
                         radius: 4.0,
                     });
                 }
@@ -833,9 +848,14 @@ impl EntityView {
                 Quat::from_rotation_arc(Vec3::NEG_Z, vel.normalize()) * spin
             };
             let mut tint = Tint::default();
+            let pal = palette();
+            let hostile = matches!(e.kind, kind::EMBER_BOMB | kind::NEEDLE) && !parried;
             if parried {
                 tint.body = Vec4::new(2.6, 2.5, 2.3, 1.0);
                 tint.glow = Vec4::splat(3.0);
+            } else if hostile {
+                // Enemy projectiles in the colour-blind palettes' hostile colour.
+                tint.glow_color = pal.model_glow(pal.hostile_projectile);
             } else if e.kind == kind::BOMB {
                 // The fuse band flickers faster as it burns down.
                 let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
@@ -859,8 +879,12 @@ impl EntityView {
                 let dir = vel.normalize();
                 let len = (pos - pv.start).dot(dir).clamp(0.0, 7.0);
                 if len > 0.3 {
-                    let c = if parried { Vec4::new(2.4, 2.3, 2.2, 0.9) } else { Vec4::new(2.6, 0.9, 0.55, 0.85) };
-                    draw_beam(lib, pos - dir * len, pos, 0.06, c, draws);
+                    let tint = if parried {
+                        glow_tint(Vec4::new(2.4, 2.3, 2.2, 0.9), None)
+                    } else {
+                        glow_tint(Vec4::new(2.6, 0.9, 0.55, 0.85), pal.model_glow(pal.hostile_projectile))
+                    };
+                    draw_beam(lib, pos - dir * len, pos, 0.06, tint, draws);
                 }
             }
             let light = match e.kind {
@@ -869,8 +893,8 @@ impl EntityView {
                 kind::GRAVEWELL if stuck => Some((Vec3::new(0.5, 2.0, 0.7), 7.0)),
                 kind::GRAVEWELL => Some((Vec3::new(0.3, 1.2, 0.4), 3.0)),
                 kind::WISP => Some((Vec3::new(1.2, 0.8, 2.2), 6.0)),
-                kind::EMBER_BOMB => Some((Vec3::new(2.2, 1.1, 0.35), 6.5)),
-                kind::NEEDLE => Some((Vec3::new(1.6, 0.5, 0.3), 4.0)),
+                kind::EMBER_BOMB => Some((pal.light(Vec3::new(2.2, 1.1, 0.35), pal.hostile_projectile, 2.2), 6.5)),
+                kind::NEEDLE => Some((pal.light(Vec3::new(1.6, 0.5, 0.3), pal.hostile_projectile, 1.6), 4.0)),
                 _ => None,
             };
             if let Some((color, radius)) = light {
@@ -884,28 +908,37 @@ impl EntityView {
     }
 }
 
-/// Colour of an aim laser: red while tracking, white-hot and pulsing once locked.
-fn laser_tint(locked: bool, time: f64) -> Vec4 {
+/// Tint of an aim laser: red while tracking, white-hot and pulsing once locked. The
+/// colour-blind palettes draw tracking in `aim_laser`; locked stays white-hot in every palette,
+/// so tracking vs locked always differs in colour as well as width and pulse.
+fn laser_tint(locked: bool, time: f64) -> Tint {
     if locked {
         let pulse = 0.8 + 0.4 * ((time * 30.0).sin() as f32).abs();
-        Vec4::new(3.0 * pulse, 2.4 * pulse, 2.2 * pulse, 1.0)
+        glow_tint(Vec4::new(3.0 * pulse, 2.4 * pulse, 2.2 * pulse, 1.0), None)
     } else {
-        Vec4::new(2.4, 0.25, 0.15, 0.9)
+        let p = palette();
+        glow_tint(Vec4::new(2.4, 0.25, 0.15, 0.9), p.model_glow(p.aim_laser))
+    }
+}
+
+/// Tint for a glowing model: `glow` multiplies its own colours, or `color` (a palette role)
+/// replaces them.
+fn glow_tint(glow: Vec4, color: Option<Vec4>) -> Tint {
+    Tint {
+        glow,
+        glow_color: color,
+        ..Default::default()
     }
 }
 
 /// A glowing beam (the `AimLaser` unit beam model stretched from `a` to `b`).
-fn draw_beam(lib: &ModelLibrary, a: Vec3, b: Vec3, width: f32, color: Vec4, draws: &mut Vec<DrawItem>) {
+fn draw_beam(lib: &ModelLibrary, a: Vec3, b: Vec3, width: f32, tint: Tint, draws: &mut Vec<DrawItem>) {
     let d = b - a;
     let len = d.length();
     if !(len > 1e-3 && a.is_finite() && b.is_finite()) {
         return;
     }
     let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d / len);
-    let tint = Tint {
-        glow: color,
-        ..Default::default()
-    };
     lib.draw_model(
         ModelId::AimLaser,
         Mat4::from_scale_rotation_translation(Vec3::new(width, width, len), rot, a),

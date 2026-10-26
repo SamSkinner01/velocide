@@ -19,6 +19,7 @@ use shared::sim::{EnemyDef, EnemyRegistry, HitPart, HitShape};
 use super::super::effects::{Effects, FxTex, OnHit, Particle};
 use super::Rng;
 use crate::models::EnemyKind;
+use crate::palette::palette;
 
 /// The enemy definitions the client knows (the built-ins: the same files the server loads).
 pub fn defs() -> &'static EnemyRegistry {
@@ -110,12 +111,15 @@ pub fn fired_sfx(k: u16) -> Sfx {
     }
 }
 
-/// Glow colour of an enemy projectile kind.
+/// Glow colour of an enemy projectile kind (`palette().hostile_projectile` in the colour-blind
+/// palettes).
 pub fn projectile_color(k: u16) -> Vec4 {
-    match k {
+    let standard = match k {
         kind::NEEDLE => Vec4::new(1.0, 0.35, 0.22, 1.0),
         _ => Vec4::new(1.0, 0.58, 0.16, 1.0),
-    }
+    };
+    let p = palette();
+    p.effect(standard, p.hostile_projectile, 1.0)
 }
 
 /// Telegraph glint colour of an enemy kind (`colors.telegraph`).
@@ -314,12 +318,13 @@ pub fn ember_trail(effects: &mut Effects, rng: &mut Rng, pos: Vec3, back: Vec3) 
         rotation: rng.angle(),
         ..Default::default()
     });
+    let p = palette();
     effects.spawn(Particle {
         position: pos,
         max_life: 0.12,
         size: Vec2::splat(0.75),
         end_scale: 0.5,
-        color: Vec4::new(1.0, 0.6, 0.2, 0.9),
+        color: p.effect(Vec4::new(1.0, 0.6, 0.2, 0.9), p.hostile_projectile, 1.0),
         texture: FxTex::Glow,
         additive: true,
         ..Default::default()
@@ -332,7 +337,7 @@ pub fn ember_trail(effects: &mut Effects, rng: &mut Rng, pos: Vec3, back: Vec3) 
             max_life: rng.range(0.3, 0.6),
             size: Vec2::splat(0.07),
             end_scale: 0.4,
-            color: Vec4::new(1.0, 0.7, 0.3, 1.0),
+            color: p.effect(Vec4::new(1.0, 0.7, 0.3, 1.0), p.hostile_projectile, 1.0),
             texture: FxTex::Spark,
             additive: true,
             ..Default::default()
@@ -388,7 +393,8 @@ pub fn ember_bomb_burst(effects: &mut Effects, rng: &mut Rng, pos: Vec3, radius:
     });
 }
 
-/// The Gaoler's chain sweep: a burning arc of sparks at knee height around it plus floor dust.
+/// The Gaoler's chain sweep: a burning arc of sparks at knee height around it plus floor dust
+/// (telegraph colour in the colour-blind palettes).
 pub fn sweep_arc(effects: &mut Effects, rng: &mut Rng, feet: Vec3, yaw: f32, radius: f32) {
     for k in 0..30 {
         // 300 degrees, starting behind its right shoulder and coming round the front.
@@ -404,7 +410,7 @@ pub fn sweep_arc(effects: &mut Effects, rng: &mut Rng, feet: Vec3, yaw: f32, rad
             max_life: rng.range(0.25, 0.5),
             size: Vec2::splat(rng.range(0.1, 0.2)),
             end_scale: 0.4,
-            color: Vec4::new(1.0, 0.3, 0.1, 1.0),
+            color: palette().effect(Vec4::new(1.0, 0.3, 0.1, 1.0), palette().telegraph, 1.0),
             texture: FxTex::Spark,
             additive: true,
             ..Default::default()
@@ -413,7 +419,8 @@ pub fn sweep_arc(effects: &mut Effects, rng: &mut Rng, feet: Vec3, yaw: f32, rad
     effects.dust(feet, 18, radius * 1.4);
 }
 
-/// A diving Harrier's streak: hot red air behind it.
+/// A diving Harrier's streak: hot red air behind it (the whole dive is parryable, so the
+/// colour-blind palettes draw it in the parry colour).
 pub fn dive_streak(effects: &mut Effects, rng: &mut Rng, at: Vec3, back: Vec3) {
     effects.spawn(Particle {
         position: at + back * rng.range(0.3, 0.8),
@@ -422,7 +429,7 @@ pub fn dive_streak(effects: &mut Effects, rng: &mut Rng, at: Vec3, back: Vec3) {
         max_life: 0.18,
         size: Vec2::new(0.35, 0.35),
         end_scale: 0.2,
-        color: Vec4::new(1.0, 0.25, 0.12, 0.7),
+        color: palette().effect(Vec4::new(1.0, 0.25, 0.12, 0.7), palette().parry_window, 1.0),
         texture: FxTex::Glow,
         additive: true,
         ..Default::default()

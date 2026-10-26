@@ -1,9 +1,13 @@
 # VELOCIDE
 
-A fast, style-driven retro multiplayer FPS on a small custom Rust engine. You play a *Shrike*,
-a blood-fuelled chrome automaton that heals by fighting up close. You can play single-player,
-online co-op (2–4 players) through the campaign level **Crucible of Veins**, or deathmatch (up to
-8 players) in the arena **Cistern Nine**. Everything is original and procedural: the art,
+A fast, style-driven retro multiplayer FPS on a small custom Rust engine. The Foundry never
+stopped pouring: every scrap of heat left in the world has been cast into its wax-and-slag
+*Moulds*. You play a *Shrike*, a masked hunter whose life is a flame burning in a lantern in its
+chest, fast enough to tear that heat back out of them up close.
+
+You can play single-player, online co-op (2–4 players) through the campaign levels **Crucible
+of Veins** and **Spire of Wicks**, or deathmatch (up to 8 players) in the arenas **Cistern
+Nine**, **Knell Yard** and **Ingot Run**. Everything is original and procedural: the art,
 models, sound effects and music are all generated in code.
 
 ## Build and run
@@ -90,9 +94,9 @@ have to be built on a Mac.
 | Dash (3 charges) | Left Shift | LB |
 | Fire / Alt fire | LMB / RMB | RT / LT |
 | Punch / **Parry** | F | RB |
-| Throw Prism (ricochet target) | Q | Y / North |
+| Throw Thorn (ricochet relay) | Q | Y / North |
 | Use / revive a teammate | E | X / West |
-| Weapons | 1 Lancet, 2 Thresher, 3 Riveter, 4 Cinderbox (press again to cycle alt mode) | D-pad |
+| Weapons | 1 Quill, 2 Bellows, 3 Arclash, 4 Tumbler (press again to cycle alt mode) | D-pad |
 | Next / previous weapon | mouse wheel | D-pad right / left |
 | Cycle fire mode | middle mouse | D-pad up |
 | Scoreboard | Tab | Select |
@@ -109,20 +113,48 @@ have to be built on a Mac.
   - Slide-jumps and dash-jumps carry momentum.
   - Slam (crouch in the air) and jump right after landing to bounce much higher.
   - You get 3 wall jumps before you have to touch the ground again.
-- **Heal by fighting up close.** Every hit you land sprays blood, and standing in it heals you.
-  Part of each hit you take is *hard damage*, which temporarily caps your max health.
+- **Heal by fighting up close.** Every hit you land knocks embers out of a Mould; the closest
+  Shrike draws them into its wick (*kindling*). Part of each hit you take *smothers* your wick,
+  temporarily capping your max health.
 - **Parry.** Punch an incoming projectile just before it hits you. It flies back at double
-  damage and refills your health. Punching a glowing yellow **Bastion** mid-slam stuns it.
-- **Ricochet.** Throw a Prism and shoot it with a hitscan weapon. The shot bounces to the
-  nearest enemy, and chaining prisms multiplies the damage.
+  damage and refills your wick. Punch a **Gaoler** while its shield rim strobes white-hot to
+  stun it, or swat a diving **Harrier** out of the air.
+- **Ricochet.** Throw a Thorn: it plants itself in a wall or floor. Shoot it with the Quill and
+  the shot jumps to the nearest enemy (branded ones first); chaining thorns multiplies the
+  damage.
 - **Style.** Mix weapons, kill in the air, parry and ricochet to climb the ranks from DULL up to
   VELOCIDE. Repeating the same weapon goes *stale* and earns less.
+
+### The arsenal
+
+| Slot | Weapon | Primary | Alt A | Alt B |
+|---|---|---|---|---|
+| 1 | **Quill** (spike-caster) | precise hitscan quill | **Brand**: the target takes +35 % damage from everyone for 5 s | **Splinter**: bursts into shrapnel, reflects off walls |
+| 2 | **Bellows** (twin-barrel blast cannon) | close-range blast | **Gust**: air blast that shoves enemies and turns their projectiles around | **Both Barrels**: double blast, launches you backwards |
+| 3 | **Arclash** (arc caster) | beam that chains between enemies | **Wisp**: slow ball lightning that zaps whatever is near | **Discharge**: hold to charge a shock nova around you |
+| 4 | **Tumbler** (bouncing-bomb launcher) | bouncing bombs | **Breach**: point-blank blast (blast-jump) | **Gravewell**: pulls enemies together, then implodes |
+
+### The Moulds
+
+| Enemy | What it does | How to beat it |
+|---|---|---|
+| **Gnawer** | knuckle-walking pack hunter; bites, pounces at runners | head is big and low |
+| **Censer** | brazier-headed lobber; 3 arcing ember bombs, swings at rushers | punch the embers back; shoot the brazier |
+| **Harrier** | wax-winged flyer that dives at you | dodge sideways, or punch it mid-dive |
+| **Gaoler** | 3.7 m jailer with a cell-door shield | parry the bash, jump the chain sweep, hit the lantern on its back |
+| **Heron** | stilt-legged sniper; red aim laser locks white-hot just before it fires | dash out of the laser after it locks; its lens is high above cover |
 
 ## Settings
 
 Settings are saved to `~/.config/velocide/settings.ron`. They include every retro effect
 (internal resolution, vertex wobble, affine textures, dithering, colour depth, fog, vertex
 lighting), screen shake, flashes, hitstop, FOV, sensitivity, volumes and key bindings.
+
+**Accessibility** (Settings → Accessibility): a colour-vision mode for protanopia,
+deuteranopia or tritanopia with a strength slider. It corrects the 3D view, switches the HUD,
+team colours, enemy wind-ups, the parry window, the Heron's laser and enemy projectiles to a
+palette that stays distinguishable, and adds shape cues (player marker shapes, a "!" diamond
+over parryable enemies, +/− health popups).
 
 ## For developers
 
@@ -137,7 +169,8 @@ lighting), screen shake, flashes, hitstop, FOV, sensitivity, volumes and key bin
 - **Local multiplayer test:** `scripts/local_test.sh --netsim 100,20,2` starts a dedicated
   server plus two clients with one command.
 - **Dev chat commands** (in a match; in hosted games only the host can use them):
-  `/spawn husk 5`, `/spawn bastion`, `/god`, `/give`, `/killall`, `/orb` (parry practice),
+  `/spawn gnawer 5`, `/spawn gaoler`, `/enemies`, `/god`, `/give`, `/killall`, `/needle` or
+  `/ember` (parry practice),
   `/encounter 1`, `/goto exit`, `/goto checkpoint 3`, `/tp x y z`, `/help`.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which
   must stay at zero warnings.
