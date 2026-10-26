@@ -8,7 +8,7 @@
 //! the map, the encounters and the routes.
 
 use glam::Vec3;
-use shared::level::{Encounter, EnemySpawn, Environment, LevelKind};
+use shared::level::{Encounter, Environment, LevelKind};
 
 use super::furnace_ring::{half, seg_around};
 use super::gates::pad_velocity;
@@ -49,27 +49,6 @@ const L_WATER: [f32; 3] = [0.32, 0.92, 0.82];
 const L_MOLTEN: [f32; 3] = [1.3, 0.82, 0.36];
 const L_SKY: [f32; 3] = [0.55, 0.72, 0.85];
 const L_FLAME: [f32; 3] = [1.45, 1.15, 0.7];
-
-/// The new Moulds (`docs/expansion.md`) arrive with the enemies merge. Until then each spawns
-/// as the stand-in of its size and role; set this to `true` to swap them in.
-const NEW_MOULDS: bool = false;
-/// New Mould -> stand-in: the Bellwether (support, keeps back with the pack) -> censer, the
-/// Snuffer (leaping latcher, fodder-sized) -> gnawer, the Smelter (slow heavy, needs room to be
-/// circled) -> gaoler.
-const STAND_INS: [(&str, &str); 3] = [
-    ("bellwether", "censer"),
-    ("snuffer", "gnawer"),
-    ("smelter", "gaoler"),
-];
-
-/// An enemy spawn that may be one of the new Moulds (see [`NEW_MOULDS`]).
-fn mould(name: &str, pos: [f32; 3], yaw: f32) -> EnemySpawn {
-    let name = match STAND_INS.iter().find(|(n, _)| *n == name) {
-        Some((_, stand_in)) if !NEW_MOULDS => stand_in,
-        _ => name,
-    };
-    enemy(name, pos, yaw)
-}
 
 /// Deep water over `x` × `z`: a dark bed, the translucent surface (no collision) and a kill
 /// volume from the bed to just over the surface — water snuffs a Shrike's wick.
@@ -488,9 +467,9 @@ pub fn drowned_chandlery() -> Gen {
                 wave(
                     1.5,
                     vec![
-                        mould("snuffer", [-19.5, 0.0, 32.5], 180.0),
-                        mould("snuffer", [19.5, 0.0, 32.5], 180.0),
-                        mould("snuffer", [0.0, 0.0, 22.0], 180.0),
+                        enemy("snuffer", [-19.5, 0.0, 32.5], 180.0),
+                        enemy("snuffer", [19.5, 0.0, 32.5], 180.0),
+                        enemy("snuffer", [0.0, 0.0, 22.0], 180.0),
                         enemy("gnawer", [-6.0, 0.0, 13.5], 180.0),
                         enemy("gnawer", [6.0, 0.0, 13.5], 180.0),
                         enemy("censer", [-8.0, 4.0, 13.5], 180.0),
@@ -709,7 +688,7 @@ pub fn drowned_chandlery() -> Gen {
                         enemy("censer", [16.0, 14.0, -50.0], 0.0),
                         enemy("harrier", [8.0, 10.0, -25.0], 0.0),
                         enemy("harrier", [26.0, 11.0, -37.0], 0.0),
-                        mould("bellwether", [16.0, 4.0, -50.0], 0.0),
+                        enemy("bellwether", [16.0, 4.0, -50.0], 0.0),
                         enemy("gnawer", [-1.0, 4.0, -50.0], 0.0),
                         enemy("gnawer", [27.0, 4.0, -50.0], 0.0),
                     ],
@@ -902,14 +881,14 @@ pub fn drowned_chandlery() -> Gen {
                         enemy("gnawer", [-38.0, 11.0, -24.0], 90.0),
                         enemy("gnawer", [-26.0, 11.0, -48.0], 90.0),
                         enemy("gnawer", [-40.0, 11.0, -40.0], 90.0),
-                        mould("snuffer", [-25.0, 11.0, -26.0], 90.0),
-                        mould("snuffer", [-24.0, 11.0, -57.0], 90.0),
+                        enemy("snuffer", [-25.0, 11.0, -26.0], 90.0),
+                        enemy("snuffer", [-24.0, 11.0, -57.0], 90.0),
                     ],
                 ),
                 wave(
                     1.5,
                     vec![
-                        mould("smelter", [-22.0, 11.0, -53.0], 90.0),
+                        enemy("smelter", [-22.0, 11.0, -53.0], 90.0),
                         enemy("censer", [-34.0, 15.0, -48.0], 90.0),
                         enemy("heron", [-24.0, 11.0, -58.0], 90.0),
                         enemy("harrier", [-30.0, 18.0, -28.0], 90.0),
@@ -1228,17 +1207,17 @@ pub fn drowned_chandlery() -> Gen {
                         enemy("gnawer", [-104.0, 11.0, -40.0], 90.0),
                         enemy("gnawer", [-104.0, 11.0, -16.0], 90.0),
                         enemy("gnawer", [-88.0, 11.0, -12.5], 90.0),
-                        mould("snuffer", [-96.0, 11.0, -45.5], 90.0),
-                        mould("snuffer", [-80.0, 11.0, -45.5], 90.0),
+                        enemy("snuffer", [-96.0, 11.0, -45.5], 90.0),
+                        enemy("snuffer", [-80.0, 11.0, -45.5], 90.0),
                         enemy("censer", [-95.0, GY, -46.5], 90.0),
                         enemy("censer", [-106.5, GY, -30.0], 90.0),
-                        mould("bellwether", [-105.5, 11.0, -28.0], 90.0),
+                        enemy("bellwether", [-105.5, 11.0, -28.0], 90.0),
                     ],
                 ),
                 wave(
                     1.5,
                     vec![
-                        mould("smelter", [-78.0, 11.0, -45.5], 90.0),
+                        enemy("smelter", [-78.0, 11.0, -45.5], 90.0),
                         enemy("heron", [-82.0, GY, -46.5], 90.0),
                         enemy("heron", [-106.5, GY, -40.0], 90.0),
                         enemy("harrier", [-81.6, 14.0, -34.4], 90.0),
@@ -1258,9 +1237,9 @@ pub fn drowned_chandlery() -> Gen {
                         enemy("harrier", [-94.4, 14.0, -34.4], 90.0),
                         enemy("harrier", [-81.6, 14.0, -21.6], 90.0),
                         enemy("harrier", [-81.6, 14.0, -34.4], 90.0),
-                        mould("snuffer", [-104.0, 11.0, -34.0], 90.0),
-                        mould("snuffer", [-104.0, 11.0, -22.0], 90.0),
-                        mould("bellwether", [-106.5, 11.0, -40.0], 90.0),
+                        enemy("snuffer", [-104.0, 11.0, -34.0], 90.0),
+                        enemy("snuffer", [-104.0, 11.0, -22.0], 90.0),
+                        enemy("bellwether", [-106.5, 11.0, -40.0], 90.0),
                     ],
                 ),
             ],
