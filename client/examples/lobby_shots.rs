@@ -305,6 +305,27 @@ fn main() -> anyhow::Result<()> {
     game.set_lobby_overlay(false);
     rig.game(&mut host_common, &mut game, 10, &[]);
 
+    // LOADOUT from the overlay (applies at once in the warm-up).
+    game.open_loadout();
+    rig.game(&mut host_common, &mut game, 20, &[]);
+    rig.shot("warmup_loadout");
+    rig.game(&mut host_common, &mut game, 1, &[UiKey::Escape]);
+    game.set_lobby_overlay(false);
+    rig.game(&mut host_common, &mut game, 10, &[]);
+
+    // The firing range: the counter, the Effigies down the lanes (west).
+    game.send_chat("/tp -11 0.05 -15.6");
+    rig.game(&mut host_common, &mut game, 20, &[]);
+    let sensitivity = host_common.settings.mouse_sensitivity as f64;
+    let degrees = |d: f64| d / (sensitivity * 0.022);
+    rig.input
+        .handle_mouse_motion((-degrees(90.0), degrees(4.0)));
+    rig.game(&mut host_common, &mut game, 30, &[]);
+    rig.shot("warmup_range");
+    rig.input
+        .handle_mouse_motion((degrees(90.0), -degrees(4.0)));
+    rig.game(&mut host_common, &mut game, 2, &[]);
+
     // ---- a guest joins: through the lobby screen straight into the warm-up -----------------
     let mut guest_common = common_for("tin saint", Cosmetics::from_seed(99));
     let guest = LobbyScreen::start(

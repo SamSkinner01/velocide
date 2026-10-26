@@ -20,7 +20,8 @@
 //!
 //! Hub markup (read by `shared::sim::warmup` and the client's `ingame::hub`):
 //! - encounter 0, a **fixture** (trigger without volume): the firing range's Effigy dummies,
-//!   always standing (skipped by servers that don't know `effigy`);
+//!   always standing (the enemies area's training dummy; a server that doesn't know `effigy`
+//!   skips them);
 //! - encounter 1, a **console** (trigger = where you stand to press USE, arena = the pit):
 //!   each press summons the next of five practice packs into the pit;
 //! - props: the ready board on the nave's screen wall and the console at the pit's rim.

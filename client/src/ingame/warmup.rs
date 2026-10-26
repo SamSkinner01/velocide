@@ -463,6 +463,12 @@ impl InGame {
         self.warmup.panel.open_customize();
     }
 
+    /// The overlay's LOADOUT sub-screen (tools, tests).
+    pub fn open_loadout(&mut self) {
+        self.set_lobby_overlay(true);
+        self.warmup.panel.open_loadout();
+    }
+
     /// Per frame, before input: the panel's clock, auto-ready, the host's edits, our look; the
     /// overlay opens by itself on the first arrival and closes when a match starts; the hub's
     /// board follows the lobby.
