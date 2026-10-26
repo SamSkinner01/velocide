@@ -79,9 +79,10 @@ impl NetId {
 /// (keep them stable: they are part of the protocol).
 pub mod kind {
     /// A player (`owner` = player id). `flags` = [`super::player_flags`]; `state` = held
-    /// `WeaponKind` (bits 0–3) | selected `Ability` (bits 4–8) | charge / draw level (bits
-    /// 9–15), packed and read only through [`super::pack_player_weapon`] /
-    /// [`super::player_weapon`]; `health` = health; `aux` = hard damage (bits 0–7) | thorn
+    /// `WeaponKind` (bits 0–3; [`super::UNARMED_WEAPON_ID`] = fists only) | selected `Ability`
+    /// (bits 4–8) | charge / draw level (bits 9–15), packed and read only through
+    /// [`super::pack_player_weapon`] / [`super::pack_player_unarmed`] /
+    /// [`super::player_weapon`] / [`super::player_armed`]; `health` = health; `aux` = hard damage (bits 0–7) | thorn
     /// charges (8–11) | (12–15 unused) | wall-cling normal as a quantised yaw (16–31, while
     /// `WALL_CLING`). See `docs/combat.md`, `docs/arsenal.md`.
     pub const PLAYER: u16 = 0;
@@ -242,6 +243,21 @@ pub mod enemy_flags {
     /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area; the
     /// brand lives in a `SimWorld` side table and is OR-ed in by `SimWorld::replicate`).
     pub const BRANDED: u32 = 1 << 15;
+}
+
+/// Weapon id (bits 0–3 of a player entity's `state`) of a player carrying no weapon (fists
+/// only, gun game's Fist tier). `WeaponKind` ids stay below it.
+pub const UNARMED_WEAPON_ID: u16 = 0xF;
+
+/// `state` of an unarmed player entity (no weapon, no ability, no charge).
+pub fn pack_player_unarmed() -> u16 {
+    UNARMED_WEAPON_ID
+}
+
+/// Does a player entity's `state` say they hold a weapon? (`false`: fists only;
+/// [`player_weapon`] then decodes the defaults, ignore it.)
+pub fn player_armed(state: u16) -> bool {
+    state & 0xF != UNARMED_WEAPON_ID
 }
 
 /// `state` of a player entity: the held weapon, the selected ability and a charge / draw
@@ -790,6 +806,14 @@ mod tests {
         // Garbage decodes to something valid.
         let (w, a, _) = player_weapon(0xFFFF);
         assert_eq!((w, a), (WeaponKind::Quill, Ability::Brand));
+        // Fists only: a sentinel no weapon id reaches.
+        assert!(!player_armed(pack_player_unarmed()));
+        assert!(
+            WeaponKind::ALL
+                .iter()
+                .all(|w| player_armed(pack_player_weapon(*w, Ability::Brand, 255)))
+        );
+        assert!((WeaponKind::COUNT as u16) < UNARMED_WEAPON_ID);
     }
 
     fn player(id: u32, pos: Vec3, yaw: f32) -> EntityState {

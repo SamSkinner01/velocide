@@ -346,10 +346,11 @@ TIME LIMIT, no frag limit), `velocide-server --mode gungame --level knell_yard`.
   tiers either player is on (never below the first) — `GunGameEvent::Demoted`. The puncher only
   climbs if the Fist is their tier: **a punch kill on the Fist tier wins** the match
   (`EndReason::Ladder`; the winner's tier is set one past the Fist).
-* **The Fist tier** keeps the last build (the Longwick) in hand: an unarmed loadout needs
-  support from the arsenal (`force_loadout` sanitises an empty loadout into the default one, and
-  the client would draw and replicate it as a Quill). Weapon kills on the Fist tier count for
-  nothing; the HUD says PUNCH A KILL TO WIN.
+* **The Fist tier** is fists only: `tier_loadout` forces `Loadout::unarmed()` (no weapon: the
+  trigger and abilities do nothing, the fist punches; replicated as unarmed,
+  `protocol::player_armed`; `docs/arsenal.md`). Kills with anything but the fist on the Fist
+  tier (a projectile of the last weapon still flying) count for nothing; the HUD says PUNCH A
+  KILL TO WIN.
 * **Respawns, protection, time limit**: deathmatch's. When time runs out the most tiers wins,
   then kills, then fewer deaths, then style. Gun game has no frag limit
   (`ModeRules::gun_game(time_limit_secs)`); frags aren't counted, kills are.
@@ -569,8 +570,10 @@ PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo gri
   survives a respawn, tiers ride on the scoreboard; a punch kill knocks the victim down a tier
   (never below the first) without promoting the puncher; on the Fist tier weapon kills count for
   nothing and a punch kill wins (winner one past the Fist, standings by tier, the ladder in the
-  results, a frozen world); the time limit ranks by tier, not kills, and gun game never ends on
-  frags; late joiners start on the lowest tier; lobby settings start a gun game.
+  results, a frozen world); the Fist tier is fists only (unarmed, replicated as such, nothing
+  but punches fires, still unarmed after a respawn, armed again when punched down); the time
+  limit ranks by tier, not kills, and gun game never ends on frags; late joiners start on the
+  lowest tier; lobby settings start a gun game.
 * `modes_net.rs`: style events reach only the killer, `OwnState` carries the meter, everyone's
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
@@ -604,7 +607,6 @@ PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo gri
   reach the player spawns; a Mould may still appear somewhere awkward on an arena with odd
   geometry (the maps area adds `grind_spawns` to every arena).
 * Grind best waves are per machine (settings file), not per player profile or server.
-* Gun game's Fist tier keeps the last build in hand (see Gun game): a true fists-only tier needs
-  an unarmed loadout from the arsenal (accepted by `force_loadout`, replicated and drawn as "no
-  weapon"). Until the arsenal-client work lands the HUD's weapon block and the viewmodel don't
-  follow forced loadouts yet (the sim, the replicated own state and the weapon prediction do).
+* Gun game's Fist tier is fists only in the sim, the replicated state and the prediction; until
+  the arsenal-client work lands the HUD's weapon block and the viewmodel don't follow forced
+  loadouts yet (an unarmed player is still drawn with the default weapon).

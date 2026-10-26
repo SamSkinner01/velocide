@@ -10,7 +10,9 @@
 //! Rules: a request applies at once while the player is dead (downed included), in the warm-up
 //! ([`SimWorld::warmup`]), or has a fresh body that hasn't acted yet (just joined); otherwise at
 //! the player's next (re)spawn (`WeaponState::respawned`, from [`SimWorld::spawn_loadout`]). A
-//! forced loadout applies at once and wins over the request until it is lifted.
+//! forced loadout applies at once and wins over the request until it is lifted. Requests are
+//! always sanitised to at least one weapon; only a forced loadout may be
+//! [`Loadout::unarmed`] (fists only: gun game's Fist tier).
 
 use super::{PlayerId, SimWorld, WeaponState};
 use crate::loadout::Loadout;
@@ -34,10 +36,12 @@ impl SimWorld {
     }
 
     /// Forces a loadout now (gun game tier changes): replaces the weapons immediately, selects
-    /// the first slot, keeps nothing of the old weapons' state. `None` lifts the override (the
+    /// the first slot, keeps nothing of the old weapons' state. [`Loadout::unarmed`] is kept
+    /// as it is (fists only); anything else is sanitised. `None` lifts the override (the
     /// requested loadout applies at the next spawn).
     pub fn force_loadout(&mut self, id: PlayerId, loadout: Option<Loadout>) {
-        let Some(loadout) = loadout.map(Loadout::sanitized) else {
+        let sanitize = |l: Loadout| if l.is_unarmed() { l } else { l.sanitized() };
+        let Some(loadout) = loadout.map(sanitize) else {
             self.forced_loadouts.remove(&id);
             return;
         };
