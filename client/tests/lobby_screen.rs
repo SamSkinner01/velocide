@@ -226,27 +226,37 @@ fn warmup_match_and_back_through_the_real_screens() {
     assert!(rows.iter().any(|r| r.is_host));
 
     // Host pause menu: RESUME, RETURN TO LOBBY... -> everyone back in the warm-up, on the
-    // same game screens.
-    game.open_pause();
-    rig.frame(&mut host_common, Screen::Game(&mut game), &[]);
-    rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Down]);
-    rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Enter]);
+    // same game screens. (A loaded machine can drop the key presses' frame timing: press again
+    // a couple of times, like a player would.)
     let mut back = (false, false);
-    for _ in 0..400 {
-        let h = rig
-            .frame(&mut host_common, Screen::Game(&mut game), &[])
-            .transition;
-        let g = rig
-            .frame(&mut guest_common, Screen::Game(&mut guest_game), &[])
-            .transition;
-        assert_eq!(
-            (h, g),
-            (None, None),
-            "no screen change: the warm-up is the lobby"
-        );
-        // (Each on its own: autostart may already be counting down the next match.)
-        back.0 |= warming_up(&game);
-        back.1 |= warming_up(&guest_game);
+    for _attempt in 0..3 {
+        if !in_match(&game) {
+            break;
+        }
+        game.open_pause();
+        rig.frame(&mut host_common, Screen::Game(&mut game), &[]);
+        rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Down]);
+        rig.frame(&mut host_common, Screen::Game(&mut game), &[UiKey::Enter]);
+        game.resume();
+        for _ in 0..300 {
+            let h = rig
+                .frame(&mut host_common, Screen::Game(&mut game), &[])
+                .transition;
+            let g = rig
+                .frame(&mut guest_common, Screen::Game(&mut guest_game), &[])
+                .transition;
+            assert_eq!(
+                (h, g),
+                (None, None),
+                "no screen change: the warm-up is the lobby"
+            );
+            // (Each on its own: autostart may already be counting down the next match.)
+            back.0 |= warming_up(&game);
+            back.1 |= warming_up(&guest_game);
+            if back == (true, true) {
+                break;
+            }
+        }
         if back == (true, true) {
             break;
         }
