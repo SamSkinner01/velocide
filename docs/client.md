@@ -13,14 +13,15 @@ the debug overlay.
 | `app` | `VelocideApp` (`engine::app::Game`): the screen state machine, `Common` (app-wide state incl. the `ModelLibrary`), `FrameStats` |
 | `frame` | `FrameBuffers` (reused draw lists → `FrameDesc`), `SceneParams`, `FrameIo` (engine inputs of a frame), `ScreenOutput`, `Transition` |
 | `cli` | `LaunchOptions`, `StartMode`, `parse`, `USAGE` |
-| `settings` | `Settings` (RON, persisted), `CROSSHAIRS`, `RESOLUTIONS` |
+| `settings` | `Settings` (RON, persisted), `Accessibility`, `CueMode`, `CROSSHAIRS`, `RESOLUTIONS` |
+| `palette` | colour-blind-safe colours by role, one `Palette` per colour-vision mode; `palette()` follows the setting, `Palette::theme()` feeds the UI theme, `MarkerShape` per player slot (docs/ui.md "Accessibility") |
 | `controls` | `Action`, `Bindings`, `WeaponSelect`, `WEAPONS`, `Controls` (look + per-tick `PlayerInput`) |
 | `ui_input` | `UiInputMapper`: `InputState` → `ui::UiInput` (keyboard + gamepad navigation with repeat) |
 | `bot` | `--bot` auto-pilot for multi-client testing |
 | `menus::main_menu` | main menu: single player (level select), host (mode, level, port, max players), join, settings, notices |
 | `menus::lobby` | `LobbyScreen`: the lobby of hosted / joined games, `Handoff` (docs/lobby.md) |
 | `menus::results` | `ResultsScreen`: animated campaign / co-op / deathmatch results (docs/style_modes.md) |
-| `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay), reused by the pause menu |
+| `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay, Accessibility with a palette preview), reused by the pause menu |
 | `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
 | `ingame` (`mod.rs`) | `InGame`: one `net::Session` + everything while playing |
 | `ingame::camera` | `CameraRig`: eye height, FOV kick, view roll, landing dip, stair smoothing, shake |
@@ -30,7 +31,8 @@ the debug overlay.
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
 | `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, blood bursts, prisms), `hud` (hit markers, damage numbers, direction, vignette, death screen, prisms / stickies / cooldowns) |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
-| `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
+| `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags, `+N`/`-N` health popups (shape cues) |
+| `ingame::cues` | accessibility shape cues: player marker shapes (`player_swatch`, `draw_marker`), the parry icon over enemies in their parry window (`parry_icons`) |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
 | `ingame::match_flow` | lobby phase changes in game, results screen, scoreboard rows |
 | `ingame::style_hud`, `ingame::mode_hud` | style meter + style feed + rank banner; game-mode state and HUD (checkpoints, downed / revive, extraction, deathmatch clock), score cells, results glue (docs/style_modes.md) |
@@ -205,7 +207,7 @@ way.
 | `feedback.shake(trauma)` | adds 0..1 trauma; shake = trauma², decays at 1.4/s |
 | `feedback.hitstop(seconds)` | freezes what is *drawn* (shake, viewmodel, particles) up to 0.35 s; never the simulation or networking |
 | `feedback.set_time_scale(s)` | visual slow motion |
-| `feedback.flash(color, strength)`, `damage_flash(fraction)`, `parry_flash()` | full-screen flash (red / white), fades in ~0.3 s |
+| `feedback.flash(color, strength)`, `damage_flash(fraction)`, `parry_flash()`, `shield_flash()`, `death_flash()` | full-screen flash, fades in ~0.3 s; the named ones take their colour from `palette()` (`flash_damage` / `_parry` / `_shield` / `_death`), so pass `palette().…` to `flash` too |
 | `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `blood(pos, dir, amount)`, `gibs(pos, n)`, `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
@@ -221,6 +223,12 @@ Add a field to `HudInfo` (`ingame/hud.rs`), fill it in `InGame::draw_hud`, draw 
 `readout`...). Stateful elements (feeds, banners, animations) live in `Hud`. `Hud::event` is the
 top-right feed; `Hud::banner` a big centred announcement. Respect the canvas: 360 units tall,
 width follows the aspect (640 at 16:9).
+
+**Colours that mean something** come from `common.theme` (HUD roles, already swapped per
+colour-vision mode) or `crate::palette::palette()` (everything else: team colours, enemy
+signals, heal / damage, flashes) — never a literal, or colour-blind players lose it. If colour is
+the only thing telling two states apart, add a shape / text cue behind `palette::shape_cues()`
+(see `ingame::cues`) and a pair to the palette tests.
 
 ### Sounds for events
 
@@ -279,8 +287,14 @@ fog, vertex lights, vsync, shake, flashes, hitstop), FOV (horizontal at 16:9), w
 mouse sensitivity / invert, gamepad look speed / invert, master / effects / music volume
 (squared before the mixer), bindings, player name, last join address, host port and max
 players, last level, HUD toggles (timer, speed, FPS, ping), crosshair, view bob, show weapon,
-fullscreen. Changes apply live and are saved when leaving the settings screen (and when a game
+fullscreen, and an `accessibility` section (colour-vision mode + correction strength, shape
+cues). Changes apply live and are saved when leaving the settings screen (and when a game
 starts from the menu).
+
+Applying: `Common::apply_display_settings(renderer)` hands the renderer
+`Settings::render_settings()` (the retro options plus the colour-vision correction, which is not
+stored under `retro`) and sets the palette mode and the UI theme (`Common::apply_accessibility`).
+Tools that drive screens headless should call it when `settings_changed` is set.
 
 ## Command line
 
@@ -329,6 +343,7 @@ Press Esc to free the cursor and interact with the window. Without `debug-ui`
 cargo test -p client                                   # unit + integration tests (GPU tests skip without an adapter)
 cargo run -p client --release --example client_shots -- out/   # headless PNGs of every screen
 cargo run -p client --release --example lobby_shots -- out/    # lobby (host / guest), countdown, match, results
+cargo run -p client --release --example a11y_shots -- out/     # every colour-vision mode + "as that viewer sees it" strips
 cargo run -p client --release --example playthrough -- out/    # every player-facing flow end to end, PASS/FAIL
 PLAYTHROUGH=sp,coop cargo run -p client --release --example playthrough   # only some: sp coop dm robust settings perf window
 scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --debug \
@@ -336,7 +351,11 @@ scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --
 velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-after 6
 ```
 
-- `client_settings`: settings load/save/repair, CLI parsing.
+- `client_settings`: settings load/save/repair (incl. the accessibility section and files
+  written before it existed), CLI parsing.
+- `palette` unit tests: every critical colour pair as each deficiency sees it (docs/ui.md
+  "Accessibility"); `ingame::cues` and `hud` tests: marker shapes, parry icon placement,
+  health popups.
 - `client_controls`: weapon selection rule, taps between ticks, per-frame look, input
   building, bindings, the rebinding flow through the real settings screen.
 - `client_ingame` (GPU): a bot-driven single-player session renders, the pause menu freezes

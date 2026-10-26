@@ -100,6 +100,11 @@ list.text_in(rect, "CENTRED", &TextStyle::new(theme.bone).centered()); // v-cent
 Metrics: `row_height` 14, `spacing` 3, `padding` 12, `title_height` 15, `label_fraction` 0.46
 (label column width in label + control rows), `blink_period` 0.8 s.
 
+The game doesn't use `Theme::default()` as is: `client::palette::Palette::theme()` swaps the HUD
+colours (`health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty`, `blood_bright`,
+`rank_colors`) for the player's colour-vision mode; the standard palette gives exactly the
+default theme. See [Accessibility](#accessibility-colour-blind-palette-and-shape-cues).
+
 Look: translucent near-black panels with a 1-unit edge and bone corner brackets; a blood title
 slab with a stepped 45° cut and trailing slashes; focused rows get a translucent red band, a
 2-unit red bar and an animated `>` (it nudges and blinks red/bone) while the label slides
@@ -193,7 +198,7 @@ All labels follow one rule: text after `##` is hidden but still part of the id
 | `choice(label, &mut usize, &[&str])` | `bool` changed | Left/Right cycle (wraps), click left arrow = previous, elsewhere = next, Enter = next |
 | `text_field(label, &mut String, max_len, TextFilter)` | `TextFieldResponse { changed, submitted, focused }` | type when focused; Backspace, Delete, Left, Right, Home, End; Enter = `submitted`; click places the cursor; scrolls horizontally |
 | `keybind(label, current_binding_name)` | `KeybindResponse { started, capturing, cancelled, cleared }` | click / Enter starts capture; Escape cancels; Backspace/Delete = `cleared` |
-| `tabs(id, &mut usize, &[&str])` | `bool` changed | click a tab, Left/Right while focused (clamped) |
+| `tabs(id, &mut usize, &[&str])` | `bool` changed | click a tab, Left/Right while focused (clamped); equal widths, unless a label needs more (then each tab gets its label plus an equal share) |
 | `scroll_area(id, height, f)` | `f`'s value | wheel / PageUp / PageDown when hovered or containing focus, draggable scrollbar, contents clipped |
 | `scroll_area_sticky(id, height, f)` | `f`'s value | same, but follows the bottom while scrolled to the end and anchors short content to the bottom (chat logs) |
 
@@ -269,6 +274,72 @@ hud::format_timer(seconds) // "MM:SS.cc"
 faded entries, `draw(list, theme, anchor, align, scale, time)`. Entries slide in, flash white
 for a moment and fade out over `fade` seconds. `newest_on_top` controls the stacking direction:
 true for the style feed (under the meter), false for a kill feed growing up from its anchor.
+
+## Accessibility: colour-blind palette and shape cues
+
+Settings > **ACCESSIBILITY** (main menu and pause menu, applies live, saved in the settings
+file's `accessibility` section): COLOUR MODE Off / Protanopia / Deuteranopia / Tritanopia,
+FILTER STRENGTH 0–100 % (the full-screen correction of the 3D view, `docs/render.md`), SHAPE
+CUES AUTO / ON / OFF (AUTO = on with any colour mode), and a live preview of the palette.
+
+The UI is drawn after the post pass and is **not** filtered. It uses a colour-blind-safe
+palette instead: `client::palette` names every colour that carries meaning by role, with one
+variant per mode. `palette()` follows the setting (a process-wide mode, set by
+`Common::apply_accessibility`, so code anywhere can call `palette().telegraph` or
+`palette().team(i)`), `Palette::for_mode(m)` gets a specific one, `Palette::theme()` builds the
+UI theme. `player_color(id)` returns `palette().team(id)`.
+
+| role | meaning | standard | protanopia | deuteranopia | tritanopia |
+|---|---|---|---|---|---|
+| `team[8]` | player slots (trim, name tags, chat, scoreboard) | red, sky, amber, green, violet, pink, aqua, pale yellow | salmon, blue, yellow, pale aqua, magenta, rose, sky, pale yellow | raspberry, blue, amber, pale green, periwinkle, pink, aqua, yellow | red, light blue, yellow, green, purple, lilac, lime, magenta |
+| `telegraph` | enemy wind-up you dodge | #FF2614 | #8C4CFF | #8C4CFF | #3373FF |
+| `parry_window` | parryable window (strobe) | #FFE633 | #BFF2FF | #BFF2FF | #FFF299 |
+| `weak_point` | glowing weak points | #FF9940 | #FFEB8C | #FFEB8C | #FF8C99 |
+| `aim_laser` | Heron aim laser | #FF1F1A | #6673FF | #6673FF | #3373FF |
+| `hostile_projectile` | enemy projectiles | #FF8C26 | #BF59FF | #BF59FF | #40BFFF |
+| `deflected` | your parried projectile | #FFF7E6 | #FFF7E6 | #FFF7E6 | #FFF7E6 |
+| `brand` | Quill brand sigil | #FF4CD9 | #CCFF33 | #CCFF33 | #FF4CD9 |
+| `friendly` / `hostile` | team-mode markers | #61C7FF / #ED262B | #4CA6FF / #FF8C0D | #4CA6FF / #FF8C0D | #33D999 / #ED262B |
+| `heal` / `damage` | kindling, `+N` / `-N` popups | #FF9E38 / #EE262C | #FFCC33 / #FF6E28 | #FFD940 / #F03C1E | #FFCC73 / #FF2828 |
+| `flash_damage` | hit flash | #E60D0A | #FF4C00 | #F23300 | #E60D0A |
+| `flash_parry` / `_shield` / `_death` | other flashes | white / pale blue / dark red | same, death #803300 | same, death #803300 | same |
+| `hard_damage` | smothered capacity (hatched) | #781018 | #965AFF | #965AFF | #3C8CC8 |
+| `health_low` / `warning` | low health, DOWNED, LOCKED (`blood_bright`) | #EE262C | #FF6E28 | #F03C1E | #FF2828 |
+| `stamina` | dash pips, good news (READY, CLEARED) | #60C8FF | #60C8FF | #60C8FF | #60C8FF |
+| `ranks[8]` | style ranks | grey, brass, orange, hot orange, red, magenta, bright red, white-hot | grey, brass, gold, orange, blue, ice, pink, white | same as protan | grey, brass, orange, red, green, magenta, ember, white |
+
+**Why these:** for protanopes and deuteranopes reds, oranges, browns and molten slag are all one
+yellow-brown, which is most of a foundry level. So enemy signals (wind-up, laser, projectiles)
+go violet-blue and the parry window white-cyan, the hues they see best that the levels don't
+use; dark reds that protanopes barely see (hard damage, low health) move to violet / orange.
+Tritanopes keep red-green but lose blue-yellow, so their signals go azure (seen as teal)
+against the red foundry, the parry window pale yellow-white, hard damage teal.
+
+**Tests** (`client::palette::tests`): each palette is checked *as its viewer sees it*
+(Machado 2009 simulation) with CIEDE2000: HUD pairs (health / hard damage / empty bar / low
+health, good / warning, heal / damage) ≥ 15–25, flashes ≥ 20, world pairs (telegraph / parry
+≥ 25, hostile / deflected ≥ 20, friendly / hostile ≥ 25, weak point, brand, heal) ≥ 12–25 —
+world colours also after the full-screen correction at strength 0, 0.5 and 1 — enemy
+signals ≥ 20 from every foundry colour, all 28 team-colour pairs ≥ 12 (about the best eight
+bright colours manage for a dichromat; shapes do the rest) and readable on dark panels,
+neighbouring ranks ≥ 8. The standard palette is checked with normal vision and must equal the
+original look (`STANDARD.theme() == Theme::default()`).
+
+**Shape cues** (`client::ingame::cues`, on when `palette::shape_cues()`):
+
+- **Player markers**: slot `i % 8` gets a 5x5 shape (`palette::MarkerShape`: square, diamond,
+  triangle, ring, cross, inverted triangle, bars, chevron) wherever its colour swatch was — name
+  tags, scoreboard, lobby list, results, the co-op team list (`cues::player_swatch`).
+- **Parry icon**: a `!` diamond strobing between `parry_window` and white over every enemy whose
+  `enemy_flags::PARRYABLE` is set (`cues::parry_icons`), above its head or held at the top of the
+  view (below the timer) when a big enemy is too close.
+- **Health popups**: `+12` (heal colour) / `-8` (damage colour) rising over the health number
+  (`Hud`), so heal vs hurt reads from the sign.
+- Hard damage is hatched in every mode; low health blinks; hit markers differ in size and
+  thickness; the lobby says READY in words.
+
+Check the look with `cargo run -p client --release --example a11y_shots -- out/` (every mode,
+plus "as that viewer sees it" comparison strips).
 
 ## CPU rasteriser
 
