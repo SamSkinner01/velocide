@@ -66,7 +66,7 @@ const ALCOVE_H: f32 = 3.5;
 const SLOT: (f32, f32) = (4.0, 7.5);
 const SLOT_D: f32 = 2.0;
 
-fn half(apothem: f32) -> f32 {
+pub(super) fn half(apothem: f32) -> f32 {
     apothem * TAN8
 }
 
@@ -87,7 +87,7 @@ fn normal(k: usize) -> (f32, f32) {
 
 /// World `(x, z)` of side `k`'s local `(t, d)`: `t` along the side (clockwise), `d` out from
 /// the centre.
-fn at(k: usize, t: f32, d: f32) -> (f32, f32) {
+pub(super) fn at(k: usize, t: f32, d: f32) -> (f32, f32) {
     let (nx, nz) = normal(k);
     (-nz * t + nx * d, nx * t + nz * d)
 }
@@ -99,6 +99,21 @@ fn seg(
     g: &mut Gen,
     note: &str,
     k: usize,
+    t: (f32, f32),
+    d: (f32, f32),
+    y: (f32, f32),
+    m: Mat,
+) -> usize {
+    seg_around(g, note, (0.0, 0.0), k, t, d, y, m)
+}
+
+/// [`seg`] for an octagon centred on `(cx, cz)`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn seg_around(
+    g: &mut Gen,
+    note: &str,
+    (ox, oz): (f32, f32),
+    k: usize,
     (t0, t1): (f32, f32),
     (d0, d1): (f32, f32),
     (y0, y1): (f32, f32),
@@ -109,14 +124,14 @@ fn seg(
         let (bx, bz) = at(k, t1, d1);
         g.bx(
             note,
-            [ax.min(bx), y0, az.min(bz)],
-            [ax.max(bx), y1, az.max(bz)],
+            [ox + ax.min(bx), y0, oz + az.min(bz)],
+            [ox + ax.max(bx), y1, oz + az.max(bz)],
             m,
         );
     } else {
         let y1 = y1 - 0.02;
         let (cx, cz) = at(k, (t0 + t1) * 0.5, (d0 + d1) * 0.5);
-        let c = Vec3::new(cx, (y0 + y1) * 0.5, cz);
+        let c = Vec3::new(ox + cx, (y0 + y1) * 0.5, oz + cz);
         let h = Vec3::new((t1 - t0).abs(), y1 - y0, (d1 - d0).abs()) * 0.5;
         let (nx, nz) = normal(k);
         let b = g.push(note, brush(c - h, c + h, m));

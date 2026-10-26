@@ -8,6 +8,8 @@
 //! - `ingot_run.ron` — "Ingot Run", the long, lane-based PvP arena (`level_gen/ingot_run.rs`).
 //! - `furnace_ring.ron` — "Furnace Ring", the round tiered grind / PvP arena
 //!   (`level_gen/furnace_ring.rs`).
+//! - `drowned_chandlery.ron` — "The Drowned Chandlery", the third co-op campaign level (4 arenas,
+//!   `level_gen/drowned_chandlery.rs`).
 //!
 //! Every arena has Mould gates for grind mode (`level_gen/gates.rs`).
 //!
@@ -33,6 +35,8 @@ use shared::level::{
 
 // Level modules live in `level_gen/` (an example's crate root resolves `mod` paths from
 // `examples/`, hence the `#[path]`).
+#[path = "level_gen/drowned_chandlery.rs"]
+mod drowned_chandlery;
 #[path = "level_gen/furnace_ring.rs"]
 mod furnace_ring;
 #[path = "level_gen/gates.rs"]
@@ -2648,6 +2652,11 @@ fn main() -> anyhow::Result<()> {
             "furnace_ring.ron",
             furnace_ring::furnace_ring(),
             "Furnace Ring — round tiered arena for grind and PvP (1-4 grind, 4-8 PvP). See docs/levels.md.\nGenerator module: client/examples/level_gen/furnace_ring.rs.",
+        ),
+        (
+            "drowned_chandlery.ron",
+            drowned_chandlery::drowned_chandlery(),
+            "The Drowned Chandlery — co-op campaign level (1-4 players). See docs/levels.md.\nGenerator module: client/examples/level_gen/drowned_chandlery.rs.",
         ),
     ] {
         let text = emit(&g, header);

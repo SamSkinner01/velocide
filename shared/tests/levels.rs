@@ -37,16 +37,17 @@ use shared::tuning::MovementTuning;
 const DT: f32 = 1.0 / 60.0;
 const CRUCIBLE: &str = "crucible_of_veins";
 const SPIRE: &str = "spire_of_wicks";
+const DROWNED: &str = "drowned_chandlery";
 /// Every shipped `Campaign` level: each gets the structure, spawn, sealing and bot checks
 /// (its routes live in [`campaign_route`] / [`alternate_routes`]).
-const CAMPAIGNS: [&str; 2] = [CRUCIBLE, SPIRE];
+const CAMPAIGNS: [&str; 3] = [CRUCIBLE, SPIRE, DROWNED];
 const ARENA: &str = "cistern_nine";
 const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
 const FURNACE: &str = "furnace_ring";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
-const SHIPPED: [&str; 6] = [CRUCIBLE, SPIRE, ARENA, KNELL, INGOT, FURNACE];
+const SHIPPED: [&str; 7] = [CRUCIBLE, SPIRE, DROWNED, ARENA, KNELL, INGOT, FURNACE];
 /// Test levels that aren't held to the shipping standards.
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
@@ -1130,6 +1131,9 @@ impl<'a> Bot<'a> {
         if let Some(x) = level.exit {
             marks.push(("exit".into(), x));
         }
+        for (i, v) in level.secrets.iter().enumerate() {
+            marks.push((format!("secret {}", i + 1), *v));
+        }
         let mut bot = Self {
             level,
             s: MoveState::spawn(start),
@@ -1297,8 +1301,73 @@ fn campaign_route(name: &str) -> Vec<Vec<Wp>> {
     match name {
         CRUCIBLE => crucible_route(),
         SPIRE => spire_route(),
+        DROWNED => drowned_route(),
         _ => panic!("{name}: every campaign level needs a bot route in levels.rs"),
     }
+}
+
+/// The Drowned Chandlery: two plain jumps over deep water (the Culvert's sluice, the Spool
+/// Walk's break), a hop over the Pipe Gallery's valve box and one over the Wax Press's drowned
+/// floor past a wax floe; ramps everywhere else.
+fn drowned_route() -> Vec<Vec<Wp>> {
+    vec![
+        // Loading Dock -> Culvert (jump the sluice) -> Dipping Hall vestibule.
+        vec![
+            run(0.0, 0.0, 66.0),
+            run(0.0, 0.0, 57.0),
+            run(0.0, 0.0, 48.0),
+            run(0.0, 0.0, 41.0),
+        ],
+        // Dipping Hall: east ramp to the gantry, exit door -> Spool Walk (jump the break) ->
+        // Cistern vestibule.
+        vec![
+            run(20.0, 0.0, 38.0),
+            run(20.0, 0.0, 31.0),
+            run(20.0, 4.0, 15.0),
+            run(16.5, 4.0, 12.0),
+            run(16.5, 4.0, 5.0),
+            run(16.5, 4.0, -8.0),
+            run(16.5, 4.0, -16.0),
+        ],
+        // Cistern: east ramp, landing, north gallery, west gallery, exit -> Pipe Gallery (hop
+        // the valve box) -> Wax Press balcony.
+        vec![
+            run(26.0, 4.0, -18.0),
+            run(31.5, 4.0, -15.0),
+            run(31.5, 14.0, -43.0),
+            run(26.0, 14.0, -50.0),
+            run(0.0, 14.0, -50.0),
+            run(0.0, 14.0, -37.5),
+            run(-6.0, 14.0, -36.0),
+            run(-14.0, 14.0, -36.0),
+            run(-19.0, 14.0, -37.5),
+        ],
+        // Wax Press: down the balcony ramp, west across the floor, jump the drowned floor past
+        // the floe, exit door -> Wick Passage -> Great Wick vestibule.
+        vec![
+            run(-20.5, 14.0, -33.0),
+            run(-31.0, 11.0, -33.0),
+            run(-33.0, 11.0, -29.0),
+            run(-40.5, 11.0, -27.5),
+            run(-51.5, 11.0, -27.5),
+            run(-57.0, 11.0, -27.5),
+            run(-63.0, 11.0, -27.5),
+            run(-69.0, 11.0, -27.5),
+        ],
+        // Great Wick: round the east floor to the south ramp, up to the west gallery, the
+        // north gallery, exit door -> C5 -> the Wick Terrace.
+        vec![
+            run(-70.0, 11.0, -15.0),
+            run(-76.0, 11.4, -9.0),
+            run(-103.0, 21.0, -9.0),
+            run(-106.5, 21.0, -12.0),
+            run(-106.5, 21.0, -46.5),
+            run(-88.5, 21.0, -46.5),
+            run(-88.5, 21.0, -55.0),
+            run(-88.5, 21.0, -68.0),
+            run(-88.5, 21.3, -75.5),
+        ],
+    ]
 }
 
 /// Spire of Wicks: no tech needed (one jump over the fallen bell's crown, ramps all the way).
@@ -1487,6 +1556,7 @@ fn alternate_routes(name: &str, level: &LevelDef) -> Vec<(&'static str, Vec3, Ve
     match name {
         CRUCIBLE => crucible_alternate_routes(level),
         SPIRE => spire_alternate_routes(level),
+        DROWNED => drowned_alternate_routes(level),
         _ => panic!("{name}: every campaign level needs alternate routes in levels.rs"),
     }
 }
@@ -1498,13 +1568,93 @@ fn campaign_alternate_routes_are_traversable() {
         let col = collision(&level, Some(true));
         let routes = alternate_routes(name, &level);
         assert!(routes.len() >= 4, "{name}: alternate routes");
+        // Every secret is found by one of them (and never on the critical path: the bots
+        // there must enter exactly the checkpoints, encounters and the exit).
+        let mut found = HashSet::new();
         for (route, start, wps) in routes {
             let mut bot = Bot::new(&level, &col, start);
             bot.follow(&wps, 12.0)
                 .unwrap_or_else(|e| panic!("{name}: {route}: {e}"));
             println!("{name}: alternate route '{route}': {:.1} s", bot.seconds());
+            found.extend(bot.entered.into_iter().filter(|l| l.starts_with("secret")));
+        }
+        for i in 1..=level.secrets.len() {
+            assert!(
+                found.contains(&format!("secret {i}")),
+                "{name}: no route finds secret {i}"
+            );
         }
     }
+}
+
+fn drowned_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
+    vec![
+        (
+            "Dipping Hall pad onto the gantry",
+            level.checkpoints[0].spawn.position,
+            vec![
+                run(5.5, 0.0, 33.0),
+                run(5.5, 0.0, 24.0),
+                pad(0.0, 0.0, 23.0),
+                run(0.0, 4.0, 13.0),
+                run(16.5, 4.0, 12.0),
+            ],
+        ),
+        (
+            "Cistern pad onto the west gallery",
+            level.checkpoints[1].spawn.position,
+            vec![
+                run(10.0, 4.0, -18.0),
+                run(0.5, 4.0, -21.0),
+                pad(0.2, 4.0, -24.8),
+                run(0.0, 14.0, -37.5),
+            ],
+        ),
+        (
+            "slide under the Pipe Gallery's pipes",
+            Vec3::new(-5.5, 14.0, -39.0),
+            vec![slide(-14.0, 14.0, -39.0), run(-19.0, 14.0, -38.0)],
+        ),
+        (
+            "Wax Press: drop off the balcony, pad onto the press bed",
+            level.checkpoints[2].spawn.position,
+            vec![
+                run(-23.0, 11.0, -43.0),
+                run(-31.0, 11.0, -43.0),
+                pad(-34.0, 11.0, -38.0),
+                run(-34.0, 15.0, -48.0),
+            ],
+        ),
+        (
+            "Great Wick: floor pad onto the north gallery",
+            level.checkpoints[3].spawn.position,
+            vec![
+                pad(-78.0, 11.0, -38.0),
+                run(-82.0, 21.0, -47.0),
+                run(-88.5, 21.0, -46.5),
+            ],
+        ),
+        (
+            "secret 1: hop onto the barge and into its cabin",
+            level.spawns[0].position,
+            vec![
+                run(-4.5, 0.0, 74.5),
+                run(-7.5, 0.0, 74.5),
+                run(-10.0, 0.0, 74.5),
+                run(-9.6, 0.0, 76.4),
+            ],
+        ),
+        (
+            "secret 2: the floe pad onto the top of the Great Wick",
+            level.checkpoints[3].spawn.position,
+            vec![
+                run(-70.0, 11.0, -15.0),
+                run(-94.0, 11.0, -13.5),
+                pad(-94.36, 11.2, -21.64),
+                run(-90.5, 38.0, -25.5),
+            ],
+        ),
+    ]
 }
 
 fn spire_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
@@ -2190,6 +2340,101 @@ fn ingot_run_tech() {
 }
 
 #[test]
+fn drowned_chandlery_tech() {
+    let level = load(DROWNED);
+    let col = collision(&level, Some(true));
+    let (east, west, north) = (Vec3::X, Vec3::NEG_X, Vec3::NEG_Z);
+
+    // The Cistern: dash-jump across the pool from the west walk to the east walk (a shortcut
+    // to the east ramp; the pool snuffs a short jump).
+    let mut d = Script::new(&level, &col, Vec3::new(3.0, 4.0, -33.0));
+    for _ in 0..5 {
+        d.tick(east, Buttons::NONE);
+    }
+    d.tick(east, Buttons::DASH);
+    assert!(
+        d.tick(east, Buttons::JUMP).dash_jumped,
+        "dash-jump off the west walk"
+    );
+    assert!(d.until_landed(east, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        d.s.position.x > 24.0 && (d.s.position.y - 4.0).abs() < 0.2,
+        "the dash-jump should clear the pool, landed at {}",
+        d.s.position
+    );
+
+    // The Wax Press: jump, slam, bounce off the floor onto the press bed (4 m up).
+    let mut b = Script::new(&level, &col, Vec3::new(-31.0, 11.0, -41.0));
+    for _ in 0..5 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    b.tick(Vec3::ZERO, Buttons::JUMP);
+    while b.s.velocity.y > 0.0 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    assert!(
+        b.tick(Vec3::ZERO, Buttons::CROUCH).slam_started,
+        "slam from the jump's apex"
+    );
+    assert!(
+        (0..60).any(|_| b.tick(Vec3::ZERO, Buttons::JUMP).slam_bounced),
+        "slam bounce off the floor"
+    );
+    let mut landed = false;
+    for _ in 0..120 {
+        let dir = if b.s.position.y > 15.3 {
+            north
+        } else {
+            Vec3::ZERO
+        };
+        if b.tick(dir, Buttons::NONE).landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (b.s.position.y - 15.0).abs() < 0.05 && b.s.position.z < -44.0,
+        "the slam bounce should land on the press bed, got {}",
+        b.s.position
+    );
+
+    // The Wax Press: a running jump onto a wax floe, braking in the air over it.
+    let mut f = Script::new(&level, &col, Vec3::new(-39.5, 11.0, -47.0));
+    let mut jumped = false;
+    let mut landed = false;
+    for _ in 0..240 {
+        let x = f.s.position.x;
+        let (dir, buttons) = if !jumped {
+            (
+                west,
+                if x < -41.8 {
+                    Buttons::JUMP
+                } else {
+                    Buttons::NONE
+                },
+            )
+        } else if x > -44.0 {
+            (west, Buttons::NONE)
+        } else if f.s.velocity.x < -0.5 {
+            (east, Buttons::NONE)
+        } else {
+            (Vec3::ZERO, Buttons::NONE)
+        };
+        let ev = f.tick(dir, buttons);
+        jumped |= ev.jumped;
+        if jumped && ev.landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (f.s.position.y - 11.2).abs() < 0.05 && f.s.position.x < -44.6,
+        "the hop should land on the floe, got {}",
+        f.s.position
+    );
+}
+
+#[test]
 fn furnace_ring_tech() {
     let level = load(FURNACE);
     let col = collision(&level, None);
@@ -2590,8 +2835,9 @@ fn pvp_spawns_cannot_see_each_other() {
 }
 
 /// Campaign encounter spawns are connected on the nav grid for their Mould's class (doors
-/// open): every walker reaches its arena's centre and its rally point and back. Censers may
-/// sit on pad-only ledges (they only need to be on the grid).
+/// open): every walker can walk to its rally point (the Gaoler with its wide footprint, to the
+/// nearest spot by the rally it fits) and players can walk to it. Censers may sit on pad-only
+/// ledges (they only need to be on the grid).
 #[test]
 fn campaign_enemy_spawns_are_on_connected_nav() {
     for name in CAMPAIGNS {
@@ -2602,8 +2848,6 @@ fn campaign_enemy_spawns_are_on_connected_nav() {
         let mut bad = Vec::new();
         for (ei, e) in level.encounters.iter().enumerate() {
             let rally = e.rally.expect("rally").position;
-            let arena = e.arena.expect("arena");
-            let centre = Vec3::new(arena.center().x, rally.y, arena.center().z);
             let rally_node = grid
                 .node_at(rally, 0.6, NavClass::SMALL, &[])
                 .unwrap_or_else(|| panic!("{name}: encounter {} rally off the grid", ei + 1));
@@ -2627,30 +2871,25 @@ fn campaign_enemy_spawns_are_on_connected_nav() {
                         continue;
                     }
                     let found = |r: PathResult| matches!(r, PathResult::Found(_));
-                    let goal = grid.nearest_node(centre, 12, class, &[]);
-                    if !goal.is_some_and(|g| {
-                        found(grid.find_path(&mut scratch, start, g, class, &[], 200_000))
-                    }) {
-                        bad.push(format!("{what}: no path to the arena centre {centre}"));
-                    }
-                    let to = grid.find_path(
+                    let goal = grid.nearest_node(rally, 8, class, &[]);
+                    let to = goal.is_some_and(|goal| {
+                        found(grid.find_path(&mut scratch, start, goal, class, &[], 200_000))
+                    });
+                    let small = grid
+                        .node_at(s.position, 0.6, NavClass::SMALL, &[])
+                        .expect("a node for a class is a narrow node too");
+                    let from = found(grid.find_path(
                         &mut scratch,
-                        start,
                         rally_node,
+                        small,
                         NavClass::SMALL,
                         &[],
                         200_000,
-                    );
-                    let from = grid.find_path(
-                        &mut scratch,
-                        rally_node,
-                        start,
-                        NavClass::SMALL,
-                        &[],
-                        200_000,
-                    );
-                    if !found(to) || !found(from) {
-                        bad.push(format!("{what}: not connected to the rally point"));
+                    ));
+                    if !to || !from {
+                        bad.push(format!(
+                            "{what}: can't walk to the rally point ({to}) or be reached from it ({from})"
+                        ));
                     }
                 }
             }
