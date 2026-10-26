@@ -17,11 +17,26 @@ use crate::sim::projectiles::ProjectileKind;
 /// Built-in definitions (compiled in, so the server works without an assets directory and
 /// tests don't depend on edited files). Files in `assets/enemies/` override them by name.
 const BUILTIN: &[(&str, &str)] = &[
-    ("gnawer", include_str!("../../../../assets/enemies/gnawer.ron")),
-    ("censer", include_str!("../../../../assets/enemies/censer.ron")),
-    ("harrier", include_str!("../../../../assets/enemies/harrier.ron")),
-    ("gaoler", include_str!("../../../../assets/enemies/gaoler.ron")),
-    ("heron", include_str!("../../../../assets/enemies/heron.ron")),
+    (
+        "gnawer",
+        include_str!("../../../../assets/enemies/gnawer.ron"),
+    ),
+    (
+        "censer",
+        include_str!("../../../../assets/enemies/censer.ron"),
+    ),
+    (
+        "harrier",
+        include_str!("../../../../assets/enemies/harrier.ron"),
+    ),
+    (
+        "gaoler",
+        include_str!("../../../../assets/enemies/gaoler.ron"),
+    ),
+    (
+        "heron",
+        include_str!("../../../../assets/enemies/heron.ron"),
+    ),
 ];
 
 /// How an enemy moves.

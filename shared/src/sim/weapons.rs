@@ -403,8 +403,8 @@ impl SimWorld {
         };
         match attack {
             Attack::Quill => {
-                let shot = ShotSpec::new(eye, aim, c.hitscan_range, c.quill.damage, attack)
-                    .ricochet(true);
+                let shot =
+                    ShotSpec::new(eye, aim, c.hitscan_range, c.quill.damage, attack).ricochet(true);
                 self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
             }
             Attack::Brand => {
@@ -458,7 +458,14 @@ impl SimWorld {
                     self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
                 for impact in results.iter().filter_map(|r| r.impact) {
                     if let Some((target, _)) = impact.target {
-                        self.arc_chain(t, owner, &view.hitboxes, target, impact.point, a.zap_damage);
+                        self.arc_chain(
+                            t,
+                            owner,
+                            &view.hitboxes,
+                            target,
+                            impact.point,
+                            a.zap_damage,
+                        );
                     }
                 }
             }
@@ -604,7 +611,10 @@ mod tests {
         // Switching mode or weapon cancels it without firing.
         let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 0), true, &t, 60);
         assert_eq!(s.charge, 0);
-        assert!(out.iter().all(|i| !matches!(i, FireIntent::Alt { charge, .. } if *charge > 0.0)));
+        assert!(
+            out.iter()
+                .all(|i| !matches!(i, FireIntent::Alt { charge, .. } if *charge > 0.0))
+        );
         for _ in 0..10 {
             step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 1), true, &t, 60);
         }
@@ -625,7 +635,10 @@ mod tests {
                 charge: 0.0
             }]
         );
-        assert_eq!(s.primary_cooldown[1], secs_to_ticks(t.bellows.interval, 60, 1));
+        assert_eq!(
+            s.primary_cooldown[1],
+            secs_to_ticks(t.bellows.interval, 60, 1)
+        );
         assert!(step_weapons(&mut s, &input(Buttons::FIRE, 1, 1), true, &t, 60).is_empty());
         // Gust doesn't.
         let mut s = WeaponState::default();

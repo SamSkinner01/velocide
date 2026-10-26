@@ -10,8 +10,8 @@ use engine::assets::meshgen::MeshBuilder;
 use engine::glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::{
-    EnemyAnim, EnemyState, gray, heat, melt, rx, ry, rz, seed_phase, smoothstep, strobe,
-    telegraph, walk_legs, wave,
+    EnemyAnim, EnemyState, gray, heat, melt, rx, ry, rz, seed_phase, smoothstep, strobe, telegraph,
+    walk_legs, wave,
 };
 use crate::models::PartSet;
 use crate::models::kit::{self, add, add_mirrored, ellipsoid, gem, limb, rgb, spike};
@@ -89,7 +89,15 @@ fn plate(center: Vec3, half: Vec3, rot: Quat, color: Vec4, rivet: Vec4) -> MeshB
     let mut m = kit::block(center, half, rot, color);
     for k in 0..4 {
         let x = -half.x + (k as f32 + 0.5) * half.x * 0.5;
-        add(&mut m, gem(center + rot * Vec3::new(x, half.y * 0.75, -half.z), 0.03, 0, rivet));
+        add(
+            &mut m,
+            gem(
+                center + rot * Vec3::new(x, half.y * 0.75, -half.z),
+                0.03,
+                0,
+                rivet,
+            ),
+        );
     }
     m
 }
@@ -106,20 +114,47 @@ pub fn build() -> Vec<ModelPart> {
     let grille = Vec4::new(1.0, 0.55, 0.15, 1.0);
 
     // Pelvis: an iron belt and a skirt of hanging plates.
-    p.add(PELVIS, kit::block(Vec3::new(0.0, 1.42, 0.0), Vec3::new(0.62, 0.16, 0.45), Quat::IDENTITY, iron_dark));
+    p.add(
+        PELVIS,
+        kit::block(
+            Vec3::new(0.0, 1.42, 0.0),
+            Vec3::new(0.62, 0.16, 0.45),
+            Quat::IDENTITY,
+            iron_dark,
+        ),
+    );
     for k in 0..5 {
         let x = -0.5 + 0.25 * k as f32;
-        p.add(PELVIS, kit::block(Vec3::new(x, 1.12, -0.42), Vec3::new(0.11, 0.2, 0.03), rx(-0.12), iron));
+        p.add(
+            PELVIS,
+            kit::block(
+                Vec3::new(x, 1.12, -0.42),
+                Vec3::new(0.11, 0.2, 0.03),
+                rx(-0.12),
+                iron,
+            ),
+        );
     }
 
     // Torso: a barrel of iron plate, wax bulging at the seams, a heavy collar.
     let ring = |y: f32, w: f32, d: f32| {
-        kit::chamfer_ring(Vec3::new(0.0, y, 0.0), Vec3::X, Vec3::Z, Vec2::new(w, d), 0.18)
+        kit::chamfer_ring(
+            Vec3::new(0.0, y, 0.0),
+            Vec3::X,
+            Vec3::Z,
+            Vec2::new(w, d),
+            0.18,
+        )
     };
     p.add(
         TORSO,
         kit::loft(
-            &[ring(1.58, 0.6, 0.44), ring(2.1, 0.86, 0.56), ring(2.65, 0.98, 0.58), ring(2.98, 0.72, 0.46)],
+            &[
+                ring(1.58, 0.6, 0.44),
+                ring(2.1, 0.86, 0.56),
+                ring(2.65, 0.98, 0.58),
+                ring(2.98, 0.72, 0.46),
+            ],
             wax,
             false,
             (true, true),
@@ -127,51 +162,198 @@ pub fn build() -> Vec<ModelPart> {
         ),
     );
     for (y, w) in [(1.95, 0.84), (2.4, 0.95), (2.78, 0.9)] {
-        let front = plate(Vec3::new(0.0, y, -0.56), Vec3::new(w * 0.8, 0.18, 0.05), Quat::IDENTITY, iron, brass);
+        let front = plate(
+            Vec3::new(0.0, y, -0.56),
+            Vec3::new(w * 0.8, 0.18, 0.05),
+            Quat::IDENTITY,
+            iron,
+            brass,
+        );
         add(p.mesh(TORSO), front);
     }
     for side in [-1.0f32, 1.0] {
-        p.add(TORSO, kit::block(Vec3::new(side * 0.94, 2.35, 0.0), Vec3::new(0.06, 0.45, 0.42), rz(side * 0.12), iron));
+        p.add(
+            TORSO,
+            kit::block(
+                Vec3::new(side * 0.94, 2.35, 0.0),
+                Vec3::new(0.06, 0.45, 0.42),
+                rz(side * 0.12),
+                iron,
+            ),
+        );
     }
-    p.add(TORSO, kit::block(Vec3::new(0.0, 3.0, -0.05), Vec3::new(0.6, 0.1, 0.42), Quat::IDENTITY, iron_dark));
+    p.add(
+        TORSO,
+        kit::block(
+            Vec3::new(0.0, 3.0, -0.05),
+            Vec3::new(0.6, 0.1, 0.42),
+            Quat::IDENTITY,
+            iron_dark,
+        ),
+    );
     // Pauldrons: big round iron shells.
-    let pauldron = ellipsoid(Vec3::new(1.0, 2.88, 0.0), Vec3::new(0.38, 0.26, 0.4), rz(-0.3), 3, 8, iron, false);
+    let pauldron = ellipsoid(
+        Vec3::new(1.0, 2.88, 0.0),
+        Vec3::new(0.38, 0.26, 0.4),
+        rz(-0.3),
+        3,
+        8,
+        iron,
+        false,
+    );
     add_mirrored(p.mesh(TORSO), &pauldron);
     // The lantern cage on its back: brackets, rings and bars of brass around the heart glow.
     let lc = Vec3::new(0.0, 2.2, 0.95);
     for x in [-0.3, 0.3] {
-        p.add(TORSO, limb(Vec3::new(x, 2.5, 0.45), Vec3::new(x * 0.8, 2.6, 0.95), Vec2::splat(0.05), Vec2::splat(0.04), brass));
-        p.add(TORSO, limb(Vec3::new(x, 1.9, 0.45), Vec3::new(x * 0.8, 1.8, 0.95), Vec2::splat(0.05), Vec2::splat(0.04), brass));
+        p.add(
+            TORSO,
+            limb(
+                Vec3::new(x, 2.5, 0.45),
+                Vec3::new(x * 0.8, 2.6, 0.95),
+                Vec2::splat(0.05),
+                Vec2::splat(0.04),
+                brass,
+            ),
+        );
+        p.add(
+            TORSO,
+            limb(
+                Vec3::new(x, 1.9, 0.45),
+                Vec3::new(x * 0.8, 1.8, 0.95),
+                Vec2::splat(0.05),
+                Vec2::splat(0.04),
+                brass,
+            ),
+        );
     }
-    p.add(TORSO, kit::band(lc + Vec3::Y * 0.42, Vec3::Y, 0.42, 0.07, 0.05, 10, brass));
-    p.add(TORSO, kit::band(lc - Vec3::Y * 0.42, Vec3::Y, 0.42, 0.07, 0.05, 10, brass));
+    p.add(
+        TORSO,
+        kit::band(lc + Vec3::Y * 0.42, Vec3::Y, 0.42, 0.07, 0.05, 10, brass),
+    );
+    p.add(
+        TORSO,
+        kit::band(lc - Vec3::Y * 0.42, Vec3::Y, 0.42, 0.07, 0.05, 10, brass),
+    );
     for k in 0..7 {
         let a = k as f32 / 7.0 * std::f32::consts::TAU;
         let (s, c) = a.sin_cos();
         p.add(
             TORSO,
-            limb(lc + Vec3::new(c * 0.44, -0.45, s * 0.44), lc + Vec3::new(c * 0.44, 0.45, s * 0.44), Vec2::splat(0.025), Vec2::splat(0.025), brass),
+            limb(
+                lc + Vec3::new(c * 0.44, -0.45, s * 0.44),
+                lc + Vec3::new(c * 0.44, 0.45, s * 0.44),
+                Vec2::splat(0.025),
+                Vec2::splat(0.025),
+                brass,
+            ),
         );
     }
-    p.add(TORSO, spike(lc + Vec3::Y * 0.46, lc + Vec3::Y * 0.75, 0.12, 6, iron_dark));
-    p.add(LANTERN, ellipsoid(lc, Vec3::new(0.34, 0.38, 0.34), Quat::IDENTITY, 4, 8, lantern, false));
+    p.add(
+        TORSO,
+        spike(lc + Vec3::Y * 0.46, lc + Vec3::Y * 0.75, 0.12, 6, iron_dark),
+    );
+    p.add(
+        LANTERN,
+        ellipsoid(
+            lc,
+            Vec3::new(0.34, 0.38, 0.34),
+            Quat::IDENTITY,
+            4,
+            8,
+            lantern,
+            false,
+        ),
+    );
 
     // The helm: an iron box with a crest and a barred grille; the heat glows behind the bars.
     let hc = Vec3::new(0.0, 3.3, -0.3);
-    p.add(HELM, kit::block(Vec3::new(0.0, 3.1, -0.18), Vec3::new(0.24, 0.12, 0.22), Quat::IDENTITY, iron_dark));
-    p.add(HELM, kit::block(hc + Vec3::new(0.0, 0.26, 0.05), Vec3::new(0.34, 0.06, 0.32), Quat::IDENTITY, iron));
+    p.add(
+        HELM,
+        kit::block(
+            Vec3::new(0.0, 3.1, -0.18),
+            Vec3::new(0.24, 0.12, 0.22),
+            Quat::IDENTITY,
+            iron_dark,
+        ),
+    );
+    p.add(
+        HELM,
+        kit::block(
+            hc + Vec3::new(0.0, 0.26, 0.05),
+            Vec3::new(0.34, 0.06, 0.32),
+            Quat::IDENTITY,
+            iron,
+        ),
+    );
     for side in [-1.0f32, 1.0] {
-        p.add(HELM, kit::block(hc + Vec3::new(side * 0.31, 0.0, 0.05), Vec3::new(0.04, 0.3, 0.32), Quat::IDENTITY, iron));
+        p.add(
+            HELM,
+            kit::block(
+                hc + Vec3::new(side * 0.31, 0.0, 0.05),
+                Vec3::new(0.04, 0.3, 0.32),
+                Quat::IDENTITY,
+                iron,
+            ),
+        );
     }
-    p.add(HELM, kit::block(hc + Vec3::new(0.0, 0.0, 0.34), Vec3::new(0.3, 0.3, 0.04), Quat::IDENTITY, iron));
-    p.add(HELM, kit::block(hc + Vec3::new(0.0, -0.27, 0.05), Vec3::new(0.3, 0.04, 0.3), Quat::IDENTITY, iron));
+    p.add(
+        HELM,
+        kit::block(
+            hc + Vec3::new(0.0, 0.0, 0.34),
+            Vec3::new(0.3, 0.3, 0.04),
+            Quat::IDENTITY,
+            iron,
+        ),
+    );
+    p.add(
+        HELM,
+        kit::block(
+            hc + Vec3::new(0.0, -0.27, 0.05),
+            Vec3::new(0.3, 0.04, 0.3),
+            Quat::IDENTITY,
+            iron,
+        ),
+    );
     for k in 0..5 {
         let x = -0.24 + 0.12 * k as f32;
-        p.add(HELM, kit::block(hc + Vec3::new(x, 0.0, -0.28), Vec3::new(0.022, 0.26, 0.022), Quat::IDENTITY, iron_dark));
+        p.add(
+            HELM,
+            kit::block(
+                hc + Vec3::new(x, 0.0, -0.28),
+                Vec3::new(0.022, 0.26, 0.022),
+                Quat::IDENTITY,
+                iron_dark,
+            ),
+        );
     }
-    p.add(HELM, kit::block(hc + Vec3::new(0.0, 0.08, -0.28), Vec3::new(0.3, 0.025, 0.025), Quat::IDENTITY, iron_dark));
-    p.add(HELM, limb(hc + Vec3::new(0.0, 0.32, -0.22), hc + Vec3::new(0.0, 0.4, 0.3), Vec2::new(0.04, 0.08), Vec2::new(0.03, 0.03), brass));
-    p.add(GRILLE, kit::block(hc + Vec3::new(0.0, 0.0, -0.18), Vec3::new(0.27, 0.25, 0.08), Quat::IDENTITY, grille));
+    p.add(
+        HELM,
+        kit::block(
+            hc + Vec3::new(0.0, 0.08, -0.28),
+            Vec3::new(0.3, 0.025, 0.025),
+            Quat::IDENTITY,
+            iron_dark,
+        ),
+    );
+    p.add(
+        HELM,
+        limb(
+            hc + Vec3::new(0.0, 0.32, -0.22),
+            hc + Vec3::new(0.0, 0.4, 0.3),
+            Vec2::new(0.04, 0.08),
+            Vec2::new(0.03, 0.03),
+            brass,
+        ),
+    );
+    p.add(
+        GRILLE,
+        kit::block(
+            hc + Vec3::new(0.0, 0.0, -0.18),
+            Vec3::new(0.27, 0.25, 0.08),
+            Quat::IDENTITY,
+            grille,
+        ),
+    );
 
     // Arms: thick wax upper arms, iron vambraces, gauntlets.
     let s = v(SHOULDER);
@@ -179,10 +361,22 @@ pub fn build() -> Vec<ModelPart> {
     let upper_l = kit::smooth_tube(v(neg_x(SHOULDER)), v(ELBOW_L), 0.26, 0.2, 7, wax);
     p.add(ARM_R, upper_r);
     p.add(ARM_L, upper_l);
-    let mut fore_r = limb(v(ELBOW_R), v(HAND_R), Vec2::splat(0.2), Vec2::splat(0.17), iron);
+    let mut fore_r = limb(
+        v(ELBOW_R),
+        v(HAND_R),
+        Vec2::splat(0.2),
+        Vec2::splat(0.17),
+        iron,
+    );
     add(&mut fore_r, gem(v(HAND_R), 0.17, 0, iron_dark));
     p.add(FOREARM_R, fore_r);
-    let mut fore_l = limb(v(ELBOW_L), v(HAND_L), Vec2::splat(0.2), Vec2::splat(0.17), iron);
+    let mut fore_l = limb(
+        v(ELBOW_L),
+        v(HAND_L),
+        Vec2::splat(0.2),
+        Vec2::splat(0.17),
+        iron,
+    );
     add(&mut fore_l, gem(v(HAND_L), 0.17, 0, iron_dark));
     p.add(FOREARM_L, fore_l);
 
@@ -191,29 +385,106 @@ pub fn build() -> Vec<ModelPart> {
     let dc = Vec3::new(-0.62, 1.82, -1.02);
     let (dw, dh, dt) = (0.68, 1.12, 0.06);
     // Door leaf around the window (four frames), so the bars read against the dark gap.
-    p.add(SHIELD, kit::block(dc + Vec3::new(0.0, -0.4, 0.0), Vec3::new(dw, 0.72, dt), Quat::IDENTITY, iron));
-    p.add(SHIELD, kit::block(dc + Vec3::new(0.0, 0.98, 0.0), Vec3::new(dw, 0.14, dt), Quat::IDENTITY, iron));
+    p.add(
+        SHIELD,
+        kit::block(
+            dc + Vec3::new(0.0, -0.4, 0.0),
+            Vec3::new(dw, 0.72, dt),
+            Quat::IDENTITY,
+            iron,
+        ),
+    );
+    p.add(
+        SHIELD,
+        kit::block(
+            dc + Vec3::new(0.0, 0.98, 0.0),
+            Vec3::new(dw, 0.14, dt),
+            Quat::IDENTITY,
+            iron,
+        ),
+    );
     for side in [-1.0f32, 1.0] {
-        p.add(SHIELD, kit::block(dc + Vec3::new(side * (dw - 0.13), 0.6, 0.0), Vec3::new(0.13, 0.26, dt), Quat::IDENTITY, iron));
+        p.add(
+            SHIELD,
+            kit::block(
+                dc + Vec3::new(side * (dw - 0.13), 0.6, 0.0),
+                Vec3::new(0.13, 0.26, dt),
+                Quat::IDENTITY,
+                iron,
+            ),
+        );
     }
     for k in 0..5 {
         let x = -0.4 + 0.2 * k as f32;
-        p.add(SHIELD, kit::block(dc + Vec3::new(x, 0.6, -0.01), Vec3::new(0.03, 0.27, 0.03), Quat::IDENTITY, iron_dark));
+        p.add(
+            SHIELD,
+            kit::block(
+                dc + Vec3::new(x, 0.6, -0.01),
+                Vec3::new(0.03, 0.27, 0.03),
+                Quat::IDENTITY,
+                iron_dark,
+            ),
+        );
     }
     for y in [-0.85, -0.1, 0.9] {
-        p.add(SHIELD, kit::block(dc + Vec3::new(-dw * 0.45, y, -dt - 0.015), Vec3::new(dw * 0.55, 0.05, 0.015), Quat::IDENTITY, iron_dark));
+        p.add(
+            SHIELD,
+            kit::block(
+                dc + Vec3::new(-dw * 0.45, y, -dt - 0.015),
+                Vec3::new(dw * 0.55, 0.05, 0.015),
+                Quat::IDENTITY,
+                iron_dark,
+            ),
+        );
         for k in 0..4 {
-            p.add(SHIELD, gem(dc + Vec3::new(-dw + 0.1 + 0.18 * k as f32, y, -dt - 0.03), 0.028, 0, brass));
+            p.add(
+                SHIELD,
+                gem(
+                    dc + Vec3::new(-dw + 0.1 + 0.18 * k as f32, y, -dt - 0.03),
+                    0.028,
+                    0,
+                    brass,
+                ),
+            );
         }
     }
-    p.add(SHIELD, kit::block(dc + Vec3::new(dw - 0.18, -0.2, -dt - 0.02), Vec3::new(0.1, 0.14, 0.02), Quat::IDENTITY, brass));
+    p.add(
+        SHIELD,
+        kit::block(
+            dc + Vec3::new(dw - 0.18, -0.2, -dt - 0.02),
+            Vec3::new(0.1, 0.14, 0.02),
+            Quat::IDENTITY,
+            brass,
+        ),
+    );
     // Grip from the gauntlet to the door's back.
-    p.add(SHIELD, limb(v(HAND_L), dc + Vec3::new(0.0, -0.1, dt), Vec2::splat(0.07), Vec2::splat(0.07), iron_dark));
+    p.add(
+        SHIELD,
+        limb(
+            v(HAND_L),
+            dc + Vec3::new(0.0, -0.1, dt),
+            Vec2::splat(0.07),
+            Vec2::splat(0.07),
+            iron_dark,
+        ),
+    );
     // The rim: a frame around the door's face that burns when it bashes.
     let rim_bar = |c: Vec3, h: Vec3| kit::block(dc + c, h, Quat::IDENTITY, rim);
     for side in [-1.0f32, 1.0] {
-        p.add(RIM, rim_bar(Vec3::new(side * (dw + 0.02), -0.0, -0.01), Vec3::new(0.035, dh, dt + 0.015)));
-        p.add(RIM, rim_bar(Vec3::new(0.0, side * (dh + 0.02), -0.01), Vec3::new(dw + 0.05, 0.035, dt + 0.015)));
+        p.add(
+            RIM,
+            rim_bar(
+                Vec3::new(side * (dw + 0.02), -0.0, -0.01),
+                Vec3::new(0.035, dh, dt + 0.015),
+            ),
+        );
+        p.add(
+            RIM,
+            rim_bar(
+                Vec3::new(0.0, side * (dh + 0.02), -0.01),
+                Vec3::new(dw + 0.05, 0.035, dt + 0.015),
+            ),
+        );
     }
 
     // The chain flail: links from the gauntlet down to a spiked iron ball.
@@ -227,16 +498,54 @@ pub fn build() -> Vec<ModelPart> {
         let a = hand.lerp(ball + Vec3::Y * 0.3, f0);
         let b = hand.lerp(ball + Vec3::Y * 0.3, f1);
         let side = if k % 2 == 0 { Vec3::X } else { Vec3::Z };
-        p.add(CHAIN, kit::limb_oriented(a, b, side, Vec2::new(0.06, 0.02), Vec2::new(0.06, 0.02), iron_dark));
-        add(&mut glow, kit::limb_oriented(a, b, side, Vec2::new(0.035, 0.03), Vec2::new(0.035, 0.03), hot));
+        p.add(
+            CHAIN,
+            kit::limb_oriented(
+                a,
+                b,
+                side,
+                Vec2::new(0.06, 0.02),
+                Vec2::new(0.06, 0.02),
+                iron_dark,
+            ),
+        );
+        add(
+            &mut glow,
+            kit::limb_oriented(
+                a,
+                b,
+                side,
+                Vec2::new(0.035, 0.03),
+                Vec2::new(0.035, 0.03),
+                hot,
+            ),
+        );
     }
     p.add(CHAIN_GLOW, glow);
-    p.add(FLAIL, ellipsoid(ball, Vec3::splat(0.3), Quat::IDENTITY, 4, 8, iron_dark, false));
+    p.add(
+        FLAIL,
+        ellipsoid(
+            ball,
+            Vec3::splat(0.3),
+            Quat::IDENTITY,
+            4,
+            8,
+            iron_dark,
+            false,
+        ),
+    );
     for k in 0..10 {
         let d = engine::assets::procedural::rand01(k, 3, 0x9a0) * std::f32::consts::TAU;
         let h = engine::assets::procedural::rand01(k, 5, 0x9a0) * 2.0 - 1.0;
-        let dir = Vec3::new(d.cos() * (1.0 - h * h).sqrt(), h, d.sin() * (1.0 - h * h).sqrt());
-        p.add(FLAIL, spike(ball + dir * 0.26, ball + dir * 0.5, 0.06, 4, iron));
+        let dir = Vec3::new(
+            d.cos() * (1.0 - h * h).sqrt(),
+            h,
+            d.sin() * (1.0 - h * h).sqrt(),
+        );
+        p.add(
+            FLAIL,
+            spike(ball + dir * 0.26, ball + dir * 0.5, 0.06, 4, iron),
+        );
     }
 
     // Legs: thick wax thighs, iron greaves, heavy boots.
@@ -244,8 +553,19 @@ pub fn build() -> Vec<ModelPart> {
     let ankle = Vec3::new(0.5, 0.2, 0.0);
     let thigh = kit::smooth_tube(hip, knee, 0.3, 0.24, 7, wax);
     let mut shin = limb(knee, ankle, Vec2::splat(0.24), Vec2::splat(0.2), iron);
-    add(&mut shin, kit::block(Vec3::new(0.5, 0.1, -0.12), Vec3::new(0.24, 0.1, 0.36), Quat::IDENTITY, iron_dark));
-    add(&mut shin, gem(knee + Vec3::new(0.0, 0.0, -0.18), 0.12, 0, brass));
+    add(
+        &mut shin,
+        kit::block(
+            Vec3::new(0.5, 0.1, -0.12),
+            Vec3::new(0.24, 0.1, 0.36),
+            Quat::IDENTITY,
+            iron_dark,
+        ),
+    );
+    add(
+        &mut shin,
+        gem(knee + Vec3::new(0.0, 0.0, -0.18), 0.12, 0, brass),
+    );
     p.add(THIGH_L, kit::mirrored_x(&thigh));
     p.add(THIGH_R, thigh);
     p.add(SHIN_L, kit::mirrored_x(&shin));
@@ -300,7 +620,8 @@ pub fn pose(a: &EnemyAnim) -> Pose {
     let mut door: Option<Quat> = None;
     let mut arm_r = rz(0.05);
     let fore_r = Quat::IDENTITY;
-    let mut chain = rx(0.12 * wave(t, 0.5, off) + 0.25 * k * (a.cycle * std::f32::consts::TAU).sin());
+    let mut chain =
+        rx(0.12 * wave(t, 0.5, off) + 0.25 * k * (a.cycle * std::f32::consts::TAU).sin());
     let mut whirl: Option<(f32, f32)> = None;
     let mut legs = [(0.0f32, 0.0f32); 2];
     let mut squash = 1.0f32;
@@ -380,7 +701,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             torso *= rx(0.45 * e);
             helm *= rx(-0.3 * e);
             arm_l = rx(0.75 * e) * rz(0.3 * e);
-            legs = [(0.7 * e, -0.9 * e), (-0.3 * e + 0.15 * wave(t, 4.0, off) * e, -0.5 * e)];
+            legs = [
+                (0.7 * e, -0.9 * e),
+                (-0.3 * e + 0.15 * wave(t, 4.0, off) * e, -0.5 * e),
+            ];
         }
         EnemyState::Attack(_) if rush => {
             // Charging behind the shield.
@@ -389,7 +713,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             torso *= rx(0.5);
             helm *= rx(-0.35);
             arm_l = rx(0.85) * rz(0.3);
-            legs = [(0.7 * phase.sin(), -0.6 - 0.4 * phase.cos().max(0.0)), (-0.7 * phase.sin(), -0.6 - 0.4 * (-phase.cos()).max(0.0))];
+            legs = [
+                (0.7 * phase.sin(), -0.6 - 0.4 * phase.cos().max(0.0)),
+                (-0.7 * phase.sin(), -0.6 - 0.4 * (-phase.cos()).max(0.0)),
+            ];
         }
         EnemyState::Recover(p) => {
             let s = 1.0 - smoothstep(p);
@@ -448,7 +775,15 @@ pub fn pose(a: &EnemyAnim) -> Pose {
 
     pose.set(
         PELVIS,
-        Mat4::from_scale_rotation_translation(Vec3::new(1.0 + 0.3 * (1.0 - squash), squash, 1.0 + 0.3 * (1.0 - squash)), pelvis_rot, pelvis_off),
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(
+                1.0 + 0.3 * (1.0 - squash),
+                squash,
+                1.0 + 0.3 * (1.0 - squash),
+            ),
+            pelvis_rot,
+            pelvis_off,
+        ),
     );
     pose.rotate(TORSO, torso);
     pose.rotate(HELM, helm);
@@ -462,7 +797,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
         chain = chain_out(parent, spin, droop);
     }
     pose.rotate(CHAIN, chain);
-    for (i, (thigh, shin)) in [(THIGH_L, SHIN_L), (THIGH_R, SHIN_R)].into_iter().enumerate() {
+    for (i, (thigh, shin)) in [(THIGH_L, SHIN_L), (THIGH_R, SHIN_R)]
+        .into_iter()
+        .enumerate()
+    {
         pose.rotate(thigh, rx(legs[i].0));
         pose.rotate(shin, rx(legs[i].1));
     }

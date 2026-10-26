@@ -138,7 +138,10 @@ fn select(game: &mut InGame, weapon: u8, mode: u8) {
 }
 
 /// Where a replicated entity of `pick` is drawn (projectiles / thorns by trajectory).
-fn find_entity(game: &InGame, pick: impl Fn(&shared::protocol::EntityState) -> bool) -> Option<Vec3> {
+fn find_entity(
+    game: &InGame,
+    pick: impl Fn(&shared::protocol::EntityState) -> bool,
+) -> Option<Vec3> {
     let n = game.net()?;
     n.remote_entities().iter().find(|e| pick(e)).map(|e| {
         shared::sim::projectiles::replicated_position(
@@ -212,7 +215,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t);
         }
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_brand");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
@@ -225,7 +235,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t);
         }
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_splinter");
     h.frames(&mut game, 5, |g, _| hold(g, Buttons::NONE));
@@ -247,7 +264,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t);
         }
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_gust");
     select(&mut game, 1, 1);
@@ -256,7 +280,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t);
         }
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_both_barrels");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
@@ -281,7 +312,14 @@ fn main() -> anyhow::Result<()> {
         if let Some(t) = nearest_enemy(g, false) {
             aim_at(g, t + Vec3::Y * 0.4);
         }
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_wisp");
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
@@ -322,7 +360,14 @@ fn main() -> anyhow::Result<()> {
     // Breach at the floor in front.
     h.frames(&mut game, 4, |g, i| {
         g.controls.pitch = -0.55;
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_breach");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
@@ -335,7 +380,14 @@ fn main() -> anyhow::Result<()> {
             aim_at(g, t);
         }
         g.controls.pitch -= 0.1;
-        hold(g, if i == 0 { Buttons::ALT_FIRE } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_gravewell_pull");
     for _ in 0..90 {
@@ -361,7 +413,14 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 50, |g, i| {
         g.controls.yaw = 0.3;
         g.controls.pitch = -0.12;
-        hold(g, if i == 0 { Buttons::THROW } else { Buttons::NONE });
+        hold(
+            g,
+            if i == 0 {
+                Buttons::THROW
+            } else {
+                Buttons::NONE
+            },
+        );
     });
     h.shot("combat_thorn_planted");
     let mut fired = false;

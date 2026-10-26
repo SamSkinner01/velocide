@@ -1212,7 +1212,11 @@ impl<'a> Ui<'a> {
         }
         // Field body.
         fill(self.list, field, fade(t.ink, 0.92));
-        let edge = if resp.focused { t.crimson_bright } else { t.ash };
+        let edge = if resp.focused {
+            t.crimson_bright
+        } else {
+            t.ash
+        };
         border(
             self.list,
             field,
@@ -1291,7 +1295,11 @@ impl<'a> Ui<'a> {
         let time = self.input.time;
         if capturing {
             let on = t.blink(time);
-            fill(self.list, control, if on { t.crimson } else { t.crimson_dark });
+            fill(
+                self.list,
+                control,
+                if on { t.crimson } else { t.crimson_dark },
+            );
             border(self.list, control, 1.0, t.crimson_bright);
             let style = TextStyle::new(t.bone).centered();
             self.text_in(control, "PRESS A KEY", &style);

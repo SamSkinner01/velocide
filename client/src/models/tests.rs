@@ -410,7 +410,9 @@ fn enemy_models_match_their_definitions() {
     let defs = shared::sim::EnemyRegistry::builtin();
     for kind in EnemyKind::ALL {
         let name = format!("{kind:?}").to_ascii_lowercase();
-        let def = defs.get(&name).unwrap_or_else(|| panic!("no definition for {name}"));
+        let def = defs
+            .get(&name)
+            .unwrap_or_else(|| panic!("no definition for {name}"));
         assert_eq!(EnemyKind::from_name(&name), Some(kind));
         let parts = kind.model().build();
         let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
@@ -423,18 +425,29 @@ fn enemy_models_match_their_definitions() {
         let lift = kind.root_lift();
         let (bottom, top) = (lo.y + lift, hi.y + lift);
         let size = hi - lo;
-        println!("{kind:?}: {size} (feet {bottom:.2} .. top {top:.2}), capsule {} x {}", def.radius, def.height);
-        assert!(size.max_element() >= 1.9, "{kind:?}: at least ~2 m in its longest dimension");
+        println!(
+            "{kind:?}: {size} (feet {bottom:.2} .. top {top:.2}), capsule {} x {}",
+            def.radius, def.height
+        );
+        assert!(
+            size.max_element() >= 1.9,
+            "{kind:?}: at least ~2 m in its longest dimension"
+        );
         if kind == EnemyKind::Harrier {
             assert!(size.x >= 2.9, "3 m wingspan: {}", size.x);
         } else {
             assert!(bottom.abs() < 0.12, "{kind:?} stands on its feet: {bottom}");
-            assert!((top - def.height).abs() < 0.45, "{kind:?}: model top {top} vs capsule {}", def.height);
+            assert!(
+                (top - def.height).abs() < 0.45,
+                "{kind:?}: model top {top} vs capsule {}",
+                def.height
+            );
         }
         for w in &def.weak_points {
             let c = w.offset - Vec3::Y * lift;
             assert!(
-                c.cmpge(lo - Vec3::splat(w.radius * 0.5)).all() && c.cmple(hi + Vec3::splat(w.radius * 0.5)).all(),
+                c.cmpge(lo - Vec3::splat(w.radius * 0.5)).all()
+                    && c.cmple(hi + Vec3::splat(w.radius * 0.5)).all(),
                 "{kind:?} weak point {} at {} outside the model {lo}..{hi}",
                 w.name,
                 w.offset
@@ -512,7 +525,12 @@ fn heron_lens_flares_once_the_aim_locks() {
         };
         super::enemies::pose(&anim).glow.x
     };
-    assert!(glow(true) > glow(false) * 1.2, "{} vs {}", glow(true), glow(false));
+    assert!(
+        glow(true) > glow(false) * 1.2,
+        "{} vs {}",
+        glow(true),
+        glow(false)
+    );
 }
 
 #[test]
@@ -599,7 +617,11 @@ fn drum_turns_one_chamber_per_shot_with_overshoot() {
         drum.update(1.0 / 60.0);
         peak = peak.max(drum.angle());
     }
-    assert!((drum.angle() - DrumTurn::STEP).abs() < 1e-3, "{}", drum.angle());
+    assert!(
+        (drum.angle() - DrumTurn::STEP).abs() < 1e-3,
+        "{}",
+        drum.angle()
+    );
     assert!(peak > DrumTurn::STEP * 1.02, "a little overshoot: {peak}");
     // Many shots keep the numbers bounded and every rest angle a whole chamber.
     for _ in 0..500 {
@@ -623,7 +645,10 @@ fn weapon_mechanisms_move() {
     let rest = weapons::weapon_pose(WeaponKind::Quill, 0, 0.0, 0.0, 0.0, 1.0);
     let kick = weapons::weapon_pose(WeaponKind::Quill, 0, 1.0, 0.0, 0.0, 1.0);
     for i in 0..quill::CREST_COUNT {
-        assert!(!moved(&rest, quill::QUILL + i) && moved(&kick, quill::QUILL + i), "quill {i}");
+        assert!(
+            !moved(&rest, quill::QUILL + i) && moved(&kick, quill::QUILL + i),
+            "quill {i}"
+        );
     }
     // Bellows: the pump closes the board half way through the recoil, open at rest.
     let pump = weapons::weapon_pose(WeaponKind::Bellows, 0, 0.5, 0.0, 0.0, 1.0);
@@ -672,7 +697,14 @@ fn shrike_wick_and_coat() {
     });
     assert!(!downed.is_hidden(shrike::WICK) && downed.glow.x < alive.glow.x);
     let glows: Vec<f32> = (0..10)
-        .map(|i| shrike::pose(&PlayerAnim { time: i as f64 * 0.037, ..base }).glow.x)
+        .map(|i| {
+            shrike::pose(&PlayerAnim {
+                time: i as f64 * 0.037,
+                ..base
+            })
+            .glow
+            .x
+        })
         .collect();
     assert!(glows.iter().any(|g| (g - glows[0]).abs() > 0.02), "flicker");
     // Running streams the coat tails back: their hems end up behind the knees.
@@ -688,7 +720,10 @@ fn shrike_wick_and_coat() {
         cycle: 0.3,
         ..base
     });
-    assert!(running.z > still.z + 0.15, "still {still}, running {running}");
+    assert!(
+        running.z > still.z + 0.15,
+        "still {still}, running {running}"
+    );
 }
 
 #[test]

@@ -82,9 +82,26 @@ pub fn build() -> Vec<ModelPart> {
     // Haunches: a heavy rump between the hind legs, a slag tail stub.
     p.add(
         PELVIS,
-        ellipsoid(Vec3::new(0.0, 0.98, 0.4), Vec3::new(0.3, 0.26, 0.3), Quat::IDENTITY, 4, 7, wax, true),
+        ellipsoid(
+            Vec3::new(0.0, 0.98, 0.4),
+            Vec3::new(0.3, 0.26, 0.3),
+            Quat::IDENTITY,
+            4,
+            7,
+            wax,
+            true,
+        ),
     );
-    p.add(PELVIS, spike(Vec3::new(0.0, 1.05, 0.62), Vec3::new(0.0, 0.85, 0.95), 0.07, 5, slag));
+    p.add(
+        PELVIS,
+        spike(
+            Vec3::new(0.0, 1.05, 0.62),
+            Vec3::new(0.0, 0.85, 0.95),
+            0.07,
+            5,
+            slag,
+        ),
+    );
 
     // Torso: a hump rising from the hips to massive shoulders, brass cage hoops over the
     // ribs, slag spines along the back, wax drips under the belly.
@@ -105,9 +122,13 @@ pub fn build() -> Vec<ModelPart> {
             kit::Uv::Density(2.0),
         ),
     );
-    for (i, (y, z, rx_, ry_)) in [(1.2, 0.12, 0.38, 0.36), (1.27, -0.02, 0.48, 0.42), (1.32, -0.15, 0.46, 0.38)]
-        .into_iter()
-        .enumerate()
+    for (i, (y, z, rx_, ry_)) in [
+        (1.2, 0.12, 0.38, 0.36),
+        (1.27, -0.02, 0.48, 0.42),
+        (1.32, -0.15, 0.46, 0.38),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let c = Vec3::new(0.0, y, z);
         let r = Vec2::new(rx_ + 0.03, ry_ + 0.03);
@@ -130,7 +151,10 @@ pub fn build() -> Vec<ModelPart> {
     for (i, z) in [0.38, 0.2, 0.02, -0.14].into_iter().enumerate() {
         let y = 1.22 + 0.11 * i as f32 + if i == 3 { -0.02 } else { 0.0 };
         let base = Vec3::new(0.0, y + 0.18, z);
-        p.add(CHEST, spike(base, base + Vec3::new(0.0, 0.26, 0.12), 0.07, 4, slag));
+        p.add(
+            CHEST,
+            spike(base, base + Vec3::new(0.0, 0.26, 0.12), 0.07, 4, slag),
+        );
     }
 
     // Head: a small low cranium over the neck, the huge jaw below it.
@@ -146,7 +170,15 @@ pub fn build() -> Vec<ModelPart> {
     );
     p.add(
         HEAD,
-        ellipsoid(Vec3::new(0.0, 1.78, -0.42), Vec3::new(0.27, 0.17, 0.27), rx(-0.25), 4, 8, wax, true),
+        ellipsoid(
+            Vec3::new(0.0, 1.78, -0.42),
+            Vec3::new(0.27, 0.17, 0.27),
+            rx(-0.25),
+            4,
+            8,
+            wax,
+            true,
+        ),
     );
     // Brow ridge and a slag crest.
     p.add(
@@ -159,12 +191,27 @@ pub fn build() -> Vec<ModelPart> {
             wax_dark,
         ),
     );
-    p.add(HEAD, spike(Vec3::new(0.0, 1.9, -0.34), Vec3::new(0.0, 2.02, -0.08), 0.06, 4, slag));
+    p.add(
+        HEAD,
+        spike(
+            Vec3::new(0.0, 1.9, -0.34),
+            Vec3::new(0.0, 2.02, -0.08),
+            0.06,
+            4,
+            slag,
+        ),
+    );
     // Upper fangs hanging from the snout.
     for x in [-0.17, -0.06, 0.06, 0.17] {
         p.add(
             HEAD,
-            spike(Vec3::new(x, 1.66, -0.64), Vec3::new(x * 0.95, 1.5, -0.68), 0.032, 4, brass),
+            spike(
+                Vec3::new(x, 1.66, -0.64),
+                Vec3::new(x * 0.95, 1.5, -0.68),
+                0.032,
+                4,
+                brass,
+            ),
         );
     }
     // Eyes: two ember slits under the brow.
@@ -178,7 +225,15 @@ pub fn build() -> Vec<ModelPart> {
     // Throat / gums: the inside of the mouth that burns orange when the jaw opens.
     p.add(
         THROAT,
-        ellipsoid(Vec3::new(0.0, 1.52, -0.44), Vec3::new(0.2, 0.09, 0.24), Quat::IDENTITY, 3, 7, gum, true),
+        ellipsoid(
+            Vec3::new(0.0, 1.52, -0.44),
+            Vec3::new(0.2, 0.09, 0.24),
+            Quat::IDENTITY,
+            3,
+            7,
+            gum,
+            true,
+        ),
     );
     p.add(
         THROAT,
@@ -224,8 +279,22 @@ pub fn build() -> Vec<ModelPart> {
         add_mirrored(p.mesh(JAW), &tooth);
     }
     // Brass chin plate with a pair of tusks.
-    p.add(JAW, kit::block(Vec3::new(0.0, 1.25, -0.78), Vec3::new(0.22, 0.05, 0.11), Quat::IDENTITY, brass));
-    let tusk = spike(Vec3::new(0.2, 1.4, -0.88), Vec3::new(0.27, 1.78, -0.95), 0.05, 5, brass);
+    p.add(
+        JAW,
+        kit::block(
+            Vec3::new(0.0, 1.25, -0.78),
+            Vec3::new(0.22, 0.05, 0.11),
+            Quat::IDENTITY,
+            brass,
+        ),
+    );
+    let tusk = spike(
+        Vec3::new(0.2, 1.4, -0.88),
+        Vec3::new(0.27, 1.78, -0.95),
+        0.05,
+        5,
+        brass,
+    );
     add_mirrored(p.mesh(JAW), &tusk);
 
     // Arms (right built, left mirrored): bulging wax shoulders, forearm bands, huge fists
@@ -235,27 +304,90 @@ pub fn build() -> Vec<ModelPart> {
     add(&mut upper, gem(s, 0.19, 1, wax));
     // Gorilla forearms: thicker towards the fist.
     let mut fore = kit::smooth_tube(e, w, 0.12, 0.15, 7, wax);
-    add(&mut fore, kit::band(e.lerp(w, 0.55), w - e, 0.15, 0.08, 0.03, 8, brass));
+    add(
+        &mut fore,
+        kit::band(e.lerp(w, 0.55), w - e, 0.15, 0.08, 0.03, 8, brass),
+    );
     add(&mut fore, gem(e, 0.12, 0, wax_dark));
     // The fist, walked on its knuckles: a rounded mass, four curled fingers whose knuckles
     // take the weight, a thumb, brass studs.
-    let mut fist = ellipsoid(Vec3::new(0.57, 0.24, -0.5), Vec3::new(0.17, 0.17, 0.16), ry(0.1), 3, 7, wax, true);
+    let mut fist = ellipsoid(
+        Vec3::new(0.57, 0.24, -0.5),
+        Vec3::new(0.17, 0.17, 0.16),
+        ry(0.1),
+        3,
+        7,
+        wax,
+        true,
+    );
     for k in 0..4 {
         let x = 0.45 + 0.08 * k as f32;
         let knuckle = Vec3::new(x, 0.1, -0.6 - 0.02 * (k == 1 || k == 2) as u8 as f32);
-        add(&mut fist, ellipsoid(knuckle, Vec3::new(0.045, 0.08, 0.07), Quat::IDENTITY, 2, 6, wax_dark, true));
-        add(&mut fist, gem(knuckle + Vec3::new(0.0, 0.03, -0.065), 0.03, 0, brass));
+        add(
+            &mut fist,
+            ellipsoid(
+                knuckle,
+                Vec3::new(0.045, 0.08, 0.07),
+                Quat::IDENTITY,
+                2,
+                6,
+                wax_dark,
+                true,
+            ),
+        );
+        add(
+            &mut fist,
+            gem(knuckle + Vec3::new(0.0, 0.03, -0.065), 0.03, 0, brass),
+        );
     }
-    add(&mut fist, ellipsoid(Vec3::new(0.42, 0.22, -0.58), Vec3::new(0.05, 0.05, 0.1), ry(0.6), 2, 6, wax, true));
-    add(&mut fist, kit::limb(w, Vec3::new(0.57, 0.3, -0.5), Vec2::splat(0.12), Vec2::splat(0.14), wax));
+    add(
+        &mut fist,
+        ellipsoid(
+            Vec3::new(0.42, 0.22, -0.58),
+            Vec3::new(0.05, 0.05, 0.1),
+            ry(0.6),
+            2,
+            6,
+            wax,
+            true,
+        ),
+    );
+    add(
+        &mut fist,
+        kit::limb(
+            w,
+            Vec3::new(0.57, 0.3, -0.5),
+            Vec2::splat(0.12),
+            Vec2::splat(0.14),
+            wax,
+        ),
+    );
     // Hind legs: short and digitigrade.
     let (hip, knee) = (v(HIP), v(KNEE));
     let hock = Vec3::new(0.3, 0.22, 0.46);
     let mut thigh = kit::smooth_tube(hip, knee, 0.15, 0.1, 7, wax);
     add(&mut thigh, gem(knee, 0.1, 0, wax_dark));
     let mut shin = limb(knee, hock, Vec2::splat(0.08), Vec2::splat(0.06), wax);
-    add(&mut shin, limb(hock, Vec3::new(0.3, 0.04, 0.3), Vec2::splat(0.06), Vec2::new(0.08, 0.05), wax_dark));
-    add(&mut shin, spike(Vec3::new(0.3, 0.05, 0.27), Vec3::new(0.31, 0.01, 0.12), 0.04, 4, slag));
+    add(
+        &mut shin,
+        limb(
+            hock,
+            Vec3::new(0.3, 0.04, 0.3),
+            Vec2::splat(0.06),
+            Vec2::new(0.08, 0.05),
+            wax_dark,
+        ),
+    );
+    add(
+        &mut shin,
+        spike(
+            Vec3::new(0.3, 0.05, 0.27),
+            Vec3::new(0.31, 0.01, 0.12),
+            0.04,
+            4,
+            slag,
+        ),
+    );
 
     for (right, left, mesh) in [
         (UPPER_ARM_R, UPPER_ARM_L, upper),
@@ -464,10 +596,17 @@ pub fn pose(a: &EnemyAnim) -> Pose {
     let spread = 1.0 + 0.15 * (1.0 - squash);
     pose.set(
         PELVIS,
-        Mat4::from_scale_rotation_translation(Vec3::new(spread, squash, spread), pelvis_rot, pelvis_off),
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(spread, squash, spread),
+            pelvis_rot,
+            pelvis_off,
+        ),
     );
     pose.rotate(CHEST, rx(chest));
-    pose.rotate(HEAD, ry(head_yaw) * rx(head + a.aim_pitch.clamp(-0.5, 0.5) * 0.5));
+    pose.rotate(
+        HEAD,
+        ry(head_yaw) * rx(head + a.aim_pitch.clamp(-0.5, 0.5) * 0.5),
+    );
     pose.rotate(JAW, rx(jaw));
     for (i, (upper, fore, fist, thigh, shin, sgn)) in [
         (UPPER_ARM_L, FOREARM_L, FIST_L, THIGH_L, SHIN_L, -1.0f32),

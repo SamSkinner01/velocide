@@ -540,7 +540,11 @@ mod tests {
             let who = if i % 2 == 0 { a } else { b };
             assert!(w.deflect(&t, who, rocket).is_some());
             let p = &w.projectiles[&rocket];
-            assert!(p.speed <= t.combat.parry_max_speed, "parry {i}: {}", p.speed);
+            assert!(
+                p.speed <= t.combat.parry_max_speed,
+                "parry {i}: {}",
+                p.speed
+            );
             assert!(p.velocity.length() <= t.combat.parry_max_speed + 1e-3);
             let e = p.explosion.unwrap().damage;
             assert!(p.damage <= t.combat.parry_max_damage && e <= t.combat.parry_max_damage);

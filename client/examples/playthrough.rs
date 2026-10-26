@@ -173,13 +173,7 @@ impl Client {
     }
 
     fn door_open(&self, id: u32) -> Option<bool> {
-        Some(
-            self.game_ref()?
-                .net()?
-                .world()?
-                .collision
-                .is_door_open(id),
-        )
+        Some(self.game_ref()?.net()?.world()?.collision.is_door_open(id))
     }
 
     fn level(&self) -> Option<std::sync::Arc<shared::level::LevelDef>> {
@@ -461,14 +455,19 @@ fn single_player(rig: &mut Rig) {
     rig.run(&mut [&mut c], 90);
     rig.shot(&mut c, "sp_03_spawn");
     let eye = c.camera.y - c.feet().map_or(0.0, |f| f.y);
-    rig.check((eye - 1.6).abs() < 0.2, &format!("SP: standing eye height {eye:.2}"));
+    rig.check(
+        (eye - 1.6).abs() < 0.2,
+        &format!("SP: standing eye height {eye:.2}"),
+    );
 
     // Pause stops the in-process server.
     c.pad(GamepadButton::Start, true);
     rig.run(&mut [&mut c], 1);
     c.pad(GamepadButton::Start, false);
     rig.run(&mut [&mut c], 10);
-    let paused = c.game_ref().is_some_and(|g| g.is_paused() && g.is_sim_paused());
+    let paused = c
+        .game_ref()
+        .is_some_and(|g| g.is_paused() && g.is_sim_paused());
     let tick0 = c.server_stats().map_or(0, |s| s.tick);
     let time0 = c.game_ref().map_or(0.0, InGame::level_time);
     rig.run(&mut [&mut c], 60);
@@ -497,14 +496,20 @@ fn single_player(rig: &mut Rig) {
     rig.check(locked, "SP: entering arena 1 locks door 1");
     println!("      clocks: {}", Rig::clocks(&c));
     let spawned = rig.until(&mut [&mut c], 5.0, |cs| cs[0].enemies().len() >= 3);
-    rig.check(spawned, &format!("SP: wave 1 spawned ({} enemies)", c.enemies().len()));
+    rig.check(
+        spawned,
+        &format!("SP: wave 1 spawned ({} enemies)", c.enemies().len()),
+    );
     // Stand still: they come and hit.
     let hit = rig.until(&mut [&mut c], 12.0, |cs| cs[0].health() < 100.0);
     if let Some(e) = c.enemies().first().copied() {
         c.aim(e + Vec3::Y);
     }
     rig.shot(&mut c, "sp_06_enemies_attack");
-    rig.check(hit, &format!("SP: enemies hit back (health {:.0})", c.health()));
+    rig.check(
+        hit,
+        &format!("SP: enemies hit back (health {:.0})", c.health()),
+    );
     println!("      clocks: {}", Rig::clocks(&c));
     c.chat("/give");
     // Fight: aim at the nearest enemy and fire for a while.
@@ -627,7 +632,10 @@ fn single_player(rig: &mut Rig) {
     rig.shot(&mut c, "sp_15_back_in_menu");
     rig.check(
         matches!(c.screen, Screen::Menu(_)),
-        &format!("SP: MAIN MENU leaves the results ({:?})", c.transitions.last()),
+        &format!(
+            "SP: MAIN MENU leaves the results ({:?})",
+            c.transitions.last()
+        ),
     );
     rig.leave(&mut c);
 }
@@ -731,12 +739,17 @@ fn coop(rig: &mut Rig) {
     });
     rig.run(&mut [&mut host, &mut guest], 20);
     rig.shot(&mut guest, "coop_04_guest_rallied");
-    rig.check(pulled, "co-op: encounter lock pulls the teammate to the rally point");
+    rig.check(
+        pulled,
+        "co-op: encounter lock pulls the teammate to the rally point",
+    );
 
     // The guest gets downed (the host is god + notarget, so everything goes for the guest).
     let guest_id = guest.me().unwrap_or(PlayerId(0));
     let downed = rig.until(&mut [&mut host, &mut guest], 30.0, |cs| {
-        cs[1].game_ref().is_some_and(|g| g.modes.is_downed(guest_id))
+        cs[1]
+            .game_ref()
+            .is_some_and(|g| g.modes.is_downed(guest_id))
     });
     rig.check(downed, "co-op: guest downed by enemies");
     rig.run(&mut [&mut host, &mut guest], 60);
@@ -763,7 +776,10 @@ fn coop(rig: &mut Rig) {
     rig.run(&mut [&mut host, &mut guest], 30);
     host.pad(GamepadButton::West, true);
     let revived = rig.until(&mut [&mut host, &mut guest], 6.0, |cs| {
-        !cs[1].dead() && cs[1].game_ref().is_some_and(|g| !g.modes.is_downed(guest_id))
+        !cs[1].dead()
+            && cs[1]
+                .game_ref()
+                .is_some_and(|g| !g.modes.is_downed(guest_id))
     });
     rig.run(&mut [&mut host, &mut guest], 10);
     rig.shot(&mut host, "coop_07_reviving_done");
@@ -781,7 +797,9 @@ fn coop(rig: &mut Rig) {
     host.chat("/notarget");
     host.chat("/god");
     let downed = rig.until(&mut [&mut host, &mut guest], 30.0, |cs| {
-        cs[1].game_ref().is_some_and(|g| g.modes.is_downed(guest_id))
+        cs[1]
+            .game_ref()
+            .is_some_and(|g| g.modes.is_downed(guest_id))
     });
     rig.check(downed, "co-op: guest downed again");
     host.chat("/kill");
@@ -809,7 +827,10 @@ fn coop(rig: &mut Rig) {
             .all(|c| c.game_ref().is_some_and(InGame::results_open))
     });
     rig.shot(&mut guest, "coop_11_results_reveal_guest");
-    rig.check(results, "co-op: extraction countdown ends the level for both");
+    rig.check(
+        results,
+        "co-op: extraction countdown ends the level for both",
+    );
     rig.run(&mut [&mut host, &mut guest], 300);
     rig.shot(&mut host, "coop_12_results_host");
     rig.shot(&mut guest, "coop_13_results_guest");
@@ -831,27 +852,33 @@ fn coop(rig: &mut Rig) {
             .is_some_and(|l| l.all_ready())
     });
     rig.check(ready, "co-op: --ready readies again after a match");
-    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
+        force: true,
+    }));
     let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
     rig.run(&mut [&mut host, &mut guest], 60);
-    let at_start = host
-        .level()
-        .is_some_and(|l| {
-            l.spawns
-                .iter()
-                .any(|s| guest.feet().is_some_and(|f| f.distance(s.position) < 3.0))
-        });
+    let at_start = host.level().is_some_and(|l| {
+        l.spawns
+            .iter()
+            .any(|s| guest.feet().is_some_and(|f| f.distance(s.position) < 3.0))
+    });
     rig.shot(&mut guest, "coop_15_second_match");
     rig.check(ok && at_start, "co-op: second match starts fresh");
 
     // Robustness: the guest quits mid-match, the host keeps playing.
     rig.leave(&mut guest);
     let left = rig.until(&mut [&mut host], 3.0, |cs| {
-        cs[0].game_ref().and_then(InGame::net).is_some_and(|n| n.players().len() == 1)
+        cs[0]
+            .game_ref()
+            .and_then(InGame::net)
+            .is_some_and(|n| n.players().len() == 1)
     });
     rig.run(&mut [&mut host], 30);
     rig.shot(&mut host, "coop_16_guest_left");
-    rig.check(left && host.playing(), "robustness: a guest quitting doesn't stop the host");
+    rig.check(
+        left && host.playing(),
+        "robustness: a guest quitting doesn't stop the host",
+    );
     rig.leave(&mut host);
 }
 
@@ -870,7 +897,9 @@ fn deathmatch(rig: &mut Rig) {
     host.command(ServerCommand::Lobby(LobbyCommand::SetSettings(settings)));
     rig.run(&mut [&mut host, &mut guest], 30);
     rig.shot(&mut guest, "dm_01_lobby_guest");
-    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
+        force: true,
+    }));
     let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
     rig.check(ok, "DM: both in Cistern Nine");
     rig.run(&mut [&mut host, &mut guest], 60);
@@ -907,7 +936,10 @@ fn deathmatch(rig: &mut Rig) {
     rig.run(&mut [&mut host, &mut guest], 10);
     rig.shot(&mut host, "dm_03_scoreboard");
     host.pad(GamepadButton::Select, false);
-    let rows = host.game_ref().map(|g| g.score_rows().1).unwrap_or_default();
+    let rows = host
+        .game_ref()
+        .map(|g| g.score_rows().1)
+        .unwrap_or_default();
     rig.check(
         rows.len() == 4
             && rows
@@ -970,9 +1002,12 @@ fn deathmatch(rig: &mut Rig) {
         }
         rig.run(&mut [&mut host, &mut guest], 1);
         if !respawn_checked
-            && host
-                .game_ref()
-                .is_some_and(|g| g.score_rows().1.iter().any(|r| r.cells.first().is_some_and(|c| c == "1")))
+            && host.game_ref().is_some_and(|g| {
+                g.score_rows()
+                    .1
+                    .iter()
+                    .any(|r| r.cells.first().is_some_and(|c| c == "1"))
+            })
         {
             respawn_checked = true;
             rig.shot(&mut host, "dm_04_first_frag");
@@ -985,7 +1020,10 @@ fn deathmatch(rig: &mut Rig) {
     c_fire(&mut host, false);
     rig.check(ended, "DM: frag limit 3 ends the match");
     rig.check(
-        !respawns.is_empty() && respawns.iter().all(|(d, protected)| *d > 25.0 && *protected),
+        !respawns.is_empty()
+            && respawns
+                .iter()
+                .all(|(d, protected)| *d > 25.0 && *protected),
         &format!("DM: bots respawn far from their killer, protected ({respawns:?})"),
     );
     rig.until(&mut [&mut host, &mut guest], 3.0, |cs| {
@@ -1010,11 +1048,14 @@ fn deathmatch(rig: &mut Rig) {
     settings.max_players = 8;
     host.command(ServerCommand::Lobby(LobbyCommand::SetSettings(settings)));
     rig.run(&mut [&mut host, &mut guest], 20);
-    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
+        force: true,
+    }));
     let ok = wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
     let started = Instant::now();
     let ended = rig.until(&mut [&mut host, &mut guest], 15.0, |cs| {
-        cs.iter().all(|c| c.game_ref().is_some_and(InGame::results_open))
+        cs.iter()
+            .all(|c| c.game_ref().is_some_and(InGame::results_open))
     });
     let secs = started.elapsed().as_secs_f32();
     rig.run(&mut [&mut host, &mut guest], 200);
@@ -1030,12 +1071,16 @@ fn deathmatch(rig: &mut Rig) {
     });
 
     // Robustness: the host's game vanishes mid-match (process gone, no goodbye).
-    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch { force: true }));
+    host.command(ServerCommand::Lobby(LobbyCommand::StartMatch {
+        force: true,
+    }));
     wait_playing(rig, &mut [&mut host, &mut guest], 12.0);
     rig.run(&mut [&mut host, &mut guest], 30);
     let started = Instant::now();
     rig.leave(&mut host);
-    let menu = rig.until(&mut [&mut guest], 20.0, |cs| matches!(cs[0].screen, Screen::Menu(_)));
+    let menu = rig.until(&mut [&mut guest], 20.0, |cs| {
+        matches!(cs[0].screen, Screen::Menu(_))
+    });
     rig.run(&mut [&mut guest], 10);
     rig.shot(&mut guest, "robust_01_host_gone");
     rig.check(
@@ -1176,7 +1221,10 @@ fn robustness(rig: &mut Rig) {
                 }),
             );
             let playing = wait_playing(rig, &mut [&mut joiner], 15.0);
-            rig.check(playing, "robustness: dedicated server --autostart puts a joiner in");
+            rig.check(
+                playing,
+                "robustness: dedicated server --autostart puts a joiner in",
+            );
             rig.run(&mut [&mut joiner], 60);
             let _ = child.kill();
             let _ = child.wait();
@@ -1266,8 +1314,12 @@ fn settings(rig: &mut Rig) {
     let noise = differing(&base, &grab(rig, &mut c));
     println!("      frame-to-frame noise: {noise} pixels");
     let tweaks: [Tweak; 17] = [
-        ("internal resolution 240p", |s| s.retro.internal_height = 240),
-        ("internal resolution 720p", |s| s.retro.internal_height = 720),
+        ("internal resolution 240p", |s| {
+            s.retro.internal_height = 240
+        }),
+        ("internal resolution 720p", |s| {
+            s.retro.internal_height = 720
+        }),
         ("vertex snapping off", |s| s.retro.vertex_snap = false),
         ("snap strength 3x", |s| s.retro.vertex_snap_strength = 3.0),
         ("affine textures on", |s| s.retro.affine_textures = true),
@@ -1320,8 +1372,17 @@ fn settings(rig: &mut Rig) {
         engine::input::Binding::Key(engine::input::Key::KeyV),
     );
     let saved = s.save(&path).is_ok();
-    rig.check(saved && Settings::load(&path) == s, "settings: survive a restart");
-    for garbage in ["", "((((", "\u{0}\u{1}binary", "(fov: \"wide\")", "(retro: 5)"] {
+    rig.check(
+        saved && Settings::load(&path) == s,
+        "settings: survive a restart",
+    );
+    for garbage in [
+        "",
+        "((((",
+        "\u{0}\u{1}binary",
+        "(fov: \"wide\")",
+        "(retro: 5)",
+    ] {
         let _ = std::fs::write(&path, garbage);
         let loaded = Settings::load(&path);
         rig.check(
@@ -1525,7 +1586,10 @@ fn window_sizes(rig: &mut Rig) {
         if w > 0 {
             rig.shot(&mut c, &format!("window_{name}"));
         }
-        rig.check(c.playing(), &format!("window: {name} ({w}x{h}) keeps the game running"));
+        rig.check(
+            c.playing(),
+            &format!("window: {name} ({w}x{h}) keeps the game running"),
+        );
     }
     rig.size = (W, H);
     rig.renderer.resize(W, H);

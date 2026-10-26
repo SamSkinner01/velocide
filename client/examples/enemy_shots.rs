@@ -258,7 +258,11 @@ fn main() -> anyhow::Result<()> {
     h.shot("censer_embers_in_flight");
     let burst = (0..200).any(|_| {
         h.frames(&mut game, 1);
-        !game.net().is_some_and(|n| n.remote_entities().iter().any(|e| e.kind == kind::EMBER_BOMB))
+        !game.net().is_some_and(|n| {
+            n.remote_entities()
+                .iter()
+                .any(|e| e.kind == kind::EMBER_BOMB)
+        })
     });
     h.frames(&mut game, 2);
     println!("ember bombs burst: {burst}");
@@ -326,7 +330,9 @@ fn main() -> anyhow::Result<()> {
     let ok = h.until(&mut game, kind::GAOLER, 900, |e| windup_of(e, 0) > 60);
     println!("gaoler bash wind-up: {ok}");
     h.shot("gaoler_bash_windup");
-    let ok = h.until(&mut game, kind::GAOLER, 60, |e| e.flags & enemy_flags::PARRYABLE != 0);
+    let ok = h.until(&mut game, kind::GAOLER, 60, |e| {
+        e.flags & enemy_flags::PARRYABLE != 0
+    });
     h.frames(&mut game, 6);
     println!("gaoler parry window: {ok}");
     h.shot("gaoler_parryable");
@@ -370,7 +376,9 @@ fn main() -> anyhow::Result<()> {
     });
     println!("heron laser: {ok}");
     h.shot("heron_laser");
-    let ok = h.until(&mut game, kind::HERON, 90, |e| e.flags & enemy_flags::AIM_LOCKED != 0);
+    let ok = h.until(&mut game, kind::HERON, 90, |e| {
+        e.flags & enemy_flags::AIM_LOCKED != 0
+    });
     h.frames(&mut game, 4);
     println!("heron locked: {ok}");
     h.shot("heron_laser_locked");
@@ -378,7 +386,9 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 1);
     println!("heron needle: {ok}");
     h.shot("heron_needle");
-    let ok = h.until(&mut game, kind::HERON, 600, |e| e.flags & enemy_flags::AIM_LOCKED != 0);
+    let ok = h.until(&mut game, kind::HERON, 600, |e| {
+        e.flags & enemy_flags::AIM_LOCKED != 0
+    });
     h.moving = (0.0, 1.0, Buttons::DASH);
     h.frames(&mut game, 1);
     h.moving = (0.0, 1.0, Buttons::NONE);
@@ -424,7 +434,9 @@ fn main() -> anyhow::Result<()> {
     h.shot("arena4_locked");
     h.frames(&mut game, 60);
     h.shot("arena4_wave1");
-    let ok = h.until(&mut game, kind::GAOLER, 600, |e| e.state == AiState::Windup as u16);
+    let ok = h.until(&mut game, kind::GAOLER, 600, |e| {
+        e.state == AiState::Windup as u16
+    });
     println!("arena gaoler wind-up: {ok}");
     h.shot("arena4_gaoler");
     game.send_chat("/killall");

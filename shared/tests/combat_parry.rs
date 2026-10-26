@@ -199,7 +199,11 @@ fn parry_window_catches_projectiles_arriving_during_it() {
 fn players_projectiles_are_not_punchable() {
     // No parryable grenades: the fist does nothing to your own (or anyone's) bombs, wisps and
     // gravewells; the Bellows Gust is how you turn a player's projectile around.
-    for kind in [ProjectileKind::Bomb, ProjectileKind::Wisp, ProjectileKind::Gravewell] {
+    for kind in [
+        ProjectileKind::Bomb,
+        ProjectileKind::Wisp,
+        ProjectileKind::Gravewell,
+    ] {
         assert!(!kind.parryable(), "{kind:?}");
         assert!(!kind.owner_can_parry(), "{kind:?}");
     }
@@ -243,8 +247,15 @@ fn pvp_players_gust_back_each_others_bombs() {
     let back = a.eye(p1);
     a.aim(p0, back);
     let ev = a.tap(p0, Buttons::ALT_FIRE, 40);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Deflected { player, .. } if *player == p0)));
-    assert!(a.health(p0) >= 94.0, "only the gust's own recoil, no blast: {}", a.health(p0));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Deflected { player, .. } if *player == p0))
+    );
+    assert!(
+        a.health(p0) >= 94.0,
+        "only the gust's own recoil, no blast: {}",
+        a.health(p0)
+    );
     let hit = ev
         .iter()
         .find_map(|e| match e {
@@ -252,7 +263,11 @@ fn pvp_players_gust_back_each_others_bombs() {
             _ => None,
         })
         .expect("back to sender");
-    assert!(hit.info.flags.contains(DamageFlags::RETURNED | DamageFlags::EXPLOSIVE));
+    assert!(
+        hit.info
+            .flags
+            .contains(DamageFlags::RETURNED | DamageFlags::EXPLOSIVE)
+    );
     assert_eq!(hit.info.attack, Attack::Gust);
     assert!(hit.dealt > 70.0, "{}", hit.dealt);
 }
@@ -344,7 +359,10 @@ fn swat_when_seen(lag: f64, distance: f32) -> (Arena, PlayerId, NetId, Vec<SimEv
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.view_lag.insert(p, lag);
-    let h = a.world.spawn_enemy("harrier", Vec3::new(0.0, 7.0, -12.0), 0.0).unwrap();
+    let h = a
+        .world
+        .spawn_enemy("harrier", Vec3::new(0.0, 7.0, -12.0), 0.0)
+        .unwrap();
     a.world.enemies.get_mut(&h).unwrap().health = 500.0;
     let mut dive_from = None;
     for _ in 0..600 {
@@ -375,7 +393,10 @@ fn swatting_a_diving_harrier_works_at_200ms_view_lag() {
         let parried = parries(&ev);
         assert_eq!(parried.len(), 1, "lag {lag}: swatted");
         assert_eq!(parried[0].target, ParryTarget::Melee { enemy: h });
-        println!("swat at {lag} ticks of view lag: {} ticks late", parried[0].late_ticks);
+        println!(
+            "swat at {lag} ticks of view lag: {} ticks late",
+            parried[0].late_ticks
+        );
         assert_eq!(a.health(p), 100.0, "lag {lag}: the dive never landed");
         assert_ne!(a.world.enemies[&h].state, shared::sim::AiState::Strike);
     }

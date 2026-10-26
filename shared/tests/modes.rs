@@ -184,7 +184,11 @@ fn solo_death_restarts_at_the_last_checkpoint() {
         Vec3::ZERO,
     );
     // Long-lived: it would still be around without the restart.
-    a.world.projectiles.get_mut(&wisp.unwrap()).unwrap().expire_tick += 6000;
+    a.world
+        .projectiles
+        .get_mut(&wisp.unwrap())
+        .unwrap()
+        .expire_tick += 6000;
     // Death cam: 1.5 s.
     let ev = a.ticks(85);
     assert!(respawned(&ev, p).is_none());
@@ -324,7 +328,11 @@ fn everyone_down_at_once_wipes_the_team_back_to_the_checkpoint() {
         Vec3::new(0.0, 1.0, -90.0),
         Vec3::ZERO,
     );
-    a.world.projectiles.get_mut(&wisp.unwrap()).unwrap().expire_tick += 6000;
+    a.world
+        .projectiles
+        .get_mut(&wisp.unwrap())
+        .unwrap()
+        .expire_tick += 6000;
     kill(&mut a, pb);
     let ev = a.tick();
     let wiped = mode_events(&ev)

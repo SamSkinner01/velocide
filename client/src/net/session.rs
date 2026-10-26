@@ -110,7 +110,10 @@ impl Session {
                 if server.lobby.enabled {
                     // Only our own client knows the token, so only we can be the host: it
                     // must be unguessable (OS randomness, not time ^ pid).
-                    let token = *server.lobby.host_token.get_or_insert_with(random_host_token);
+                    let token = *server
+                        .lobby
+                        .host_token
+                        .get_or_insert_with(random_host_token);
                     client.host_token = Some(token);
                 }
                 let server = ServerHandle::spawn(*server)?;
@@ -214,7 +217,8 @@ mod tests {
 
     #[test]
     fn host_tokens_are_random() {
-        let tokens: std::collections::BTreeSet<u64> = (0..64).map(|_| random_host_token()).collect();
+        let tokens: std::collections::BTreeSet<u64> =
+            (0..64).map(|_| random_host_token()).collect();
         assert_eq!(tokens.len(), 64);
         // Not clustered like time-derived values: the high bits vary too.
         let high: std::collections::BTreeSet<u64> = tokens.iter().map(|t| t >> 48).collect();

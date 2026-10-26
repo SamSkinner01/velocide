@@ -464,7 +464,8 @@ impl InGame {
                 return self.on_lobby_changed(phase, previous, common, now);
             }
             NetEvent::Notice { text } => {
-                self.chat.system(&text.to_uppercase(), t.crimson_bright, now);
+                self.chat
+                    .system(&text.to_uppercase(), t.crimson_bright, now);
             }
             // Combat events (damage, hit confirms, kills, parries): `combat` module.
             NetEvent::Game(ev) => self.combat_game_event(ev, common),

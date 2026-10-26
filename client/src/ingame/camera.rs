@@ -245,7 +245,10 @@ mod tests {
         };
         // Sinks smoothly, not in one frame.
         let first = downed(&mut rig);
-        assert!(first < standing && first > DOWNED_EYE_HEIGHT + 0.5, "{first}");
+        assert!(
+            first < standing && first > DOWNED_EYE_HEIGHT + 0.5,
+            "{first}"
+        );
         let mut y = first;
         for _ in 0..300 {
             y = downed(&mut rig);

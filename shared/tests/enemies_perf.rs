@@ -70,7 +70,9 @@ fn fifty_enemies_on_the_campaign_level() {
                 yaw: tick as f32 * 0.02 + i as f32 * 1.6,
                 ..Default::default()
             };
-            input.buttons.set(Buttons::JUMP, (tick + i as u32 * 17).is_multiple_of(90));
+            input
+                .buttons
+                .set(Buttons::JUMP, (tick + i as u32 * 17).is_multiple_of(90));
             inputs.insert(PlayerId(i), vec![input]);
         }
         let started = Instant::now();
@@ -86,7 +88,10 @@ fn fifty_enemies_on_the_campaign_level() {
                     }
                     _ => None,
                 };
-                println!("tick {tick}: {name:?} died ({:?}) at {}", k.attack, k.position);
+                println!(
+                    "tick {tick}: {name:?} died ({:?}) at {}",
+                    k.attack, k.position
+                );
             }
         }
     }

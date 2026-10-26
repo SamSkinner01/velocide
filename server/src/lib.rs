@@ -25,9 +25,9 @@ mod commands;
 pub mod input_queue;
 pub mod lagcomp;
 // Style / game-mode messages and the end-of-match hook (docs/style_modes.md).
-pub mod modes;
 /// Lobby / match flow: phases, host, match settings, pings (docs/lobby.md).
 pub mod lobby;
+pub mod modes;
 pub mod netsim;
 pub mod transport;
 
@@ -744,7 +744,8 @@ impl Server {
             .map(|c| c.id)
             .collect();
         for id in &ids {
-            self.renet.send_message(*id, CHANNEL_RELIABLE, bytes.clone());
+            self.renet
+                .send_message(*id, CHANNEL_RELIABLE, bytes.clone());
         }
         ids.len()
     }

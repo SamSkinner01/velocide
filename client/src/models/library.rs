@@ -166,7 +166,11 @@ impl ModelLibrary {
     ) -> PlayerDrawInfo {
         let rig = self.get(ModelId::Shrike);
         let pose = shrike::pose(anim);
-        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
         let root = shrike::root_transform(anim, feet) * Mat4::from_scale(Vec3::splat(scale));
         rig.draw(&pose, root, tint, out);
         let hand = rig.part_transform(&pose, root, shrike::HAND_R);

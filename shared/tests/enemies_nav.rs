@@ -10,9 +10,7 @@ use glam::Vec3;
 use shared::level::{LevelDef, LevelKind};
 use shared::sim::EnemyRegistry;
 use shared::sim::enemy::Locomotion;
-use shared::sim::nav::{
-    MAX_DROP, NavClass, NavGrid, NavScratch, PathResult, STEP_UP, node_flags,
-};
+use shared::sim::nav::{MAX_DROP, NavClass, NavGrid, NavScratch, PathResult, STEP_UP, node_flags};
 
 fn load(name: &str) -> (LevelDef, NavGrid, shared::level::LevelCollision) {
     let level = LevelDef::load_named(name).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -23,7 +21,9 @@ fn load(name: &str) -> (LevelDef, NavGrid, shared::level::LevelCollision) {
 
 /// The nav class of a definition (flyers have none).
 fn class_of(enemy: &str) -> Option<NavClass> {
-    let def = EnemyRegistry::builtin().get(enemy).unwrap_or_else(|| panic!("no enemy '{enemy}'"));
+    let def = EnemyRegistry::builtin()
+        .get(enemy)
+        .unwrap_or_else(|| panic!("no enemy '{enemy}'"));
     match def.locomotion {
         Locomotion::Flying { .. } => None,
         Locomotion::Ground => Some(NavClass::for_size(def.radius, def.height)),
@@ -39,8 +39,16 @@ fn in_kill_volume(level: &LevelDef, p: Vec3) -> bool {
 fn assert_safe_path(level: &LevelDef, g: &NavGrid, path: &[u32], class: NavClass, what: &str) {
     for &n in path {
         let node = &g.nodes[n as usize];
-        assert!(!node.is(node_flags::DEADLY), "{what}: deadly node {}", node.pos);
-        assert!(!in_kill_volume(level, node.pos + Vec3::Y * 0.1), "{what}: node in a kill volume {}", node.pos);
+        assert!(
+            !node.is(node_flags::DEADLY),
+            "{what}: deadly node {}",
+            node.pos
+        );
+        assert!(
+            !in_kill_volume(level, node.pos + Vec3::Y * 0.1),
+            "{what}: node in a kill volume {}",
+            node.pos
+        );
     }
     let wps = g.smooth(path, class, &[]);
     let mut prev = g.nodes[path[0] as usize].pos;
@@ -69,8 +77,17 @@ fn builds_on_every_shipped_level() {
         let s = &g.stats;
         println!(
             "{name:20} {}x{} cols, {} floors: {} walkable, {} large, {} hazard, {} deadly; {} links; {} rays, {} capsule tests; build {:.1} ms (incl. load {ms:.1} ms)",
-            g.nx, g.nz, s.floors, s.small, s.large, s.hazard, s.deadly, s.links, s.rays,
-            s.capsule_tests, s.build_ms
+            g.nx,
+            g.nz,
+            s.floors,
+            s.small,
+            s.large,
+            s.hazard,
+            s.deadly,
+            s.links,
+            s.rays,
+            s.capsule_tests,
+            s.build_ms
         );
         assert!(s.small > 1000, "{name}: only {} walkable nodes", s.small);
         assert!(s.links > s.small, "{name}: barely linked");
@@ -78,7 +95,9 @@ fn builds_on_every_shipped_level() {
         let mut per_class = Vec::new();
         for enemy in ["gnawer", "censer", "heron", "gaoler"] {
             let class = class_of(enemy).expect("ground enemy");
-            let n = (0..g.nodes.len() as u32).filter(|&n| g.passable(n, class, &[])).count();
+            let n = (0..g.nodes.len() as u32)
+                .filter(|&n| g.passable(n, class, &[]))
+                .count();
             per_class.push(format!("{enemy} {n}"));
             if level.kind == LevelKind::Campaign || enemy != "gaoler" {
                 assert!(n > s.small / 3, "{name}: only {n} nodes for the {enemy}");
@@ -115,15 +134,27 @@ fn crucible_encounters_are_connected_and_paths_avoid_lava() {
                 let Some(class) = class_of(&sp.enemy) else {
                     continue;
                 };
-                let what = format!("encounter {} wave {} {} at {}", ei + 1, wi + 1, sp.enemy, sp.position);
+                let what = format!(
+                    "encounter {} wave {} {} at {}",
+                    ei + 1,
+                    wi + 1,
+                    sp.enemy,
+                    sp.position
+                );
                 let start = g
                     .node_at(sp.position, 0.6, class, &[])
                     .unwrap_or_else(|| panic!("{what}: spawn not on the grid for {class:?}"));
-                let goal = g.nearest_node(centre, 12, class, &[]).expect("arena centre on the grid");
-                let rally_node = g.node_at(rally, 0.6, NavClass::SMALL, &[]).expect("rally on the grid");
+                let goal = g
+                    .nearest_node(centre, 12, class, &[])
+                    .expect("arena centre on the grid");
+                let rally_node = g
+                    .node_at(rally, 0.6, NavClass::SMALL, &[])
+                    .expect("rally on the grid");
                 let to_centre = g.find_path(&mut s, start, goal, class, &[], 100_000);
-                let to_rally = g.find_path(&mut s, start, rally_node, NavClass::SMALL, &[], 100_000);
-                let from_rally = g.find_path(&mut s, rally_node, start, NavClass::SMALL, &[], 100_000);
+                let to_rally =
+                    g.find_path(&mut s, start, rally_node, NavClass::SMALL, &[], 100_000);
+                let from_rally =
+                    g.find_path(&mut s, rally_node, start, NavClass::SMALL, &[], 100_000);
                 if sp.enemy == "censer" {
                     // Censers may sit on pad-only ledges (docs/levels.md): they only need to be
                     // on the grid and able to come down.
@@ -201,7 +232,10 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
             .or_default()
             .push(n);
     }
-    println!("{reachable} of {} walkable nodes are reachable", g.stats.small);
+    println!(
+        "{reachable} of {} walkable nodes are reachable",
+        g.stats.small
+    );
     assert!(reachable > 12_000);
     for nodes in by_column.values() {
         let walk = nodes.iter().filter(|n| n.is(node_flags::SMALL)).count();
@@ -218,13 +252,22 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
                 .unwrap();
             let lava = nodes.iter().find(|n| n.is(node_flags::DEADLY)).unwrap();
             if lava.pos.y < top.pos.y {
-                assert!(g.ground_ok(top.pos, top.pos.y, STEP_UP), "bridge at {} unsafe", top.pos);
+                assert!(
+                    g.ground_ok(top.pos, top.pos.y, STEP_UP),
+                    "bridge at {} unsafe",
+                    top.pos
+                );
             }
         }
     }
-    println!("{stacked} columns with stacked walkable floors, {deadly_under_walkable} walkable floors over lava");
+    println!(
+        "{stacked} columns with stacked walkable floors, {deadly_under_walkable} walkable floors over lava"
+    );
     assert!(stacked > 100, "multi-floor areas found: {stacked}");
-    assert!(deadly_under_walkable > 10, "bridges over lava: {deadly_under_walkable}");
+    assert!(
+        deadly_under_walkable > 10,
+        "bridges over lava: {deadly_under_walkable}"
+    );
 
     // Every lava surface refuses the edge guard from the rim next to it.
     for v in &level.kill_volumes {
@@ -234,7 +277,10 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
             continue; // the safety volume under the whole level
         }
         let p = Vec3::new(c.x, top, c.z);
-        assert!(!g.ground_ok(p, top + 0.5, MAX_DROP), "lava at {p} looks safe");
+        assert!(
+            !g.ground_ok(p, top + 0.5, MAX_DROP),
+            "lava at {p} looks safe"
+        );
     }
 
     // The stacked floors are separate nodes and the higher one is not reached by climbing a
@@ -245,7 +291,12 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
                 continue;
             }
             let o = &g.nodes[m as usize];
-            assert!(o.pos.y - n.pos.y <= 1.25, "link climbs {} -> {}", n.pos, o.pos);
+            assert!(
+                o.pos.y - n.pos.y <= 1.25,
+                "link climbs {} -> {}",
+                n.pos,
+                o.pos
+            );
         }
     }
 }
@@ -255,21 +306,33 @@ fn arena_level_grid_and_queries_are_fast() {
     let (_, g, _) = load("crucible_of_veins");
     let mut s = NavScratch::default();
     // A long query across the whole campaign (start to exit), doors open.
-    let start = g.node_at(Vec3::new(0.0, 0.0, 25.0), 0.5, NavClass::SMALL, &[]).unwrap();
-    let exit = g.nearest_node(Vec3::new(91.0, 4.0, -362.0), 6, NavClass::SMALL, &[]).unwrap();
+    let start = g
+        .node_at(Vec3::new(0.0, 0.0, 25.0), 0.5, NavClass::SMALL, &[])
+        .unwrap();
+    let exit = g
+        .nearest_node(Vec3::new(91.0, 4.0, -362.0), 6, NavClass::SMALL, &[])
+        .unwrap();
     let t = Instant::now();
     let r = g.find_path(&mut s, start, exit, NavClass::SMALL, &[], 1_000_000);
     let ms = t.elapsed().as_secs_f64() * 1000.0;
-    println!("start -> exit: {:?} nodes, {} expanded, {ms:.2} ms", match &r {
-        PathResult::Found(p) | PathResult::Partial(p) => p.len(),
-        PathResult::NotFound => 0,
-    }, s.last_expanded);
+    println!(
+        "start -> exit: {:?} nodes, {} expanded, {ms:.2} ms",
+        match &r {
+            PathResult::Found(p) | PathResult::Partial(p) => p.len(),
+            PathResult::NotFound => 0,
+        },
+        s.last_expanded
+    );
     // The campaign's critical path uses one jump pad (Bell Loft), so a walker can't do the
     // whole level; it must at least get far.
     assert!(!matches!(r, PathResult::NotFound));
     // Typical in-arena query (budgeted search).
-    let a = g.node_at(Vec3::new(-10.0, 0.0, -57.0), 0.6, NavClass::SMALL, &[]).unwrap();
-    let b = g.node_at(Vec3::new(0.0, 0.0, -25.5), 0.6, NavClass::SMALL, &[]).unwrap();
+    let a = g
+        .node_at(Vec3::new(-10.0, 0.0, -57.0), 0.6, NavClass::SMALL, &[])
+        .unwrap();
+    let b = g
+        .node_at(Vec3::new(0.0, 0.0, -25.5), 0.6, NavClass::SMALL, &[])
+        .unwrap();
     let t = Instant::now();
     let mut n = 0;
     for _ in 0..100 {
@@ -278,6 +341,9 @@ fn arena_level_grid_and_queries_are_fast() {
         }
     }
     let us = t.elapsed().as_secs_f64() * 1e6 / 100.0;
-    println!("arena 1 spawn -> rally: {n} nodes, {} expanded, {us:.0} us per search", s.last_expanded);
+    println!(
+        "arena 1 spawn -> rally: {n} nodes, {} expanded, {us:.0} us per search",
+        s.last_expanded
+    );
     assert!(n > 0);
 }

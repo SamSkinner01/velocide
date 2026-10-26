@@ -25,8 +25,8 @@ use glam::{Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
 use super::combat::{Blocked, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner};
-use super::trail::Trail;
 use super::nav::NavClass;
+use super::trail::Trail;
 use super::{HitPart, HitShape, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
 use crate::input::look_dir;
 use crate::protocol::{EntityState, NetId, OWNER_NONE, enemy_flags};
@@ -411,7 +411,10 @@ impl SimWorld {
     ) -> Option<NetId> {
         let def = self.enemy_defs.get(name)?;
         if self.enemies.len() >= super::MAX_ENEMIES {
-            log::warn!("enemy limit ({}) reached: '{name}' not spawned", super::MAX_ENEMIES);
+            log::warn!(
+                "enemy limit ({}) reached: '{name}' not spawned",
+                super::MAX_ENEMIES
+            );
             return None;
         }
         let id = self.alloc_net_id()?;
@@ -466,7 +469,9 @@ impl SimWorld {
             weak_name = Some(w.name.as_str());
         }
         // A parry counter (telegraphed-melee parry) always lands in full.
-        let counter = info.flags.contains(DamageFlags::MELEE | DamageFlags::PARRIED);
+        let counter = info
+            .flags
+            .contains(DamageFlags::MELEE | DamageFlags::PARRIED);
         if let Some(armour) = &def.armour
             && (!explosive || armour.explosions)
             && !counter
@@ -530,7 +535,14 @@ impl SimWorld {
         e.target = None;
         let center = e.center();
         let (pool, radius) = (e.def.drops.heat, e.def.drops.heat_radius);
-        self.spawn_embers(t, center, pool, radius, t.combat.embers.death_lifetime, true);
+        self.spawn_embers(
+            t,
+            center,
+            pool,
+            radius,
+            t.combat.embers.death_lifetime,
+            true,
+        );
         self.pending_hits
             .retain(|h| !matches!(h.key, super::parry::ParryKey::Melee(e, _) if e == id));
         for p in self.projectiles.values_mut() {
@@ -582,24 +594,79 @@ mod tests {
         assert_eq!(r.len(), 5, "{:?}", r.names().collect::<Vec<_>>());
         // (file, name, kind, radius, height, health, speed, weak points (name, offset, r, x)).
         type Weak = (&'static str, [f32; 3], f32, f32);
-        type Row = (&'static str, &'static str, u16, f32, f32, f32, f32, &'static [Weak]);
+        type Row = (
+            &'static str,
+            &'static str,
+            u16,
+            f32,
+            f32,
+            f32,
+            f32,
+            &'static [Weak],
+        );
         let table: [Row; 5] = [
-            ("gnawer", "Gnawer", kind::GNAWER, 0.6, 2.0, 45.0, 10.0,
-                &[("head", [0.0, 1.62, -0.38], 0.38, 2.0)]),
-            ("censer", "Censer", kind::CENSER, 0.6, 2.5, 80.0, 5.0,
-                &[("lantern", [0.0, 2.22, -0.1], 0.42, 2.0)]),
-            ("harrier", "Harrier", kind::HARRIER, 0.7, 1.3, 40.0, 15.0,
-                &[("heart", [0.0, 0.35, -0.15], 0.35, 2.5)]),
-            ("gaoler", "Gaoler", kind::GAOLER, 1.3, 3.7, 520.0, 4.5,
-                &[("head", [0.0, 3.32, -0.35], 0.45, 1.5), ("lantern", [0.0, 2.2, 0.95], 0.55, 2.5)]),
-            ("heron", "Heron", kind::HERON, 0.5, 3.4, 60.0, 7.0,
-                &[("head", [0.0, 3.12, -0.4], 0.35, 2.5)]),
+            (
+                "gnawer",
+                "Gnawer",
+                kind::GNAWER,
+                0.6,
+                2.0,
+                45.0,
+                10.0,
+                &[("head", [0.0, 1.62, -0.38], 0.38, 2.0)],
+            ),
+            (
+                "censer",
+                "Censer",
+                kind::CENSER,
+                0.6,
+                2.5,
+                80.0,
+                5.0,
+                &[("lantern", [0.0, 2.22, -0.1], 0.42, 2.0)],
+            ),
+            (
+                "harrier",
+                "Harrier",
+                kind::HARRIER,
+                0.7,
+                1.3,
+                40.0,
+                15.0,
+                &[("heart", [0.0, 0.35, -0.15], 0.35, 2.5)],
+            ),
+            (
+                "gaoler",
+                "Gaoler",
+                kind::GAOLER,
+                1.3,
+                3.7,
+                520.0,
+                4.5,
+                &[
+                    ("head", [0.0, 3.32, -0.35], 0.45, 1.5),
+                    ("lantern", [0.0, 2.2, 0.95], 0.55, 2.5),
+                ],
+            ),
+            (
+                "heron",
+                "Heron",
+                kind::HERON,
+                0.5,
+                3.4,
+                60.0,
+                7.0,
+                &[("head", [0.0, 3.12, -0.4], 0.35, 2.5)],
+            ),
         ];
         for (file, name, net_kind, radius, height, health, speed, weak) in table {
             let d = r.get(file).unwrap_or_else(|| panic!("{file} is built in"));
             assert_eq!(d.name, name);
             assert_eq!(d.net_kind, net_kind, "{name}");
-            assert_eq!(r.by_kind(net_kind).map(|d| d.name.clone()), Some(name.to_string()));
+            assert_eq!(
+                r.by_kind(net_kind).map(|d| d.name.clone()),
+                Some(name.to_string())
+            );
             assert_eq!((d.radius, d.height), (radius, height), "{name} capsule");
             assert_eq!((d.health, d.speed), (health, speed), "{name}");
             assert_eq!(d.weak_points.len(), weak.len(), "{name} weak points");
@@ -615,7 +682,10 @@ mod tests {
             // Biggest dimension at least ~2 m (docs/roster.md "big and readable").
             assert!(height.max(radius * 2.0) >= 1.3, "{name}");
         }
-        assert!(r.get("husk").is_none() && r.by_kind(16).is_none(), "the first roster is retired");
+        assert!(
+            r.get("husk").is_none() && r.by_kind(16).is_none(),
+            "the first roster is retired"
+        );
         let gaoler = r.get("gaoler").unwrap();
         let armour = gaoler.armour.as_ref().unwrap();
         assert_eq!((armour.front_multiplier, armour.front_arc), (0.15, 120.0));

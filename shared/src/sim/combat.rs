@@ -421,7 +421,12 @@ impl SimWorld {
     /// A branded target (see [`SimWorld::brand_target`]) takes `quill.brand_multiplier` ×
     /// the damage from every source (flag [`DamageFlags::BRANDED`]); the world and dev
     /// commands are exempt.
-    pub fn apply_damage(&mut self, t: &Tuning, target: HitTarget, mut info: DamageInfo) -> DamageEvent {
+    pub fn apply_damage(
+        &mut self,
+        t: &Tuning,
+        target: HitTarget,
+        mut info: DamageInfo,
+    ) -> DamageEvent {
         if !matches!(info.attack, Attack::World | Attack::Dev) && self.is_branded(target) {
             info.amount *= t.combat.quill.brand_multiplier;
             info.flags.insert(DamageFlags::BRANDED);

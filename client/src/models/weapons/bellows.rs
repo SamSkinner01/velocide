@@ -10,8 +10,8 @@ use engine::glam::{Quat, Vec2, Vec3, Vec4};
 
 use crate::models::PartSet;
 use crate::models::kit::{
-    self, BLACK_STEEL, BRASS, DARK_LEATHER, GUNMETAL, LEATHER, add_mirrored, block,
-    chamfer_box_z, limb, rgb, tube,
+    self, BLACK_STEEL, BRASS, DARK_LEATHER, GUNMETAL, LEATHER, add_mirrored, block, chamfer_box_z,
+    limb, rgb, tube,
 };
 use crate::models::rig::{JointDef, ROOT, Shade, joint, static_part};
 
@@ -191,7 +191,12 @@ pub fn build() -> Vec<ModelPart> {
     let mid = hinge() + board_rot * Vec3::new(0.0, -0.01, len * 0.5);
     p.add(
         BOARD,
-        block(mid, Vec3::new(0.064, 0.01, len * 0.5 + 0.012), board_rot, wood),
+        block(
+            mid,
+            Vec3::new(0.064, 0.01, len * 0.5 + 0.012),
+            board_rot,
+            wood,
+        ),
     );
     p.add(
         BOARD,

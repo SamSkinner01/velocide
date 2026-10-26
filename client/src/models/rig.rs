@@ -307,15 +307,19 @@ impl Rig {
             }
             // Palette recolouring (colour-blind modes): a greyscale copy in the role colour.
             let recolour = match part.shade {
-                Shade::Glow => tint.glow_color.map(|c| (c, level(pose.glow) * level(tint.glow))),
+                Shade::Glow => tint
+                    .glow_color
+                    .map(|c| (c, level(pose.glow) * level(tint.glow))),
                 Shade::Core => tint.core_color.map(|c| (c, level(pose.core))),
                 _ => None,
             };
             if let (Some((hue, brightness)), Some(mesh)) = (recolour, part.recolour_mesh) {
-                let alpha = part.base_color.w * tint.body.w * match part.shade {
-                    Shade::Glow => pose.glow.w * tint.glow.w,
-                    _ => pose.core.w,
-                };
+                let alpha = part.base_color.w
+                    * tint.body.w
+                    * match part.shade {
+                        Shade::Glow => pose.glow.w * tint.glow.w,
+                        _ => pose.core.w,
+                    };
                 out.push(DrawItem {
                     mesh,
                     texture: part.texture,
@@ -413,10 +417,13 @@ mod tests {
         assert_eq!(swapped[0], own[0]);
         assert_eq!(swapped[1], own[1]);
         // A dim strobe phase dims the role colour.
-        let dim = draw(&r, &Tint {
-            glow: Vec4::splat(0.3),
-            ..tint
-        });
+        let dim = draw(
+            &r,
+            &Tint {
+                glow: Vec4::splat(0.3),
+                ..tint
+            },
+        );
         assert!((dim[2].tint.truncate() - blue.truncate() * 0.3).length() < 1e-5);
         // Parts without a greyscale copy keep their own colours.
         r.parts[2].recolour_mesh = None;
@@ -434,13 +441,20 @@ mod tests {
             ..Default::default()
         };
         let mesh = MeshData {
-            vertices: vec![v([1.0, 0.85, 0.45, 1.0]), v([1.0, 0.62, 0.18, 0.5]), v([0.0; 4])],
+            vertices: vec![
+                v([1.0, 0.85, 0.45, 1.0]),
+                v([1.0, 0.62, 0.18, 0.5]),
+                v([0.0; 4]),
+            ],
             indices: vec![0, 1, 2],
         };
         let n = neutral_mesh(&mesh);
         assert_eq!(n.vertices[0].color, [1.0, 1.0, 1.0, 1.0], "brightest = 1");
         let g = n.vertices[1].color;
-        assert!(g[0] > 0.6 && g[0] < 0.9 && g[0] == g[1] && g[1] == g[2], "{g:?}");
+        assert!(
+            g[0] > 0.6 && g[0] < 0.9 && g[0] == g[1] && g[1] == g[2],
+            "{g:?}"
+        );
         assert_eq!(g[3], 0.5, "alpha kept");
         assert_eq!(n.vertices[2].color, [0.0; 4]);
         assert_eq!(n.indices, mesh.indices);

@@ -29,7 +29,10 @@ pub struct Spatial {
 }
 
 impl Spatial {
-    pub const CENTER: Spatial = Spatial { gain: 1.0, pan: 0.0 };
+    pub const CENTER: Spatial = Spatial {
+        gain: 1.0,
+        pan: 0.0,
+    };
 }
 
 /// Distance attenuation: 1 within [`REF_DISTANCE`], inverse-distance roll-off beyond, eased to
@@ -52,7 +55,10 @@ pub fn spatialize(listener_pos: Vec3, listener_rot: Quat, source: Vec3) -> Spati
     let offset = source - listener_pos;
     let distance = offset.length();
     if !distance.is_finite() {
-        return Spatial { gain: 0.0, pan: 0.0 };
+        return Spatial {
+            gain: 0.0,
+            pan: 0.0,
+        };
     }
     if distance <= NEAR_DISTANCE {
         return Spatial::CENTER;
@@ -109,8 +115,16 @@ mod tests {
 
     #[test]
     fn spatialisation_is_continuous_at_the_near_threshold() {
-        let a = spatialize(Vec3::ZERO, Quat::IDENTITY, Vec3::new(NEAR_DISTANCE - 1e-3, 0.0, 0.0));
-        let b = spatialize(Vec3::ZERO, Quat::IDENTITY, Vec3::new(NEAR_DISTANCE + 1e-3, 0.0, 0.0));
+        let a = spatialize(
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::new(NEAR_DISTANCE - 1e-3, 0.0, 0.0),
+        );
+        let b = spatialize(
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::new(NEAR_DISTANCE + 1e-3, 0.0, 0.0),
+        );
         assert!((a.pan - b.pan).abs() < 0.01 && (a.gain - b.gain).abs() < 0.01);
     }
 }

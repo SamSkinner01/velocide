@@ -87,9 +87,11 @@ fn quill_shots_kill_in_two() {
     a.set_buttons(p, Buttons::FIRE);
     let first = a.tick();
     assert_eq!(dmg(&first, d[0]), 24.0);
-    assert!(first.iter().any(
-        |e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Quill && s.ends.len() == 1)
-    ));
+    assert!(
+        first.iter().any(
+            |e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Quill && s.ends.len() == 1)
+        )
+    );
     // Automatic at 0.28 s: the second shot comes 17 ticks later and kills (45 HP).
     let rest = a.ticks(16);
     assert!(a.enemy_alive(d[0]), "not before the interval");
@@ -112,7 +114,10 @@ fn headshot_doubles_damage() {
     let ev = a.tap(p, Buttons::FIRE, 1);
     let dealt = hits_on(&ev, HitTarget::Entity(d[0]));
     assert_eq!(dealt.len(), 1);
-    assert_eq!(dealt[0].info.amount, 24.0, "base damage is reported unmultiplied");
+    assert_eq!(
+        dealt[0].info.amount, 24.0,
+        "base damage is reported unmultiplied"
+    );
     assert!(
         dealt[0]
             .info
@@ -153,7 +158,13 @@ fn walls_block_hitscan_and_explosions() {
     a.select(p, TUMBLER, 0);
     let ev = a.ticks(120);
     assert_eq!(dmg(&ev, d), 0.0);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Explosion { attack: Attack::Tumble, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        SimEvent::Explosion {
+            attack: Attack::Tumble,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -169,15 +180,25 @@ fn brand_marks_multiplies_expires_and_moves() {
     a.aim(p, body);
     let ev = a.tap(p, Buttons::ALT_FIRE, 0);
     assert_eq!(dmg(&ev, da), 10.0);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Branded { owner, target, .. }
-        if *owner == p && *target == HitTarget::Entity(da))));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Branded { owner, target, .. }
+        if *owner == p && *target == HitTarget::Entity(da)))
+    );
     assert!(a.world.is_branded(HitTarget::Entity(da)));
-    assert!(entity_flags(&a, da) & enemy_flags::BRANDED != 0, "replicated");
+    assert!(
+        entity_flags(&a, da) & enemy_flags::BRANDED != 0,
+        "replicated"
+    );
     assert!(entity_flags(&a, db) & enemy_flags::BRANDED == 0);
     // Everything hits it x1.35: the Quill ...
     let ev = a.tap(p, Buttons::FIRE, 0);
     let hit = hits_on(&ev, HitTarget::Entity(da));
-    assert!((hit[0].dealt - 24.0 * 1.35).abs() < 1e-3, "{}", hit[0].dealt);
+    assert!(
+        (hit[0].dealt - 24.0 * 1.35).abs() < 1e-3,
+        "{}",
+        hit[0].dealt
+    );
     assert!(hit[0].info.flags.contains(DamageFlags::BRANDED));
     // ... and anybody else's damage.
     let t = a.tuning.clone();
@@ -189,7 +210,10 @@ fn brand_marks_multiplies_expires_and_moves() {
     let body = dummy_body(&a, db);
     a.aim(p, body);
     a.tap(p, Buttons::ALT_FIRE, 0);
-    assert!(!a.world.is_branded(HitTarget::Entity(da)), "one live brand per player");
+    assert!(
+        !a.world.is_branded(HitTarget::Entity(da)),
+        "one live brand per player"
+    );
     assert!(a.world.is_branded(HitTarget::Entity(db)));
     // 5 s later it's gone.
     a.ticks(298);
@@ -243,10 +267,19 @@ fn splinters_continue_through_the_target() {
         (dmg(&ev, d[0]), dmg(&ev, d[1]), splinters)
     };
     let (front, back, (origin, ends)) = run();
-    assert_eq!(front, 20.0, "the target hit directly takes only the main shot");
+    assert_eq!(
+        front, 20.0,
+        "the target hit directly takes only the main shot"
+    );
     assert_eq!(ends.len(), 6);
-    assert!(origin.z > -10.0 && origin.z < -9.4, "burst on the target: {origin}");
-    assert!(back >= 9.0 && back % 9.0 == 0.0, "splinters hit the one behind: {back}");
+    assert!(
+        origin.z > -10.0 && origin.z < -9.4,
+        "burst on the target: {origin}"
+    );
+    assert!(
+        back >= 9.0 && back % 9.0 == 0.0,
+        "splinters hit the one behind: {back}"
+    );
     // Every splinter leaves forward, inside the 40 degree cone.
     for end in &ends {
         let dir = (*end - origin).normalize();
@@ -280,7 +313,10 @@ fn splinters_reflect_off_walls() {
         .expect("burst on the wall");
     assert!((origin.z + 10.0).abs() < 0.1, "{origin}");
     for end in &ends {
-        assert!(end.z > -10.05, "splinters bounce back out of the wall: {end}");
+        assert!(
+            end.z > -10.05,
+            "splinters bounce back out of the wall: {end}"
+        );
         assert!(end.x > origin.x, "reflected: {end}");
     }
     let hit = dmg(&ev, d);
@@ -316,9 +352,15 @@ fn bellows_blast_and_both_barrels() {
     assert!(dv.dot(-aim) > 7.0, "recoil {dv}");
     a.set_buttons(p, Buttons::FIRE);
     let ev = a.ticks(47);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Shot(_))), "primary waits");
+    assert!(
+        !ev.iter().any(|e| matches!(e, SimEvent::Shot(_))),
+        "primary waits"
+    );
     let ev = a.ticks(1);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Blast)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Blast))
+    );
 }
 
 #[test]
@@ -326,8 +368,8 @@ fn gust_knocks_back_in_its_cone_and_recoils() {
     let a50 = 50f32.to_radians();
     let (mut a, p, d) = range(
         &[
-            Vec3::new(0.0, 0.0, -4.0),                          // in the cone
-            Vec3::new(0.0, 0.0, -9.5),                          // out of range
+            Vec3::new(0.0, 0.0, -4.0),                         // in the cone
+            Vec3::new(0.0, 0.0, -9.5),                         // out of range
             Vec3::new(a50.sin() * 4.0, 0.0, -a50.cos() * 4.0), // outside the 60 degree cone
         ],
         1000.0,
@@ -348,7 +390,10 @@ fn gust_knocks_back_in_its_cone_and_recoils() {
         "gust-jump recoil {}",
         a.world.players[&p].movement.velocity
     );
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Gust)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Gust))
+    );
 }
 
 #[test]
@@ -363,7 +408,10 @@ fn gust_deflects_hostile_projectiles() {
             &t,
             kind,
             d[0],
-            Attack::Enemy { kind: 60, attack: 0 },
+            Attack::Enemy {
+                kind: 60,
+                attack: 0,
+            },
             eye + Vec3::new(0.5, 0.0, -3.0),
             Vec3::new(0.0, 0.0, 20.0),
             20.0,
@@ -372,7 +420,13 @@ fn gust_deflects_hostile_projectiles() {
     // The player's own bomb in the same place is not deflected.
     let own = a
         .world
-        .spawn_projectile(&t, ProjectileKind::Bomb, Owner::Player(p), eye + Vec3::new(-0.5, 0.0, -3.0), Vec3::new(0.0, 0.0, -1.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Bomb,
+            Owner::Player(p),
+            eye + Vec3::new(-0.5, 0.0, -3.0),
+            Vec3::new(0.0, 0.0, -1.0),
+        )
         .unwrap();
     let speed = a.world.projectiles[&incoming].speed;
     a.select(p, BELLOWS, 0);
@@ -385,13 +439,25 @@ fn gust_deflects_hostile_projectiles() {
     assert_eq!(proj.attack, Attack::Gust);
     assert!((proj.damage - 30.0).abs() < 1e-3, "x1.5: {}", proj.damage);
     assert!((proj.speed - speed * 1.25).abs() < 1e-3);
-    assert!(proj.velocity.normalize().dot(Vec3::NEG_Z) > 0.999, "along the aim");
+    assert!(
+        proj.velocity.normalize().dot(Vec3::NEG_Z) > 0.999,
+        "along the aim"
+    );
     assert_eq!(a.world.projectiles[&own].owner, Owner::Player(p));
     assert!(!a.world.projectiles[&own].parried);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Deflected { player, id, .. }
-        if *player == p && *id == incoming)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Deflected { player, id, .. }
+        if *player == p && *id == incoming))
+    );
     // DEFLECT style, no parry reward.
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Style(StyleEvent::Bonus { bonus: StyleBonus::Deflect, .. }))));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        SimEvent::Style(StyleEvent::Bonus {
+            bonus: StyleBonus::Deflect,
+            ..
+        })
+    )));
     assert!(!ev.iter().any(|e| matches!(e, SimEvent::Parried(_))));
 }
 
@@ -416,7 +482,12 @@ fn arc_zaps_and_chains_twice() {
     assert_eq!(dmg(&ev, d[1]), 4.5);
     assert_eq!(dmg(&ev, d[2]), 3.375);
     assert_eq!(dmg(&ev, d[3]), 0.0, "two jumps at most");
-    assert!(hits_on(&ev, HitTarget::Entity(d[1]))[0].info.flags.contains(DamageFlags::CHAINED));
+    assert!(
+        hits_on(&ev, HitTarget::Entity(d[1]))[0]
+            .info
+            .flags
+            .contains(DamageFlags::CHAINED)
+    );
     let chain = ev
         .iter()
         .find_map(|e| match e {
@@ -476,7 +547,10 @@ fn wisp_drifts_zaps_and_pops() {
     a.select(p, ARCLASH, 0);
     a.held.get_mut(&p).unwrap().pitch = 0.0;
     let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Wisp)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Wisp))
+    );
     let wisp = *a.world.projectiles.keys().next().unwrap();
     assert_eq!(a.world.projectiles[&wisp].kind, ProjectileKind::Wisp);
     assert!((a.world.projectiles[&wisp].velocity.length() - 12.0).abs() < 1e-3);
@@ -485,14 +559,21 @@ fn wisp_drifts_zaps_and_pops() {
     let pops: Vec<Vec3> = ev
         .iter()
         .filter_map(|e| match e {
-            SimEvent::Explosion { position, attack: Attack::Wisp, .. } => Some(*position),
+            SimEvent::Explosion {
+                position,
+                attack: Attack::Wisp,
+                ..
+            } => Some(*position),
             _ => None,
         })
         .collect();
     assert_eq!(pops.len(), 1);
     assert!(pops[0].z < -19.0, "popped on the wall: {}", pops[0]);
     // ... zapping whatever was within 6 m every 0.2 s (8 each).
-    let zaps = ev.iter().filter(|e| matches!(e, SimEvent::WispZap { .. })).count();
+    let zaps = ev
+        .iter()
+        .filter(|e| matches!(e, SimEvent::WispZap { .. }))
+        .count();
     assert!(zaps >= 6, "{zaps} zaps");
     let zapped = |id: NetId| {
         hits_on(&ev, HitTarget::Entity(id))
@@ -520,7 +601,10 @@ fn discharge_scales_with_charge_and_spares_the_shooter() {
     // Half charge: radius 5.75, 52.5 damage, 18 m/s.
     a.set_buttons(p, Buttons::ALT_FIRE);
     let ev = a.ticks(30);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Discharge { .. })), "charging");
+    assert!(
+        !ev.iter().any(|e| matches!(e, SimEvent::Discharge { .. })),
+        "charging"
+    );
     assert_eq!(a.world.players[&p].combat.weapons.charge, 30);
     a.set_buttons(p, Buttons::NONE);
     let ev = a.tick();
@@ -560,7 +644,13 @@ fn bombs_bounce_twice_and_explode_on_the_third_contact() {
     let t = a.tuning.clone();
     let bomb = a
         .world
-        .spawn_projectile(&t, ProjectileKind::Bomb, Owner::Player(p), Vec3::new(0.0, 1.0, -10.0), Vec3::new(1.0, -4.0, 0.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Bomb,
+            Owner::Player(p),
+            Vec3::new(0.0, 1.0, -10.0),
+            Vec3::new(1.0, -4.0, 0.0),
+        )
         .unwrap();
     let mut frame = NetFrame::new();
     a.world.replicate(&t, &mut frame);
@@ -576,9 +666,11 @@ fn bombs_bounce_twice_and_explode_on_the_third_contact() {
                     a.world.replicate(&t, &mut frame);
                     assert_eq!(frame.get(bomb).unwrap().state, 2 - bounces);
                 }
-                SimEvent::Explosion { position, attack: Attack::Tumble, .. } => {
-                    exploded = Some((a.world.tick, position))
-                }
+                SimEvent::Explosion {
+                    position,
+                    attack: Attack::Tumble,
+                    ..
+                } => exploded = Some((a.world.tick, position)),
                 _ => {}
             }
         }
@@ -600,9 +692,21 @@ fn bombs_explode_on_hostiles_and_on_their_fuse() {
     let ev = a.tap(p, Buttons::FIRE, 20);
     let hit = hits_on(&ev, HitTarget::Entity(d[0]));
     assert_eq!(hit.len(), 1);
-    assert!(hit[0].info.flags.contains(DamageFlags::EXPLOSIVE | DamageFlags::DIRECT));
-    assert!(hit[0].dealt > 60.0 && hit[0].dealt <= 65.0, "{}", hit[0].dealt);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Tumble)));
+    assert!(
+        hit[0]
+            .info
+            .flags
+            .contains(DamageFlags::EXPLOSIVE | DamageFlags::DIRECT)
+    );
+    assert!(
+        hit[0].dealt > 60.0 && hit[0].dealt <= 65.0,
+        "{}",
+        hit[0].dealt
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Tumble))
+    );
     // Straight up (after the 0.85 s interval): the 1.6 s fuse goes off in the air.
     a.ticks(40);
     a.held.get_mut(&p).unwrap().pitch = 1.5;
@@ -611,7 +715,12 @@ fn bombs_explode_on_hostiles_and_on_their_fuse() {
     let mut boom = None;
     for _ in 0..110 {
         for e in a.tick() {
-            if let SimEvent::Explosion { position, attack: Attack::Tumble, .. } = e {
+            if let SimEvent::Explosion {
+                position,
+                attack: Attack::Tumble,
+                ..
+            } = e
+            {
                 boom = Some((a.world.tick, position));
             }
         }
@@ -640,7 +749,12 @@ fn breach_blasts_point_blank_and_launches_the_shooter() {
     let (at, radius) = ev
         .iter()
         .find_map(|e| match e {
-            SimEvent::Explosion { position, radius, attack: Attack::Breach, .. } => Some((*position, *radius)),
+            SimEvent::Explosion {
+                position,
+                radius,
+                attack: Attack::Breach,
+                ..
+            } => Some((*position, *radius)),
             _ => None,
         })
         .expect("breach");
@@ -650,9 +764,18 @@ fn breach_blasts_point_blank_and_launches_the_shooter() {
     // Self damage (35 %) and full knockback.
     let own = hits_on(&ev, HitTarget::Player(p));
     assert_eq!(own.len(), 1);
-    assert!(own[0].info.flags.contains(DamageFlags::SELF | DamageFlags::EXPLOSIVE));
+    assert!(
+        own[0]
+            .info
+            .flags
+            .contains(DamageFlags::SELF | DamageFlags::EXPLOSIVE)
+    );
     assert!(own[0].dealt > 5.0 && own[0].dealt <= 70.0 * 0.35 + 1e-3);
-    assert!(own[0].info.knockback.z > 3.0, "pushed back: {}", own[0].info.knockback);
+    assert!(
+        own[0].info.knockback.z > 3.0,
+        "pushed back: {}",
+        own[0].info.knockback
+    );
 
     // The panic button: aimed at the floor it launches the shooter.
     let (mut a, p, _) = range(&[], 1000.0);
@@ -687,7 +810,10 @@ fn gravewell_lobs_sticks_pulls_and_implodes() {
     a.select(p, TUMBLER, 1);
     a.held.get_mut(&p).unwrap().pitch = 0.0;
     let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Gravewell)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Gravewell))
+    );
     let lobbed = a.world.projectiles.values().next().unwrap();
     assert_eq!(lobbed.kind, ProjectileKind::Gravewell);
     let v = lobbed.velocity;
@@ -699,7 +825,13 @@ fn gravewell_lobs_sticks_pulls_and_implodes() {
     let t = a.tuning.clone();
     let well = a
         .world
-        .spawn_projectile(&t, ProjectileKind::Gravewell, Owner::Player(p), Vec3::new(0.0, 0.6, -10.0), Vec3::new(0.0, -6.0, 0.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Gravewell,
+            Owner::Player(p),
+            Vec3::new(0.0, 0.6, -10.0),
+            Vec3::new(0.0, -6.0, 0.0),
+        )
         .unwrap();
     let ev = a.ticks(10);
     let stuck = ev
@@ -721,7 +853,12 @@ fn gravewell_lobs_sticks_pulls_and_implodes() {
     let at = ev
         .iter()
         .find_map(|e| match e {
-            SimEvent::Explosion { position, radius, attack: Attack::Gravewell, .. } => Some((*position, *radius)),
+            SimEvent::Explosion {
+                position,
+                radius,
+                attack: Attack::Gravewell,
+                ..
+            } => Some((*position, *radius)),
             _ => None,
         })
         .expect("implosion");
@@ -738,7 +875,13 @@ fn gravewell_pulls_hostile_players_at_half_strength_in_pvp() {
     a.ticks(5);
     let t = a.tuning.clone();
     a.world
-        .spawn_projectile(&t, ProjectileKind::Gravewell, Owner::Player(p0), Vec3::new(0.0, 0.3, -10.0), Vec3::new(0.0, -6.0, 0.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Gravewell,
+            Owner::Player(p0),
+            Vec3::new(0.0, 0.3, -10.0),
+            Vec3::new(0.0, -6.0, 0.0),
+        )
         .unwrap();
     a.ticks(3);
     let pl = &a.world.players[&p1];
@@ -778,7 +921,17 @@ fn hit_assist_pads_player_attacks_only() {
         knockback: 0.0,
     };
     let before = a.enemy_health(d[0]);
-    a.world.explode(&t, center, spec, Owner::Player(p), Attack::Breach, DamageFlags::NONE, None, None, Owner::Player(p));
+    a.world.explode(
+        &t,
+        center,
+        spec,
+        Owner::Player(p),
+        Attack::Breach,
+        DamageFlags::NONE,
+        None,
+        None,
+        Owner::Player(p),
+    );
     assert!(a.enemy_health(d[0]) < before);
 
     // PvP: 0.1 m past a player's body hits (pad 0.12), 0.2 m doesn't.
@@ -807,7 +960,18 @@ fn enemy_attacks_use_the_plain_hitboxes() {
     // An enemy projectile passing 0.08 m beside the player's body: no hit (a player-owned
     // one would have hit with the 0.12 m pad).
     let start = chest + Vec3::new(radius + r + 0.08, 0.0, -3.0);
-    a.world.spawn_enemy_projectile(&t, kind, d[0], Attack::Enemy { kind: 60, attack: 0 }, start, Vec3::new(0.0, 0.0, 60.0), 20.0);
+    a.world.spawn_enemy_projectile(
+        &t,
+        kind,
+        d[0],
+        Attack::Enemy {
+            kind: 60,
+            attack: 0,
+        },
+        start,
+        Vec3::new(0.0, 0.0, 60.0),
+        20.0,
+    );
     let ev = a.ticks(10);
     assert!(hits_on(&ev, HitTarget::Player(p)).is_empty());
     assert_eq!(a.health(p), 100.0);
@@ -818,7 +982,20 @@ fn enemy_attacks_use_the_plain_hitboxes() {
         damage: 50.0,
         knockback: 10.0,
     };
-    a.world.explode(&t, center, spec, Owner::Enemy(d[0]), Attack::Enemy { kind: 60, attack: 0 }, DamageFlags::NONE, None, None, Owner::Enemy(d[0]));
+    a.world.explode(
+        &t,
+        center,
+        spec,
+        Owner::Enemy(d[0]),
+        Attack::Enemy {
+            kind: 60,
+            attack: 0,
+        },
+        DamageFlags::NONE,
+        None,
+        None,
+        Owner::Enemy(d[0]),
+    );
     assert_eq!(a.health(p), 100.0);
     // While a player's bomb passing 0.12 m beside a dummy (pad 0.2) explodes on it.
     let body = dummy_body(&a, d[0]);
@@ -826,12 +1003,21 @@ fn enemy_attacks_use_the_plain_hitboxes() {
     let start = body + Vec3::new(DUMMY_RADIUS + br + 0.12, 0.0, -2.0);
     let bomb = a
         .world
-        .spawn_projectile(&t, ProjectileKind::Bomb, Owner::Player(p), start, Vec3::new(0.0, 0.0, 40.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Bomb,
+            Owner::Player(p),
+            start,
+            Vec3::new(0.0, 0.0, 40.0),
+        )
         .unwrap();
     let ev = a.ticks(4);
     assert!(!a.world.projectiles.contains_key(&bomb));
     let hit = hits_on(&ev, HitTarget::Entity(d[0]));
-    assert!(hit.iter().any(|h| h.info.flags.contains(DamageFlags::DIRECT)));
+    assert!(
+        hit.iter()
+            .any(|h| h.info.flags.contains(DamageFlags::DIRECT))
+    );
 }
 
 // ---- Rules shared by all weapons ------------------------------------------------------------
@@ -865,7 +1051,11 @@ fn no_friendly_fire_in_coop_but_knockback_applies() {
         .eye_position(&a.tuning.movement);
     a.aim(p0, head);
     let ev = a.tap(p0, Buttons::FIRE, 1);
-    assert_eq!(damage_to(&ev, HitTarget::Player(p1)), 48.0, "PvP headshot x2");
+    assert_eq!(
+        damage_to(&ev, HitTarget::Player(p1)),
+        48.0,
+        "PvP headshot x2"
+    );
     // PvP damage spawns an ember burst the attacker can draw in.
     assert!(!a.world.embers.is_empty());
 }
@@ -929,7 +1119,11 @@ fn hard_damage_caps_healing_then_recovers() {
     assert!(hard < 14.0 && hard > 0.0, "{hard}");
     a.ticks(40);
     assert_eq!(a.world.players[&p].combat.hard, 0.0);
-    assert_eq!(a.health(p), 86.0, "recovered hard damage only raises the cap");
+    assert_eq!(
+        a.health(p),
+        86.0,
+        "recovered hard damage only raises the cap"
+    );
 }
 
 #[test]
@@ -952,13 +1146,20 @@ fn punch_burst_heals_the_closest_player() {
     a.aim(near, body);
     let ev = a.tap(near, Buttons::PUNCH, 3);
     assert_eq!(dmg(&ev, d), 25.0);
-    assert_eq!(a.health(near), 65.0, "closest player draws in the 25 HP pool");
+    assert_eq!(
+        a.health(near),
+        65.0,
+        "closest player draws in the 25 HP pool"
+    );
     assert_eq!(a.health(far), 40.0, "the other player gets nothing");
 }
 
 #[test]
 fn slam_shockwave_hits_nearby_enemies() {
-    let (mut a, p, d) = range(&[Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -12.0)], 1000.0);
+    let (mut a, p, d) = range(
+        &[Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -12.0)],
+        1000.0,
+    );
     a.world.players.get_mut(&p).unwrap().movement.position.y = 12.0;
     a.world.players.get_mut(&p).unwrap().movement.on_ground = false;
     a.tick();
@@ -1003,7 +1204,10 @@ fn dead_players_drop_and_respawn() {
 fn server_weapon_state_is_exactly_the_predicted_one() {
     // Every mode, switches, charges, punches and thorns: the server's weapon state is what the
     // client gets by running `step_weapons` on its own inputs (nothing server-side touches it).
-    let (mut a, p, _) = range(&[Vec3::new(0.0, 0.0, -12.0), Vec3::new(3.0, 0.0, -9.0)], 100_000.0);
+    let (mut a, p, _) = range(
+        &[Vec3::new(0.0, 0.0, -12.0), Vec3::new(3.0, 0.0, -9.0)],
+        100_000.0,
+    );
     // Own blasts must not kill the shooter halfway (a dead player's weapons only tick).
     a.world.players.get_mut(&p).unwrap().combat.god = true;
     let t = a.tuning.clone();

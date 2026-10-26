@@ -156,9 +156,16 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
     let rally = enc.rally.unwrap().position;
     assert_eq!(enc.lock_doors, vec![1]);
     assert_eq!(enc.unlock_doors, vec![2]);
-    assert!(n.door_open(1) && !n.door_open(2), "level start: entry open, exit closed");
+    assert!(
+        n.door_open(1) && !n.door_open(2),
+        "level start: entry open, exit closed"
+    );
     n.run(0.5);
-    assert_eq!(n.phase(0), EncounterPhase::Idle, "nobody in the trigger yet");
+    assert_eq!(
+        n.phase(0),
+        EncounterPhase::Idle,
+        "nobody in the trigger yet"
+    );
 
     // A runs in, B is still in the start hall.
     n.place(a, Vec3::new(0.0, 0.0, -45.0));
@@ -166,7 +173,10 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
     assert!(n.run_until(0.2, |n| n.phase(0) == EncounterPhase::Active));
     assert!(!n.door_open(1), "entry door locked");
     let bpos = n.server.world().players[&b].movement.position;
-    assert!(bpos.distance(rally) < 0.5, "B pulled to the rally point, at {bpos}");
+    assert!(
+        bpos.distance(rally) < 0.5,
+        "B pulled to the rally point, at {bpos}"
+    );
     assert!(enc.arena.unwrap().contains(bpos));
     assert_eq!(
         n.count(|e| matches!(e, SimEvent::Respawned { player, .. } if *player == b)),
@@ -184,10 +194,17 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
     n.run(0.1);
     let wave1 = n.living_enemies();
     assert_eq!(wave1.len(), 6, "2 players: 1.5x the 4 authored gnawers");
-    assert!(wave1.iter().all(|(_, max)| *max == 67.5), "health x1.5: {wave1:?}");
+    assert!(
+        wave1.iter().all(|(_, max)| *max == 67.5),
+        "health x1.5: {wave1:?}"
+    );
     // Every enemy stands somewhere sensible (inside the arena, not in the slag).
     for e in n.server.world().enemies.values() {
-        assert!(enc.arena.unwrap().contains(e.position), "enemy outside the arena at {}", e.position);
+        assert!(
+            enc.arena.unwrap().contains(e.position),
+            "enemy outside the arena at {}",
+            e.position
+        );
         assert!(!level.kill_volumes.iter().any(|v| v.contains(e.position)));
         assert!(e.aware && e.encounter == Some((0, 0)));
     }
@@ -200,7 +217,11 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
             .expect("encounter entity replicated");
         assert_eq!(e.kind, kind::ENCOUNTER);
         assert!(e.flags & encounter_flags::ACTIVE != 0);
-        assert_eq!((e.state, e.health, e.aux & 0xFFFF), (1, 6, 2), "wave 1/2, 6 left");
+        assert_eq!(
+            (e.state, e.health, e.aux & 0xFFFF),
+            (1, 6, 2),
+            "wave 1/2, 6 left"
+        );
     }
 
     // Kill wave 1 through the damage pipeline: wave 2 comes 1.5 s later with 9 gnawers.
@@ -236,7 +257,10 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
             _ => None,
         })
         .collect();
-    assert_eq!(order, ["start 0 2", "wave 0 1/2 6", "wave 0 2/2 9", "clear 0"]);
+    assert_eq!(
+        order,
+        ["start 0 2", "wave 0 1/2 6", "wave 0 2/2 9", "clear 0"]
+    );
     for c in &n.clients {
         let got: Vec<&GameEvent> = c
             .game_events()
@@ -250,20 +274,33 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
             })
             .collect();
         assert_eq!(got.len(), 4, "client got {got:?}");
-        assert!(matches!(got[0], GameEvent::EncounterStarted { index: 0, waves: 2 }));
-        assert!(matches!(got[2], GameEvent::WaveStarted { wave: 2, waves: 2, enemies: 9, .. }));
+        assert!(matches!(
+            got[0],
+            GameEvent::EncounterStarted { index: 0, waves: 2 }
+        ));
+        assert!(matches!(
+            got[2],
+            GameEvent::WaveStarted {
+                wave: 2,
+                waves: 2,
+                enemies: 9,
+                ..
+            }
+        ));
         assert!(matches!(got[3], GameEvent::EncounterCleared { index: 0 }));
         let door = c.net.remote_entity(NetId::door(2)).expect("door 2");
-        assert!(door.flags & door_flags::OPEN != 0, "client sees the exit open");
+        assert!(
+            door.flags & door_flags::OPEN != 0,
+            "client sees the exit open"
+        );
         let e = c.net.remote_entity(NetId::encounter(0)).unwrap();
         assert!(e.flags & encounter_flags::CLEARED != 0);
     }
     // B's client snapped to the rally point (teleport = Spawned).
     assert!(
-        n.clients[1]
-            .events
-            .iter()
-            .any(|e| matches!(e, NetEvent::Spawned { position, .. } if position.distance(rally) < 0.1)),
+        n.clients[1].events.iter().any(
+            |e| matches!(e, NetEvent::Spawned { position, .. } if position.distance(rally) < 0.1)
+        ),
         "B's client got the teleport"
     );
     // Spawn effects for every enemy.
@@ -300,7 +337,11 @@ fn checkpoint_reset_hooks_and_single_player_counts() {
     n.place(a, Vec3::new(0.0, 0.0, -105.0));
     assert!(n.run_until(1.5, |n| n.living_enemies().len() == 6));
     assert_eq!(n.phase(1), EncounterPhase::Active);
-    assert!(n.living_enemies().iter().all(|(_, max)| *max == 45.0 || *max == 80.0));
+    assert!(
+        n.living_enemies()
+            .iter()
+            .all(|(_, max)| *max == 45.0 || *max == 80.0)
+    );
     assert!(!n.door_open(3));
     // Some time in the fight, then the modes agent's checkpoint reset.
     n.run(2.0);
@@ -309,7 +350,10 @@ fn checkpoint_reset_hooks_and_single_player_counts() {
     n.place(a, Vec3::new(0.0, 0.0, -93.5));
     n.run(0.1);
     assert_eq!(n.phase(1), EncounterPhase::Idle);
-    assert!(n.server.world().enemies.is_empty(), "the wave's enemies are gone");
+    assert!(
+        n.server.world().enemies.is_empty(),
+        "the wave's enemies are gone"
+    );
     assert!(n.door_open(3), "entry door back open");
     assert!(!n.door_open(4), "exit door back closed");
     // Walking in again restarts it.

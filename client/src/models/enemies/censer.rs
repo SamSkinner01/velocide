@@ -8,7 +8,9 @@
 use engine::assets::gltf::ModelPart;
 use engine::glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
-use super::{EnemyAnim, EnemyState, gray, heat, melt, rx, ry, rz, seed_phase, smoothstep, telegraph, wave};
+use super::{
+    EnemyAnim, EnemyState, gray, heat, melt, rx, ry, rz, seed_phase, smoothstep, telegraph, wave,
+};
 use crate::models::PartSet;
 use crate::models::kit::{self, add, ellipsoid, gem, limb, rgb, spike};
 use crate::models::rig::{JointDef, Pose, ROOT, Shade, joint};
@@ -72,7 +74,14 @@ pub fn build() -> Vec<ModelPart> {
 
     // Robe skirt: a widening cone to the floor, brass hem band, ragged strips.
     let ring = |y: f32, r: f32, z: f32| {
-        kit::ngon_ring(Vec3::new(0.0, y, z), Vec3::X, Vec3::Z, Vec2::splat(r), 10, 0.0)
+        kit::ngon_ring(
+            Vec3::new(0.0, y, z),
+            Vec3::X,
+            Vec3::Z,
+            Vec2::splat(r),
+            10,
+            0.0,
+        )
     };
     p.add(
         ROBE,
@@ -89,7 +98,18 @@ pub fn build() -> Vec<ModelPart> {
             kit::Uv::Density(2.0),
         ),
     );
-    p.add(ROBE, kit::band(Vec3::new(0.0, 0.2, 0.035), Vec3::Y, 0.575, 0.08, 0.03, 12, brass));
+    p.add(
+        ROBE,
+        kit::band(
+            Vec3::new(0.0, 0.2, 0.035),
+            Vec3::Y,
+            0.575,
+            0.08,
+            0.03,
+            12,
+            brass,
+        ),
+    );
     for k in 0..9 {
         let a = k as f32 / 9.0 * std::f32::consts::TAU + 0.2;
         let (s, c) = a.sin_cos();
@@ -127,18 +147,77 @@ pub fn build() -> Vec<ModelPart> {
     );
     p.add(
         TORSO,
-        ellipsoid(Vec3::new(0.0, 1.82, 0.02), Vec3::new(0.48, 0.14, 0.34), Quat::IDENTITY, 3, 10, cloth_dark, true),
+        ellipsoid(
+            Vec3::new(0.0, 1.82, 0.02),
+            Vec3::new(0.48, 0.14, 0.34),
+            Quat::IDENTITY,
+            3,
+            10,
+            cloth_dark,
+            true,
+        ),
     );
-    p.add(TORSO, kit::band(Vec3::new(0.0, 1.2, 0.0), Vec3::Y, 0.31, 0.05, 0.04, 10, rgb(0x6e5a3a)));
+    p.add(
+        TORSO,
+        kit::band(
+            Vec3::new(0.0, 1.2, 0.0),
+            Vec3::Y,
+            0.31,
+            0.05,
+            0.04,
+            10,
+            rgb(0x6e5a3a),
+        ),
+    );
     p.add(TORSO, gem(Vec3::new(0.0, 1.62, -0.33), 0.06, 0, brass));
-    p.add(TORSO, spike(Vec3::new(0.0, 1.2, -0.3), Vec3::new(0.05, 0.85, -0.33), 0.03, 4, rgb(0x6e5a3a)));
+    p.add(
+        TORSO,
+        spike(
+            Vec3::new(0.0, 1.2, -0.3),
+            Vec3::new(0.05, 0.85, -0.33),
+            0.03,
+            4,
+            rgb(0x6e5a3a),
+        ),
+    );
 
     // The brazier head: a brass cage of bars and rings around a bed of coals, a pointed flue
     // cap with a finial; flames lick out between the bars.
     let c = Vec3::new(0.0, 2.22, -0.1);
-    p.add(HEAD, limb(Vec3::new(0.0, 1.9, -0.04), Vec3::new(0.0, 2.0, -0.08), Vec2::splat(0.1), Vec2::splat(0.12), iron));
-    p.add(HEAD, kit::band(c + Vec3::new(0.0, -0.2, 0.0), Vec3::Y, 0.33, 0.06, 0.04, 10, brass));
-    p.add(HEAD, kit::band(c + Vec3::new(0.0, 0.17, 0.0), Vec3::Y, 0.3, 0.05, 0.04, 10, brass));
+    p.add(
+        HEAD,
+        limb(
+            Vec3::new(0.0, 1.9, -0.04),
+            Vec3::new(0.0, 2.0, -0.08),
+            Vec2::splat(0.1),
+            Vec2::splat(0.12),
+            iron,
+        ),
+    );
+    p.add(
+        HEAD,
+        kit::band(
+            c + Vec3::new(0.0, -0.2, 0.0),
+            Vec3::Y,
+            0.33,
+            0.06,
+            0.04,
+            10,
+            brass,
+        ),
+    );
+    p.add(
+        HEAD,
+        kit::band(
+            c + Vec3::new(0.0, 0.17, 0.0),
+            Vec3::Y,
+            0.3,
+            0.05,
+            0.04,
+            10,
+            brass,
+        ),
+    );
     for k in 0..8 {
         let a = k as f32 / 8.0 * std::f32::consts::TAU;
         let (s, co) = a.sin_cos();
@@ -157,8 +236,22 @@ pub fn build() -> Vec<ModelPart> {
         HEAD,
         kit::loft(
             &[
-                kit::ngon_ring(c + Vec3::Y * 0.22, Vec3::X, Vec3::Z, Vec2::splat(0.3), 8, 0.0),
-                kit::ngon_ring(c + Vec3::Y * 0.32, Vec3::X, Vec3::Z, Vec2::splat(0.14), 8, 0.0),
+                kit::ngon_ring(
+                    c + Vec3::Y * 0.22,
+                    Vec3::X,
+                    Vec3::Z,
+                    Vec2::splat(0.3),
+                    8,
+                    0.0,
+                ),
+                kit::ngon_ring(
+                    c + Vec3::Y * 0.32,
+                    Vec3::X,
+                    Vec3::Z,
+                    Vec2::splat(0.14),
+                    8,
+                    0.0,
+                ),
                 vec![c + Vec3::Y * 0.42],
             ],
             iron,
@@ -168,27 +261,76 @@ pub fn build() -> Vec<ModelPart> {
         ),
     );
     p.add(HEAD, gem(c + Vec3::Y * 0.45, 0.045, 0, brass));
-    p.add(COALS, ellipsoid(c, Vec3::new(0.27, 0.2, 0.27), Quat::IDENTITY, 4, 8, coal, false));
+    p.add(
+        COALS,
+        ellipsoid(
+            c,
+            Vec3::new(0.27, 0.2, 0.27),
+            Quat::IDENTITY,
+            4,
+            8,
+            coal,
+            false,
+        ),
+    );
     for k in 0..5 {
         let a = k as f32 / 5.0 * std::f32::consts::TAU + 0.4;
         let (s, co) = a.sin_cos();
         let base = c + Vec3::new(co * 0.16, 0.12, s * 0.16);
-        p.add(FLAMES, spike(base, base + Vec3::new(co * 0.08, 0.3, s * 0.08), 0.07, 4, flame));
+        p.add(
+            FLAMES,
+            spike(
+                base,
+                base + Vec3::new(co * 0.08, 0.3, s * 0.08),
+                0.07,
+                4,
+                flame,
+            ),
+        );
     }
 
     // Arms: long sleeves flaring at the cuffs, pale wax hands.
     let (s, e, w) = (v(SHOULDER), v(ELBOW), v(WRIST));
     let mut upper = limb(s, e, Vec2::splat(0.11), Vec2::splat(0.1), cloth);
     add(&mut upper, gem(s, 0.13, 0, cloth_dark));
-    let mut fore = limb(e, w + Vec3::Y * 0.12, Vec2::splat(0.1), Vec2::splat(0.16), cloth);
-    add(&mut fore, kit::band(w + Vec3::Y * 0.13, w - e, 0.15, 0.04, 0.03, 8, brass));
-    add(&mut fore, ellipsoid(w, Vec3::new(0.07, 0.1, 0.06), Quat::IDENTITY, 3, 6, wax, true));
+    let mut fore = limb(
+        e,
+        w + Vec3::Y * 0.12,
+        Vec2::splat(0.1),
+        Vec2::splat(0.16),
+        cloth,
+    );
+    add(
+        &mut fore,
+        kit::band(w + Vec3::Y * 0.13, w - e, 0.15, 0.04, 0.03, 8, brass),
+    );
+    add(
+        &mut fore,
+        ellipsoid(
+            w,
+            Vec3::new(0.07, 0.1, 0.06),
+            Quat::IDENTITY,
+            3,
+            6,
+            wax,
+            true,
+        ),
+    );
     p.add(FOREARM_L, kit::mirrored_x(&fore));
     p.add(FOREARM_R, fore);
     p.add(ARM_L, kit::mirrored_x(&upper));
     p.add(ARM_R, upper);
     // Left hand: a dangling iron hook on a short chain.
-    p.add(FOREARM_L, spike(Vec3::new(-0.5, 0.88, -0.18), Vec3::new(-0.5, 0.62, -0.2), 0.025, 4, iron));
+    p.add(
+        FOREARM_L,
+        spike(
+            Vec3::new(-0.5, 0.88, -0.18),
+            Vec3::new(-0.5, 0.62, -0.2),
+            0.025,
+            4,
+            iron,
+        ),
+    );
 
     // The chain: links from the hand down to the pot.
     let pot = v(POT);
@@ -199,19 +341,58 @@ pub fn build() -> Vec<ModelPart> {
         let a = w.lerp(pot + Vec3::Y * 0.2, f0);
         let b = w.lerp(pot + Vec3::Y * 0.2, f1);
         let side = if k % 2 == 0 { Vec3::X } else { Vec3::Z };
-        p.add(CHAIN, kit::limb_oriented(a, b, side, Vec2::new(0.035, 0.012), Vec2::new(0.035, 0.012), iron));
+        p.add(
+            CHAIN,
+            kit::limb_oriented(
+                a,
+                b,
+                side,
+                Vec2::new(0.035, 0.012),
+                Vec2::new(0.035, 0.012),
+                iron,
+            ),
+        );
     }
     // The censer: a perforated brass sphere with a lid knob and three hanging chains.
-    p.add(CENSER, ellipsoid(pot, Vec3::new(0.2, 0.18, 0.2), Quat::IDENTITY, 4, 8, brass, false));
-    p.add(CENSER, kit::band(pot, Vec3::Y, 0.205, 0.04, 0.03, 10, rgb(0x7a5e2a)));
+    p.add(
+        CENSER,
+        ellipsoid(
+            pot,
+            Vec3::new(0.2, 0.18, 0.2),
+            Quat::IDENTITY,
+            4,
+            8,
+            brass,
+            false,
+        ),
+    );
+    p.add(
+        CENSER,
+        kit::band(pot, Vec3::Y, 0.205, 0.04, 0.03, 10, rgb(0x7a5e2a)),
+    );
     p.add(CENSER, gem(pot + Vec3::Y * 0.21, 0.05, 0, brass));
-    p.add(CENSER, spike(pot - Vec3::Y * 0.17, pot - Vec3::Y * 0.3, 0.05, 4, rgb(0x7a5e2a)));
+    p.add(
+        CENSER,
+        spike(
+            pot - Vec3::Y * 0.17,
+            pot - Vec3::Y * 0.3,
+            0.05,
+            4,
+            rgb(0x7a5e2a),
+        ),
+    );
     for k in 0..3 {
         let a = k as f32 / 3.0 * std::f32::consts::TAU;
         let (s, co) = a.sin_cos();
         p.add(
             CENSER,
-            limb(pot + Vec3::new(co * 0.17, 0.08, s * 0.17), pot + Vec3::Y * 0.2, Vec2::splat(0.01), Vec2::splat(0.01), iron),
+            limb(
+                pot + Vec3::new(co * 0.17, 0.08, s * 0.17),
+                pot + Vec3::Y * 0.2,
+                Vec2::splat(0.01),
+                Vec2::splat(0.01),
+                iron,
+            ),
         );
     }
     // Embers glowing through the perforations.
@@ -220,7 +401,10 @@ pub fn build() -> Vec<ModelPart> {
         let y = if k % 2 == 0 { 0.03 } else { -0.06 };
         let (s, co) = a.sin_cos();
         let at = pot + Vec3::new(co * 0.19, y, s * 0.19);
-        p.add(EMBERS, kit::block(at, Vec3::new(0.035, 0.03, 0.035), ry(-a), ember));
+        p.add(
+            EMBERS,
+            kit::block(at, Vec3::new(0.035, 0.03, 0.035), ry(-a), ember),
+        );
     }
 
     p.for_each_mesh(|i, m| {
@@ -271,7 +455,8 @@ pub fn pose(a: &EnemyAnim) -> Pose {
     let mut arm_r = rz(0.1) * rx(0.2);
     let mut fore_r = rx(0.25);
     // The censer swings like a pendulum (relative to the forearm).
-    let mut chain = rx(0.25 * wave(t, 0.55, off) + 0.25 * k * phase.sin()) * rz(0.1 * wave(t, 0.4, off));
+    let mut chain =
+        rx(0.25 * wave(t, 0.55, off) + 0.25 * k * phase.sin()) * rz(0.1 * wave(t, 0.4, off));
     let mut whirl: Option<(f32, f32)> = None;
     let mut squash = 1.0f32;
 
@@ -302,7 +487,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             arm_r = rz(0.1 + 0.15 * s) * rx(0.2 + 2.35 * s);
             fore_r = rx(0.25 * (1.0 - s));
             if s > 0.3 {
-                whirl = Some((((2.2 + 3.0) + 2.0 * p) * std::f32::consts::TAU, 0.2 + 0.9 * (1.0 - s)));
+                whirl = Some((
+                    ((2.2 + 3.0) + 2.0 * p) * std::f32::consts::TAU,
+                    0.2 + 0.9 * (1.0 - s),
+                ));
             }
         }
         EnemyState::Windup(p) => {
@@ -312,7 +500,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             torso = ry(-0.35 * e) * rx(0.06 * e);
             arm_r = rz(1.1 * e) * rx(0.2 - 0.6 * e);
             fore_r = rx(0.25 * (1.0 - e));
-            whirl = Some((0.9 * e + std::f32::consts::FRAC_PI_2 * (1.0 - e), 0.35 + 0.8 * (1.0 - e)));
+            whirl = Some((
+                0.9 * e + std::f32::consts::FRAC_PI_2 * (1.0 - e),
+                0.35 + 0.8 * (1.0 - e),
+            ));
             arm_l = rz(-0.6 * e) * rx(0.4 * e);
         }
         EnemyState::Attack(p) => {
@@ -359,7 +550,15 @@ pub fn pose(a: &EnemyAnim) -> Pose {
 
     pose.set(
         ROBE,
-        Mat4::from_scale_rotation_translation(Vec3::new(1.0 + 0.4 * (1.0 - squash), squash, 1.0 + 0.4 * (1.0 - squash)), robe_rot, robe_off),
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(
+                1.0 + 0.4 * (1.0 - squash),
+                squash,
+                1.0 + 0.4 * (1.0 - squash),
+            ),
+            robe_rot,
+            robe_off,
+        ),
     );
     pose.rotate(TORSO, torso);
     if !matches!(a.state, EnemyState::Dying(_)) {

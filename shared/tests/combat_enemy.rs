@@ -14,7 +14,9 @@ use shared::protocol::{NetFrame, NetId, enemy_flags, kind};
 use shared::sim::{AiState, Attack, DamageFlags, DamageInfo, HitTarget, Owner, SimEvent};
 
 fn gnawer(a: &mut Arena, pos: Vec3, yaw: f32) -> NetId {
-    a.world.spawn_enemy("gnawer", pos, yaw).expect("the gnawer exists")
+    a.world
+        .spawn_enemy("gnawer", pos, yaw)
+        .expect("the gnawer exists")
 }
 
 #[test]
@@ -90,7 +92,11 @@ fn gnawer_replicates_its_telegraph() {
         let e = frame.get(g).unwrap();
         assert_eq!(e.kind, kind::GNAWER);
         assert_eq!(e.aux >> 16, 45, "max health in aux");
-        assert_eq!(e.flags & (enemy_flags::AIMING | enemy_flags::AIM_LOCKED), 0, "no laser");
+        assert_eq!(
+            e.flags & (enemy_flags::AIMING | enemy_flags::AIM_LOCKED),
+            0,
+            "no laser"
+        );
         if e.state == AiState::Windup as u16 {
             seen_windup = true;
             assert_eq!(e.owner, 0, "targeting player 0");
@@ -140,7 +146,10 @@ fn coop_scales_enemy_health() {
     a.player(2, Vec3::new(4.0, 0.0, 0.0), 0.0);
     let g = gnawer(&mut a, Vec3::new(0.0, 0.0, -30.0), 0.0);
     assert_eq!(a.world.enemies[&g].health, 90.0, "45 x (1 + 0.5 x 2)");
-    let gaoler = a.world.spawn_enemy("gaoler", Vec3::new(10.0, 0.0, -30.0), 0.0).unwrap();
+    let gaoler = a
+        .world
+        .spawn_enemy("gaoler", Vec3::new(10.0, 0.0, -30.0), 0.0)
+        .unwrap();
     assert_eq!(a.world.enemies[&gaoler].health, 1040.0, "520 x 2");
     let mut pvp = Arena::pvp();
     pvp.player(0, Vec3::ZERO, 0.0);
@@ -207,13 +216,21 @@ fn lag_compensated_hit_on_a_moving_gnawer() {
             .unwrap()
             + Vec3::Y * 0.8;
         let now = a.world.enemies[&g].position + Vec3::Y * 0.8;
-        assert!(seen.distance(now) > 1.5, "moved {} m since", seen.distance(now));
+        assert!(
+            seen.distance(now) > 1.5,
+            "moved {} m since",
+            seen.distance(now)
+        );
         a.aim(shooter, seen);
         let ev = a.tap(shooter, Buttons::FIRE, 0);
         damage_to(&ev, HitTarget::Entity(g))
     };
     assert!(run(true) > 0.0, "hit as seen");
-    assert_eq!(run(false), 0.0, "without lag compensation the same shot misses");
+    assert_eq!(
+        run(false),
+        0.0,
+        "without lag compensation the same shot misses"
+    );
 }
 
 #[test]
@@ -221,7 +238,10 @@ fn simulation_with_combat_is_deterministic() {
     let run = || {
         let mut a = Arena::coop();
         let p = a.player(0, Vec3::ZERO, 0.0);
-        for (i, name) in ["gnawer", "censer", "harrier", "gaoler", "heron"].iter().enumerate() {
+        for (i, name) in ["gnawer", "censer", "harrier", "gaoler", "heron"]
+            .iter()
+            .enumerate()
+        {
             let y = if *name == "harrier" { 6.0 } else { 0.0 };
             a.world
                 .spawn_enemy(name, Vec3::new(i as f32 * 4.0 - 8.0, y, -25.0), 0.0)

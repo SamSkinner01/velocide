@@ -31,8 +31,11 @@ fn in_cone(
     let center = h.center()?;
     let (d, part) = h.distance_to_point_padded(eye, pads)?;
     let to = center - eye;
-    (d <= range && to.normalize_or_zero().angle_between(aim) <= half_cone)
-        .then_some((d.max(0.0), part, center))
+    (d <= range && to.normalize_or_zero().angle_between(aim) <= half_cone).then_some((
+        d.max(0.0),
+        part,
+        center,
+    ))
 }
 
 impl SimWorld {

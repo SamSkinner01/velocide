@@ -140,7 +140,9 @@ fn horizontal(v: Vec3) -> Vec3 {
 }
 
 fn ticks(secs: f32, rate: u32) -> u16 {
-    (secs.max(0.0) * rate as f32).round().clamp(1.0, u16::MAX as f32) as u16
+    (secs.max(0.0) * rate as f32)
+        .round()
+        .clamp(1.0, u16::MAX as f32) as u16
 }
 
 /// Desired horizontal velocity (and the drop the edge guard may allow) for a ground enemy
@@ -194,9 +196,8 @@ pub(crate) fn ground_velocity(
         let mut deferred = false;
         match (start, end) {
             (Some(s), Some(g)) => {
-                let near_goal = |p: Vec3| {
-                    horizontal(goal - p).length() < 1.6 && (goal.y - p.y).abs() < 1.2
-                };
+                let near_goal =
+                    |p: Vec3| horizontal(goal - p).length() < 1.6 && (goal.y - p.y).abs() < 1.2;
                 if nav.walkable_line(s, g, class, &cx.doors) {
                     cx.stats.direct += 1;
                     a.mode = PathMode::Direct;
@@ -204,8 +205,7 @@ pub(crate) fn ground_velocity(
                 } else if cx.paths_left > 0 {
                     cx.paths_left -= 1;
                     cx.stats.paths += 1;
-                    let result =
-                        nav.find_path(&mut cx.scratch, s, g, class, &cx.doors, MAX_EXPAND);
+                    let result = nav.find_path(&mut cx.scratch, s, g, class, &cx.doors, MAX_EXPAND);
                     cx.stats.expanded += cx.scratch.last_expanded as u64;
                     match result {
                         PathResult::Found(p) => {
@@ -254,7 +254,10 @@ pub(crate) fn ground_velocity(
         a.sidestep -= 1;
         let to = horizontal(goal - pos).normalize_or(Vec3::Z);
         let side = Vec3::new(-to.z, 0.0, to.x) * e.strafe_sign;
-        return ((side * 0.8 + to * 0.2).normalize_or_zero() * speed, STEP_UP + 0.1);
+        return (
+            (side * 0.8 + to * 0.2).normalize_or_zero() * speed,
+            STEP_UP + 0.1,
+        );
     }
 
     let target = match a.mode {
@@ -440,14 +443,16 @@ pub(crate) fn fly_velocity(
 
 /// Can a ground enemy strafe along `dir` (unit, horizontal) from where it is: nothing solid
 /// right there and safe ground (no ledge, no lava)?
-pub(crate) fn can_step(world: &CollisionWorld, nav: Option<&NavGrid>, e: &Enemy, dir: Vec3) -> bool {
+pub(crate) fn can_step(
+    world: &CollisionWorld,
+    nav: Option<&NavGrid>,
+    e: &Enemy,
+    dir: Vec3,
+) -> bool {
     let r = e.def.radius;
     let feet = e.feet();
     let probe = feet + Vec3::Y * (e.def.height * 0.5);
-    if world
-        .cast_ray(probe, dir, r + 0.6, MASK_MOVEMENT)
-        .is_some()
-    {
+    if world.cast_ray(probe, dir, r + 0.6, MASK_MOVEMENT).is_some() {
         return false;
     }
     nav.is_none_or(|n| n.is_empty() || n.ground_ok(feet + dir * (r + 0.4), feet.y, STEP_UP + 0.1))

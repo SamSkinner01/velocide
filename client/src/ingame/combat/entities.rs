@@ -25,8 +25,7 @@ use engine::gfx::{DrawItem, PointLight};
 use engine::physics::CollisionWorld;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::protocol::{
-    EntityState, NetId, ember_flags, enemy_flags, kind, player_flags, projectile_flags,
-    thorn_flags,
+    EntityState, NetId, ember_flags, enemy_flags, kind, player_flags, projectile_flags, thorn_flags,
 };
 use shared::sim::AiState;
 use shared::sim::projectiles::{ProjectileKind, replicated_position};
@@ -405,7 +404,8 @@ impl EntityView {
     ) {
         let k = enemy_kind(e.kind);
         let height = k.height();
-        let center = e.position + Vec3::Y * (k.root_lift() + height * if k == EnemyKind::Harrier { 0.0 } else { 0.5 });
+        let center = e.position
+            + Vec3::Y * (k.root_lift() + height * if k == EnemyKind::Harrier { 0.0 } else { 0.5 });
         let dying = e.flags & enemy_flags::DYING != 0 || e.state == AiState::Dying as u16;
         let (wax, heat) = (enemy_fx::wax_color(e.kind), enemy_fx::heat_color(e.kind));
         let v = self.enemies.entry(e.id).or_insert(EnemyVis {
@@ -425,7 +425,15 @@ impl EntityView {
             let lost = (v.last_health - e.health) as f32;
             v.flash = 1.0;
             let dir = (rng.dir() + Vec3::Y * 0.5).normalize_or(Vec3::Y);
-            enemy_fx::wax_hit(effects, rng, center, dir, (0.6 + lost / 20.0).min(3.5), wax, heat);
+            enemy_fx::wax_hit(
+                effects,
+                rng,
+                center,
+                dir,
+                (0.6 + lost / 20.0).min(3.5),
+                wax,
+                heat,
+            );
             audio.play(Sfx::EnemyHurt, PlayParams::at(center));
         }
         v.last_health = e.health;
@@ -461,7 +469,11 @@ impl EntityView {
         // The Heron's laser locks: a click and a flare at the lens.
         let locked = e.flags & enemy_flags::AIM_LOCKED != 0;
         v.laser = enemy_fx::aim_laser(e).map(|(origin, dir, locked)| {
-            (origin, enemy_fx::laser_end(f.world, origin, dir, f.entities, f.camera), locked)
+            (
+                origin,
+                enemy_fx::laser_end(f.world, origin, dir, f.entities, f.camera),
+                locked,
+            )
         });
         if let Some((origin, end, locked)) = v.laser {
             let p = palette();
@@ -476,7 +488,8 @@ impl EntityView {
             effects.glow(end, c, if locked { 0.45 } else { 0.32 }, 0.05);
             effects.glow(origin, c, if locked { 0.9 } else { 0.55 }, 0.05);
         }
-        if locked && !v.locked
+        if locked
+            && !v.locked
             && let Some((origin, _, _)) = v.laser
         {
             audio.play(Sfx::HeronLock, PlayParams::at(origin));
@@ -502,7 +515,11 @@ impl EntityView {
                         max_life: rng.range(0.3, 0.6),
                         size: Vec2::splat(0.09),
                         end_scale: 0.3,
-                        color: palette().effect(Vec4::new(1.0, 0.6, 0.2, 1.0), palette().telegraph, 1.0),
+                        color: palette().effect(
+                            Vec4::new(1.0, 0.6, 0.2, 1.0),
+                            palette().telegraph,
+                            1.0,
+                        ),
                         texture: FxTex::Spark,
                         additive: true,
                         ..Default::default()
@@ -515,7 +532,8 @@ impl EntityView {
                     if rng.unit() < dt * 30.0 {
                         let a = rng.angle();
                         let r = rng.range(1.7, 2.7);
-                        let at = e.position + Vec3::new(a.cos() * r, rng.range(0.5, 1.1), a.sin() * r);
+                        let at =
+                            e.position + Vec3::new(a.cos() * r, rng.range(0.5, 1.1), a.sin() * r);
                         effects.spawn(Particle {
                             position: at,
                             velocity: Vec3::new(-a.sin(), 0.15, a.cos()) * rng.range(3.0, 7.0),
@@ -523,7 +541,11 @@ impl EntityView {
                             max_life: rng.range(0.3, 0.6),
                             size: Vec2::splat(0.2),
                             end_scale: 0.3,
-                            color: palette().effect(Vec4::new(1.0, 0.25, 0.08, 1.0), palette().telegraph, 1.0),
+                            color: palette().effect(
+                                Vec4::new(1.0, 0.25, 0.08, 1.0),
+                                palette().telegraph,
+                                1.0,
+                            ),
                             texture: FxTex::Spark,
                             additive: true,
                             ..Default::default()
@@ -538,7 +560,11 @@ impl EntityView {
             _ => {}
         }
         // The Gaoler's heavy footfalls.
-        if k == EnemyKind::Gaoler && !dying && speed > 0.5 && (v.cycle * 2.0).floor() != (before * 2.0).floor() {
+        if k == EnemyKind::Gaoler
+            && !dying
+            && speed > 0.5
+            && (v.cycle * 2.0).floor() != (before * 2.0).floor()
+        {
             audio.play(Sfx::GaolerStep, PlayParams::at(e.position));
             effects.dust(e.position, 3, 1.2);
         }
@@ -589,7 +615,14 @@ impl EntityView {
         if e.kind == kind::WISP && rng.unit() < dt * 14.0 {
             let violet = WeaponKind::Arclash.glow_color(0);
             let to = pos + rng.dir() * rng.range(0.4, 0.9);
-            beams.arc(pos, to, 0.03, (violet.truncate() * 1.8).extend(0.9), 0.07, rng);
+            beams.arc(
+                pos,
+                to,
+                0.03,
+                (violet.truncate() * 1.8).extend(0.9),
+                0.07,
+                rng,
+            );
         }
         v.trail += dt;
         let interval = match e.kind {
@@ -773,11 +806,22 @@ impl EntityView {
                 lib.draw_enemy(&anim, root, &tint, draws);
                 // The aim laser (every client draws it from the replicated aim).
                 if let Some((origin, end, locked)) = v.laser {
-                    draw_beam(lib, origin, end, if locked { 0.07 } else { 0.045 }, laser_tint(locked, time), draws);
+                    draw_beam(
+                        lib,
+                        origin,
+                        end,
+                        if locked { 0.07 } else { 0.045 },
+                        laser_tint(locked, time),
+                        draws,
+                    );
                     let tracking = pal.light(Vec3::new(1.6, 0.25, 0.15), pal.aim_laser, 1.6);
                     lights.push(PointLight {
                         position: origin,
-                        color: if locked { Vec3::new(2.0, 1.2, 1.0) } else { tracking },
+                        color: if locked {
+                            Vec3::new(2.0, 1.2, 1.0)
+                        } else {
+                            tracking
+                        },
                         radius: 4.0,
                     });
                 }
@@ -799,7 +843,11 @@ impl EntityView {
                     ..Default::default()
                 };
                 // Planted / lying thorns are drawn a little larger so the relay reads.
-                let scale = if e.flags & thorn_flags::PLANTED != 0 { 1.5 } else { 1.2 };
+                let scale = if e.flags & thorn_flags::PLANTED != 0 {
+                    1.5
+                } else {
+                    1.2
+                };
                 lib.draw_model(
                     ModelId::Thorn,
                     Mat4::from_scale_rotation_translation(Vec3::splat(scale), rot, pos),
@@ -882,7 +930,10 @@ impl EntityView {
                     let tint = if parried {
                         glow_tint(Vec4::new(2.4, 2.3, 2.2, 0.9), None)
                     } else {
-                        glow_tint(Vec4::new(2.6, 0.9, 0.55, 0.85), pal.model_glow(pal.hostile_projectile))
+                        glow_tint(
+                            Vec4::new(2.6, 0.9, 0.55, 0.85),
+                            pal.model_glow(pal.hostile_projectile),
+                        )
                     };
                     draw_beam(lib, pos - dir * len, pos, 0.06, tint, draws);
                 }
@@ -893,8 +944,14 @@ impl EntityView {
                 kind::GRAVEWELL if stuck => Some((Vec3::new(0.5, 2.0, 0.7), 7.0)),
                 kind::GRAVEWELL => Some((Vec3::new(0.3, 1.2, 0.4), 3.0)),
                 kind::WISP => Some((Vec3::new(1.2, 0.8, 2.2), 6.0)),
-                kind::EMBER_BOMB => Some((pal.light(Vec3::new(2.2, 1.1, 0.35), pal.hostile_projectile, 2.2), 6.5)),
-                kind::NEEDLE => Some((pal.light(Vec3::new(1.6, 0.5, 0.3), pal.hostile_projectile, 1.6), 4.0)),
+                kind::EMBER_BOMB => Some((
+                    pal.light(Vec3::new(2.2, 1.1, 0.35), pal.hostile_projectile, 2.2),
+                    6.5,
+                )),
+                kind::NEEDLE => Some((
+                    pal.light(Vec3::new(1.6, 0.5, 0.3), pal.hostile_projectile, 1.6),
+                    4.0,
+                )),
                 _ => None,
             };
             if let Some((color, radius)) = light {
@@ -932,7 +989,14 @@ fn glow_tint(glow: Vec4, color: Option<Vec4>) -> Tint {
 }
 
 /// A glowing beam (the `AimLaser` unit beam model stretched from `a` to `b`).
-fn draw_beam(lib: &ModelLibrary, a: Vec3, b: Vec3, width: f32, tint: Tint, draws: &mut Vec<DrawItem>) {
+fn draw_beam(
+    lib: &ModelLibrary,
+    a: Vec3,
+    b: Vec3,
+    width: f32,
+    tint: Tint,
+    draws: &mut Vec<DrawItem>,
+) {
     let d = b - a;
     let len = d.length();
     if !(len > 1e-3 && a.is_finite() && b.is_finite()) {
@@ -967,7 +1031,10 @@ fn thorn_transform(e: &EntityState, f: &EntityFrame, time: f64) -> (Quat, Vec3) 
         let quiver = (-since * 6.0).exp() * (since * 70.0).sin() * 0.12;
         let side = facing.any_orthonormal_vector();
         let dir = (facing + side * quiver).normalize_or(facing);
-        return (Quat::from_rotation_arc(Vec3::NEG_Z, dir), pos - facing * (THORN_TIP * 0.2));
+        return (
+            Quat::from_rotation_arc(Vec3::NEG_Z, dir),
+            pos - facing * (THORN_TIP * 0.2),
+        );
     }
     let g = f.tuning.thorn.gravity;
     let dt = ((f.render_tick - e.aux as f64) / f.tick_rate.max(1) as f64).max(0.0) as f32;

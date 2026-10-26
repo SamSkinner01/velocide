@@ -69,7 +69,8 @@ fn log_events(a: &Arena, id: NetId, ev: &[SimEvent], log: &mut Log) {
             SimEvent::EnemyFired { id: eid, .. } if *eid == id => log.fired.push(now),
             SimEvent::EnemyAlerted { id: eid, .. } if *eid == id => log.alerted = true,
             SimEvent::Damage(d)
-                if d.info.source == Owner::Enemy(id) && matches!(d.target, HitTarget::Player(_)) =>
+                if d.info.source == Owner::Enemy(id)
+                    && matches!(d.target, HitTarget::Player(_)) =>
             {
                 let attack = match d.info.attack {
                     Attack::Enemy { attack, .. } => attack,
@@ -92,8 +93,14 @@ fn spawn(a: &mut Arena, name: &str, pos: Vec3, yaw: f32) -> NetId {
 
 /// Index of attack `name` of definition `def`.
 fn attack_index(a: &Arena, def: &str, name: &str) -> u8 {
-    a.world.enemy_defs.get(def).unwrap().attacks.iter().position(|x| x.name == name).unwrap()
-        as u8
+    a.world
+        .enemy_defs
+        .get(def)
+        .unwrap()
+        .attacks
+        .iter()
+        .position(|x| x.name == name)
+        .unwrap() as u8
 }
 
 fn windup_ticks(a: &Arena, def: &str, attack: u8) -> u32 {
@@ -115,14 +122,29 @@ fn assert_telegraphs(a: &Arena, log: &Log, def: &str) {
     assert!(!log.strikes.is_empty(), "{def}: never attacked");
     for &(s, attack) in &log.strikes {
         let len = windup_ticks(a, def, attack);
-        let ok = log.windups.iter().any(|&(w, i)| i == attack && w + len == s);
-        assert!(ok, "{def}: strike {attack} at tick {s} without a full {len}-tick wind-up ({:?})", log.windups);
+        let ok = log
+            .windups
+            .iter()
+            .any(|&(w, i)| i == attack && w + len == s);
+        assert!(
+            ok,
+            "{def}: strike {attack} at tick {s} without a full {len}-tick wind-up ({:?})",
+            log.windups
+        );
         let before = log.states.iter().find(|(t, _)| *t == s - 1).map(|x| x.1);
-        assert_eq!(before, Some(AiState::Windup), "{def}: state before the strike at {s}");
+        assert_eq!(
+            before,
+            Some(AiState::Windup),
+            "{def}: state before the strike at {s}"
+        );
     }
     for &f in &log.fired {
         let state = log.states.iter().find(|(t, _)| *t == f).map(|x| x.1);
-        assert_eq!(state, Some(AiState::Strike), "{def}: fired outside a strike at {f}");
+        assert_eq!(
+            state,
+            Some(AiState::Strike),
+            "{def}: fired outside a strike at {f}"
+        );
     }
     for &(h, attack) in &log.hits {
         let first = log.strikes.iter().find(|s| s.1 == attack).map(|s| s.0);
@@ -146,17 +168,77 @@ struct Scenario {
 #[test]
 fn every_attack_of_every_type_is_telegraphed_before_it_hurts() {
     let scenarios = [
-        Scenario { def: "gnawer", attack: "bite", enemy: Vec3::new(0.0, 0.0, -12.0), secs: 5.0, run: None },
+        Scenario {
+            def: "gnawer",
+            attack: "bite",
+            enemy: Vec3::new(0.0, 0.0, -12.0),
+            secs: 5.0,
+            run: None,
+        },
         // A player running across in front of it: pounced on.
-        Scenario { def: "gnawer", attack: "pounce", enemy: Vec3::new(0.0, 0.0, -8.0), secs: 4.0, run: Some((0, 40, 0.0)) },
-        Scenario { def: "censer", attack: "swing", enemy: Vec3::new(0.0, 0.0, -2.6), secs: 3.0, run: None },
-        Scenario { def: "censer", attack: "volley", enemy: Vec3::new(0.0, 0.0, -20.0), secs: 6.0, run: None },
-        Scenario { def: "harrier", attack: "dive", enemy: Vec3::new(0.0, 7.0, -12.0), secs: 8.0, run: None },
-        Scenario { def: "gaoler", attack: "bash", enemy: Vec3::new(0.0, 0.0, -3.4), secs: 5.0, run: None },
-        Scenario { def: "gaoler", attack: "sweep", enemy: Vec3::new(0.0, 0.0, -5.0), secs: 5.0, run: None },
-        Scenario { def: "gaoler", attack: "rush", enemy: Vec3::new(0.0, 0.0, -15.0), secs: 5.0, run: None },
-        Scenario { def: "heron", attack: "kick", enemy: Vec3::new(0.0, 0.0, -2.8), secs: 3.0, run: None },
-        Scenario { def: "heron", attack: "needle", enemy: Vec3::new(0.0, 0.0, -32.0), secs: 6.0, run: None },
+        Scenario {
+            def: "gnawer",
+            attack: "pounce",
+            enemy: Vec3::new(0.0, 0.0, -8.0),
+            secs: 4.0,
+            run: Some((0, 40, 0.0)),
+        },
+        Scenario {
+            def: "censer",
+            attack: "swing",
+            enemy: Vec3::new(0.0, 0.0, -2.6),
+            secs: 3.0,
+            run: None,
+        },
+        Scenario {
+            def: "censer",
+            attack: "volley",
+            enemy: Vec3::new(0.0, 0.0, -20.0),
+            secs: 6.0,
+            run: None,
+        },
+        Scenario {
+            def: "harrier",
+            attack: "dive",
+            enemy: Vec3::new(0.0, 7.0, -12.0),
+            secs: 8.0,
+            run: None,
+        },
+        Scenario {
+            def: "gaoler",
+            attack: "bash",
+            enemy: Vec3::new(0.0, 0.0, -3.4),
+            secs: 5.0,
+            run: None,
+        },
+        Scenario {
+            def: "gaoler",
+            attack: "sweep",
+            enemy: Vec3::new(0.0, 0.0, -5.0),
+            secs: 5.0,
+            run: None,
+        },
+        Scenario {
+            def: "gaoler",
+            attack: "rush",
+            enemy: Vec3::new(0.0, 0.0, -15.0),
+            secs: 5.0,
+            run: None,
+        },
+        Scenario {
+            def: "heron",
+            attack: "kick",
+            enemy: Vec3::new(0.0, 0.0, -2.8),
+            secs: 3.0,
+            run: None,
+        },
+        Scenario {
+            def: "heron",
+            attack: "needle",
+            enemy: Vec3::new(0.0, 0.0, -32.0),
+            secs: 6.0,
+            run: None,
+        },
     ];
     for s in scenarios {
         let mut a = Arena::coop();
@@ -175,11 +257,26 @@ fn every_attack_of_every_type_is_telegraphed_before_it_hurts() {
         let what = format!("{} {}", s.def, s.attack);
         assert!(log.alerted, "{what}: never noticed the player");
         assert_eq!(a.world.enemies[&id].target, Some(p), "{what}: target");
-        assert!(log.strikes_of(attack) > 0, "{what}: never used ({:?})", log.strikes);
-        assert!(log.hits.iter().any(|h| h.1 == attack), "{what}: never landed ({:?})", log.hits);
+        assert!(
+            log.strikes_of(attack) > 0,
+            "{what}: never used ({:?})",
+            log.strikes
+        );
+        assert!(
+            log.hits.iter().any(|h| h.1 == attack),
+            "{what}: never landed ({:?})",
+            log.hits
+        );
         assert_telegraphs(&a, &log, s.def);
-        let alert = log.states.iter().find(|s| s.1 == AiState::Alert).map(|s| s.0);
-        assert!(alert.is_some_and(|t| t < log.windups[0].0), "{what}: alert before the first wind-up");
+        let alert = log
+            .states
+            .iter()
+            .find(|s| s.1 == AiState::Alert)
+            .map(|s| s.0);
+        assert!(
+            alert.is_some_and(|t| t < log.windups[0].0),
+            "{what}: alert before the first wind-up"
+        );
         println!(
             "{what}: {} strikes ({} of it), {} hits, {} projectiles in {} s",
             log.strikes.len(),
@@ -191,7 +288,10 @@ fn every_attack_of_every_type_is_telegraphed_before_it_hurts() {
         if s.attack == "volley" {
             // Volleys of three (the last one may still be under way when the run ends).
             let full = 3 * log.strikes_of(attack);
-            assert!(log.fired.len() + 2 >= full && log.fired.len() <= full, "volleys of three");
+            assert!(
+                log.fired.len() + 2 >= full && log.fired.len() <= full,
+                "volleys of three"
+            );
         }
     }
 }
@@ -222,9 +322,15 @@ fn gnawer_pounces_on_an_arc() {
     let v = launched.expect("pounced");
     let flat = Vec3::new(v.x, 0.0, v.z).length();
     println!("pounce launch {v} (flat {flat:.1} m/s), apex {peak:.2} m");
-    assert!(flat > 11.0, "13 m/s forward (less a tick of braking): {flat}");
+    assert!(
+        flat > 11.0,
+        "13 m/s forward (less a tick of braking): {flat}"
+    );
     assert!(peak > 0.25, "it leaves the ground: apex {peak}");
-    assert!(log.hits.iter().any(|h| h.1 == pounce), "the pounce raked the player");
+    assert!(
+        log.hits.iter().any(|h| h.1 == pounce),
+        "the pounce raked the player"
+    );
     let hits = log.hits.iter().filter(|h| h.1 == pounce).count();
     assert_eq!(hits, 1, "once per player");
 }
@@ -317,11 +423,17 @@ fn censer_lobs_land_on_the_target() {
         let miss = Vec3::new(bursts[0].x, 0.0, bursts[0].z).length();
         let side: Vec<f32> = bursts[1..].iter().map(|b| b.x).collect();
         println!("censer at {dist} m: straight bomb {miss:.2} m off, side bombs at x {side:?}");
-        assert!(miss < 1.2, "{dist} m: the straight bomb lands on the player ({miss} m)");
+        assert!(
+            miss < 1.2,
+            "{dist} m: the straight bomb lands on the player ({miss} m)"
+        );
         assert!(side[0] * side[1] < 0.0, "fanned left and right");
         for x in side {
             let expect = (dist - 0.35) * 8f32.to_radians().sin();
-            assert!((x.abs() - expect).abs() < 1.2, "{dist} m: side bomb {x} (expected ~{expect})");
+            assert!(
+                (x.abs() - expect).abs() < 1.2,
+                "{dist} m: side bomb {x} (expected ~{expect})"
+            );
         }
     }
     // A player walking sideways: the lead puts the straight bomb within its blast radius.
@@ -361,7 +473,15 @@ fn ember_bombs_explode_with_falloff_and_can_be_punched_back() {
             a.aim(p, pos);
             let ev = a.tap(p, Buttons::PUNCH, 0);
             parried = ev.iter().find_map(|e| match e {
-                SimEvent::Parried(pe) if pe.target == ParryTarget::Projectile { id, kind: ProjectileKind::EmberBomb } => Some(id),
+                SimEvent::Parried(pe)
+                    if pe.target
+                        == ParryTarget::Projectile {
+                            id,
+                            kind: ProjectileKind::EmberBomb,
+                        } =>
+                {
+                    Some(id)
+                }
                 _ => None,
             });
             break;
@@ -383,9 +503,20 @@ fn ember_bombs_explode_with_falloff_and_can_be_punched_back() {
     let t = a.tuning.clone();
     let owner = spawn(&mut a, "censer", Vec3::new(0.0, 0.0, -40.0), 0.0);
     a.world.enemies.get_mut(&owner).unwrap().state = AiState::Stunned;
-    let attack = Attack::Enemy { kind: shared::protocol::kind::CENSER, attack: 1 };
+    let attack = Attack::Enemy {
+        kind: shared::protocol::kind::CENSER,
+        attack: 1,
+    };
     a.world
-        .spawn_enemy_projectile(&t, ProjectileKind::EmberBomb, owner, attack, Vec3::new(1.5, 0.6, 0.0), Vec3::new(0.0, -5.0, 0.0), 18.0)
+        .spawn_enemy_projectile(
+            &t,
+            ProjectileKind::EmberBomb,
+            owner,
+            attack,
+            Vec3::new(1.5, 0.6, 0.0),
+            Vec3::new(0.0, -5.0, 0.0),
+            18.0,
+        )
         .unwrap();
     let mut hurt = 0.0;
     for _ in 0..30 {
@@ -421,7 +552,14 @@ fn harrier_hovers_in_its_band_circles_and_never_clips_the_level() {
     let p = a.player(0, Vec3::ZERO, 0.0);
     god(&mut a, p);
     let flyers: Vec<NetId> = (0..3)
-        .map(|i| spawn(&mut a, "harrier_hover", Vec3::new(-12.0 + 8.0 * i as f32, 6.0, -16.0), 0.0))
+        .map(|i| {
+            spawn(
+                &mut a,
+                "harrier_hover",
+                Vec3::new(-12.0 + 8.0 * i as f32, 6.0, -16.0),
+                0.0,
+            )
+        })
         .collect();
     let mut low = f32::INFINITY;
     let mut high = 0.0f32;
@@ -456,7 +594,9 @@ fn harrier_hovers_in_its_band_circles_and_never_clips_the_level() {
             }
         }
     }
-    println!("harriers hovered {low:.1}..{high:.1} m above the ground, circled {angle_travel:.1} rad");
+    println!(
+        "harriers hovered {low:.1}..{high:.1} m above the ground, circled {angle_travel:.1} rad"
+    );
     assert!(low >= 3.5, "too low: {low}");
     assert!(high <= 11.0, "too high: {high}");
     assert!(angle_travel > 2.0 * PI, "harriers circle the target");
@@ -469,7 +609,10 @@ fn assert_inside_free_space(a: &Arena, id: NetId, tick: u32) {
     let half = (h * 0.5 - r).max(0.0);
     let center = e.position + Vec3::Y * (h * 0.5);
     assert!(
-        !a.world.collision.world.intersects_capsule(center, half, r - 0.05, MASK_MOVEMENT),
+        !a.world
+            .collision
+            .world
+            .intersects_capsule(center, half, r - 0.05, MASK_MOVEMENT),
         "{} inside the level at {} (tick {tick})",
         e.def.name,
         e.position
@@ -483,7 +626,11 @@ fn harrier_dives_in_a_straight_line_hits_once_and_climbs_back() {
     god(&mut a, p);
     let id = spawn(&mut a, "harrier", Vec3::new(0.0, 7.0, -12.0), 0.0);
     let mut log = Log::default();
-    assert!(until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Strike), "dived");
+    assert!(
+        until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state
+            == AiState::Strike),
+        "dived"
+    );
     let start = a.world.enemies[&id].center();
     let aim = a.world.enemies[&id].aim;
     let mut strike_ticks = 1;
@@ -504,7 +651,10 @@ fn harrier_dives_in_a_straight_line_hits_once_and_climbs_back() {
     );
     assert!(aim.y < -0.2, "dives down at the player");
     assert!(off_line < 0.05, "a straight 3D line ({off_line} m)");
-    assert!(strike_ticks < 36, "the floor behind the player ended the dive early ({strike_ticks} ticks)");
+    assert!(
+        strike_ticks < 36,
+        "the floor behind the player ended the dive early ({strike_ticks} ticks)"
+    );
     // It raked the player once (the hit is parry-delayed, so it lands a few ticks later).
     a.ticks(15);
     run_logged(&mut a, id, 1, &mut log);
@@ -529,7 +679,11 @@ fn a_harrier_dive_is_flagged_parryable_from_start_to_end() {
     a.world.enemies.get_mut(&id).unwrap().health = 500.0;
     let mut log = Log::default();
     assert!(!parryable_flag(&a, id), "not while hovering");
-    assert!(until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Strike), "dived");
+    assert!(
+        until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state
+            == AiState::Strike),
+        "dived"
+    );
     let mut ticks = 0;
     while a.world.enemies[&id].state == AiState::Strike && ticks < 120 {
         assert!(parryable_flag(&a, id), "dive tick {ticks} without the flag");
@@ -560,9 +714,19 @@ fn swatting_a_diving_harrier_is_a_parry() {
     let c = a.world.enemies[&id].center();
     a.aim(p, c);
     let ev = a.tap(p, Buttons::PUNCH, 1);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Parried(_))), "not parryable while hovering");
-    assert!(until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Strike), "dived");
-    assert!(replicated(&a, id).flags & enemy_flags::PARRYABLE != 0, "the dive shows the parry flash");
+    assert!(
+        !ev.iter().any(|e| matches!(e, SimEvent::Parried(_))),
+        "not parryable while hovering"
+    );
+    assert!(
+        until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state
+            == AiState::Strike),
+        "dived"
+    );
+    assert!(
+        replicated(&a, id).flags & enemy_flags::PARRYABLE != 0,
+        "the dive shows the parry flash"
+    );
     // Swat it when it is a few metres out (the parry window stays open for a few ticks: the
     // swat lands as soon as it is within reach).
     let mut swat = Vec::new();
@@ -598,7 +762,8 @@ fn swatting_a_diving_harrier_is_a_parry() {
         .iter()
         .filter_map(|e| match e {
             SimEvent::Damage(d)
-                if d.target == HitTarget::Entity(id) && d.info.flags.contains(DamageFlags::PARRIED) =>
+                if d.target == HitTarget::Entity(id)
+                    && d.info.flags.contains(DamageFlags::PARRIED) =>
             {
                 Some(d.dealt)
             }
@@ -618,7 +783,12 @@ fn swatting_a_diving_harrier_is_a_parry() {
     }
     assert!(landed, "fell to the floor while stunned");
     assert!(log.hits.is_empty(), "the dive never landed: {:?}", log.hits);
-    assert!(a.health(p) > before, "healed: {} -> {}", before, a.health(p));
+    assert!(
+        a.health(p) > before,
+        "healed: {} -> {}",
+        before,
+        a.health(p)
+    );
     // Then it takes off again.
     a.ticks(120);
     assert!(a.world.enemies[&id].center().y > 3.0, "back in the air");
@@ -657,14 +827,17 @@ fn gaoler_bash_is_parryable_only_in_its_window() {
     let (mut a, p, id) = gaoler_duel();
     let w0 = until_windup(&mut a, id);
     assert_eq!(a.world.enemies[&id].attack, 0, "close: the bash");
-    assert!(!parryable_flag(&a, id), "not parryable at the start of the wind-up");
+    assert!(
+        !parryable_flag(&a, id),
+        "not parryable at the start of the wind-up"
+    );
     a.ticks(45 - 1);
     assert_eq!(a.world.tick, w0 + 44);
     assert!(parryable_flag(&a, id), "parryable in the window");
     let ev = a.tap(p, Buttons::PUNCH, 2);
-    let parried = ev.iter().any(|e| {
-        matches!(e, SimEvent::Parried(pe) if pe.target == ParryTarget::Melee { enemy: id })
-    });
+    let parried = ev.iter().any(
+        |e| matches!(e, SimEvent::Parried(pe) if pe.target == ParryTarget::Melee { enemy: id }),
+    );
     assert!(parried, "the punch parried the bash");
     let e = &a.world.enemies[&id];
     assert_eq!(e.state, AiState::Stunned);
@@ -687,14 +860,21 @@ fn gaoler_bash_is_parryable_only_in_its_window() {
     a.ticks(60);
     assert_eq!(a.health(p), before, "the bash never landed");
     a.ticks(100);
-    assert_ne!(a.world.enemies[&id].state, AiState::Stunned, "stun wears off");
+    assert_ne!(
+        a.world.enemies[&id].state,
+        AiState::Stunned,
+        "stun wears off"
+    );
 
     // Too early (first half of the wind-up): nothing, and the bash lands (40, knocked back).
     let (mut a, p, id) = gaoler_duel();
     until_windup(&mut a, id);
     a.ticks(5);
     let ev = a.tap(p, Buttons::PUNCH, 0);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Parried(_))), "parried too early");
+    assert!(
+        !ev.iter().any(|e| matches!(e, SimEvent::Parried(_))),
+        "parried too early"
+    );
     let mut hurt = 0.0;
     for _ in 0..90 {
         hurt += damage_to(&a.tick(), HitTarget::Player(p));
@@ -716,10 +896,16 @@ fn gaoler_bash_is_parryable_only_in_its_window() {
     let hurt_at = hurt_at.expect("bash hit");
     assert!(hurt_at >= w0 + 60, "damage only after the full 1 s wind-up");
     let v = a.world.players[&p].movement.velocity;
-    assert!(v.y > 4.0 && Vec3::new(v.x, 0.0, v.z).length() > 10.0, "knocked back and up: {v}");
+    assert!(
+        v.y > 4.0 && Vec3::new(v.x, 0.0, v.z).length() > 10.0,
+        "knocked back and up: {v}"
+    );
     a.ticks(3);
     let ev = a.tap(p, Buttons::PUNCH, 0);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Parried(_))), "parried after the hit");
+    assert!(
+        !ev.iter().any(|e| matches!(e, SimEvent::Parried(_))),
+        "parried after the hit"
+    );
     assert_ne!(a.world.enemies[&id].state, AiState::Stunned);
 }
 
@@ -745,18 +931,30 @@ fn gaoler_front_armour_and_weak_points() {
     assert!((front.dealt - 15.0).abs() < 0.01, "front {}", front.dealt);
     assert!(front.info.flags.contains(DamageFlags::ARMOURED));
     assert_eq!(back.dealt, 100.0, "back");
-    assert_eq!(side.dealt, 100.0, "90° from the front is outside the 120° arc");
+    assert_eq!(
+        side.dealt, 100.0,
+        "90° from the front is outside the 120° arc"
+    );
     let head = hit(&mut a, -fwd, HitPart::Weak(0), DamageFlags::HITSCAN);
-    assert_eq!(head.dealt, 150.0, "the helm grille ignores the armour (x1.5)");
+    assert_eq!(
+        head.dealt, 150.0,
+        "the helm grille ignores the armour (x1.5)"
+    );
     assert!(head.info.flags.contains(DamageFlags::HEADSHOT));
     let lantern = hit(&mut a, fwd, HitPart::Weak(1), DamageFlags::HITSCAN);
     assert_eq!(lantern.dealt, 250.0, "the back lantern x2.5");
     let blast = hit(&mut a, -fwd, HitPart::Body, DamageFlags::EXPLOSIVE);
-    assert!((blast.dealt - 15.0).abs() < 0.01, "explosions from the front are armoured");
+    assert!(
+        (blast.dealt - 15.0).abs() < 0.01,
+        "explosions from the front are armoured"
+    );
     // The weak points are where the contract puts them: the lantern behind, the helm on top.
     let e = &a.world.enemies[&id];
     let lantern_at = e.local_to_world(e.def.weak_points[1].offset);
-    assert!(lantern_at.z > 0.9 && (lantern_at.y - 2.2).abs() < 1e-4, "{lantern_at}");
+    assert!(
+        lantern_at.z > 0.9 && (lantern_at.y - 2.2).abs() < 1e-4,
+        "{lantern_at}"
+    );
 }
 
 #[test]
@@ -769,8 +967,13 @@ fn gaoler_sweep_only_hits_players_on_the_ground() {
         let sweep = attack_index(&a, "gaoler", "sweep");
         let len = windup_ticks(&a, "gaoler", sweep);
         let mut log = Log::default();
-        assert!(until(&mut a, id, 300, &mut log, |a| a.world.enemies[&id].state == AiState::Windup));
-        assert_eq!(a.world.enemies[&id].attack, sweep as usize, "3.3 m away: the sweep");
+        assert!(until(&mut a, id, 300, &mut log, |a| a.world.enemies[&id]
+            .state
+            == AiState::Windup));
+        assert_eq!(
+            a.world.enemies[&id].attack, sweep as usize,
+            "3.3 m away: the sweep"
+        );
         let w0 = a.world.tick;
         // Jump 0.3 s before the sweep comes round.
         run_logged(&mut a, id, len - 18 - 1, &mut log);
@@ -789,7 +992,10 @@ fn gaoler_sweep_only_hits_players_on_the_ground() {
         }
         let feet = feet_at_strike.expect("swept");
         let hurt: f32 = log.hits.iter().filter(|h| h.1 == sweep).count() as f32;
-        println!("sweep, jump {jump}: feet {feet:.2} m up at the strike, {hurt} hits, health {}", a.health(p));
+        println!(
+            "sweep, jump {jump}: feet {feet:.2} m up at the strike, {hurt} hits, health {}",
+            a.health(p)
+        );
         if jump {
             assert!(feet > 1.2, "the jump cleared the sweep height ({feet})");
             assert_eq!(hurt, 0.0, "jumped over the sweep");
@@ -825,7 +1031,8 @@ fn gaoler_rush_hits_in_the_open_and_stops_at_walls() {
     let id = spawn(&mut a, "gaoler", Vec3::new(0.0, 0.0, -17.0), 0.0);
     let mut log = Log::default();
     assert!(
-        until(&mut a, id, 4 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Strike),
+        until(&mut a, id, 4 * 60, &mut log, |a| a.world.enemies[&id].state
+            == AiState::Strike),
         "rushed at the player behind the wall"
     );
     assert_eq!(a.world.enemies[&id].attack, rush as usize);
@@ -836,9 +1043,19 @@ fn gaoler_rush_hits_in_the_open_and_stops_at_walls() {
         ticks += 1;
     }
     let e = &a.world.enemies[&id];
-    println!("rush into the wall: {ticks} strike ticks, stopped at z {:.2}", e.position.z);
-    assert!(ticks < 48, "the wall ended the 0.8 s rush early ({ticks} ticks)");
-    assert!(e.position.z < -7.0 && e.position.z > -10.0, "stopped at the wall: {}", e.position);
+    println!(
+        "rush into the wall: {ticks} strike ticks, stopped at z {:.2}",
+        e.position.z
+    );
+    assert!(
+        ticks < 48,
+        "the wall ended the 0.8 s rush early ({ticks} ticks)"
+    );
+    assert!(
+        e.position.z < -7.0 && e.position.z > -10.0,
+        "stopped at the wall: {}",
+        e.position
+    );
     assert!(log.hits.is_empty(), "no hit through the wall");
 }
 
@@ -859,7 +1076,10 @@ fn heron_keeps_its_distance_and_repositions() {
             let ev = a.tick();
             log_events(&a, id, &ev, &mut log);
             let e = &a.world.enemies[&id];
-            if ev.iter().any(|x| matches!(x, SimEvent::EnemyFired { id: f, .. } if *f == id)) {
+            if ev
+                .iter()
+                .any(|x| matches!(x, SimEvent::EnemyFired { id: f, .. } if *f == id))
+            {
                 shots_from.push(e.position);
             }
             let d = Vec3::new(e.position.x, 0.0, e.position.z).length();
@@ -879,7 +1099,10 @@ fn heron_keeps_its_distance_and_repositions() {
         );
         assert!(frac > 0.85, "heron from {start} m: in band {frac}");
         assert!(log.strikes_of(needle) >= 2, "fires");
-        assert!(moved.iter().all(|m| *m > 2.0), "repositions between shots: {moved:?}");
+        assert!(
+            moved.iter().all(|m| *m > 2.0),
+            "repositions between shots: {moved:?}"
+        );
     }
 }
 
@@ -894,7 +1117,10 @@ fn heron_laser_tracks_then_locks_and_the_needle_follows_it() {
     let needle = attack_index(&a, "heron", "needle");
     let len = windup_ticks(&a, "heron", needle);
     let mut log = Log::default();
-    assert!(until(&mut a, id, 6 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Windup));
+    assert!(until(&mut a, id, 6 * 60, &mut log, |a| a.world.enemies
+        [&id]
+        .state
+        == AiState::Windup));
     assert_eq!(a.world.enemies[&id].attack, needle as usize);
     let w0 = a.world.tick;
     // (tick, aiming, locked, yaw, pitch) every tick of the wind-up.
@@ -912,28 +1138,56 @@ fn heron_laser_tracks_then_locks_and_the_needle_follows_it() {
         let ev = a.tick();
         log_events(&a, id, &ev, &mut log);
         if needle_velocity.is_none()
-            && let Some(pr) = a.world.projectiles.values().find(|pr| pr.kind == ProjectileKind::Needle)
+            && let Some(pr) = a
+                .world
+                .projectiles
+                .values()
+                .find(|pr| pr.kind == ProjectileKind::Needle)
         {
             needle_velocity = Some(pr.velocity);
         }
     }
     let strike = w0 + len;
-    assert!(log.strikes.iter().any(|s| s.0 == strike), "the needle at the end of the 1.3 s wind-up");
-    let during: Vec<_> = frames.iter().filter(|f| f.0 >= w0 && f.0 < strike).collect();
-    assert!(during.iter().all(|f| f.1), "the laser is on for the whole wind-up");
-    assert!(!frames.iter().any(|f| f.0 >= strike && f.1), "and off once it fired");
+    assert!(
+        log.strikes.iter().any(|s| s.0 == strike),
+        "the needle at the end of the 1.3 s wind-up"
+    );
+    let during: Vec<_> = frames
+        .iter()
+        .filter(|f| f.0 >= w0 && f.0 < strike)
+        .collect();
+    assert!(
+        during.iter().all(|f| f.1),
+        "the laser is on for the whole wind-up"
+    );
+    assert!(
+        !frames.iter().any(|f| f.0 >= strike && f.1),
+        "and off once it fired"
+    );
     let first_lock = during.iter().find(|f| f.2).map(|f| f.0).expect("locked");
     assert_eq!(strike - first_lock, 15, "locks for the last 0.25 s");
     let locked: Vec<_> = during.iter().filter(|f| f.2).collect();
-    assert!(locked.iter().all(|f| f.3 == locked[0].3 && f.4 == locked[0].4), "the aim stays put once locked");
+    assert!(
+        locked
+            .iter()
+            .all(|f| f.3 == locked[0].3 && f.4 == locked[0].4),
+        "the aim stays put once locked"
+    );
     let tracked = (during[2].3 - locked[0].3).abs();
-    println!("laser tracked {:.2} degrees before locking", tracked.to_degrees());
+    println!(
+        "laser tracked {:.2} degrees before locking",
+        tracked.to_degrees()
+    );
     assert!(tracked > 0.01, "it tracked the walking player");
     // The needle flies exactly along the replicated (locked) laser.
     let v = needle_velocity.expect("a needle");
     let laser = look_dir(locked[0].3, locked[0].4);
     let err = v.normalize().angle_between(laser);
-    println!("needle {:.1} m/s, {:.4} degrees off the drawn laser", v.length(), err.to_degrees());
+    println!(
+        "needle {:.1} m/s, {:.4} degrees off the drawn laser",
+        v.length(),
+        err.to_degrees()
+    );
     assert!((v.length() - 110.0).abs() < 0.01);
     assert!(err < 0.002, "needle off the laser by {err} rad");
 }
@@ -946,7 +1200,10 @@ fn dodging_the_locked_laser_makes_the_needle_miss() {
         god(&mut a, p);
         let id = spawn(&mut a, "heron", Vec3::new(0.0, 0.0, -32.0), 0.0);
         let mut log = Log::default();
-        assert!(until(&mut a, id, 6 * 60, &mut log, |a| replicated(a, id).flags & enemy_flags::AIM_LOCKED != 0));
+        assert!(until(&mut a, id, 6 * 60, &mut log, |a| replicated(a, id)
+            .flags
+            & enemy_flags::AIM_LOCKED
+            != 0));
         if dodge {
             // A sideways dash the moment it locks.
             a.world.players.get_mut(&p).unwrap().movement.position.x += 2.5;
@@ -965,7 +1222,10 @@ fn a_parried_needle_kills_its_heron() {
     let mut log = Log::default();
     // Wait until the needle reached the player (its hit waits out the parry tolerance).
     assert!(until(&mut a, id, 6 * 60, &mut log, |a| {
-        a.world.projectiles.values().any(|pr| pr.kind == ProjectileKind::Needle && pr.pending.is_some())
+        a.world
+            .projectiles
+            .values()
+            .any(|pr| pr.kind == ProjectileKind::Needle && pr.pending.is_some())
     }));
     a.held.get_mut(&p).unwrap().yaw = 0.0;
     a.held.get_mut(&p).unwrap().pitch = 0.05;
@@ -992,7 +1252,11 @@ fn every_type_rests_on_the_floor_wherever_it_spawns() {
             let at = if i == 0 {
                 Vec3::new(0.0, 0.0, -3.4)
             } else {
-                Vec3::new((i % 8) as f32 * 0.37 - 1.0, 0.0, (i / 8) as f32 * -0.2 - 3.0)
+                Vec3::new(
+                    (i % 8) as f32 * 0.37 - 1.0,
+                    0.0,
+                    (i / 8) as f32 * -0.2 - 3.0,
+                )
             };
             let id = spawn(&mut a, name, at, 0.0);
             a.ticks(2);
@@ -1026,7 +1290,10 @@ fn light_enemies_fly_gaolers_barely_move() {
     a.ticks(40);
     let moved_l = a.world.enemies[&gnawer].position.x + 5.0;
     let moved_h = a.world.enemies[&gaoler].position.x - 5.0;
-    assert!(moved_l > 3.0 && moved_h < 0.6, "gnawer {moved_l} m, gaoler {moved_h} m");
+    assert!(
+        moved_l > 3.0 && moved_h < 0.6,
+        "gnawer {moved_l} m, gaoler {moved_h} m"
+    );
 }
 
 /// Two floors separated by a lava trench (kill volume) with one 5 m bridge on the east side.
@@ -1065,9 +1332,16 @@ fn enemies_take_the_bridge_and_never_walk_into_lava() {
     let p = a.player(0, Vec3::new(-8.0, 0.0, 20.0), 0.0);
     god(&mut a, p);
     let mut ids = Vec::new();
-    let roster = ["gnawer", "gnawer", "gnawer", "gnawer", "gaoler", "censer", "heron"];
+    let roster = [
+        "gnawer", "gnawer", "gnawer", "gnawer", "gaoler", "censer", "heron",
+    ];
     for (i, name) in roster.iter().enumerate() {
-        let id = spawn(&mut a, name, Vec3::new(-18.0 + 5.0 * i as f32, 0.0, -20.0), 0.0);
+        let id = spawn(
+            &mut a,
+            name,
+            Vec3::new(-18.0 + 5.0 * i as f32, 0.0, -20.0),
+            0.0,
+        );
         a.world.enemies.get_mut(&id).unwrap().aware = true;
         ids.push(id);
     }
@@ -1082,7 +1356,12 @@ fn enemies_take_the_bridge_and_never_walk_into_lava() {
         }
         for &id in &ids {
             let e = &a.world.enemies[&id];
-            assert!(!kill_volume.contains(e.feet()), "{} in the lava at {}", e.def.name, e.position);
+            assert!(
+                !kill_volume.contains(e.feet()),
+                "{} in the lava at {}",
+                e.def.name,
+                e.position
+            );
             if e.position.z > 6.0 {
                 reached.entry(id).or_insert(tick);
             }
@@ -1091,12 +1370,19 @@ fn enemies_take_the_bridge_and_never_walk_into_lava() {
     println!(
         "crossed the bridge after (s): {:?}",
         ids.iter()
-            .map(|id| (a.world.enemies[id].def.name.clone(), reached.get(id).map(|t| *t as f32 / 60.0)))
+            .map(|id| (
+                a.world.enemies[id].def.name.clone(),
+                reached.get(id).map(|t| *t as f32 / 60.0)
+            ))
             .collect::<Vec<_>>()
     );
     // The melee ones crossed (the censer and the heron may shoot from the far side).
     for &id in &ids[..5] {
-        assert!(reached.contains_key(&id), "{} never crossed", a.world.enemies[&id].def.name);
+        assert!(
+            reached.contains_key(&id),
+            "{} never crossed",
+            a.world.enemies[&id].def.name
+        );
     }
     // Knocked into the lava, an enemy dies.
     let gnawer = ids[0];
@@ -1145,9 +1431,15 @@ fn tall_enemies_route_around_low_ceilings() {
         }
     }
     println!("came through the wall at x: {through:?}");
-    let gx = through.get(&gnawer).copied().expect("the gnawer came through");
+    let gx = through
+        .get(&gnawer)
+        .copied()
+        .expect("the gnawer came through");
     assert!(gx.abs() < 1.5, "the gnawer takes the tunnel: {gx}");
-    let hx = through.get(&tall).copied().expect("the tall walker came through");
+    let hx = through
+        .get(&tall)
+        .copied()
+        .expect("the tall walker came through");
     assert!(hx > 13.0, "a 3.4 m walker goes round by the open gap: {hx}");
 }
 
@@ -1166,13 +1458,20 @@ fn melee_enemies_route_around_walls() {
     let mut hit = None;
     for i in 0..(10 * 60) {
         a.tick();
-        if a.events.iter().any(|e| matches!(e, SimEvent::Damage(d) if d.target == HitTarget::Player(p))) {
+        if a.events
+            .iter()
+            .any(|e| matches!(e, SimEvent::Damage(d) if d.target == HitTarget::Player(p)))
+        {
             hit = Some(i);
             break;
         }
     }
     let hit = hit.expect("the gnawer found the way around");
-    println!("gnawer around the wall: {:.1} s, {:?}", hit as f32 / 60.0, a.world.ai.stats);
+    println!(
+        "gnawer around the wall: {:.1} s, {:?}",
+        hit as f32 / 60.0,
+        a.world.ai.stats
+    );
     // Walking ~24 m around + 20 m back at 10 m/s: well under 8 s.
     assert!(hit < 8 * 60);
     assert!(a.world.ai.stats.paths >= 1, "planned with A*");
@@ -1194,7 +1493,12 @@ fn separation_keeps_enemies_apart() {
         for (i, x) in ids.iter().enumerate() {
             for y in &ids[i + 1..] {
                 let (ex, ey) = (&a.world.enemies[x], &a.world.enemies[y]);
-                let d = Vec3::new(ex.position.x - ey.position.x, 0.0, ex.position.z - ey.position.z).length();
+                let d = Vec3::new(
+                    ex.position.x - ey.position.x,
+                    0.0,
+                    ex.position.z - ey.position.z,
+                )
+                .length();
                 worst = worst.min(d / (ex.radius() + ey.radius()));
             }
         }
@@ -1240,9 +1544,14 @@ fn hurting_an_unaware_enemy_alerts_it() {
     let p = a.player(0, Vec3::ZERO, 0.0);
     let id = spawn(&mut a, "gnawer", Vec3::new(0.0, 0.0, -80.0), 0.0);
     a.ticks(30);
-    assert_eq!(a.world.enemies[&id].state, AiState::Idle, "80 m is out of sight range");
+    assert_eq!(
+        a.world.enemies[&id].state,
+        AiState::Idle,
+        "80 m is out of sight range"
+    );
     let t = a.tuning.clone();
-    let info = DamageInfo::new(5.0, Owner::Player(p), Attack::Dev).at(Vec3::new(0.0, 1.0, -80.0), Vec3::NEG_Z);
+    let info = DamageInfo::new(5.0, Owner::Player(p), Attack::Dev)
+        .at(Vec3::new(0.0, 1.0, -80.0), Vec3::NEG_Z);
     a.world.apply_damage(&t, HitTarget::Entity(id), info);
     a.ticks(5);
     let e = &a.world.enemies[&id];
@@ -1256,10 +1565,17 @@ fn all_enemy_types_are_deterministic() {
         let mut a = Arena::new(lava_level());
         let p = a.player(0, Vec3::new(-8.0, 0.0, 20.0), 0.0);
         god(&mut a, p);
-        let roster = ["gnawer", "censer", "harrier", "gaoler", "heron", "gnawer", "harrier"];
+        let roster = [
+            "gnawer", "censer", "harrier", "gaoler", "heron", "gnawer", "harrier",
+        ];
         for (i, name) in roster.iter().enumerate() {
             let y = if *name == "harrier" { 6.0 } else { 0.0 };
-            let id = spawn(&mut a, name, Vec3::new(-15.0 + 5.0 * i as f32, y, -20.0), 0.0);
+            let id = spawn(
+                &mut a,
+                name,
+                Vec3::new(-15.0 + 5.0 * i as f32, y, -20.0),
+                0.0,
+            );
             a.world.enemies.get_mut(&id).unwrap().aware = true;
         }
         a.ticks(900);
@@ -1269,7 +1585,12 @@ fn all_enemy_types_are_deterministic() {
             .values()
             .map(|e| (e.position, e.velocity, e.state, e.health, e.aim))
             .collect();
-        let p: Vec<_> = a.world.projectiles.values().map(|p| (p.position, p.velocity)).collect();
+        let p: Vec<_> = a
+            .world
+            .projectiles
+            .values()
+            .map(|p| (p.position, p.velocity))
+            .collect();
         (v, p, a.events.len())
     };
     assert_eq!(run(), run());
@@ -1292,7 +1613,11 @@ fn frozen_world_stops_enemies() {
     assert!(ids.iter().any(|id| a.world.enemies[id].target == Some(p)));
     a.world.frozen = true;
     let ev = a.ticks(300);
-    assert_eq!(damage_to(&ev, HitTarget::Player(p)), 0.0, "no damage while frozen");
+    assert_eq!(
+        damage_to(&ev, HitTarget::Player(p)),
+        0.0,
+        "no damage while frozen"
+    );
     assert!(!ev.iter().any(|e| matches!(
         e,
         SimEvent::EnemyAttack { .. } | SimEvent::EnemyFired { .. }
@@ -1302,7 +1627,10 @@ fn frozen_world_stops_enemies() {
         assert_eq!(e.state, AiState::Idle);
         assert_eq!(e.target, None);
         if e.is_flying() {
-            assert!(!e.on_ground && e.velocity.length() < 0.5, "the harrier hovers in place");
+            assert!(
+                !e.on_ground && e.velocity.length() < 0.5,
+                "the harrier hovers in place"
+            );
         } else {
             assert!(e.on_ground, "still standing on the floor");
         }

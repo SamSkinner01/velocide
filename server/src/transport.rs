@@ -22,7 +22,9 @@ use renet::{ChannelConfig, ClientId, ConnectionConfig, RenetServer, SendType};
 // Connection authentication/config types come from `renet_netcode` (which re-exports them from
 // `renetcode`); the netcode.io state machine itself is driven directly so the socket glue below
 // can insert the network simulator.
-use renet_netcode::{NETCODE_USER_DATA_BYTES, ServerAuthentication, ServerConfig as NetcodeServerConfig};
+use renet_netcode::{
+    NETCODE_USER_DATA_BYTES, ServerAuthentication, ServerConfig as NetcodeServerConfig,
+};
 use renetcode::{NETCODE_MAX_PACKET_BYTES, NetcodeServer, ServerResult};
 use shared::protocol::{
     CHANNEL_RELIABLE, CHANNEL_UNRELIABLE, CONNECT_USER_DATA_BYTES, PROTOCOL_ID,
@@ -522,7 +524,11 @@ mod tests {
         assert!(calls.iter().all(|&(n, _)| n <= 8), "{calls:?}");
         assert_eq!(calls[0], (8, true), "stopped at the limit, more pending");
         let data: Vec<u8> = out.iter().map(|(_, d)| d[0]).collect();
-        assert_eq!(data, (0..20).collect::<Vec<u8>>(), "nothing lost or reordered");
+        assert_eq!(
+            data,
+            (0..20).collect::<Vec<u8>>(),
+            "nothing lost or reordered"
+        );
         link.receive(&mut out).unwrap();
         assert!(!link.has_pending());
     }

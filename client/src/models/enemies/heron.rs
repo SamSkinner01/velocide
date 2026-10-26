@@ -9,7 +9,10 @@ use engine::assets::gltf::ModelPart;
 use engine::assets::meshgen::MeshBuilder;
 use engine::glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
-use super::{EnemyAnim, EnemyState, gray, heat, melt, rx, rz, seed_phase, smoothstep, strobe, telegraph, wave};
+use super::{
+    EnemyAnim, EnemyState, gray, heat, melt, rx, rz, seed_phase, smoothstep, strobe, telegraph,
+    wave,
+};
 use crate::models::PartSet;
 use crate::models::kit::{self, add, ellipsoid, gem, limb, rgb, spike};
 use crate::models::rig::{JointDef, Pose, ROOT, Shade, joint};
@@ -65,7 +68,9 @@ pub fn build() -> Vec<ModelPart> {
     let ring = Vec4::new(1.0, 0.12, 0.06, 1.0);
 
     // Body: a narrow teardrop of wax, brass wing covers along the flanks, tail vanes.
-    let r = |z: f32, y: f32, rr: Vec2| kit::ngon_ring(Vec3::new(0.0, y, z), Vec3::X, Vec3::Y, rr, 8, 0.0);
+    let r = |z: f32, y: f32, rr: Vec2| {
+        kit::ngon_ring(Vec3::new(0.0, y, z), Vec3::X, Vec3::Y, rr, 8, 0.0)
+    };
     p.add(
         BODY,
         kit::loft(
@@ -102,7 +107,11 @@ pub fn build() -> Vec<ModelPart> {
         p.add(
             BODY,
             kit::plate(
-                &[base + Vec3::new(-0.05, 0.0, 0.0), base + Vec3::new(0.05, 0.0, 0.0), base + Vec3::new(x * 1.5, -0.12, len)],
+                &[
+                    base + Vec3::new(-0.05, 0.0, 0.0),
+                    base + Vec3::new(0.05, 0.0, 0.0),
+                    base + Vec3::new(x * 1.5, -0.12, len),
+                ],
                 0.02,
                 brass_dark,
             ),
@@ -110,11 +119,23 @@ pub fn build() -> Vec<ModelPart> {
     }
     // Hip joints (brass bosses) and a slag crest along the back.
     for side in [-1.0f32, 1.0] {
-        p.add(BODY, gem(Vec3::new(side * 0.17, 2.08, 0.1), 0.08, 0, brass_dark));
+        p.add(
+            BODY,
+            gem(Vec3::new(side * 0.17, 2.08, 0.1), 0.08, 0, brass_dark),
+        );
     }
     for k in 0..3 {
         let z = -0.1 + 0.2 * k as f32;
-        p.add(BODY, spike(Vec3::new(0.0, 2.4, z), Vec3::new(0.0, 2.55, z + 0.12), 0.04, 4, slag));
+        p.add(
+            BODY,
+            spike(
+                Vec3::new(0.0, 2.4, z),
+                Vec3::new(0.0, 2.55, z + 0.12),
+                0.04,
+                4,
+                slag,
+            ),
+        );
     }
 
     // Neck: an S of wax over brass vertebra rings.
@@ -124,40 +145,144 @@ pub fn build() -> Vec<ModelPart> {
     p.add(NECK, kit::smooth_tube(n0, n1, 0.12, 0.09, 6, wax));
     p.add(NECK, kit::smooth_tube(n1, n2, 0.09, 0.08, 6, wax));
     for f in [0.3f32, 0.7] {
-        p.add(NECK, kit::band(n0.lerp(n1, f), n1 - n0, 0.085, 0.035, 0.02, 7, brass));
-        p.add(NECK, kit::band(n1.lerp(n2, f), n2 - n1, 0.072, 0.035, 0.02, 7, brass));
+        p.add(
+            NECK,
+            kit::band(n0.lerp(n1, f), n1 - n0, 0.085, 0.035, 0.02, 7, brass),
+        );
+        p.add(
+            NECK,
+            kit::band(n1.lerp(n2, f), n2 - n1, 0.072, 0.035, 0.02, 7, brass),
+        );
     }
 
     // Head: a brass drum on its side, the lens on the front, a needle-barrel beak below, a
     // crest of brass vanes behind.
     let lc = v(LENS_AT);
     let back = lc + Vec3::new(0.0, 0.0, 0.34);
-    p.add(HEAD, kit::tube(back, lc + Vec3::new(0.0, 0.0, 0.02), 0.2, 0.22, 10, brass));
-    p.add(HEAD, limb(n2, Vec3::new(0.0, 3.06, -0.3), Vec2::splat(0.07), Vec2::splat(0.09), brass_dark));
-    p.add(HEAD, kit::band(lc + Vec3::new(0.0, 0.0, 0.08), Vec3::Z, 0.225, 0.05, 0.03, 10, brass_dark));
-    for (k, (y, len)) in [(0.14, 0.32), (0.04, 0.38), (-0.06, 0.3)].into_iter().enumerate() {
+    p.add(
+        HEAD,
+        kit::tube(back, lc + Vec3::new(0.0, 0.0, 0.02), 0.2, 0.22, 10, brass),
+    );
+    p.add(
+        HEAD,
+        limb(
+            n2,
+            Vec3::new(0.0, 3.06, -0.3),
+            Vec2::splat(0.07),
+            Vec2::splat(0.09),
+            brass_dark,
+        ),
+    );
+    p.add(
+        HEAD,
+        kit::band(
+            lc + Vec3::new(0.0, 0.0, 0.08),
+            Vec3::Z,
+            0.225,
+            0.05,
+            0.03,
+            10,
+            brass_dark,
+        ),
+    );
+    for (k, (y, len)) in [(0.14, 0.32), (0.04, 0.38), (-0.06, 0.3)]
+        .into_iter()
+        .enumerate()
+    {
         let base = back + Vec3::new(0.0, y, -0.02);
-        p.add(HEAD, kit::plate(&[base + Vec3::new(0.0, 0.05, 0.0), base + Vec3::new(0.0, -0.05, 0.0), base + Vec3::new(0.0, 0.08 + 0.04 * k as f32, len)], 0.02, brass));
+        p.add(
+            HEAD,
+            kit::plate(
+                &[
+                    base + Vec3::new(0.0, 0.05, 0.0),
+                    base + Vec3::new(0.0, -0.05, 0.0),
+                    base + Vec3::new(0.0, 0.08 + 0.04 * k as f32, len),
+                ],
+                0.02,
+                brass,
+            ),
+        );
     }
     // The needle barrel: a long thin beak under the lens.
     let beak0 = lc + Vec3::new(0.0, -0.2, 0.06);
-    p.add(HEAD, kit::tube(beak0, beak0 + Vec3::new(0.0, -0.04, -0.62), 0.05, 0.025, 6, brass_dark));
-    p.add(HEAD, spike(beak0 + Vec3::new(0.0, -0.04, -0.62), beak0 + Vec3::new(0.0, -0.06, -0.78), 0.025, 5, slag));
+    p.add(
+        HEAD,
+        kit::tube(
+            beak0,
+            beak0 + Vec3::new(0.0, -0.04, -0.62),
+            0.05,
+            0.025,
+            6,
+            brass_dark,
+        ),
+    );
+    p.add(
+        HEAD,
+        spike(
+            beak0 + Vec3::new(0.0, -0.04, -0.62),
+            beak0 + Vec3::new(0.0, -0.06, -0.78),
+            0.025,
+            5,
+            slag,
+        ),
+    );
     // The lens: a domed disc, and the telegraph ring around it.
-    p.add(LENS, ellipsoid(lc + Vec3::new(0.0, 0.0, -0.01), Vec3::new(0.17, 0.17, 0.07), Quat::IDENTITY, 3, 10, lens, false));
-    p.add(RING, kit::band(lc + Vec3::new(0.0, 0.0, -0.03), Vec3::Z, 0.2, 0.04, 0.035, 12, ring));
+    p.add(
+        LENS,
+        ellipsoid(
+            lc + Vec3::new(0.0, 0.0, -0.01),
+            Vec3::new(0.17, 0.17, 0.07),
+            Quat::IDENTITY,
+            3,
+            10,
+            lens,
+            false,
+        ),
+    );
+    p.add(
+        RING,
+        kit::band(
+            lc + Vec3::new(0.0, 0.0, -0.03),
+            Vec3::Z,
+            0.2,
+            0.04,
+            0.035,
+            12,
+            ring,
+        ),
+    );
 
     // Legs (right built, left mirrored): brass stilts with backward knees, long toes.
     let (hip, knee) = (v(HIP), v(KNEE));
     let foot = Vec3::new(0.2, 0.08, 0.02);
     let mut thigh = limb(hip, knee, Vec2::splat(0.08), Vec2::splat(0.055), brass);
-    add(&mut thigh, kit::band(hip.lerp(knee, 0.3), knee - hip, 0.085, 0.05, 0.02, 6, brass_dark));
+    add(
+        &mut thigh,
+        kit::band(
+            hip.lerp(knee, 0.3),
+            knee - hip,
+            0.085,
+            0.05,
+            0.02,
+            6,
+            brass_dark,
+        ),
+    );
     let mut shin = limb(knee, foot, Vec2::splat(0.055), Vec2::splat(0.04), brass);
     add(&mut shin, gem(knee, 0.085, 0, brass_dark));
     add(&mut shin, gem(foot, 0.065, 0, brass_dark));
     let mut toes = MeshBuilder::new();
     for (dx, dz) in [(-0.1, -0.32), (0.0, -0.38), (0.1, -0.32), (0.0, 0.2)] {
-        add(&mut toes, limb(foot, foot + Vec3::new(dx, -0.07, dz), Vec2::splat(0.022), Vec2::splat(0.012), brass_dark));
+        add(
+            &mut toes,
+            limb(
+                foot,
+                foot + Vec3::new(dx, -0.07, dz),
+                Vec2::splat(0.022),
+                Vec2::splat(0.012),
+                brass_dark,
+            ),
+        );
     }
     add(&mut shin, toes);
     p.add(THIGH_L, kit::mirrored_x(&thigh));
@@ -296,7 +421,10 @@ pub fn pose(a: &EnemyAnim) -> Pose {
     );
     pose.rotate(NECK, rx(neck));
     pose.rotate(HEAD, rx(head) * rz(head_roll));
-    for (i, (thigh, shin, sgn)) in [(THIGH_L, SHIN_L, -1.0f32), (THIGH_R, SHIN_R, 1.0)].into_iter().enumerate() {
+    for (i, (thigh, shin, sgn)) in [(THIGH_L, SHIN_L, -1.0f32), (THIGH_R, SHIN_R, 1.0)]
+        .into_iter()
+        .enumerate()
+    {
         let (swing, splay, knee) = legs[i];
         pose.rotate(thigh, rz(sgn * splay.abs()) * rx(swing));
         // Backward knees: the shin folds forward under the body.

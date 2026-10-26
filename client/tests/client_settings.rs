@@ -218,8 +218,10 @@ fn an_unbound_action_stays_unbound() {
 fn old_settings_files_keep_their_throw_binding() {
     // The action used to be called `ThrowPrism`; files saved then still load.
     let mut s = Settings::default();
-    s.bindings
-        .bind(Action::ThrowThorn, engine::input::Binding::Key(engine::input::Key::KeyG));
+    s.bindings.bind(
+        Action::ThrowThorn,
+        engine::input::Binding::Key(engine::input::Key::KeyG),
+    );
     let text = s.to_ron().replace("ThrowThorn", "ThrowPrism");
     assert!(text.contains("ThrowPrism"));
     let back = Settings::from_ron(&text).unwrap();

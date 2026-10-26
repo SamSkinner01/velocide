@@ -29,9 +29,9 @@
 //! [`NetFrame`]; new entity types add themselves there with their own [`kind`] constant.
 
 pub mod area; // Gust, Discharge, Breach
-pub mod embers;
 pub mod brand;
 pub mod combat;
+pub mod embers;
 pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
 mod hitbox;
@@ -53,17 +53,17 @@ use std::sync::Arc;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub use embers::{EmberBurst, HealSource};
 pub use brand::Brand;
 pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
     PlayerCombat,
 };
+pub use embers::{EmberBurst, HealSource};
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, lob_velocity};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
-    EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules,
-    ModeState, PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
+    EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
+    PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
 };
 pub use parry::{ParryEvent, ParryTarget};
 pub use projectiles::{Projectile, ProjectileKind};
@@ -271,7 +271,8 @@ impl SimPlayer {
             yaw: self.yaw,
             pitch: self.pitch,
             flags,
-            state: (self.last_input.weapon as u16 & 0xF) | ((self.last_input.weapon_mode as u16 & 0x3) << 4),
+            state: (self.last_input.weapon as u16 & 0xF)
+                | ((self.last_input.weapon_mode as u16 & 0x3) << 4),
             aux,
             ..Default::default()
         }
@@ -729,7 +730,8 @@ impl SimWorld {
             self.collision.set_door_open(door.id, door.starts_open);
         }
         for p in self.players.values_mut() {
-            let (god, weapon, mode) = (p.combat.god, p.combat.weapons.weapon, p.combat.weapons.mode);
+            let (god, weapon, mode) =
+                (p.combat.god, p.combat.weapons.weapon, p.combat.weapons.mode);
             p.combat = PlayerCombat {
                 god,
                 weapons: WeaponState::fresh(weapon, mode),
@@ -835,8 +837,13 @@ impl SimWorld {
                 } else {
                     0.0
                 };
-                let intents =
-                    step_weapons(&mut player.combat.weapons, input, alive, &tuning.combat, tick_rate);
+                let intents = step_weapons(
+                    &mut player.combat.weapons,
+                    input,
+                    alive,
+                    &tuning.combat,
+                    tick_rate,
+                );
                 if ev.jumped {
                     self.events.push(SimEvent::Jumped { player: *id });
                 }
@@ -887,7 +894,8 @@ impl SimWorld {
     fn slam_shockwave(&mut self, t: &Tuning, id: PlayerId, slam: SlamLanded) {
         let c = &t.combat;
         let radius = t.movement.slam_shockwave_radius;
-        let scale = c.slam_min_power_scale + (1.0 - c.slam_min_power_scale) * slam.power.clamp(0.0, 1.0);
+        let scale =
+            c.slam_min_power_scale + (1.0 - c.slam_min_power_scale) * slam.power.clamp(0.0, 1.0);
         self.events.push(SimEvent::SlamShockwave {
             player: id,
             position: slam.position,
@@ -1314,7 +1322,9 @@ mod tests {
         let start = NetId::DYNAMIC_START;
         // One live entity of every kind at the start of the dynamic range.
         let projectile = wisp(&mut w, &t).unwrap();
-        let enemy = w.spawn_enemy("gnawer", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
+        let enemy = w
+            .spawn_enemy("gnawer", Vec3::new(20.0, 0.0, 20.0), 0.0)
+            .unwrap();
         let embers = w
             .spawn_embers(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
             .unwrap();
@@ -1353,7 +1363,11 @@ mod tests {
         assert!(wisp(&mut w, &t).is_none());
         assert_eq!(w.projectiles.len(), MAX_PROJECTILES);
         for i in 0..MAX_ENEMIES {
-            let at = Vec3::new((i % 16) as f32 * 3.0 - 24.0, 0.0, (i / 16) as f32 * 3.0 - 24.0);
+            let at = Vec3::new(
+                (i % 16) as f32 * 3.0 - 24.0,
+                0.0,
+                (i / 16) as f32 * 3.0 - 24.0,
+            );
             assert!(w.spawn_enemy("gnawer", at, 0.0).is_some(), "enemy {i}");
         }
         assert!(w.spawn_enemy("gnawer", Vec3::ZERO, 0.0).is_none());
@@ -1392,7 +1406,11 @@ mod tests {
         // Room for two more enemies.
         let filler: Vec<NetId> = (0..MAX_ENEMIES - 2)
             .map(|i| {
-                let at = Vec3::new((i % 16) as f32 * 3.0 - 50.0, 0.0, (i / 16) as f32 * 3.0 - 50.0);
+                let at = Vec3::new(
+                    (i % 16) as f32 * 3.0 - 50.0,
+                    0.0,
+                    (i / 16) as f32 * 3.0 - 50.0,
+                );
                 w.spawn_enemy("gnawer", at, 0.0).unwrap()
             })
             .collect();

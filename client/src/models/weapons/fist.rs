@@ -52,7 +52,10 @@ pub fn build() -> Vec<ModelPart> {
         ),
     );
     for z in [0.2, 0.25, 0.3] {
-        p.add(FOREARM, gem(Vec3::new(0.0, 0.035, z), 0.007, 0, DARK_LEATHER));
+        p.add(
+            FOREARM,
+            gem(Vec3::new(0.0, 0.035, z), 0.007, 0, DARK_LEATHER),
+        );
     }
     p.add(
         FOREARM,

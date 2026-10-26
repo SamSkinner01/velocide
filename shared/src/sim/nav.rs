@@ -345,11 +345,7 @@ impl NavGrid {
             log::warn!("nav grid: level too large ({nx} x {nz} columns), no navigation");
             return NavGrid::default();
         }
-        let buckets = Buckets::new(
-            aabbs,
-            origin,
-            Vec2::new(nx as f32 * CELL, nz as f32 * CELL),
-        );
+        let buckets = Buckets::new(aabbs, origin, Vec2::new(nx as f32 * CELL, nz as f32 * CELL));
         let ymin = lo.y - 0.5;
         let top = hi.y + 1.0;
 
@@ -435,7 +431,9 @@ impl NavGrid {
                         }
                     }
                     // Headroom: only cast when something is overhead.
-                    let overhead = cands.iter().any(|&c| buckets.aabbs[c as usize].0.y > y + 0.05);
+                    let overhead = cands
+                        .iter()
+                        .any(|&c| buckets.aabbs[c as usize].0.y > y + 0.05);
                     let headroom = if overhead {
                         stats.rays += 1;
                         world
@@ -665,7 +663,11 @@ impl NavGrid {
         let node = &self.nodes[n as usize];
         node.is(class.flag())
             && (class.headroom_dm == 0 || node.headroom >= class.headroom())
-            && (node.door == 0 || doors_open.get(node.door as usize - 1).copied().unwrap_or(true))
+            && (node.door == 0
+                || doors_open
+                    .get(node.door as usize - 1)
+                    .copied()
+                    .unwrap_or(true))
     }
 
     /// The node an agent at `pos` (feet) stands on: the highest passable floor in its column
@@ -683,7 +685,9 @@ impl NavGrid {
             self.column_nodes(col)
                 .filter(|&n| {
                     let y = self.nodes[n as usize].pos.y;
-                    y <= pos.y + 0.6 && y >= pos.y - max_below && self.passable(n, class, doors_open)
+                    y <= pos.y + 0.6
+                        && y >= pos.y - max_below
+                        && self.passable(n, class, doors_open)
                 })
                 .max_by(|&a, &b| {
                     self.nodes[a as usize]
@@ -871,7 +875,11 @@ impl NavGrid {
                     continue;
                 }
                 let other = &self.nodes[mi];
-                let step = if d < 4 { CELL } else { CELL * std::f32::consts::SQRT_2 };
+                let step = if d < 4 {
+                    CELL
+                } else {
+                    CELL * std::f32::consts::SQRT_2
+                };
                 let mut cost = step + (other.pos.y - node.pos.y).abs() * CLIMB_COST;
                 if other.is(node_flags::HAZARD) {
                     cost += HAZARD_COST;
@@ -966,9 +974,16 @@ mod tests {
         };
         let g = grid(&level);
         let open = [];
-        let a = g.node_at(Vec3::new(0.0, 0.0, -5.0), 1.0, NavClass::SMALL, &open).unwrap();
-        let b = g.node_at(Vec3::new(0.0, 0.0, 5.0), 1.0, NavClass::SMALL, &open).unwrap();
-        assert!(!g.walkable_line(a, b, NavClass::SMALL, &open), "the wall is in the way");
+        let a = g
+            .node_at(Vec3::new(0.0, 0.0, -5.0), 1.0, NavClass::SMALL, &open)
+            .unwrap();
+        let b = g
+            .node_at(Vec3::new(0.0, 0.0, 5.0), 1.0, NavClass::SMALL, &open)
+            .unwrap();
+        assert!(
+            !g.walkable_line(a, b, NavClass::SMALL, &open),
+            "the wall is in the way"
+        );
         let mut s = NavScratch::default();
         let PathResult::Found(path) = g.find_path(&mut s, a, b, NavClass::SMALL, &open, 10_000)
         else {
@@ -1011,8 +1026,12 @@ mod tests {
         };
         let g = grid(&level);
         let open = [];
-        let low = g.node_at(Vec3::new(8.0, 0.0, 10.0), 1.0, NavClass::SMALL, &open).unwrap();
-        let high = g.node_at(Vec3::new(0.0, 3.0, -10.0), 1.0, NavClass::SMALL, &open).unwrap();
+        let low = g
+            .node_at(Vec3::new(8.0, 0.0, 10.0), 1.0, NavClass::SMALL, &open)
+            .unwrap();
+        let high = g
+            .node_at(Vec3::new(0.0, 3.0, -10.0), 1.0, NavClass::SMALL, &open)
+            .unwrap();
         assert!((g.nodes[high as usize].pos.y - 3.0).abs() < 0.01);
         let mut s = NavScratch::default();
         let PathResult::Found(up) = g.find_path(&mut s, low, high, NavClass::SMALL, &open, 20_000)
@@ -1059,28 +1078,44 @@ mod tests {
         assert_eq!(gaoler, NavClass::LARGE);
         assert!(!censer.wide && censer.headroom_dm == 26);
         assert!(!heron.wide && heron.headroom_dm == 35);
-        let under = g.node_at(Vec3::new(-0.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open).unwrap();
+        let under = g
+            .node_at(Vec3::new(-0.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open)
+            .unwrap();
         assert!(g.passable(under, gnawer, &open));
         assert!(g.passable(under, censer, &open), "2.5 m fits under 2.95 m");
         assert!(!g.passable(under, heron, &open), "3.4 m does not");
-        let open_gap = g.node_at(Vec3::new(2.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open).unwrap();
+        let open_gap = g
+            .node_at(Vec3::new(2.5, 0.0, 0.5), 0.5, NavClass::SMALL, &open)
+            .unwrap();
         assert!(g.passable(open_gap, heron, &open));
         // The Gaoler needs room around it too: the middle of a 6 m field is fine, a node next
         // to the wall is not.
-        let field = g.node_at(Vec3::new(0.5, 0.0, 10.5), 0.5, NavClass::SMALL, &open).unwrap();
+        let field = g
+            .node_at(Vec3::new(0.5, 0.0, 10.5), 0.5, NavClass::SMALL, &open)
+            .unwrap();
         assert!(g.passable(field, gaoler, &open));
-        let by_wall = g.node_at(Vec3::new(10.5, 0.0, 1.5), 0.5, NavClass::SMALL, &open).unwrap();
+        let by_wall = g
+            .node_at(Vec3::new(10.5, 0.0, 1.5), 0.5, NavClass::SMALL, &open)
+            .unwrap();
         assert!(g.passable(by_wall, gnawer, &open) && !g.passable(by_wall, gaoler, &open));
         // Paths: a Heron goes through the open half of the gap, never under the lintel.
         let mut s = NavScratch::default();
-        let a = g.node_at(Vec3::new(-0.5, 0.0, -8.0), 0.5, NavClass::SMALL, &open).unwrap();
-        let b = g.node_at(Vec3::new(-0.5, 0.0, 8.0), 0.5, NavClass::SMALL, &open).unwrap();
+        let a = g
+            .node_at(Vec3::new(-0.5, 0.0, -8.0), 0.5, NavClass::SMALL, &open)
+            .unwrap();
+        let b = g
+            .node_at(Vec3::new(-0.5, 0.0, 8.0), 0.5, NavClass::SMALL, &open)
+            .unwrap();
         let PathResult::Found(p) = g.find_path(&mut s, a, b, heron, &open, 20_000) else {
             panic!("heron path");
         };
         for n in &p {
             let node = &g.nodes[*n as usize];
-            assert!(node.headroom >= 3.5, "heron under the lintel at {}", node.pos);
+            assert!(
+                node.headroom >= 3.5,
+                "heron under the lintel at {}",
+                node.pos
+            );
         }
     }
 }

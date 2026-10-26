@@ -54,7 +54,10 @@ fn parse_args() -> anyhow::Result<Args> {
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
-        let mut value = || it.next().ok_or_else(|| anyhow::anyhow!("{a} needs a value"));
+        let mut value = || {
+            it.next()
+                .ok_or_else(|| anyhow::anyhow!("{a} needs a value"))
+        };
         match a.as_str() {
             "--out" => args.out = value()?.into(),
             "--only" => args.only = Some(value()?.split(',').map(str::to_owned).collect()),
@@ -96,7 +99,18 @@ fn box_lines(out: &mut Vec<DebugLine>, min: Vec3, max: Vec3, color: Vec4) {
         )
     };
     for (a, b) in [
-        (0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (2, 3),
+        (4, 5),
+        (6, 7),
+        (0, 2),
+        (1, 3),
+        (4, 6),
+        (5, 7),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ] {
         line(out, c(a), c(b), color);
     }
@@ -146,7 +160,12 @@ fn overlay(level: &LevelDef) -> Vec<DebugLine> {
                     _ => (2.0, 0.6),
                 };
                 marker(&mut out, s.position, h, r, c);
-                line(&mut out, s.position + Vec3::Y, s.position + Vec3::Y + yaw_dir(s.yaw) * 1.5, c);
+                line(
+                    &mut out,
+                    s.position + Vec3::Y,
+                    s.position + Vec3::Y + yaw_dir(s.yaw) * 1.5,
+                    c,
+                );
             }
         }
     }
@@ -296,10 +315,18 @@ fn text(ui: &mut UiDrawList, pos: Vec2, scale: f32, color: Vec4, s: &str) {
 fn render_shot(renderer: &mut Renderer, scene: &Scene, shot: &Shot) -> anyhow::Result<TextureData> {
     let env = level_mesh::environment(&scene.level);
     let mut draws: Vec<DrawItem> = Vec::new();
-    let starts_open: std::collections::BTreeMap<u32, bool> =
-        scene.level.doors.iter().map(|d| (d.id, d.starts_open)).collect();
+    let starts_open: std::collections::BTreeMap<u32, bool> = scene
+        .level
+        .doors
+        .iter()
+        .map(|d| (d.id, d.starts_open))
+        .collect();
     scene.render.draw(
-        |id| scene.doors.unwrap_or_else(|| starts_open.get(&id).copied().unwrap_or(true)),
+        |id| {
+            scene
+                .doors
+                .unwrap_or_else(|| starts_open.get(&id).copied().unwrap_or(true))
+        },
         &mut draws,
     );
     let (w, h) = renderer.window_size();
@@ -317,10 +344,18 @@ fn render_shot(renderer: &mut Renderer, scene: &Scene, shot: &Shot) -> anyhow::R
         fog.start = 1.0e5;
         fog.end = 2.0e5;
     }
-    let ambient = if shot.bright { env.ambient.max(Vec3::splat(0.8)) } else { env.ambient };
+    let ambient = if shot.bright {
+        env.ambient.max(Vec3::splat(0.8))
+    } else {
+        env.ambient
+    };
     let frame = FrameDesc {
         camera: shot.camera,
-        clear_color: if shot.fog { env.clear_color } else { Vec3::new(0.05, 0.05, 0.07) },
+        clear_color: if shot.fog {
+            env.clear_color
+        } else {
+            Vec3::new(0.05, 0.05, 0.07)
+        },
         fog,
         ambient,
         light_dir: env.light_dir,
@@ -511,7 +546,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     // ---- Overviews: native resolution, fog off, roofs removed for indoor levels.
-    let top_level = if level.kind == LevelKind::Campaign { roofless(&level) } else { level.clone() };
+    let top_level = if level.kind == LevelKind::Campaign {
+        roofless(&level)
+    } else {
+        level.clone()
+    };
     if want("overview") {
         let size = (hi - lo).max(Vec3::ONE);
         let aspect = size.x / size.z;
@@ -556,8 +595,10 @@ fn main() -> anyhow::Result<()> {
         let mut imgs = Vec::new();
         for (i, e) in level.encounters.iter().enumerate() {
             let c = e.trigger.center();
-            let half = Vec2::new(e.trigger.max.x - e.trigger.min.x, e.trigger.max.z - e.trigger.min.z)
-                * 0.5
+            let half = Vec2::new(
+                e.trigger.max.x - e.trigger.min.x,
+                e.trigger.max.z - e.trigger.min.z,
+            ) * 0.5
                 + Vec2::splat(4.0);
             let shot = Shot {
                 camera: top_down(c, half, e.trigger.max.y, 50.0, w as f32 / h as f32),
@@ -569,7 +610,11 @@ fn main() -> anyhow::Result<()> {
             // Without whatever is stacked above the arena (vertical levels).
             let cut = e.arena.map_or(e.trigger.max.y, |a| a.max.y);
             let area_scene = if level.kind == LevelKind::Campaign {
-                Some(Scene::new(&mut top, roofless(&below(&level, cut)), args.doors))
+                Some(Scene::new(
+                    &mut top,
+                    roofless(&below(&level, cut)),
+                    args.doors,
+                ))
             } else {
                 None
             };
@@ -578,15 +623,28 @@ fn main() -> anyhow::Result<()> {
             imgs.push(img);
             // Angled views from two high corners inside the trigger volume, looking at the
             // centre of the encounter at enemy height (full level, with ceilings).
-            let mut ys: Vec<f32> = e.waves.iter().flat_map(|w| &w.spawns).map(|s| s.position.y).collect();
+            let mut ys: Vec<f32> = e
+                .waves
+                .iter()
+                .flat_map(|w| &w.spawns)
+                .map(|s| s.position.y)
+                .collect();
             ys.sort_by(f32::total_cmp);
             let target_y = ys.get(ys.len() / 2).copied().unwrap_or(c.y);
             let target = Vec3::new(c.x, target_y, c.z);
             for (corner, (sx, sz)) in [("SE", (1.0, 1.0)), ("NW", (-1.0, -1.0))] {
                 let eye = Vec3::new(
-                    if sx > 0.0 { e.trigger.max.x - 1.5 } else { e.trigger.min.x + 1.5 },
+                    if sx > 0.0 {
+                        e.trigger.max.x - 1.5
+                    } else {
+                        e.trigger.min.x + 1.5
+                    },
                     (e.trigger.max.y - 2.0).min(target_y + 14.0),
-                    if sz > 0.0 { e.trigger.max.z - 1.0 } else { e.trigger.min.z + 1.5 },
+                    if sz > 0.0 {
+                        e.trigger.max.z - 1.0
+                    } else {
+                        e.trigger.min.z + 1.5
+                    },
                 );
                 let d = target - eye;
                 let yaw = (-d.x).atan2(-d.z).to_degrees();
@@ -610,8 +668,15 @@ fn main() -> anyhow::Result<()> {
             // Arena: four angled views from the corners.
             let center = (lo + hi) * 0.5;
             let half = Vec2::new(hi.x - lo.x, hi.z - lo.z) * 0.5;
-            for (k, (sx, sz)) in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)].into_iter().enumerate() {
-                let eye = Vec3::new(center.x + sx * half.x * 0.9, hi.y + 4.0, center.z + sz * half.y * 0.9);
+            for (k, (sx, sz)) in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let eye = Vec3::new(
+                    center.x + sx * half.x * 0.9,
+                    hi.y + 4.0,
+                    center.z + sz * half.y * 0.9,
+                );
                 let d = Vec3::new(center.x, lo.y, center.z) - eye;
                 let yaw = (-d.x).atan2(-d.z).to_degrees();
                 let pitch = (d.y / Vec2::new(d.x, d.z).length()).atan().to_degrees();

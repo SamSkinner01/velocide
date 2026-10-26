@@ -565,16 +565,33 @@ mod tests {
     fn names_are_printable_ascii_and_never_reserved() {
         // Invisible / direction-changing Unicode would make "Bob" and "Bob\u{200B}" distinct
         // names that look the same (defeating `unique_name`), or reverse what follows.
-        for evil in ["Bob\u{200B}", "\u{202E}Bob", "B\u{2066}ob\u{2069}", "Bob\u{FEFF}", "Bøb", "Bob\u{0301}"] {
+        for evil in [
+            "Bob\u{200B}",
+            "\u{202E}Bob",
+            "B\u{2066}ob\u{2069}",
+            "Bob\u{FEFF}",
+            "Bøb",
+            "Bob\u{0301}",
+        ] {
             let name = sanitize_name(evil);
-            assert!(name.chars().all(|c| c.is_ascii_graphic() || c == ' '), "{evil:?} -> {name:?}");
+            assert!(
+                name.chars().all(|c| c.is_ascii_graphic() || c == ' '),
+                "{evil:?} -> {name:?}"
+            );
         }
         assert_eq!(sanitize_name("Bob\u{200B}"), "Bob");
         assert_eq!(sanitize_name("\u{202E}Bob"), "Bob");
         assert_eq!(sanitize_name("Ünïcode Shrike"), "ncode Shrike");
         assert_eq!(sanitize_name("名前"), DEFAULT_NAME);
         // "server" would pass for server announcements in chat.
-        for reserved in ["server", "SERVER", "Server", "  sErVeR  ", "ser\u{200B}ver", ""] {
+        for reserved in [
+            "server",
+            "SERVER",
+            "Server",
+            "  sErVeR  ",
+            "ser\u{200B}ver",
+            "",
+        ] {
             assert_eq!(sanitize_name(reserved), DEFAULT_NAME, "{reserved:?}");
         }
         assert_eq!(sanitize_name("server2"), "server2");

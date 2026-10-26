@@ -79,7 +79,15 @@ fn bomb() -> Vec<ModelPart> {
     let mut p = PartSet::new(&BODY_GLOW);
     p.add(
         0,
-        kit::ellipsoid(Vec3::ZERO, Vec3::splat(0.16), Quat::IDENTITY, 5, 10, IRON, false),
+        kit::ellipsoid(
+            Vec3::ZERO,
+            Vec3::splat(0.16),
+            Quat::IDENTITY,
+            5,
+            10,
+            IRON,
+            false,
+        ),
     );
     // Studs: three staggered rings plus the poles.
     for (ring, (lat, n)) in [(0.55f32, 6), (0.0, 7), (-0.55, 6)].iter().enumerate() {
@@ -95,7 +103,16 @@ fn bomb() -> Vec<ModelPart> {
             p.add(0, spike(d * 0.15, d * 0.205, 0.028, 4, kit::BLACK_STEEL));
         }
     }
-    p.add(0, spike(Vec3::NEG_Y * 0.15, Vec3::NEG_Y * 0.2, 0.03, 4, kit::BLACK_STEEL));
+    p.add(
+        0,
+        spike(
+            Vec3::NEG_Y * 0.15,
+            Vec3::NEG_Y * 0.2,
+            0.03,
+            4,
+            kit::BLACK_STEEL,
+        ),
+    );
     // Fuse stub on top: brass collar and a short cord.
     p.add(
         0,
@@ -112,8 +129,19 @@ fn bomb() -> Vec<ModelPart> {
         ),
     );
     // Glowing fuse band and spark.
-    p.add(1, kit::band(Vec3::ZERO, Vec3::Y, 0.158, 0.035, 0.016, 12, FUSE));
-    p.add(1, gem(Vec3::new(0.022, 0.25, 0.017), 0.032, 0, Vec4::new(1.0, 0.85, 0.4, 1.0)));
+    p.add(
+        1,
+        kit::band(Vec3::ZERO, Vec3::Y, 0.158, 0.035, 0.016, 12, FUSE),
+    );
+    p.add(
+        1,
+        gem(
+            Vec3::new(0.022, 0.25, 0.017),
+            0.032,
+            0,
+            Vec4::new(1.0, 0.85, 0.4, 1.0),
+        ),
+    );
     finish_lit(&mut p);
     p.texture(0, kit::tex_grime());
     p.texture(1, kit::tex_glow());
@@ -129,7 +157,17 @@ fn gravewell() -> Vec<ModelPart> {
     p.add(0, tube(z(-0.16), z(-0.2), 0.11, 0.1, 10, kit::BLACK_STEEL));
     // Rings the core bands sit between.
     for zz in [0.13, 0.03, -0.07] {
-        p.add(0, tube(z(zz + 0.012), z(zz - 0.012), 0.104, 0.104, 10, kit::BLACK_STEEL));
+        p.add(
+            0,
+            tube(
+                z(zz + 0.012),
+                z(zz - 0.012),
+                0.104,
+                0.104,
+                10,
+                kit::BLACK_STEEL,
+            ),
+        );
     }
     // Clamp claws: out from the front cap, then hooking in.
     for k in 0..3 {
@@ -138,8 +176,14 @@ fn gravewell() -> Vec<ModelPart> {
         let p0 = d * 0.08 + z(-0.19);
         let p1 = d * 0.13 + z(-0.27);
         let p2 = d * 0.06 + z(-0.34);
-        p.add(0, limb(p0, p1, Vec2::splat(0.018), Vec2::splat(0.015), BRASS));
-        p.add(0, limb(p1, p2, Vec2::splat(0.015), Vec2::splat(0.008), BRASS));
+        p.add(
+            0,
+            limb(p0, p1, Vec2::splat(0.018), Vec2::splat(0.015), BRASS),
+        );
+        p.add(
+            0,
+            limb(p1, p2, Vec2::splat(0.015), Vec2::splat(0.008), BRASS),
+        );
         p.add(0, gem(p1, 0.02, 0, kit::BLACK_STEEL));
     }
     // Eerie green core bands, a lens at the back and a spike of light at the front.
@@ -220,7 +264,16 @@ fn thorn() -> Vec<ModelPart> {
     p.mesh(0).shade_by_normal(1.0, 0.75, 0.5);
     p.color(0, Vec4::new(0.8, 0.95, 1.0, 0.42));
     // Hot core line, the heart behind the tip and a ring at the collar: the lit relay.
-    p.add(1, limb(z(-0.17), z(0.36), Vec2::splat(0.02), Vec2::splat(0.011), hot));
+    p.add(
+        1,
+        limb(
+            z(-0.17),
+            z(0.36),
+            Vec2::splat(0.02),
+            Vec2::splat(0.011),
+            hot,
+        ),
+    );
     p.add(1, gem(z(-0.07), 0.03, 0, Vec4::new(1.0, 0.95, 0.78, 1.0)));
     p.add(1, kit::band(z(0.27), Vec3::Z, 0.031, 0.012, 0.01, 6, hot));
     // Brass collar and fletching at the tail.

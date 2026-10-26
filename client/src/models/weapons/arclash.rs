@@ -10,8 +10,7 @@ use engine::glam::{Quat, Vec2, Vec3, Vec4};
 
 use crate::models::PartSet;
 use crate::models::kit::{
-    self, BLACK_STEEL, COPPER, GUNMETAL, IRON, add_mirrored, block, chamfer_box_z, limb, rgb,
-    tube,
+    self, BLACK_STEEL, COPPER, GUNMETAL, IRON, add_mirrored, block, chamfer_box_z, limb, rgb, tube,
 };
 use crate::models::rig::{JointDef, ROOT, Shade, joint, static_part};
 
@@ -129,7 +128,10 @@ pub fn build() -> Vec<ModelPart> {
         );
     }
     // Copper caps at both ends of the capacitor, tie rods between them.
-    for (z0, z1) in [(GLASS_Z.0 + 0.012, GLASS_Z.0 - 0.012), (GLASS_Z.1 + 0.012, GLASS_Z.1 - 0.014)] {
+    for (z0, z1) in [
+        (GLASS_Z.0 + 0.012, GLASS_Z.0 - 0.012),
+        (GLASS_Z.1 + 0.012, GLASS_Z.1 - 0.014),
+    ] {
         p.add(
             BODY,
             tube(
@@ -189,12 +191,24 @@ pub fn build() -> Vec<ModelPart> {
     for w in strap.windows(2) {
         p.add(
             BODY,
-            limb(w[0], w[1], Vec2::new(0.008, 0.004), Vec2::new(0.008, 0.004), COPPER),
+            limb(
+                w[0],
+                w[1],
+                Vec2::new(0.008, 0.004),
+                Vec2::new(0.008, 0.004),
+                COPPER,
+            ),
         );
     }
     p.add(
         BODY,
-        kit::spike(strap[3], strap[3] + Vec3::new(0.0, -0.03, -0.012), 0.008, 4, COPPER),
+        kit::spike(
+            strap[3],
+            strap[3] + Vec3::new(0.0, -0.03, -0.012),
+            0.008,
+            4,
+            COPPER,
+        ),
     );
     kit::finish(p.mesh(BODY));
 
@@ -260,7 +274,13 @@ pub fn build() -> Vec<ModelPart> {
         for w in points.windows(2) {
             p.add(
                 CRAWL,
-                limb(w[0], w[1], Vec2::splat(0.0045), Vec2::splat(0.0035), Vec4::ONE),
+                limb(
+                    w[0],
+                    w[1],
+                    Vec2::splat(0.0045),
+                    Vec2::splat(0.0035),
+                    Vec4::ONE,
+                ),
             );
         }
     }
@@ -272,22 +292,45 @@ pub fn build() -> Vec<ModelPart> {
     }
     p.add(
         TIPS,
-        kit::gem(strap[3] + Vec3::new(0.0, -0.032, -0.013), 0.008, 0, Vec4::ONE),
+        kit::gem(
+            strap[3] + Vec3::new(0.0, -0.032, -0.013),
+            0.008,
+            0,
+            Vec4::ONE,
+        ),
     );
     let lamp = kit::gem(Vec3::new(0.042, 0.09, 0.03), 0.007, 0, Vec4::ONE);
     add_mirrored(p.mesh(TIPS), &lamp);
     // Charge eye on the back of the housing (faces the wielder).
     p.add(
         TIPS,
-        kit::band(Vec3::new(0.0, 0.062, 0.098), Vec3::Z, 0.022, 0.006, 0.008, 8, Vec4::ONE),
+        kit::band(
+            Vec3::new(0.0, 0.062, 0.098),
+            Vec3::Z,
+            0.022,
+            0.006,
+            0.008,
+            8,
+            Vec4::ONE,
+        ),
     );
-    p.add(TIPS, kit::gem(Vec3::new(0.0, 0.062, 0.098), 0.012, 0, Vec4::ONE));
+    p.add(
+        TIPS,
+        kit::gem(Vec3::new(0.0, 0.062, 0.098), 0.012, 0, Vec4::ONE),
+    );
 
     // Arcs between the prong tips (shown while charging / on a strong shot).
     for k in 0..3 {
         p.add(
             ARCS,
-            kit::bolt(prong_tip(k), prong_tip((k + 1) % 3), 4, 0.008, k as u32 + 3, 0.0035),
+            kit::bolt(
+                prong_tip(k),
+                prong_tip((k + 1) % 3),
+                4,
+                0.008,
+                k as u32 + 3,
+                0.0035,
+            ),
         );
         p.add(
             ARCS,

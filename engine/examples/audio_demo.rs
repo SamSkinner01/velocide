@@ -28,7 +28,9 @@ mod demo {
     use std::time::{Duration, Instant};
 
     use engine::audio::dsp::{SAMPLE_RATE, gain_to_db, loudness, peak, rms};
-    use engine::audio::music::{MUSIC_SAMPLE_RATE, MusicData, STEM_COUNT, render_track, stem_gains};
+    use engine::audio::music::{
+        MUSIC_SAMPLE_RATE, MusicData, STEM_COUNT, render_track, stem_gains,
+    };
     use engine::audio::wav::write_wav;
     use engine::audio::{Audio, MusicTrack, PlayParams, Sfx, generate_all_sfx};
     use engine::glam::{Quat, Vec3};
@@ -60,7 +62,9 @@ mod demo {
             did_something = true;
         }
         if !did_something {
-            eprintln!("usage: audio_demo [--bench] [--wav-dir <dir>] [--play [--section sfx|music|spatial]]");
+            eprintln!(
+                "usage: audio_demo [--bench] [--wav-dir <dir>] [--play [--section sfx|music|spatial]]"
+            );
         }
     }
 
@@ -82,7 +86,11 @@ mod demo {
         let sfx = generate_all_sfx();
         let sfx_time = sfx_start.elapsed();
         let variants: usize = sfx.iter().map(|v| v.len()).sum();
-        println!("sound effects: {} sounds / {variants} variations in {:.0} ms", Sfx::COUNT, ms(sfx_time));
+        println!(
+            "sound effects: {} sounds / {variants} variations in {:.0} ms",
+            Sfx::COUNT,
+            ms(sfx_time)
+        );
         for handle in music {
             match handle.join() {
                 Ok((t, d, len)) => println!(
@@ -139,20 +147,33 @@ mod demo {
 
         let start = Instant::now();
         let all = generate_all_sfx();
-        println!("generated {} sound effects in {:.0} ms", Sfx::COUNT, ms(start.elapsed()));
+        println!(
+            "generated {} sound effects in {:.0} ms",
+            Sfx::COUNT,
+            ms(start.elapsed())
+        );
         for (&sfx, variants) in Sfx::ALL.iter().zip(&all) {
             for (v, buf) in variants.iter().enumerate() {
-                let name = if v == 0 { sfx.name() } else { format!("{}_v{v}", sfx.name()) };
+                let name = if v == 0 {
+                    sfx.name()
+                } else {
+                    format!("{}_v{v}", sfx.name())
+                };
                 write_wav(&dir.join(format!("sfx_{name}.wav")), SAMPLE_RATE, 1, buf)?;
                 rows.push(analyse(name, buf, 1, SAMPLE_RATE));
             }
         }
-        print_table("SOUND EFFECTS (mono, 44.1 kHz; LU = K-weighted loudness of the loudest window)", &mut rows);
+        print_table(
+            "SOUND EFFECTS (mono, 44.1 kHz; LU = K-weighted loudness of the loudest window)",
+            &mut rows,
+        );
 
         let mut rows = Vec::new();
         for track in MusicTrack::PLAYABLE {
             let start = Instant::now();
-            let Some(data) = render_track(track) else { continue };
+            let Some(data) = render_track(track) else {
+                continue;
+            };
             println!(
                 "rendered {track:?}: {} BPM, {} bars, {:.2} s loop (loop start {} frames) in {:.0} ms",
                 data.bpm,
@@ -164,18 +185,31 @@ mod demo {
             for stem in &data.stems {
                 let flat: Vec<f32> = stem.frames.iter().flatten().copied().collect();
                 let name = format!("{track:?}_{}", stem.kind.name());
-                write_wav(&dir.join(format!("music_{name}.wav")), MUSIC_SAMPLE_RATE, 2, &flat)?;
+                write_wav(
+                    &dir.join(format!("music_{name}.wav")),
+                    MUSIC_SAMPLE_RATE,
+                    2,
+                    &flat,
+                )?;
                 rows.push(analyse(name, &flat, 2, MUSIC_SAMPLE_RATE));
             }
             for (label, intensity) in [("calm", 0.0f32), ("mid", 0.45), ("full", 1.0)] {
                 let gains = stem_gains(intensity.max(data.intensity_floor));
                 let mix = mix_twice(&data, &gains);
                 let name = format!("{track:?}_mix_{label}");
-                write_wav(&dir.join(format!("music_{name}.wav")), MUSIC_SAMPLE_RATE, 2, &mix)?;
+                write_wav(
+                    &dir.join(format!("music_{name}.wav")),
+                    MUSIC_SAMPLE_RATE,
+                    2,
+                    &mix,
+                )?;
                 rows.push(analyse(name, &mix, 2, MUSIC_SAMPLE_RATE));
             }
         }
-        print_table("MUSIC STEMS + MIXES (stereo; mixes play the loop twice to check the seam)", &mut rows);
+        print_table(
+            "MUSIC STEMS + MIXES (stereo; mixes play the loop twice to check the seam)",
+            &mut rows,
+        );
         println!("wrote WAV files to {}", dir.display());
         Ok(())
     }
@@ -219,7 +253,11 @@ mod demo {
     fn play(section: Option<&str>) {
         let start = Instant::now();
         let mut audio = Audio::new();
-        println!("Audio::new() took {:.0} ms, enabled = {}", ms(start.elapsed()), audio.is_enabled());
+        println!(
+            "Audio::new() took {:.0} ms, enabled = {}",
+            ms(start.elapsed()),
+            audio.is_enabled()
+        );
         if !audio.is_enabled() {
             println!("no audio device: nothing to play");
             return;
@@ -231,7 +269,9 @@ mod demo {
         if all || section == Some("sfx") {
             let lengths = generate_all_sfx();
             for (&sfx, variants) in Sfx::ALL.iter().zip(&lengths) {
-                let secs = variants.first().map_or(0.3, |b| b.len() as f32 / SAMPLE_RATE as f32);
+                let secs = variants
+                    .first()
+                    .map_or(0.3, |b| b.len() as f32 / SAMPLE_RATE as f32);
                 println!("{:<18} {:.2} s", sfx.name(), secs);
                 audio.play_2d(sfx);
                 if sfx == Sfx::Ricochet {
@@ -259,7 +299,10 @@ mod demo {
                     let intensity = if x <= 1.0 { x } else { 2.0 - x };
                     audio.set_music_intensity(intensity);
                     if i % 8 == 0 {
-                        println!("  intensity {intensity:.2}  playhead {:?}", audio.music_position());
+                        println!(
+                            "  intensity {intensity:.2}  playhead {:?}",
+                            audio.music_position()
+                        );
                     }
                     wait(&mut audio, 0.25);
                 }
@@ -274,11 +317,20 @@ mod demo {
         }
 
         if all || section == Some("spatial") {
-            println!("spatial: footsteps and shots sweeping left -> right 6 m in front, then circling");
+            println!(
+                "spatial: footsteps and shots sweeping left -> right 6 m in front, then circling"
+            );
             for i in 0..=24 {
                 let x = -12.0 + i as f32;
                 let pos = Vec3::new(x, 0.0, -6.0);
-                audio.play_at(if i % 4 == 0 { Sfx::QuillFire } else { Sfx::Footstep }, pos);
+                audio.play_at(
+                    if i % 4 == 0 {
+                        Sfx::QuillFire
+                    } else {
+                        Sfx::Footstep
+                    },
+                    pos,
+                );
                 wait(&mut audio, 0.2);
             }
             for i in 0..32 {

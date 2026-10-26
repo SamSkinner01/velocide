@@ -329,7 +329,13 @@ pub fn build() -> Vec<ModelPart> {
         kit::finish(p.mesh(q));
         p.add(
             TIP + i,
-            spike(at(len - 0.004, 0.0), at(len + 0.04, 0.0), 0.0075, 4, Vec4::ONE),
+            spike(
+                at(len - 0.004, 0.0),
+                at(len + 0.04, 0.0),
+                0.0075,
+                4,
+                Vec4::ONE,
+            ),
         );
     }
 

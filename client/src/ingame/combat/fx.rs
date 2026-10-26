@@ -173,7 +173,13 @@ impl Beams {
                 a + d * t + off * jag * taper
             };
             self.beam(prev, p, width, color, life);
-            self.beam(prev, p, width * 0.35, Vec4::new(2.5, 2.5, 2.6, color.w), life * 0.7);
+            self.beam(
+                prev,
+                p,
+                width * 0.35,
+                Vec4::new(2.5, 2.5, 2.6, color.w),
+                life * 0.7,
+            );
             prev = p;
         }
     }
@@ -240,7 +246,11 @@ impl Beams {
         let tilt = std::f32::consts::PI + (angle * 2.0).sin() * 0.25;
         for i in 0..3 {
             let a = tilt + i as f32 * third;
-            edge(point(a, radius * 0.6), point(a + third, radius * 0.6), radius * 0.08);
+            edge(
+                point(a, radius * 0.6),
+                point(a + third, radius * 0.6),
+                radius * 0.08,
+            );
         }
     }
 
@@ -562,15 +572,34 @@ fn implosion(ctx: &mut FxCtx, position: Vec3, radius: f32) {
     });
     ctx.effects.sparks(position, Vec3::Y, 18);
     ctx.effects.dust(position, 16, r * 1.5);
-    ctx.beams
-        .ring(position + Vec3::Y * 0.3, Vec3::Y, r * 1.2, 0.2, 0.12, hot(green, 2.0), 0.25);
-    ctx.beams
-        .ring(position + Vec3::Y * 0.3, Vec3::Y, 0.3, r, 0.08, hot(green, 1.4), 0.4);
-    ctx.beams
-        .light(position + Vec3::Y * 0.5, Vec3::new(0.8, 2.4, 1.0), r * 3.0, 0.4);
+    ctx.beams.ring(
+        position + Vec3::Y * 0.3,
+        Vec3::Y,
+        r * 1.2,
+        0.2,
+        0.12,
+        hot(green, 2.0),
+        0.25,
+    );
+    ctx.beams.ring(
+        position + Vec3::Y * 0.3,
+        Vec3::Y,
+        0.3,
+        r,
+        0.08,
+        hot(green, 1.4),
+        0.4,
+    );
+    ctx.beams.light(
+        position + Vec3::Y * 0.5,
+        Vec3::new(0.8, 2.4, 1.0),
+        r * 3.0,
+        0.4,
+    );
     let d = position.distance(ctx.listener);
     ctx.feedback.shake(shake_at(d, r * 4.0, 0.8));
-    ctx.audio.play(Sfx::GravewellImplode, PlayParams::at(position));
+    ctx.audio
+        .play(Sfx::GravewellImplode, PlayParams::at(position));
 }
 
 /// A Wisp popping: violet flash, a burst of arcs, a crackle.
@@ -581,11 +610,13 @@ fn wisp_pop(ctx: &mut FxCtx, position: Vec3, radius: f32) {
     ctx.effects.sparks(position, Vec3::Y, 12);
     for _ in 0..6 {
         let to = position + ctx.rng.dir() * r * ctx.rng.range(0.5, 1.0);
-        ctx.beams.arc(position, to, 0.05, hot(violet, 1.6), 0.18, ctx.rng);
+        ctx.beams
+            .arc(position, to, 0.05, hot(violet, 1.6), 0.18, ctx.rng);
     }
     ctx.beams
         .ring(position, Vec3::Y, 0.3, r, 0.07, hot(violet, 1.6), 0.3);
-    ctx.beams.light(position, Vec3::new(1.4, 0.9, 2.4), r * 3.0, 0.3);
+    ctx.beams
+        .light(position, Vec3::new(1.4, 0.9, 2.4), r * 3.0, 0.3);
     let d = position.distance(ctx.listener);
     ctx.feedback.shake(shake_at(d, r * 3.0, 0.4));
     ctx.audio.play(
@@ -624,12 +655,26 @@ pub fn gust_puff(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, origin
 
 /// Arclash Discharge nova around `center` (the shooter's body centre, radius `radius`): rings
 /// rushing out along the floor from their feet, arcs to the edge, a flash.
-pub fn discharge_nova(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, center: Vec3, radius: f32) {
+pub fn discharge_nova(
+    effects: &mut Effects,
+    beams: &mut Beams,
+    rng: &mut Rng,
+    center: Vec3,
+    radius: f32,
+) {
     let r = radius.max(1.0);
     let feet = center - Vec3::Y * 0.8;
     let blue = Vec4::new(0.7, 1.1, 2.0, 0.9);
     beams.ring(feet + Vec3::Y * 0.12, Vec3::Y, 1.2, r, 0.09, blue, 0.32);
-    beams.ring(feet + Vec3::Y * 0.4, Vec3::Y, 1.0, r * 0.8, 0.05, Vec4::new(1.6, 1.8, 2.4, 0.8), 0.26);
+    beams.ring(
+        feet + Vec3::Y * 0.4,
+        Vec3::Y,
+        1.0,
+        r * 0.8,
+        0.05,
+        Vec4::new(1.6, 1.8, 2.4, 0.8),
+        0.26,
+    );
     for _ in 0..9 {
         let a = rng.angle();
         let from = feet + Vec3::new(a.cos(), 0.0, a.sin()) * 1.6 + Vec3::Y * 0.2;
@@ -771,7 +816,8 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             let p = q(*position);
             let r = *radius_dm as f32 / 10.0;
             enemy_fx::ember_bomb_burst(ctx.effects, ctx.rng, p, r);
-            ctx.beams.light(p + Vec3::Y * 0.4, Vec3::new(2.6, 1.3, 0.4), r * 2.6, 0.3);
+            ctx.beams
+                .light(p + Vec3::Y * 0.4, Vec3::new(2.6, 1.3, 0.4), r * 2.6, 0.3);
             let d = p.distance(ctx.listener);
             ctx.feedback.shake(shake_at(d, r * 3.0, 0.35));
             ctx.audio.play(Sfx::EmberBurst, PlayParams::at(p));
@@ -1027,7 +1073,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 .iter()
                 .find(|e| e.id == *enemy)
                 .map_or(kind::CENSER, |e| e.kind);
-            let projectile = if k == kind::HERON { kind::NEEDLE } else { kind::EMBER_BOMB };
+            let projectile = if k == kind::HERON {
+                kind::NEEDLE
+            } else {
+                kind::EMBER_BOMB
+            };
             let c = enemy_projectile_color(projectile);
             ctx.effects.glow(p, c, 1.3, 0.15);
             ctx.effects.sparks(p, Vec3::Y, 6);
@@ -1050,7 +1100,10 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         } => {
             let feet = q(*position);
             let model = super::entities::enemy_kind(*k);
-            let (lift, size) = (model.root_lift() + model.height() * 0.5, model.height() * 1.2);
+            let (lift, size) = (
+                model.root_lift() + model.height() * 0.5,
+                model.height() * 1.2,
+            );
             let center = feet + Vec3::Y * lift;
             ctx.effects
                 .glow(center, glam::Vec4::new(1.0, 0.25, 0.12, 1.0), size, 0.35);
@@ -1177,7 +1230,14 @@ mod tests {
     fn arcs_rings_and_sigils() {
         let mut b = Beams::headless();
         let mut rng = Rng::default();
-        b.arc(Vec3::ZERO, Vec3::new(0.0, 0.0, -10.0), 0.05, ARC_COLOR, 0.1, &mut rng);
+        b.arc(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -10.0),
+            0.05,
+            ARC_COLOR,
+            0.1,
+            &mut rng,
+        );
         let n = b.beam_count();
         assert!(n >= 6, "a zig-zag of segments (+ cores): {n}");
         b.ring(Vec3::ZERO, Vec3::Y, 0.5, 6.0, 0.1, ARC_COLOR, 0.3);

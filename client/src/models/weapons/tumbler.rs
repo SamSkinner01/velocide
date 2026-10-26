@@ -8,8 +8,8 @@ use engine::glam::{Quat, Vec2, Vec3, Vec4};
 
 use crate::models::PartSet;
 use crate::models::kit::{
-    self, BLACK_STEEL, BRASS, DARK_LEATHER, IRON, add_mirrored, block, chamfer_box_z,
-    limb, rgb, tube,
+    self, BLACK_STEEL, BRASS, DARK_LEATHER, IRON, add_mirrored, block, chamfer_box_z, limb, rgb,
+    tube,
 };
 use crate::models::rig::{JointDef, ROOT, Shade, joint, static_part};
 
@@ -143,21 +143,49 @@ pub fn build() -> Vec<ModelPart> {
     let bore = |z: f32| Vec3::new(0.0, BORE_Y, z);
     p.add(
         BODY,
-        tube(bore(-0.215), bore(-0.47), BARREL_R, BARREL_R * 0.94, 10, IRON),
+        tube(
+            bore(-0.215),
+            bore(-0.47),
+            BARREL_R,
+            BARREL_R * 0.94,
+            10,
+            IRON,
+        ),
     );
     for z in [-0.25, -0.38] {
         p.add(
             BODY,
-            tube(bore(z), bore(z - 0.03), BARREL_R + 0.008, BARREL_R + 0.006, 10, BRASS),
+            tube(
+                bore(z),
+                bore(z - 0.03),
+                BARREL_R + 0.008,
+                BARREL_R + 0.006,
+                10,
+                BRASS,
+            ),
         );
     }
     p.add(
         BODY,
-        tube(bore(-0.47), bore(-0.56), BARREL_R * 0.94, BARREL_R * 1.2, 10, IRON),
+        tube(
+            bore(-0.47),
+            bore(-0.56),
+            BARREL_R * 0.94,
+            BARREL_R * 1.2,
+            10,
+            IRON,
+        ),
     );
     p.add(
         BODY,
-        tube(bore(-0.548), bore(-0.562), BARREL_R * 1.12, BARREL_R * 1.12, 10, dark),
+        tube(
+            bore(-0.548),
+            bore(-0.562),
+            BARREL_R * 1.12,
+            BARREL_R * 1.12,
+            10,
+            dark,
+        ),
     );
     // Studs around the muzzle lip.
     for k in 0..6 {
@@ -239,7 +267,15 @@ pub fn build() -> Vec<ModelPart> {
     // Throat ring inside the muzzle and a fuse window on each side of the housing.
     p.add(
         GLOW,
-        kit::band(bore(-0.566), Vec3::Z, BARREL_R * 0.86, 0.006, 0.014, 10, Vec4::ONE),
+        kit::band(
+            bore(-0.566),
+            Vec3::Z,
+            BARREL_R * 0.86,
+            0.006,
+            0.014,
+            10,
+            Vec4::ONE,
+        ),
     );
     let window = block(
         Vec3::new(0.0535, 0.045, 0.035),

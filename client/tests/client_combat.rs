@@ -166,7 +166,8 @@ fn fx_arrive_once_and_own_state_follows_damage() {
             ..Default::default()
         };
         if i == 0 {
-            inp.buttons.set(Buttons::FIRE | Buttons::ALT_FIRE, t % 80 == 5);
+            inp.buttons
+                .set(Buttons::FIRE | Buttons::ALT_FIRE, t % 80 == 5);
         }
         Some(inp)
     });

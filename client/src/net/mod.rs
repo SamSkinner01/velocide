@@ -1058,7 +1058,10 @@ mod tests {
         assert!(c.world().is_none());
         assert!(c.is_disconnected());
         let reason = c.disconnect_reason().unwrap();
-        assert!(reason.contains("invalid level") && reason.contains("brush 0"), "{reason}");
+        assert!(
+            reason.contains("invalid level") && reason.contains("brush 0"),
+            "{reason}"
+        );
 
         let mut c = client();
         c.handle_message(ServerMessage::LoadLevel {
@@ -1112,4 +1115,3 @@ mod tests {
         assert!(c.drain_events().contains(&NetEvent::TuningChanged));
     }
 }
-

@@ -235,7 +235,12 @@ impl Hitbox {
     pub fn distance_to_point_padded(&self, p: Vec3, pads: HitPads) -> Option<(f32, HitPart)> {
         self.shapes
             .iter()
-            .map(|s| (s.distance_to_point(p) - pads.for_part(s.part).max(0.0), s.part))
+            .map(|s| {
+                (
+                    s.distance_to_point(p) - pads.for_part(s.part).max(0.0),
+                    s.part,
+                )
+            })
             .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
@@ -377,13 +382,19 @@ mod tests {
         assert!(h.ray_hit_padded(far, Vec3::NEG_Z, 100.0, pads).is_none());
         // A plain head hit stays a head hit (the padded body reaches this high too).
         let head = Vec3::new(0.0, 1.7, 10.0);
-        assert_eq!(h.ray_hit(head, Vec3::NEG_Z, 100.0).unwrap().1, HitPart::Head);
+        assert_eq!(
+            h.ray_hit(head, Vec3::NEG_Z, 100.0).unwrap().1,
+            HitPart::Head
+        );
         assert_eq!(
             h.ray_hit_padded(head, Vec3::NEG_Z, 100.0, pads).unwrap().1,
             HitPart::Head
         );
         // No pads: identical to the plain test.
-        assert!(h.ray_hit_padded(origin, Vec3::NEG_Z, 100.0, HitPads::NONE).is_none());
+        assert!(
+            h.ray_hit_padded(origin, Vec3::NEG_Z, 100.0, HitPads::NONE)
+                .is_none()
+        );
         // Distances and sweeps shrink by the pad.
         let p = Vec3::new(1.0, 0.6, 0.0);
         let (plain, _) = h.distance_to_point(p).unwrap();

@@ -55,7 +55,9 @@ pub fn enemy_name(k: u16) -> &'static str {
 
 /// Hit capsule of an enemy (radius, top of the body hitbox) for client-side tracer ends.
 pub fn enemy_size(k: u16) -> (f32, f32) {
-    def(k).map_or((0.6, 2.0), |d| (d.radius, d.body_top.unwrap_or(d.height).max(2.0 * d.radius)))
+    def(k).map_or((0.6, 2.0), |d| {
+        (d.radius, d.body_top.unwrap_or(d.height).max(2.0 * d.radius))
+    })
 }
 
 /// Name of attack `index` of enemy kind `k` ("bite", "volley", ...).
@@ -124,17 +126,23 @@ pub fn projectile_color(k: u16) -> Vec4 {
 
 /// Telegraph glint colour of an enemy kind (`colors.telegraph`).
 pub fn telegraph_color(k: u16) -> Vec4 {
-    def(k).map_or(Vec4::new(1.0, 0.2, 0.08, 0.9), |d| d.colors.telegraph.extend(0.9))
+    def(k).map_or(Vec4::new(1.0, 0.2, 0.08, 0.9), |d| {
+        d.colors.telegraph.extend(0.9)
+    })
 }
 
 /// Heat colour of an enemy kind's insides (`colors.glow`): hit sprays and death bursts.
 pub fn heat_color(k: u16) -> Vec4 {
-    def(k).map_or(Vec4::new(1.0, 0.5, 0.15, 1.0), |d| d.colors.glow.extend(1.0))
+    def(k).map_or(Vec4::new(1.0, 0.5, 0.15, 1.0), |d| {
+        d.colors.glow.extend(1.0)
+    })
 }
 
 /// Wax colour of an enemy kind (`colors.body`).
 pub fn wax_color(k: u16) -> Vec4 {
-    def(k).map_or(Vec4::new(0.8, 0.77, 0.7, 1.0), |d| (d.colors.body * 1.25).min(Vec3::ONE).extend(1.0))
+    def(k).map_or(Vec4::new(0.8, 0.77, 0.7, 1.0), |d| {
+        (d.colors.body * 1.25).min(Vec3::ONE).extend(1.0)
+    })
 }
 
 /// Origin and direction of a replicated enemy's aim laser (while `AIMING`), and whether it has
@@ -146,7 +154,10 @@ pub fn aim_laser(e: &EntityState) -> Option<(Vec3, Vec3, bool)> {
     }
     let d = def(e.kind)?;
     let attack = d.attacks.get(((e.aux >> 8) & 0xFF) as usize)?;
-    let muzzle = attack.projectile.as_ref().map_or(Vec3::Y * d.eye_height, |p| p.muzzle);
+    let muzzle = attack
+        .projectile
+        .as_ref()
+        .map_or(Vec3::Y * d.eye_height, |p| p.muzzle);
     let origin = e.position + Quat::from_rotation_y(e.yaw) * muzzle;
     let dir = shared::input::look_dir(e.yaw, e.pitch);
     Some((origin, dir, e.flags & enemy_flags::AIM_LOCKED != 0))
@@ -167,8 +178,16 @@ pub fn laser_end(
     let mut end = world
         .and_then(|w| w.cast_ray(origin, dir, LASER_RANGE, MASK_SHOTS))
         .map_or(LASER_RANGE, |h| h.distance);
-    for p in entities.iter().filter(|p| p.kind == kind::PLAYER && p.flags & player_flags::DEAD == 0) {
-        let shape = HitShape::capsule(HitPart::Body, p.position + Vec3::Y * 0.4, p.position + Vec3::Y * 1.4, 0.4);
+    for p in entities
+        .iter()
+        .filter(|p| p.kind == kind::PLAYER && p.flags & player_flags::DEAD == 0)
+    {
+        let shape = HitShape::capsule(
+            HitPart::Body,
+            p.position + Vec3::Y * 0.4,
+            p.position + Vec3::Y * 1.4,
+            0.4,
+        );
         if let Some(d) = shape.ray_hit(origin, dir, end) {
             end = d;
         }
@@ -186,13 +205,24 @@ pub fn laser_end(
 
 /// A hit cracks a Mould: pale wax droplets flying off along the shot (some set as wax splats
 /// where they land), molten droplets and sparks (`amount` ~1 for a normal hit).
-pub fn wax_hit(effects: &mut Effects, rng: &mut Rng, at: Vec3, dir: Vec3, amount: f32, wax: Vec4, heat: Vec4) {
+pub fn wax_hit(
+    effects: &mut Effects,
+    rng: &mut Rng,
+    at: Vec3,
+    dir: Vec3,
+    amount: f32,
+    wax: Vec4,
+    heat: Vec4,
+) {
     let n = (amount * 5.0).clamp(2.0, 18.0) as usize;
     for k in 0..n {
         let v = (dir + rng.dir() * 0.8).normalize_or(Vec3::Y) * rng.range(2.5, 7.0) + Vec3::Y * 2.0;
         // Every fourth drop sets where it lands: a wax splat on the floor or wall.
         let (texture, collide) = if k % 4 == 0 {
-            (FxTex::WaxDrop, OnHit::Splat(DecalKind::Wax, rng.range(0.25, 0.5)))
+            (
+                FxTex::WaxDrop,
+                OnHit::Splat(DecalKind::Wax, rng.range(0.25, 0.5)),
+            )
         } else {
             (FxTex::Glow, OnHit::Die)
         };
@@ -235,11 +265,23 @@ pub fn wax_hit(effects: &mut Effects, rng: &mut Rng, at: Vec3, dir: Vec3, amount
 
 /// A dead Mould releases its heat: a flash, a fountain of embers, wax chunks and smoke, and a
 /// scorch mark on the floor under it. `size` ~1 for a Gnawer, ~2 for the Gaoler.
-pub fn ember_burst(effects: &mut Effects, rng: &mut Rng, center: Vec3, size: f32, wax: Vec4, heat: Vec4) {
+pub fn ember_burst(
+    effects: &mut Effects,
+    rng: &mut Rng,
+    center: Vec3,
+    size: f32,
+    wax: Vec4,
+    heat: Vec4,
+) {
     effects.glow(center, Vec4::new(1.0, 0.75, 0.4, 1.0), 2.2 * size, 0.35);
     let embers = (26.0 * size) as usize;
     for _ in 0..embers {
-        let v = Vec3::new(rng.range(-1.0, 1.0), rng.range(0.6, 1.6), rng.range(-1.0, 1.0)) * rng.range(2.0, 7.0) * size.sqrt();
+        let v = Vec3::new(
+            rng.range(-1.0, 1.0),
+            rng.range(0.6, 1.6),
+            rng.range(-1.0, 1.0),
+        ) * rng.range(2.0, 7.0)
+            * size.sqrt();
         effects.spawn(Particle {
             position: center + rng.dir() * 0.4 * size,
             velocity: v,
@@ -248,7 +290,11 @@ pub fn ember_burst(effects: &mut Effects, rng: &mut Rng, center: Vec3, size: f32
             max_life: rng.range(0.8, 1.8),
             size: Vec2::splat(rng.range(0.06, 0.14)),
             end_scale: 0.3,
-            color: if rng.unit() < 0.5 { heat } else { Vec4::new(1.0, 0.85, 0.45, 1.0) },
+            color: if rng.unit() < 0.5 {
+                heat
+            } else {
+                Vec4::new(1.0, 0.85, 0.45, 1.0)
+            },
             end_alpha: 0.0,
             texture: FxTex::Spark,
             additive: true,
@@ -306,7 +352,11 @@ pub fn smoulder(effects: &mut Effects, rng: &mut Rng, at: Vec3, spread: f32, hea
     });
     effects.spawn(Particle {
         position: at + rng.dir() * spread * 0.5,
-        velocity: Vec3::new(rng.range(-0.3, 0.3), rng.range(1.0, 2.5), rng.range(-0.3, 0.3)),
+        velocity: Vec3::new(
+            rng.range(-0.3, 0.3),
+            rng.range(1.0, 2.5),
+            rng.range(-0.3, 0.3),
+        ),
         gravity: -0.5,
         max_life: rng.range(0.6, 1.2),
         size: Vec2::splat(0.08),

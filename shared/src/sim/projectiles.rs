@@ -544,8 +544,8 @@ impl SimWorld {
                     offset: Vec3::ZERO,
                 });
                 p.velocity = Vec3::ZERO;
-                p.expire_tick =
-                    now + secs_to_ticks(t.combat.tumbler.gravewell_pull_time, self.tick_rate, 1) as u32;
+                p.expire_tick = now
+                    + secs_to_ticks(t.combat.tumbler.gravewell_pull_time, self.tick_rate, 1) as u32;
                 p.relaunch(now);
                 self.events.push(SimEvent::GravewellStuck {
                     id: p.id,

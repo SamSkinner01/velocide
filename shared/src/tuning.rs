@@ -1239,7 +1239,8 @@ mod tests {
         let mut chars = text.chars().peekable();
         let mut prev = ' ';
         while let Some(c) = chars.next() {
-            let starts_number = (c.is_ascii_digit() || c == '-') && matches!(prev, ':' | ',' | '(' | '[');
+            let starts_number =
+                (c.is_ascii_digit() || c == '-') && matches!(prev, ':' | ',' | '(' | '[');
             if !starts_number {
                 out.push(c);
                 prev = c;
@@ -1253,7 +1254,11 @@ mod tests {
                 token.push(n);
                 chars.next();
             }
-            out.push_str(if token.contains(['.', 'e']) { float } else { int });
+            out.push_str(if token.contains(['.', 'e']) {
+                float
+            } else {
+                int
+            });
             prev = '0';
         }
         ron::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"))
@@ -1266,7 +1271,10 @@ mod tests {
         assert_eq!(t, Tuning::default());
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/tuning.ron");
         let mut shipped: Tuning = ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert!(!shipped.sanitize(), "assets/tuning.ron has out-of-range values");
+        assert!(
+            !shipped.sanitize(),
+            "assets/tuning.ron has out-of-range values"
+        );
     }
 
     #[test]

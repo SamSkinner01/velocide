@@ -404,9 +404,9 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 waves: *waves,
                 enemies: *enemies,
             }),
-            SimEvent::EncounterCleared { index } => {
-                routed.broadcast.push(GameEvent::EncounterCleared { index: *index })
-            }
+            SimEvent::EncounterCleared { index } => routed
+                .broadcast
+                .push(GameEvent::EncounterCleared { index: *index }),
             // Visible through entities / other events, or server-internal.
             SimEvent::Jumped { .. }
             | SimEvent::Landed { .. }

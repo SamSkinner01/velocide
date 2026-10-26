@@ -717,7 +717,10 @@ mod tests {
             assert!(p.recolours_world());
             let c = p.effect(art, p.brand, 1.6);
             assert_eq!(c, (p.brand.truncate() * 1.6).extend(0.95), "{:?}", p.mode);
-            assert_eq!(p.light(light, p.aim_laser, 2.0), p.aim_laser.truncate() * 2.0);
+            assert_eq!(
+                p.light(light, p.aim_laser, 2.0),
+                p.aim_laser.truncate() * 2.0
+            );
             assert_eq!(p.model_glow(p.telegraph), Some(p.telegraph));
         }
     }

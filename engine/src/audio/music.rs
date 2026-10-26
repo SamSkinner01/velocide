@@ -177,7 +177,9 @@ impl MusicData {
             for (stem, &g) in self.stems.iter().zip(gains) {
                 let s = stem.frames[pos];
                 let t = match pos.checked_sub(self.loop_start) {
-                    Some(k) if first_pass => stem.first_pass_tail.get(k).copied().unwrap_or_default(),
+                    Some(k) if first_pass => {
+                        stem.first_pass_tail.get(k).copied().unwrap_or_default()
+                    }
                     _ => [0.0; 2],
                 };
                 f[0] += (s[0] + t[0]) * g;
@@ -406,7 +408,15 @@ impl Arrangement {
     }
 
     /// Places `sample` at every hit of `pattern` in `bar`, scaled by hit velocity.
-    fn pattern(&mut self, kind: StemKind, bar: usize, pattern: &str, sample: &[f32], gain: f32, pan: f32) {
+    fn pattern(
+        &mut self,
+        kind: StemKind,
+        bar: usize,
+        pattern: &str,
+        sample: &[f32],
+        gain: f32,
+        pan: f32,
+    ) {
         for (step, vel) in hits(pattern) {
             self.add(kind, bar, step, sample, gain * vel, pan);
         }
@@ -466,7 +476,11 @@ impl Arrangement {
         let loud = loudness(&mid, SR, 0.4);
         let gain = db_to_gain(level_db - loud).min(0.89 / pk.max(1e-6));
         for stem in &mut stems {
-            for f in stem.frames.iter_mut().chain(stem.first_pass_tail.iter_mut()) {
+            for f in stem
+                .frames
+                .iter_mut()
+                .chain(stem.first_pass_tail.iter_mut())
+            {
                 f[0] *= gain;
                 f[1] *= gain;
             }
@@ -505,7 +519,16 @@ fn kick(r: &mut Rng, tight: bool) -> Vec<f32> {
 
 fn snare(r: &mut Rng, big: bool) -> Vec<f32> {
     let body = thump(0.2, 260.0, 185.0, 0.01, 0.045);
-    let rattle = noise(r, 0.35, Pass::Band, 5000.0, 2500.0, 0.7, 0.0005, if big { 0.12 } else { 0.07 });
+    let rattle = noise(
+        r,
+        0.35,
+        Pass::Band,
+        5000.0,
+        2500.0,
+        0.7,
+        0.0005,
+        if big { 0.12 } else { 0.07 },
+    );
     let crack = click(r, 0.002);
     let mut b = layer(&[(&body, 0.8, 0.0), (&rattle, 1.0, 0.0), (&crack, 0.5, 0.0)]);
     drive(&mut b, 2.0);
@@ -517,7 +540,8 @@ fn snare(r: &mut Rng, big: bool) -> Vec<f32> {
 
 /// 808-style metallic hat: six detuned squares through a band-pass, plus noise.
 fn hat(r: &mut Rng, decay: f32) -> Vec<f32> {
-    let mut oscs = [263.0f32, 400.0, 421.0, 474.0, 587.0, 845.0].map(|f| (Osc::new(Wave::Square), f));
+    let mut oscs =
+        [263.0f32, 400.0, 421.0, 474.0, 587.0, 845.0].map(|f| (Osc::new(Wave::Square), f));
     let mut n = Rng::new(r.next_u64());
     let (mut bp, mut hp) = (Svf::default(), Svf::default());
     super::dsp::render(decay * 6.0 + 0.01, |t, _| {
@@ -535,7 +559,16 @@ fn crash(r: &mut Rng) -> Vec<f32> {
 
 /// Industrial anvil hit.
 fn clank(r: &mut Rng) -> Vec<f32> {
-    let ring = metal(0.4, 520.0, &[(1.0, 1.0, 0.09), (2.41, 0.7, 0.06), (3.73, 0.5, 0.04), (5.6, 0.3, 0.03)]);
+    let ring = metal(
+        0.4,
+        520.0,
+        &[
+            (1.0, 1.0, 0.09),
+            (2.41, 0.7, 0.06),
+            (3.73, 0.5, 0.04),
+            (5.6, 0.3, 0.03),
+        ],
+    );
     let hit = click(r, 0.002);
     let mut b = layer(&[(&ring, 0.8, 0.0), (&hit, 0.6, 0.0)]);
     super::dsp::crush(&mut b, 8, 2.0);
@@ -570,7 +603,11 @@ fn bass_sub(freq: f32, secs: f32) -> Vec<f32> {
 
 /// Detuned-saw "reese" bass for drum'n'bass.
 fn bass_reese(freq: f32, secs: f32, vel: f32) -> Vec<f32> {
-    let (mut a, mut b, mut sub) = (Osc::new(Wave::Saw), Osc::new(Wave::Saw).phase(0.5), Osc::new(Wave::Sine));
+    let (mut a, mut b, mut sub) = (
+        Osc::new(Wave::Saw),
+        Osc::new(Wave::Saw).phase(0.5),
+        Osc::new(Wave::Sine),
+    );
     let mut lp = Svf::default();
     super::dsp::render(secs + 0.06, |t, _| {
         let x = a.next(freq * cents(-14.0)) + b.next(freq * cents(14.0));
@@ -586,10 +623,18 @@ fn guitar(r: &mut Rng, root: f32, secs: f32, muted: bool, gain_drive: f32) -> Ve
     let mut oscs = Vec::new();
     for ratio in [1.0f32, 1.4983, 2.0] {
         for c in [-7.0f32, 6.0] {
-            oscs.push((Osc::new(Wave::Saw).phase(r.f32()), root * ratio * cents(c + r.range(-2.0, 2.0))));
+            oscs.push((
+                Osc::new(Wave::Saw).phase(r.f32()),
+                root * ratio * cents(c + r.range(-2.0, 2.0)),
+            ));
         }
     }
-    let (mut hp, mut pre, mut cab, mut cab2) = (Svf::default(), Svf::default(), Svf::default(), Svf::default());
+    let (mut hp, mut pre, mut cab, mut cab2) = (
+        Svf::default(),
+        Svf::default(),
+        Svf::default(),
+        Svf::default(),
+    );
     let mut scoop = Biquad::peaking(750.0, 0.8, -5.0, SR);
     let pre_fc = if muted { 1000.0 } else { 4000.0 };
     let len = secs + if muted { 0.03 } else { 0.15 };
@@ -621,7 +666,11 @@ enum LeadStyle {
 fn lead(freq: f32, secs: f32, style: LeadStyle) -> Vec<f32> {
     match style {
         LeadStyle::Square | LeadStyle::Saw => {
-            let (mut a, mut b, mut vib) = (Osc::new(Wave::Square), Osc::new(Wave::Saw).phase(0.3), Osc::new(Wave::Sine));
+            let (mut a, mut b, mut vib) = (
+                Osc::new(Wave::Square),
+                Osc::new(Wave::Saw).phase(0.3),
+                Osc::new(Wave::Sine),
+            );
             let mut lp = Svf::default();
             let saw = matches!(style, LeadStyle::Saw);
             super::dsp::render(secs + 0.08, |t, _| {
@@ -640,7 +689,8 @@ fn lead(freq: f32, secs: f32, style: LeadStyle) -> Vec<f32> {
             let mut sq = Osc::new(Wave::Square);
             let mut lp = Svf::default();
             super::dsp::render(secs + 0.2, |t, _| {
-                lp.lowpass(sq.next(freq), 300.0 + 4000.0 * perc(t, 0.001, 0.05), 1.0) * perc(t, 0.001, 0.14)
+                lp.lowpass(sq.next(freq), 300.0 + 4000.0 * perc(t, 0.001, 0.05), 1.0)
+                    * perc(t, 0.001, 0.14)
             })
         }
     }
@@ -648,7 +698,14 @@ fn lead(freq: f32, secs: f32, style: LeadStyle) -> Vec<f32> {
 
 /// Sustained chord from detuned saws per channel (wide stereo) plus a sine sub, through a
 /// slowly breathing low-pass.
-fn pad(notes: &[f32], secs: f32, cutoff: f32, attack: f32, release: f32, seed: u64) -> [Vec<f32>; 2] {
+fn pad(
+    notes: &[f32],
+    secs: f32,
+    cutoff: f32,
+    attack: f32,
+    release: f32,
+    seed: u64,
+) -> [Vec<f32>; 2] {
     let mut r = Rng::new(seed);
     let mut out = [Vec::new(), Vec::new()];
     for (ch, buf) in out.iter_mut().enumerate() {
@@ -694,7 +751,15 @@ fn place_melody(a: &mut Arrangement, phrases: &[Phrase], style: LeadStyle, gain:
 }
 
 /// Double-tracked guitar: two separate takes hard-ish left and right, the right one a few ms late.
-fn place_guitar(a: &mut Arrangement, r: &mut Rng, bar: usize, root_midi: f32, pattern: &str, gain: f32, gain_drive: f32) {
+fn place_guitar(
+    a: &mut Arrangement,
+    r: &mut Rng,
+    bar: usize,
+    root_midi: f32,
+    pattern: &str,
+    gain: f32,
+    gain_drive: f32,
+) {
     let hs = hits(pattern);
     for (i, &(step, vel)) in hs.iter().enumerate() {
         let next = hs.get(i + 1).map_or(16, |h| h.0);
@@ -718,7 +783,14 @@ fn menu() -> MusicData {
 
     for b in 0..8 {
         let n = 45.0 + roots[b];
-        let chord = pad(&[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]], bar, 700.0, 0.8, 1.2, r.next_u64());
+        let chord = pad(
+            &[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]],
+            bar,
+            700.0,
+            0.8,
+            1.2,
+            r.next_u64(),
+        );
         let pos = a.song.at(b, 0);
         a.add_stereo_at(StemKind::Pad, pos, &chord, 0.5);
 
@@ -737,15 +809,54 @@ fn menu() -> MusicData {
     let snare_big = snare(&mut r, true);
     let cymbal = crash(&mut r);
     for b in 0..8 {
-        a.pattern(StemKind::DrumsLight, b, "X.........o.....", &low_tom, 0.9, 0.0);
-        a.pattern(StemKind::DrumsLight, b, "............x...", &anvil, 0.4, 0.35);
-        a.pattern(StemKind::DrumsLight, b, "o.o.o.o.o.o.o.o.", &hat_c, 0.35, -0.3);
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "X.........o.....",
+            &low_tom,
+            0.9,
+            0.0,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "............x...",
+            &anvil,
+            0.4,
+            0.35,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "o.o.o.o.o.o.o.o.",
+            &hat_c,
+            0.35,
+            -0.3,
+        );
         // Half-time heavy beat.
-        let k = if b == 7 { "X.....X...X.X..." } else { "X.........X....." };
+        let k = if b == 7 {
+            "X.....X...X.X..."
+        } else {
+            "X.........X....."
+        };
         a.pattern(StemKind::DrumsFull, b, k, &kick_big, 1.0, 0.0);
-        a.pattern(StemKind::DrumsFull, b, "........X.......", &snare_big, 0.8, 0.0);
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "........X.......",
+            &snare_big,
+            0.8,
+            0.0,
+        );
         if b % 4 == 0 {
-            a.pattern(StemKind::DrumsFull, b, "X...............", &cymbal, 0.4, 0.2);
+            a.pattern(
+                StemKind::DrumsFull,
+                b,
+                "X...............",
+                &cymbal,
+                0.4,
+                0.2,
+            );
         }
     }
     a.effect(StemKind::DrumsLight, |t| t.reverb(0.85, 0.4, 0.3));
@@ -754,7 +865,13 @@ fn menu() -> MusicData {
     for b in (0..8).step_by(2) {
         let take_secs = a.bar_secs() * 2.0;
         for (pan, delay) in [(-0.6f32, 0usize), (0.6, samples(0.006))] {
-            let mut take = guitar(&mut r, midi_hz(40.0 + roots[b] + 5.0), take_secs, false, 7.0);
+            let mut take = guitar(
+                &mut r,
+                midi_hz(40.0 + roots[b] + 5.0),
+                take_secs,
+                false,
+                7.0,
+            );
             for (i, s) in take.iter_mut().enumerate() {
                 *s *= smoothstep(0.0, 1.2, i as f32 / SR);
             }
@@ -790,7 +907,14 @@ fn campaign() -> MusicData {
 
     for b in 0..8 {
         let n = 52.0 + roots[b];
-        let chord = pad(&[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]], bar, 1000.0, 0.2, 0.5, r.next_u64());
+        let chord = pad(
+            &[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]],
+            bar,
+            1000.0,
+            0.2,
+            0.5,
+            r.next_u64(),
+        );
         let pos = a.song.at(b, 0);
         a.add_stereo_at(StemKind::Pad, pos, &chord, 0.6);
 
@@ -822,9 +946,30 @@ fn campaign() -> MusicData {
     let cymbal = crash(&mut r);
     let anvil = clank(&mut r);
     for b in 0..8 {
-        a.pattern(StemKind::DrumsLight, b, "X.......X.......", &kick_t, 0.9, 0.0);
-        a.pattern(StemKind::DrumsLight, b, "x.x.x.x.x.x.x.x.", &hat_c, 0.3, 0.3);
-        a.pattern(StemKind::DrumsLight, b, "....o.......o...", &snare_t, 0.6, 0.0);
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "X.......X.......",
+            &kick_t,
+            0.9,
+            0.0,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "x.x.x.x.x.x.x.x.",
+            &hat_c,
+            0.3,
+            0.3,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "....o.......o...",
+            &snare_t,
+            0.6,
+            0.0,
+        );
 
         let (k, s) = if b == 7 {
             ("X.....X.X.X.X...", "....X..XX.XXXXXX")
@@ -834,21 +979,92 @@ fn campaign() -> MusicData {
         a.pattern(StemKind::DrumsFull, b, k, &kick_t, 0.9, 0.0);
         a.pattern(StemKind::DrumsFull, b, s, &snare_t, 0.85, 0.0);
         a.pattern(StemKind::DrumsFull, b, ".o.o.o.o.o.o.o.o", &hat_c, 0.3, 0.3);
-        a.pattern(StemKind::DrumsFull, b, "...x.......x....", &anvil, 0.35, -0.4);
-        a.pattern(StemKind::DrumsFull, b, "..............x.", &hat_o, 0.35, 0.3);
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "...x.......x....",
+            &anvil,
+            0.35,
+            -0.4,
+        );
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "..............x.",
+            &hat_o,
+            0.35,
+            0.3,
+        );
         if b % 4 == 0 {
-            a.pattern(StemKind::DrumsFull, b, "X...............", &cymbal, 0.45, -0.2);
+            a.pattern(
+                StemKind::DrumsFull,
+                b,
+                "X...............",
+                &cymbal,
+                0.45,
+                -0.2,
+            );
         }
     }
 
     let melody: [Phrase; 8] = [
-        &[(0, 2, 76.0), (2, 2, 77.0), (4, 2, 79.0), (6, 1, 77.0), (7, 1, 76.0), (8, 4, 71.0), (12, 2, 72.0), (14, 2, 71.0)],
-        &[(0, 3, 76.0), (3, 1, 74.0), (4, 2, 76.0), (6, 2, 79.0), (8, 2, 77.0), (10, 2, 76.0), (12, 4, 74.0)],
-        &[(0, 3, 77.0), (3, 1, 79.0), (4, 2, 81.0), (6, 2, 79.0), (8, 4, 77.0), (12, 4, 72.0)],
-        &[(0, 6, 76.0), (6, 2, 71.0), (8, 2, 76.0), (10, 2, 77.0), (12, 4, 76.0)],
-        &[(0, 2, 72.0), (2, 2, 76.0), (4, 4, 79.0), (8, 2, 76.0), (10, 2, 79.0), (12, 4, 84.0)],
-        &[(0, 2, 74.0), (2, 2, 77.0), (4, 4, 81.0), (8, 2, 77.0), (10, 2, 81.0), (12, 4, 86.0)],
-        &[(0, 4, 88.0), (4, 2, 86.0), (6, 2, 84.0), (8, 4, 83.0), (12, 4, 79.0)],
+        &[
+            (0, 2, 76.0),
+            (2, 2, 77.0),
+            (4, 2, 79.0),
+            (6, 1, 77.0),
+            (7, 1, 76.0),
+            (8, 4, 71.0),
+            (12, 2, 72.0),
+            (14, 2, 71.0),
+        ],
+        &[
+            (0, 3, 76.0),
+            (3, 1, 74.0),
+            (4, 2, 76.0),
+            (6, 2, 79.0),
+            (8, 2, 77.0),
+            (10, 2, 76.0),
+            (12, 4, 74.0),
+        ],
+        &[
+            (0, 3, 77.0),
+            (3, 1, 79.0),
+            (4, 2, 81.0),
+            (6, 2, 79.0),
+            (8, 4, 77.0),
+            (12, 4, 72.0),
+        ],
+        &[
+            (0, 6, 76.0),
+            (6, 2, 71.0),
+            (8, 2, 76.0),
+            (10, 2, 77.0),
+            (12, 4, 76.0),
+        ],
+        &[
+            (0, 2, 72.0),
+            (2, 2, 76.0),
+            (4, 4, 79.0),
+            (8, 2, 76.0),
+            (10, 2, 79.0),
+            (12, 4, 84.0),
+        ],
+        &[
+            (0, 2, 74.0),
+            (2, 2, 77.0),
+            (4, 4, 81.0),
+            (8, 2, 77.0),
+            (10, 2, 81.0),
+            (12, 4, 86.0),
+        ],
+        &[
+            (0, 4, 88.0),
+            (4, 2, 86.0),
+            (6, 2, 84.0),
+            (8, 4, 83.0),
+            (12, 4, 79.0),
+        ],
         &[(0, 8, 82.0), (8, 4, 81.0), (12, 4, 77.0)],
     ];
     place_melody(&mut a, &melody, LeadStyle::Square, 0.5, 0.1);
@@ -868,7 +1084,14 @@ fn arena() -> MusicData {
 
     for b in 0..8 {
         let n = 50.0 + roots[b];
-        let chord = pad(&[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]], bar, 1100.0, 0.15, 0.4, r.next_u64());
+        let chord = pad(
+            &[n, n + 7.0, n + 12.0, n + 12.0 + thirds[b]],
+            bar,
+            1100.0,
+            0.15,
+            0.4,
+            r.next_u64(),
+        );
         let pos = a.song.at(b, 0);
         a.add_stereo_at(StemKind::Pad, pos, &chord, 0.55);
 
@@ -881,7 +1104,11 @@ fn arena() -> MusicData {
             a.add(StemKind::Bass, b, step, &note, 0.5, 0.0);
         }
 
-        let gpat = if b == 7 { "X...X...X.X.X.X." } else { "X..x..x.X..x.x.x" };
+        let gpat = if b == 7 {
+            "X...X...X.X.X.X."
+        } else {
+            "X..x..x.X..x.x.x"
+        };
         place_guitar(&mut a, &mut r, b, 38.0 + roots[b] + 12.0, gpat, 0.42, 10.0);
     }
 
@@ -892,9 +1119,30 @@ fn arena() -> MusicData {
     let cymbal = crash(&mut r);
     let anvil = clank(&mut r);
     for b in 0..8 {
-        a.pattern(StemKind::DrumsLight, b, "X.........X.....", &kick_t, 0.9, 0.0);
-        a.pattern(StemKind::DrumsLight, b, "x.x.x.x.x.x.x.x.", &hat_c, 0.3, 0.25);
-        a.pattern(StemKind::DrumsLight, b, "....o.......o...", &snare_t, 0.6, 0.0);
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "X.........X.....",
+            &kick_t,
+            0.9,
+            0.0,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "x.x.x.x.x.x.x.x.",
+            &hat_c,
+            0.3,
+            0.25,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "....o.......o...",
+            &snare_t,
+            0.6,
+            0.0,
+        );
 
         let (k, s) = if b == 7 {
             ("X.X...X...X.X...", "....X.XoX.XXXXXX")
@@ -905,21 +1153,84 @@ fn arena() -> MusicData {
         };
         a.pattern(StemKind::DrumsFull, b, k, &kick_t, 0.85, 0.0);
         a.pattern(StemKind::DrumsFull, b, s, &snare_t, 0.85, 0.0);
-        a.pattern(StemKind::DrumsFull, b, "x.x.x.x.x.x.x.x.", &ride, 0.25, -0.3);
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "x.x.x.x.x.x.x.x.",
+            &ride,
+            0.25,
+            -0.3,
+        );
         a.pattern(StemKind::DrumsFull, b, ".......x.......x", &anvil, 0.3, 0.4);
         if b % 4 == 0 {
-            a.pattern(StemKind::DrumsFull, b, "X...............", &cymbal, 0.45, 0.2);
+            a.pattern(
+                StemKind::DrumsFull,
+                b,
+                "X...............",
+                &cymbal,
+                0.45,
+                0.2,
+            );
         }
     }
 
     let melody: [Phrase; 8] = [
-        &[(0, 2, 74.0), (2, 2, 77.0), (4, 2, 81.0), (6, 2, 77.0), (8, 3, 86.0), (11, 1, 84.0), (12, 4, 81.0)],
-        &[(0, 2, 79.0), (2, 2, 77.0), (4, 4, 76.0), (8, 2, 77.0), (10, 2, 76.0), (12, 4, 74.0)],
-        &[(0, 3, 74.0), (3, 1, 77.0), (4, 4, 82.0), (8, 2, 81.0), (10, 2, 79.0), (12, 4, 77.0)],
-        &[(0, 3, 76.0), (3, 1, 79.0), (4, 4, 84.0), (8, 2, 82.0), (10, 2, 81.0), (12, 4, 79.0)],
-        &[(0, 2, 86.0), (2, 2, 84.0), (4, 2, 81.0), (6, 2, 77.0), (8, 4, 81.0), (12, 4, 74.0)],
-        &[(0, 2, 74.0), (2, 2, 76.0), (4, 2, 77.0), (6, 2, 79.0), (8, 4, 81.0), (12, 4, 77.0)],
-        &[(0, 4, 79.0), (4, 2, 82.0), (6, 2, 86.0), (8, 4, 91.0), (12, 4, 86.0)],
+        &[
+            (0, 2, 74.0),
+            (2, 2, 77.0),
+            (4, 2, 81.0),
+            (6, 2, 77.0),
+            (8, 3, 86.0),
+            (11, 1, 84.0),
+            (12, 4, 81.0),
+        ],
+        &[
+            (0, 2, 79.0),
+            (2, 2, 77.0),
+            (4, 4, 76.0),
+            (8, 2, 77.0),
+            (10, 2, 76.0),
+            (12, 4, 74.0),
+        ],
+        &[
+            (0, 3, 74.0),
+            (3, 1, 77.0),
+            (4, 4, 82.0),
+            (8, 2, 81.0),
+            (10, 2, 79.0),
+            (12, 4, 77.0),
+        ],
+        &[
+            (0, 3, 76.0),
+            (3, 1, 79.0),
+            (4, 4, 84.0),
+            (8, 2, 82.0),
+            (10, 2, 81.0),
+            (12, 4, 79.0),
+        ],
+        &[
+            (0, 2, 86.0),
+            (2, 2, 84.0),
+            (4, 2, 81.0),
+            (6, 2, 77.0),
+            (8, 4, 81.0),
+            (12, 4, 74.0),
+        ],
+        &[
+            (0, 2, 74.0),
+            (2, 2, 76.0),
+            (4, 2, 77.0),
+            (6, 2, 79.0),
+            (8, 4, 81.0),
+            (12, 4, 77.0),
+        ],
+        &[
+            (0, 4, 79.0),
+            (4, 2, 82.0),
+            (6, 2, 86.0),
+            (8, 4, 91.0),
+            (12, 4, 86.0),
+        ],
         &[(0, 4, 85.0), (4, 4, 81.0), (8, 4, 76.0), (12, 4, 73.0)],
     ];
     place_melody(&mut a, &melody, LeadStyle::Saw, 0.5, -0.1);
@@ -944,18 +1255,33 @@ fn results() -> MusicData {
         if b == 0 {
             notes.push(n + 14.0);
         }
-        let chord = pad(&notes, bar, 1600.0, if b == 0 { 0.005 } else { 0.1 }, 0.5, r.next_u64());
+        let chord = pad(
+            &notes,
+            bar,
+            1600.0,
+            if b == 0 { 0.005 } else { 0.1 },
+            0.5,
+            r.next_u64(),
+        );
         let pos = a.song.at(b, 0);
         a.add_stereo_at(StemKind::Pad, pos, &chord, 0.35);
 
         let f = midi_hz(45.0 + roots[b]);
-        let pat = if b == 0 { "X..............." } else { "X.x.X.x.X.x.X.x." };
+        let pat = if b == 0 {
+            "X..............."
+        } else {
+            "X.x.X.x.X.x.X.x."
+        };
         for (step, vel) in hits(pat) {
             let note = bass_growl(f, a.song.secs(if b == 0 { 12.0 } else { 1.8 }), vel * 0.6);
             a.add(StemKind::Bass, b, step, &note, 0.5 * vel, 0.0);
         }
 
-        let gpat = if b == 0 { "X..............." } else { "X.......X......." };
+        let gpat = if b == 0 {
+            "X..............."
+        } else {
+            "X.......X......."
+        };
         place_guitar(&mut a, &mut r, b, 45.0 + roots[b], gpat, 0.22, 5.0);
 
         // Arpeggio over the chord tones.
@@ -964,7 +1290,14 @@ fn results() -> MusicData {
             for step in 0..16 {
                 let note = tones[[0, 1, 2, 3, 2, 1][step % 6]];
                 let pluck = lead(midi_hz(note), a.song.secs(1.0), LeadStyle::Pluck);
-                a.add(StemKind::Lead, b, step, &pluck, if step % 4 == 0 { 0.3 } else { 0.2 }, 0.2);
+                a.add(
+                    StemKind::Lead,
+                    b,
+                    step,
+                    &pluck,
+                    if step % 4 == 0 { 0.3 } else { 0.2 },
+                    0.2,
+                );
             }
         }
     }
@@ -975,14 +1308,63 @@ fn results() -> MusicData {
     let cymbal = crash(&mut r);
     let low_tom = tom(&mut r, 90.0);
     // Sting: kick + crash, tom roll swelling into the loop.
-    a.pattern(StemKind::DrumsLight, 0, "X...............", &kick_t, 1.0, 0.0);
-    a.pattern(StemKind::DrumsLight, 0, "X...............", &cymbal, 0.6, 0.0);
-    a.pattern(StemKind::DrumsFull, 0, "........ooxxxXXX", &low_tom, 0.7, -0.2);
+    a.pattern(
+        StemKind::DrumsLight,
+        0,
+        "X...............",
+        &kick_t,
+        1.0,
+        0.0,
+    );
+    a.pattern(
+        StemKind::DrumsLight,
+        0,
+        "X...............",
+        &cymbal,
+        0.6,
+        0.0,
+    );
+    a.pattern(
+        StemKind::DrumsFull,
+        0,
+        "........ooxxxXXX",
+        &low_tom,
+        0.7,
+        -0.2,
+    );
     for b in 1..5 {
-        a.pattern(StemKind::DrumsLight, b, "X.......X.......", &kick_t, 0.8, 0.0);
-        a.pattern(StemKind::DrumsLight, b, "x.x.x.x.x.x.x.x.", &hat_c, 0.25, 0.3);
-        a.pattern(StemKind::DrumsFull, b, "....X..o....X...", &snare_t, 0.7, 0.0);
-        a.pattern(StemKind::DrumsFull, b, "..........X.....", &kick_t, 0.6, 0.0);
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "X.......X.......",
+            &kick_t,
+            0.8,
+            0.0,
+        );
+        a.pattern(
+            StemKind::DrumsLight,
+            b,
+            "x.x.x.x.x.x.x.x.",
+            &hat_c,
+            0.25,
+            0.3,
+        );
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "....X..o....X...",
+            &snare_t,
+            0.7,
+            0.0,
+        );
+        a.pattern(
+            StemKind::DrumsFull,
+            b,
+            "..........X.....",
+            &kick_t,
+            0.6,
+            0.0,
+        );
     }
     let dotted_eighth = a.song.step * 3;
     a.effect(StemKind::Lead, |t| t.echo(dotted_eighth, 0.3, 0.25));
@@ -1015,16 +1397,37 @@ mod tests {
             assert_eq!(data.stems.len(), STEM_COUNT);
             let bar = (SR * 60.0 / data.bpm * 4.0).round() as usize;
             assert_eq!(data.bar_frames, bar);
-            assert_eq!(data.len(), bar * data.bars, "{track:?} not a whole number of bars");
+            assert_eq!(
+                data.len(),
+                bar * data.bars,
+                "{track:?} not a whole number of bars"
+            );
             assert_eq!(data.loop_start % bar, 0);
             for stem in &data.stems {
-                assert_eq!(stem.frames.len(), data.len(), "{track:?}/{}", stem.kind.name());
+                assert_eq!(
+                    stem.frames.len(),
+                    data.len(),
+                    "{track:?}/{}",
+                    stem.kind.name()
+                );
                 let flat: Vec<f32> = stem.frames.iter().flatten().copied().collect();
-                assert!(flat.iter().all(|s| s.is_finite()), "{track:?}/{} NaN", stem.kind.name());
+                assert!(
+                    flat.iter().all(|s| s.is_finite()),
+                    "{track:?}/{} NaN",
+                    stem.kind.name()
+                );
                 let p = peak(&flat);
-                assert!(p <= 1.0 && p > 0.01, "{track:?}/{} peak {p}", stem.kind.name());
+                assert!(
+                    p <= 1.0 && p > 0.01,
+                    "{track:?}/{} peak {p}",
+                    stem.kind.name()
+                );
             }
-            let mix: Vec<f32> = data.mixdown(&[1.0; STEM_COUNT]).into_iter().flatten().collect();
+            let mix: Vec<f32> = data
+                .mixdown(&[1.0; STEM_COUNT])
+                .into_iter()
+                .flatten()
+                .collect();
             assert!(peak(&mix) <= 1.0);
         }
     }
@@ -1039,7 +1442,10 @@ mod tests {
             let seam = diffs[len - 1];
             diffs.sort_unstable_by(f32::total_cmp);
             let p999 = diffs[diffs.len() * 999 / 1000];
-            assert!(seam <= p999, "{track:?}: jump {seam} at the loop seam (99.9th pct {p999})");
+            assert!(
+                seam <= p999,
+                "{track:?}: jump {seam} at the loop seam (99.9th pct {p999})"
+            );
         }
     }
 

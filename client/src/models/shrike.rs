@@ -507,8 +507,14 @@ pub fn build() -> Vec<ModelPart> {
             false,
         ),
     );
-    add(&mut pauldron, gem(Vec3::new(0.27, 1.53, -0.05), 0.014, 0, BRASS));
-    add(&mut pauldron, gem(Vec3::new(0.27, 1.53, 0.05), 0.014, 0, BRASS));
+    add(
+        &mut pauldron,
+        gem(Vec3::new(0.27, 1.53, -0.05), 0.014, 0, BRASS),
+    );
+    add(
+        &mut pauldron,
+        gem(Vec3::new(0.27, 1.53, 0.05), 0.014, 0, BRASS),
+    );
     add_mirrored(p.mesh(TORSO), &pauldron);
     // Harness: straps from the shoulders to the lantern and on to the belt, brass buckles.
     let lantern = v3(LANTERN);
@@ -585,7 +591,14 @@ pub fn build() -> Vec<ModelPart> {
     // The wick: a tall flame with a forked tip, and its hot heart.
     let base = v3(WICK_BASE);
     let flame_ring = |y: f32, r: f32, phase: f32| {
-        kit::ngon_ring(base + Vec3::Y * y, Vec3::X, Vec3::Z, Vec2::splat(r), 6, phase)
+        kit::ngon_ring(
+            base + Vec3::Y * y,
+            Vec3::X,
+            Vec3::Z,
+            Vec2::splat(r),
+            6,
+            phase,
+        )
     };
     p.add(
         WICK,
@@ -686,7 +699,14 @@ pub fn build() -> Vec<ModelPart> {
     );
     kit::finish(p.mesh(HEAD));
     let mask_ring = |z: f32, y: f32, w: f32, h: f32| {
-        kit::ngon_ring(Vec3::new(0.0, y, z), Vec3::X, Vec3::Y, Vec2::new(w, h), 8, 0.0)
+        kit::ngon_ring(
+            Vec3::new(0.0, y, z),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(w, h),
+            8,
+            0.0,
+        )
     };
     let mut mask = kit::loft(
         &[

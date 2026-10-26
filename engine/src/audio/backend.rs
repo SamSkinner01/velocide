@@ -10,9 +10,9 @@
 //! ```
 
 use std::f32::consts::FRAC_PI_2;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use glam::{Quat, Vec3};
@@ -23,11 +23,11 @@ use kira::sound::{PlaybackState, Sound, SoundData};
 use kira::track::{MainTrackBuilder, TrackBuilder, TrackHandle};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Frame, Panning, Tween};
 
+use super::PlayParams;
 use super::dsp::{Rng, SAMPLE_RATE, db_to_gain};
 use super::music::{MusicData, MusicTrack, STEM_COUNT, render_track, stem_gains};
 use super::sfx::{Sfx, render_variant};
 use super::spatial::{Spatial, spatialize};
-use super::PlayParams;
 
 /// Hard cap on simultaneous sound effects (kira's sfx track is sized a little above this).
 pub const MAX_VOICES: usize = 96;
@@ -110,7 +110,11 @@ impl Effect for Limiter {
                 continue;
             }
             let peak = frame.left.abs().max(frame.right.abs());
-            let needed = if peak > self.threshold { self.threshold / peak } else { 1.0 };
+            let needed = if peak > self.threshold {
+                self.threshold / peak
+            } else {
+                1.0
+            };
             self.gain = if needed < self.gain {
                 needed
             } else {
@@ -142,13 +146,19 @@ pub(crate) struct MusicPcm {
 impl MusicPcm {
     pub fn from_data(data: &MusicData) -> Self {
         let len = data.len();
-        let tail_len = data.stems.iter().map(|s| s.first_pass_tail.len()).max().unwrap_or(0);
+        let tail_len = data
+            .stems
+            .iter()
+            .map(|s| s.first_pass_tail.len())
+            .max()
+            .unwrap_or(0);
         let interleave = |frames_of: &dyn Fn(&super::music::Stem) -> &[[f32; 2]], n: usize| {
             let mut out = vec![0i16; n * STEM_COUNT * 2];
             for (s, stem) in data.stems.iter().enumerate().take(STEM_COUNT) {
                 for (i, frame) in frames_of(stem).iter().enumerate().take(n) {
                     for (c, v) in frame.iter().enumerate() {
-                        out[(i * STEM_COUNT + s) * 2 + c] = (v.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+                        out[(i * STEM_COUNT + s) * 2 + c] =
+                            (v.clamp(-1.0, 1.0) * 32767.0).round() as i16;
                     }
                 }
             }
@@ -277,7 +287,11 @@ impl Sound for MusicSound {
             return;
         }
         let released = Arc::strong_count(&self.control) == 1;
-        let fade_target = if released { 0.0 } else { load(&self.control.fade_target) };
+        let fade_target = if released {
+            0.0
+        } else {
+            load(&self.control.fade_target)
+        };
         let fade_step = dt as f32 / load(&self.control.fade_secs).max(0.001);
         let gain_step = dt as f32 / STEM_RAMP_SECS;
         let targets = self.control.stem_targets.each_ref().map(load);
@@ -292,7 +306,11 @@ impl Sound for MusicSound {
             }
             let i0 = self.pos as usize;
             let frac = (self.pos - i0 as f64) as f32;
-            let i1 = if i0 + 1 >= self.pcm.len { self.pcm.loop_start } else { i0 + 1 };
+            let i1 = if i0 + 1 >= self.pcm.len {
+                self.pcm.loop_start
+            } else {
+                i0 + 1
+            };
             let (a, b) = (self.pcm.frame(i0), self.pcm.frame(i1));
             let tail = match i0.checked_sub(self.pcm.loop_start) {
                 Some(k) if self.first_pass && k + 1 < self.pcm.tail_len => {
@@ -324,7 +342,9 @@ impl Sound for MusicSound {
                 self.first_pass = false;
             }
         }
-        self.control.position.store(self.pos as u64, Ordering::Relaxed);
+        self.control
+            .position
+            .store(self.pos as u64, Ordering::Relaxed);
         if self.fade <= 0.0 && fade_target <= 0.0 {
             self.finished = true;
         }
@@ -387,7 +407,9 @@ pub(crate) fn generate_sfx() -> Vec<Vec<Vec<f32>>> {
         .iter()
         .flat_map(|&s| (0..s.info().variants).map(move |v| (s, v)))
         .collect();
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(1, 8);
     let mut out: Vec<Vec<Vec<f32>>> = Sfx::ALL
         .iter()
         .map(|s| vec![Vec::new(); s.info().variants as usize])
@@ -412,7 +434,9 @@ pub(crate) fn generate_sfx() -> Vec<Vec<Vec<f32>>> {
                         out[s.index()][v as usize] = buf;
                     }
                 }
-                Err(_) => log::warn!("audio: a sound generation thread panicked; some sounds are silent"),
+                Err(_) => {
+                    log::warn!("audio: a sound generation thread panicked; some sounds are silent")
+                }
             }
         }
     });
@@ -467,7 +491,8 @@ impl Backend {
             }),
             ..Default::default()
         };
-        let mut manager = AudioManager::<DefaultBackend>::new(settings).map_err(|e| e.to_string())?;
+        let mut manager =
+            AudioManager::<DefaultBackend>::new(settings).map_err(|e| e.to_string())?;
         let sfx_track = manager
             .add_sub_track(TrackBuilder::new().sound_capacity(MAX_VOICES + 32))
             .map_err(|e| e.to_string())?;
@@ -480,9 +505,19 @@ impl Backend {
         let start = Instant::now();
         let sounds = generate_sfx()
             .into_iter()
-            .map(|variants| variants.iter().filter(|v| !v.is_empty()).map(|v| to_sound_data(v)).collect())
+            .map(|variants| {
+                variants
+                    .iter()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| to_sound_data(v))
+                    .collect()
+            })
             .collect();
-        log::info!("audio: generated {} sound effects in {} ms", Sfx::COUNT, start.elapsed().as_millis());
+        log::info!(
+            "audio: generated {} sound effects in {} ms",
+            Sfx::COUNT,
+            start.elapsed().as_millis()
+        );
 
         Ok(Backend {
             manager,
@@ -515,7 +550,8 @@ impl Backend {
             Some(p) => spatialize(self.listener_pos, self.listener_rot, p),
             None => Spatial::CENTER,
         };
-        let base_gain = params.volume.max(0.0) * db_to_gain(self.rng.bipolar() * info.volume_jitter_db);
+        let base_gain =
+            params.volume.max(0.0) * db_to_gain(self.rng.bipolar() * info.volume_jitter_db);
         let gain = base_gain * spatial.gain;
         if gain.is_nan() || gain <= 0.001 {
             return; // inaudible
@@ -523,7 +559,9 @@ impl Backend {
         // Drop near-simultaneous repeats unless the new one is clearly louder.
         if info.min_interval > 0.0
             && self.voices.iter().any(|v| {
-                v.sfx == sfx && self.time - v.started < info.min_interval as f64 && v.gain >= gain * 0.7
+                v.sfx == sfx
+                    && self.time - v.started < info.min_interval as f64
+                    && v.gain >= gain * 0.7
             })
         {
             return;
@@ -577,7 +615,13 @@ impl Backend {
     }
 
     pub fn set_volumes(&mut self, master: f32, sfx: f32, music: f32) {
-        let v = |x: f32| amp_to_db(if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 });
+        let v = |x: f32| {
+            amp_to_db(if x.is_finite() {
+                x.clamp(0.0, 1.0)
+            } else {
+                0.0
+            })
+        };
         self.manager.main_track().set_volume(v(master), tween(50));
         self.sfx_track.set_volume(v(sfx), tween(50));
         self.music_track.set_volume(v(music), tween(50));
@@ -609,11 +653,16 @@ impl Backend {
     }
 
     pub fn update(&mut self, dt: f32) {
-        let dt = if dt.is_finite() { dt.clamp(0.0, 0.5) } else { 0.0 };
+        let dt = if dt.is_finite() {
+            dt.clamp(0.0, 0.5)
+        } else {
+            0.0
+        };
         self.time += dt as f64;
 
         // Finished sounds go; playing spatial ones follow the (moving) listener.
-        self.voices.retain(|v| v.handle.state() != PlaybackState::Stopped);
+        self.voices
+            .retain(|v| v.handle.state() != PlaybackState::Stopped);
         for v in &mut self.voices {
             let Some(pos) = v.position else { continue };
             let s = spatialize(self.listener_pos, self.listener_rot, pos);
@@ -640,16 +689,26 @@ impl Backend {
 
         // Smoothed intensity drives the stem gains.
         let m = &mut self.music;
-        let tau = if m.intensity_target > m.intensity { INTENSITY_RISE_SECS } else { INTENSITY_FALL_SECS };
+        let tau = if m.intensity_target > m.intensity {
+            INTENSITY_RISE_SECS
+        } else {
+            INTENSITY_FALL_SECS
+        };
         m.intensity += (m.intensity_target - m.intensity) * (1.0 - (-dt / tau).exp());
         if let Some(p) = &m.playing {
-            p.control.set_stem_targets(stem_gains(m.intensity.max(p.floor)));
+            p.control
+                .set_stem_targets(stem_gains(m.intensity.max(p.floor)));
         }
     }
 
     fn start_wanted_music(&mut self) {
         let wanted = self.music.wanted;
-        if self.music.playing.as_ref().is_some_and(|p| p.track == wanted) {
+        if self
+            .music
+            .playing
+            .as_ref()
+            .is_some_and(|p| p.track == wanted)
+        {
             return;
         }
         if let Some(old) = self.music.playing.take() {
@@ -660,7 +719,9 @@ impl Backend {
             return; // MusicTrack::None, or still generating (started from update() later)
         };
         let floor = pcm.intensity_floor;
-        let control = Arc::new(MusicControl::new(stem_gains(self.music.intensity.max(floor))));
+        let control = Arc::new(MusicControl::new(stem_gains(
+            self.music.intensity.max(floor),
+        )));
         control.fade_to(1.0, CROSSFADE_SECS);
         let data = MusicSoundData {
             pcm,
@@ -719,7 +780,12 @@ mod tests {
         sound.process(&mut out, 1.0 / SAMPLE_RATE as f64, &info);
         // 250 frames: 100 to the end, then 150 more within the 80-frame loop region -> 20 + 70.
         assert_eq!(control.position(), 90);
-        assert!(out[150].left > 0.0 && out.iter().all(|f| f.left.is_finite() && f.left.abs() <= 1.0));
+        assert!(
+            out[150].left > 0.0
+                && out
+                    .iter()
+                    .all(|f| f.left.is_finite() && f.left.abs() <= 1.0)
+        );
         assert!(!sound.finished());
 
         // Releasing the control fades the sound out and lets kira unload it.
@@ -740,9 +806,15 @@ mod tests {
         .build();
         effect.init(48_000, 128);
         let info = MockInfoBuilder::new().build();
-        let mut frames: Vec<Frame> = (0..512).map(|i| Frame::from_mono((i as f32 * 0.1).sin() * 4.0)).collect();
+        let mut frames: Vec<Frame> = (0..512)
+            .map(|i| Frame::from_mono((i as f32 * 0.1).sin() * 4.0))
+            .collect();
         frames[10] = Frame::new(f32::NAN, 0.0);
         effect.process(&mut frames, 1.0 / 48_000.0, &info);
-        assert!(frames.iter().all(|f| f.left.is_finite() && f.left.abs() <= 0.9 + 1e-6));
+        assert!(
+            frames
+                .iter()
+                .all(|f| f.left.is_finite() && f.left.abs() <= 0.9 + 1e-6)
+        );
     }
 }

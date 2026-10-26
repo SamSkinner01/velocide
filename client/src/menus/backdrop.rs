@@ -101,6 +101,10 @@ fn framing(level: &LevelDef) -> (Vec3, Vec2, f32) {
         m.max(Vec2::new(d.x.abs(), d.z.abs()))
     });
     let radius = (spread * 0.75).clamp(Vec2::splat(12.0), Vec2::splat(55.0));
-    let top = level.spawns.iter().map(|s| s.position.y).fold(f32::MIN, f32::max);
+    let top = level
+        .spawns
+        .iter()
+        .map(|s| s.position.y)
+        .fold(f32::MIN, f32::max);
     (center, radius, (top - center.y + 9.0).max(8.0))
 }

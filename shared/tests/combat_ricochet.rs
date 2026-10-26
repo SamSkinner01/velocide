@@ -26,7 +26,10 @@ fn setup() -> (Arena, PlayerId) {
 /// A thorn planted in mid-air at `pos` (as if stuck in something there).
 fn thorn_at(a: &mut Arena, owner: PlayerId, pos: Vec3) -> NetId {
     let t = a.tuning.clone();
-    let id = a.world.spawn_thorn(&t, owner, pos, Vec3::ZERO).expect("thorn");
+    let id = a
+        .world
+        .spawn_thorn(&t, owner, pos, Vec3::ZERO)
+        .expect("thorn");
     let thorn = a.world.thorns.get_mut(&id).unwrap();
     thorn.position = pos;
     thorn.state = ThornState::Planted;
@@ -60,7 +63,10 @@ fn quill_ricochets_off_a_thorn_into_a_weak_point() {
     a.aim(p, Vec3::new(0.4, 1.6, -6.0));
     let ev = a.tap(p, Buttons::FIRE, 1);
     assert!(!a.world.thorns.contains_key(&thorn), "thorn shattered");
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::ThornShattered { id, .. } if *id == thorn)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::ThornShattered { id, .. } if *id == thorn))
+    );
     let paths = ricochet_paths(&ev);
     assert_eq!(paths.len(), 1);
     assert!((paths[0][0] - Vec3::new(0.0, 1.6, -6.0)).length() < 1e-3);
@@ -73,7 +79,11 @@ fn quill_ricochets_off_a_thorn_into_a_weak_point() {
         })
         .expect("ricochet hit the dummy");
     assert!((hit.info.amount - 36.0).abs() < 1e-3, "{}", hit.info.amount);
-    assert!(hit.info.flags.contains(DamageFlags::RICOCHET | DamageFlags::HEADSHOT));
+    assert!(
+        hit.info
+            .flags
+            .contains(DamageFlags::RICOCHET | DamageFlags::HEADSHOT)
+    );
     assert_eq!(hit.info.ricochets, 1);
     assert_eq!(kills(&ev)[0].ricochets, 1);
     // The tracer's first leg ends at the thorn.
@@ -156,8 +166,15 @@ fn brand_and_splinter_ricochet_but_blast_and_arc_do_not() {
         })
         .unwrap();
     assert_eq!(main.info.attack, Attack::Splinter);
-    assert!(main.info.flags.contains(DamageFlags::RICOCHET | DamageFlags::BRANDED));
-    assert!(damage_to(&ev, HitTarget::Entity(behind)) > 0.0, "splinters continue past it");
+    assert!(
+        main.info
+            .flags
+            .contains(DamageFlags::RICOCHET | DamageFlags::BRANDED)
+    );
+    assert!(
+        damage_to(&ev, HitTarget::Entity(behind)) > 0.0,
+        "splinters continue past it"
+    );
 }
 
 #[test]
@@ -211,7 +228,10 @@ fn thrown_thorns_plant_in_walls_and_expire() {
     a.ticks(2);
     a.held.get_mut(&p).unwrap().pitch = 0.0;
     let ev = a.tap(p, Buttons::THROW, 0);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::ThornThrown { player, .. } if *player == p)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::ThornThrown { player, .. } if *player == p))
+    );
     let mut planted = None;
     for _ in 0..30 {
         for e in a.tick() {
@@ -226,9 +246,17 @@ fn thrown_thorns_plant_in_walls_and_expire() {
     let planted = planted.expect("planted");
     let th = &a.world.thorns[&planted.0];
     assert_eq!(th.state, ThornState::Planted);
-    assert!((th.position.z + 8.0).abs() < 0.15, "in the wall face: {}", th.position);
+    assert!(
+        (th.position.z + 8.0).abs() < 0.15,
+        "in the wall face: {}",
+        th.position
+    );
     assert!(th.position.y > 1.0, "nearly straight: {}", th.position);
-    assert!(th.facing.dot(Vec3::NEG_Z) > 0.95, "along its flight: {}", th.facing);
+    assert!(
+        th.facing.dot(Vec3::NEG_Z) > 0.95,
+        "along its flight: {}",
+        th.facing
+    );
     let e = thorn_entity(&a, planted.0);
     assert_eq!(e.kind, shared::protocol::kind::THORN);
     assert!(e.flags & thorn_flags::PLANTED != 0 && e.flags & thorn_flags::LYING == 0);
@@ -240,7 +268,10 @@ fn thrown_thorns_plant_in_walls_and_expire() {
     assert!(a.world.thorns.contains_key(&planted.0));
     let ev = a.ticks(1);
     assert!(!a.world.thorns.contains_key(&planted.0));
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::ThornExpired { id } if *id == planted.0)));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::ThornExpired { id } if *id == planted.0))
+    );
 }
 
 #[test]
@@ -252,7 +283,10 @@ fn a_thorn_that_never_lands_fizzles() {
     assert_eq!(a.world.thorns.len(), 1, "still flying at 2.9 s");
     let ev = a.ticks(10);
     assert!(a.world.thorns.is_empty());
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::ThornExpired { .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::ThornExpired { .. }))
+    );
 }
 
 #[test]
@@ -277,9 +311,16 @@ fn thorn_hits_a_target_then_lies_on_the_floor_live() {
     let (&id, th) = a.world.thorns.iter().next().expect("still live");
     assert_eq!(th.state, ThornState::Lying);
     assert!(th.position.y < 0.3, "on the floor: {}", th.position);
-    assert!(th.position.z > -6.0, "dropped in front of the target: {}", th.position);
+    assert!(
+        th.position.z > -6.0,
+        "dropped in front of the target: {}",
+        th.position
+    );
     let e = thorn_entity(&a, id);
-    assert!(e.flags & (thorn_flags::PLANTED | thorn_flags::LYING) == thorn_flags::PLANTED | thorn_flags::LYING);
+    assert!(
+        e.flags & (thorn_flags::PLANTED | thorn_flags::LYING)
+            == thorn_flags::PLANTED | thorn_flags::LYING
+    );
     // A lying thorn still relays shots.
     let lying = th.position;
     a.aim(p, lying);

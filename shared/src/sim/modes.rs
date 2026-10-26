@@ -638,7 +638,11 @@ impl SimWorld {
                     self.mode.team_kills += 1;
                     self.mode.touch();
                     if let Some((enc, _)) = self.enemies.get(&id).and_then(|e| e.encounter) {
-                        self.mode.encounter_kills.entry(enc).or_default().push(killer);
+                        self.mode
+                            .encounter_kills
+                            .entry(enc)
+                            .or_default()
+                            .push(killer);
                     }
                 }
             }

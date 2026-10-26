@@ -642,7 +642,8 @@ fn bandwidth_with_8_players_50_gnawers_and_150_projectiles() {
     for i in 0..50 {
         let x = (i % 10) as f32 * 4.0 - 18.0;
         let z = -20.0 - (i / 10) as f32 * 4.0;
-        n.server.spawn_enemies("gnawer", Vec3::new(x, 0.0, z), 0.0, 1);
+        n.server
+            .spawn_enemies("gnawer", Vec3::new(x, 0.0, z), 0.0, 1);
     }
     // Clients run around firing rivets into the sky; the server keeps ~150 projectiles alive.
     let tuning = n.tuning();

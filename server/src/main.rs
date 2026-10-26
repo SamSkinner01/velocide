@@ -175,7 +175,11 @@ fn main() {
     if config.dev_commands {
         log::warn!(
             "dev chat commands enabled ({})",
-            if config.lobby.enabled { "lobby host only" } else { "every player: no lobby" }
+            if config.lobby.enabled {
+                "lobby host only"
+            } else {
+                "every player: no lobby"
+            }
         );
     }
 

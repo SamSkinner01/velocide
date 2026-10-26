@@ -485,7 +485,9 @@ pub fn fit_line(text: &str, suffix: &str, max_width: f32, scale: f32) -> String 
         return full;
     }
     let advance = GLYPH_ADVANCE * scale.max(1e-3);
-    let fit = ((max_width + GLYPH_SPACING * scale) / advance).floor().max(0.0) as usize;
+    let fit = ((max_width + GLYPH_SPACING * scale) / advance)
+        .floor()
+        .max(0.0) as usize;
     let keep = fit.saturating_sub(suffix.chars().count() + 2);
     let head: String = text.chars().take(keep).collect();
     format!("{}..{suffix}", head.trim_end())

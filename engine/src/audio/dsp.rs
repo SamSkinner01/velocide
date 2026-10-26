@@ -394,7 +394,14 @@ impl Biquad {
         let (cos, sin) = Self::omega(freq, sample_rate);
         let alpha = sin / (2.0 * q);
         let b1 = -(1.0 + cos);
-        Self::from_coefficients(-b1 / 2.0, b1, -b1 / 2.0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+        Self::from_coefficients(
+            -b1 / 2.0,
+            b1,
+            -b1 / 2.0,
+            1.0 + alpha,
+            -2.0 * cos,
+            1.0 - alpha,
+        )
     }
 
     /// Peaking EQ: boosts/cuts `gain_db` around `freq`.
@@ -563,7 +570,13 @@ pub fn reverb_with_rate(
 
     let mut combs: Vec<(Vec<f32>, usize, f32)> = COMBS
         .iter()
-        .map(|&n| (vec![0.0; ((n + spread) as f32 * scale) as usize + 1], 0, 0.0))
+        .map(|&n| {
+            (
+                vec![0.0; ((n + spread) as f32 * scale) as usize + 1],
+                0,
+                0.0,
+            )
+        })
         .collect();
     let mut allpasses: Vec<(Vec<f32>, usize)> = ALLPASSES
         .iter()
@@ -741,7 +754,13 @@ mod tests {
 
     #[test]
     fn oscillators_stay_bounded() {
-        for wave in [Wave::Sine, Wave::Triangle, Wave::Saw, Wave::Square, Wave::Noise] {
+        for wave in [
+            Wave::Sine,
+            Wave::Triangle,
+            Wave::Saw,
+            Wave::Square,
+            Wave::Noise,
+        ] {
             let mut osc = Osc::new(wave);
             for i in 0..10_000 {
                 let f = 30.0 + i as f32;
@@ -755,11 +774,15 @@ mod tests {
     fn svf_lowpass_attenuates_highs() {
         let mut lo = Svf::default();
         let mut osc = Osc::new(Wave::Sine);
-        let out: Vec<f32> = (0..20_000).map(|_| lo.lowpass(osc.next(8000.0), 300.0, 0.7)).collect();
+        let out: Vec<f32> = (0..20_000)
+            .map(|_| lo.lowpass(osc.next(8000.0), 300.0, 0.7))
+            .collect();
         assert!(rms(&out[10_000..]) < 0.02);
         let mut lo = Svf::default();
         let mut osc = Osc::new(Wave::Sine);
-        let out: Vec<f32> = (0..20_000).map(|_| lo.lowpass(osc.next(60.0), 3000.0, 0.7)).collect();
+        let out: Vec<f32> = (0..20_000)
+            .map(|_| lo.lowpass(osc.next(60.0), 3000.0, 0.7))
+            .collect();
         assert!(rms(&out[10_000..]) > 0.6);
     }
 

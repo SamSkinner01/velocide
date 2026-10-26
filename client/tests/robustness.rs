@@ -59,7 +59,9 @@ fn host_and_guest(config: ServerConfig) -> (Harness, usize, usize) {
 fn god(h: &mut Harness, client: usize) -> String {
     let before = server_lines(&h.clients[client]).len();
     h.clients[client].net.send_chat("/god");
-    wait(h, 3.0, "a reply", |h| server_lines(&h.clients[client]).len() > before);
+    wait(h, 3.0, "a reply", |h| {
+        server_lines(&h.clients[client]).len() > before
+    });
     server_lines(&h.clients[client]).pop().unwrap()
 }
 
@@ -124,7 +126,10 @@ fn claimed_view_lag(tuning: Tuning, claim_ms: f32) -> (f32, f32) {
     }
     let p = &h.server.world().players[&id];
     assert!(p.inputs_processed >= 100, "crafted inputs processed");
-    (p.view_lag_limit_ms.expect("server sets a limit"), granted * 1000.0 / 60.0)
+    (
+        p.view_lag_limit_ms.expect("server sets a limit"),
+        granted * 1000.0 / 60.0,
+    )
 }
 
 #[test]
@@ -137,14 +142,20 @@ fn a_low_ping_client_cannot_claim_the_maximum_rewind() {
     assert!(limit < 345.0, "limit {limit}");
     // (The limit follows the RTT estimate, which moves by a millisecond or two.)
     assert!(granted < 345.0, "granted {granted} ms of a 350 ms claim");
-    assert!((granted - limit).abs() < 5.0, "clamped to the limit: {granted} vs {limit}");
+    assert!(
+        (granted - limit).abs() < 5.0,
+        "clamped to the limit: {granted} vs {limit}"
+    );
 
     // With a generous lag_comp_max_ms the RTT bound is what stops a 900 ms claim.
     let mut tuning = Tuning::default();
     tuning.net.lag_comp_max_ms = 1000.0;
     let (limit, granted) = claimed_view_lag(tuning, 900.0);
     println!("claimed 900 ms: limit {limit:.0} ms, granted {granted:.0} ms");
-    assert!(granted < limit + 5.0 && granted < 400.0, "granted {granted} ms");
+    assert!(
+        granted < limit + 5.0 && granted < 400.0,
+        "granted {granted} ms"
+    );
 }
 
 #[test]
@@ -157,7 +168,11 @@ fn look_alike_and_reserved_names_are_neutralised() {
     h.wait_in_game();
     let name = |i: usize| h.server.world().players[&h.clients[i].id()].name.clone();
     assert_eq!(name(a), "Bob");
-    assert_eq!(name(b), "Bob (2)", "invisible characters must not make a new name");
+    assert_eq!(
+        name(b),
+        "Bob (2)",
+        "invisible characters must not make a new name"
+    );
     assert_eq!(name(c), "Shrike", "nobody chats as 'server'");
 }
 

@@ -163,10 +163,10 @@ impl SimWorld {
         let tt = &t.combat.thorn;
         let motion = th.velocity * dt - Vec3::Y * (0.5 * tt.gravity * dt * dt);
         let new_velocity = th.velocity - Vec3::Y * (tt.gravity * dt);
-        let world_hit = self
-            .collision
-            .world
-            .cast_sphere(th.position, tt.radius, motion, MASK_SHOTS);
+        let world_hit =
+            self.collision
+                .world
+                .cast_sphere(th.position, tt.radius, motion, MASK_SHOTS);
         let world_f = world_hit.map_or(1.0, |h| h.fraction);
         let dir = motion.normalize_or(th.velocity.normalize_or(Vec3::NEG_Z));
 

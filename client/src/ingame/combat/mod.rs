@@ -120,16 +120,58 @@ pub fn attack_style(a: Attack) -> AttackStyle {
     let quill = WeaponKind::Quill;
     let bellows = WeaponKind::Bellows;
     match a {
-        Attack::Quill => s(Sfx::QuillFire, 0.5, 0.03, glow(quill.primary_color(), 1.7, 0.9), 0.1, 0.04),
-        Attack::Brand => s(Sfx::BrandFire, 0.6, 0.045, glow(quill.glow_color(0), 2.0, 0.95), 0.28, 0.07),
-        Attack::Splinter => s(Sfx::SplinterFire, 0.75, 0.05, glow(quill.glow_color(1), 1.9, 0.95), 0.18, 0.12),
-        Attack::Blast => s(Sfx::BellowsBlast, 1.0, 0.022, glow(bellows.primary_color(), 1.6, 0.75), 0.07, 0.22),
+        Attack::Quill => s(
+            Sfx::QuillFire,
+            0.5,
+            0.03,
+            glow(quill.primary_color(), 1.7, 0.9),
+            0.1,
+            0.04,
+        ),
+        Attack::Brand => s(
+            Sfx::BrandFire,
+            0.6,
+            0.045,
+            glow(quill.glow_color(0), 2.0, 0.95),
+            0.28,
+            0.07,
+        ),
+        Attack::Splinter => s(
+            Sfx::SplinterFire,
+            0.75,
+            0.05,
+            glow(quill.glow_color(1), 1.9, 0.95),
+            0.18,
+            0.12,
+        ),
+        Attack::Blast => s(
+            Sfx::BellowsBlast,
+            1.0,
+            0.022,
+            glow(bellows.primary_color(), 1.6, 0.75),
+            0.07,
+            0.22,
+        ),
         Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
-        Attack::BothBarrels => s(Sfx::BothBarrels, 1.0, 0.026, glow(bellows.glow_color(1), 1.8, 0.8), 0.09, 0.42),
+        Attack::BothBarrels => s(
+            Sfx::BothBarrels,
+            1.0,
+            0.026,
+            glow(bellows.glow_color(1), 1.8, 0.8),
+            0.09,
+            0.42,
+        ),
         Attack::Arc => AttackStyle {
             jagged: true,
             flash: 0.0,
-            ..s(Sfx::ArcZap, 0.12, 0.03, crate::ingame::combat::fx::ARC_COLOR, 0.08, 0.015)
+            ..s(
+                Sfx::ArcZap,
+                0.12,
+                0.03,
+                crate::ingame::combat::fx::ARC_COLOR,
+                0.08,
+                0.015,
+            )
         },
         Attack::Wisp => s(Sfx::WispLaunch, 0.6, 0.0, Vec4::ONE, 0.0, 0.08),
         Attack::Discharge => s(Sfx::DischargeRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.45),
@@ -245,7 +287,10 @@ fn victim_name(net: &NetClient, k: &KillInfo) -> String {
 
 /// "QUILL", or the enemy's own attack ("SWIPE", "SLAM") instead of a generic "ENEMY".
 fn attack_name(net: &NetClient, attack: Attack) -> String {
-    if let Attack::Enemy { kind, attack: index } = attack
+    if let Attack::Enemy {
+        kind,
+        attack: index,
+    } = attack
         && let Some(name) = net
             .world()
             .and_then(|w| w.enemy_defs.by_kind(kind))
@@ -565,7 +610,13 @@ impl InGame {
                         combat.heat = (combat.heat + 0.05).min(1.0);
                         match attack {
                             Attack::Gust => {
-                                fx::gust_puff(effects, &mut combat.beams, &mut combat.rng, muzzle, aim);
+                                fx::gust_puff(
+                                    effects,
+                                    &mut combat.beams,
+                                    &mut combat.rng,
+                                    muzzle,
+                                    aim,
+                                );
                                 continue;
                             }
                             Attack::Discharge => {
@@ -574,7 +625,13 @@ impl InGame {
                                     + (a.discharge_max_radius - a.discharge_min_radius)
                                         * charge.clamp(0.0, 1.0);
                                 let at = body.unwrap_or(cam.position - Vec3::Y * 0.7);
-                                fx::discharge_nova(effects, &mut combat.beams, &mut combat.rng, at, r);
+                                fx::discharge_nova(
+                                    effects,
+                                    &mut combat.beams,
+                                    &mut combat.rng,
+                                    at,
+                                    r,
+                                );
                                 continue;
                             }
                             Attack::Arc => {
@@ -751,9 +808,14 @@ impl InGame {
             camera,
             world: net.world().map(|w| &w.collision.world),
         };
-        combat
-            .entities
-            .update(&frame, vdt, effects, &mut common.audio, &mut combat.rng, &mut combat.beams);
+        combat.entities.update(
+            &frame,
+            vdt,
+            effects,
+            &mut common.audio,
+            &mut combat.rng,
+            &mut combat.beams,
+        );
 
         // Fx due at the render tick.
         let due = combat.queue.due(render_tick, local);
@@ -857,7 +919,11 @@ impl InGame {
         let killed_by = self.combat.killed_by.clone();
         let branded = net
             .local_player_id()
-            .and_then(|p| net.frames().latest().and_then(|(_, f)| f.get(NetId::player(p))))
+            .and_then(|p| {
+                net.frames()
+                    .latest()
+                    .and_then(|(_, f)| f.get(NetId::player(p)))
+            })
             .is_some_and(|e| e.flags & player_flags::BRANDED != 0);
         let info = CombatHudInfo {
             camera: &self.last_camera,

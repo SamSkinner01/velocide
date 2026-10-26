@@ -118,10 +118,22 @@ fn ember_bomb() -> Vec<ModelPart> {
     let mut p = PartSet::new(&EMBER_BOMB);
     let slag = rgb(0x2e2925);
     let hot = Vec4::new(1.0, 0.62, 0.18, 1.0);
-    let mut shell = kit::ellipsoid(Vec3::ZERO, Vec3::splat(0.3), Quat::IDENTITY, 5, 9, slag, false);
-    for (i, d) in [Vec3::new(0.7, 0.5, 0.2), Vec3::new(-0.6, 0.3, -0.5), Vec3::new(0.1, -0.8, 0.4)]
-        .into_iter()
-        .enumerate()
+    let mut shell = kit::ellipsoid(
+        Vec3::ZERO,
+        Vec3::splat(0.3),
+        Quat::IDENTITY,
+        5,
+        9,
+        slag,
+        false,
+    );
+    for (i, d) in [
+        Vec3::new(0.7, 0.5, 0.2),
+        Vec3::new(-0.6, 0.3, -0.5),
+        Vec3::new(0.1, -0.8, 0.4),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let d = d.normalize();
         add(&mut shell, gem(d * 0.27, 0.09 + 0.02 * i as f32, 0, slag));
@@ -129,10 +141,25 @@ fn ember_bomb() -> Vec<ModelPart> {
     p.add(0, shell);
     // Glowing seams: three great circles at odd angles, and a hot core peeking out.
     let mut cracks = MeshBuilder::new();
-    for axis in [Vec3::new(0.3, 1.0, 0.1), Vec3::new(1.0, -0.2, 0.4), Vec3::new(-0.2, 0.3, 1.0)] {
-        add(&mut cracks, kit::band(Vec3::ZERO, axis, 0.3, 0.06, 0.03, 12, hot));
+    for axis in [
+        Vec3::new(0.3, 1.0, 0.1),
+        Vec3::new(1.0, -0.2, 0.4),
+        Vec3::new(-0.2, 0.3, 1.0),
+    ] {
+        add(
+            &mut cracks,
+            kit::band(Vec3::ZERO, axis, 0.3, 0.06, 0.03, 12, hot),
+        );
     }
-    add(&mut cracks, gem(Vec3::new(0.0, 0.0, 0.18), 0.17, 1, Vec4::new(1.0, 0.85, 0.45, 1.0)));
+    add(
+        &mut cracks,
+        gem(
+            Vec3::new(0.0, 0.0, 0.18),
+            0.17,
+            1,
+            Vec4::new(1.0, 0.85, 0.45, 1.0),
+        ),
+    );
     p.add(1, cracks);
     finish_lit(&mut p);
     p.texture(0, kit::tex_grime());
@@ -145,7 +172,17 @@ fn ember_bomb() -> Vec<ModelPart> {
 fn needle() -> Vec<ModelPart> {
     let mut p = PartSet::new(&NEEDLE);
     let brass = rgb(0x6a5226);
-    p.add(0, tube(Vec3::new(0.0, 0.0, 0.45), Vec3::new(0.0, 0.0, -0.3), 0.035, 0.03, 6, brass));
+    p.add(
+        0,
+        tube(
+            Vec3::new(0.0, 0.0, 0.45),
+            Vec3::new(0.0, 0.0, -0.3),
+            0.035,
+            0.03,
+            6,
+            brass,
+        ),
+    );
     let mut glow = spike(
         Vec3::new(0.0, 0.0, -0.3),
         Vec3::new(0.0, 0.0, -0.5),
@@ -181,8 +218,24 @@ fn needle() -> Vec<ModelPart> {
 /// translucent sheath; white, the client tints it through `Tint::glow`.
 fn aim_laser() -> Vec<ModelPart> {
     let mut p = PartSet::new(&AIM_LASER);
-    p.add(0, block(Vec3::new(0.0, 0.0, -0.5), Vec3::new(0.22, 0.22, 0.5), Quat::IDENTITY, Vec4::ONE));
-    p.add(1, block(Vec3::new(0.0, 0.0, -0.5), Vec3::new(0.5, 0.5, 0.5), Quat::IDENTITY, Vec4::ONE));
+    p.add(
+        0,
+        block(
+            Vec3::new(0.0, 0.0, -0.5),
+            Vec3::new(0.22, 0.22, 0.5),
+            Quat::IDENTITY,
+            Vec4::ONE,
+        ),
+    );
+    p.add(
+        1,
+        block(
+            Vec3::new(0.0, 0.0, -0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+            Quat::IDENTITY,
+            Vec4::ONE,
+        ),
+    );
     p.color(1, Vec4::new(1.0, 1.0, 1.0, 0.4));
     p.finish()
 }

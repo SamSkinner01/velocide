@@ -415,11 +415,8 @@ pub(crate) fn draw_viewmodel(
                     Vec3::new(0.0, 0.055, 0.02),
                 );
             lib.get(ModelId::Thorn).draw_static(thorn, tint, out);
-            fist_point = Some(thorn.transform_point3(Vec3::new(
-                0.0,
-                0.0,
-                -super::projectiles::THORN_TIP,
-            )));
+            fist_point =
+                Some(thorn.transform_point3(Vec3::new(0.0, 0.0, -super::projectiles::THORN_TIP)));
         }
     }
     ViewmodelDrawInfo {

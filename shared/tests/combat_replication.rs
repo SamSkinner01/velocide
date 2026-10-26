@@ -91,7 +91,13 @@ fn trajectories_reproduce_server_positions() {
     let t = a.tuning.clone();
     let bomb = a
         .world
-        .spawn_projectile(&t, ProjectileKind::Bomb, Owner::Player(p), Vec3::new(0.0, 1.2, -10.0), Vec3::new(3.0, -3.0, 0.0))
+        .spawn_projectile(
+            &t,
+            ProjectileKind::Bomb,
+            Owner::Player(p),
+            Vec3::new(0.0, 1.2, -10.0),
+            Vec3::new(3.0, -3.0, 0.0),
+        )
         .unwrap();
     let mut entity = frame_state(&a, bomb);
     let mut segments = 1;
@@ -117,8 +123,12 @@ fn ember_bombs_and_needles_replicate_by_trajectory() {
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.world.players.get_mut(&p).unwrap().combat.god = true;
-    a.world.spawn_enemy("censer", Vec3::new(-4.0, 0.0, -24.0), 0.0).unwrap();
-    a.world.spawn_enemy("heron", Vec3::new(6.0, 0.0, -34.0), 0.0).unwrap();
+    a.world
+        .spawn_enemy("censer", Vec3::new(-4.0, 0.0, -24.0), 0.0)
+        .unwrap();
+    a.world
+        .spawn_enemy("heron", Vec3::new(6.0, 0.0, -34.0), 0.0)
+        .unwrap();
     let mut checked = std::collections::BTreeMap::new();
     for _ in 0..(8 * 60) {
         a.tick();
@@ -131,7 +141,10 @@ fn ember_bombs_and_needles_replicate_by_trajectory() {
             }
             let (kind, pos) = (pr.kind, pr.position);
             let e = frame_state(&a, id);
-            assert!(e.flags & projectile_flags::ENEMY != 0, "{kind:?} flagged as an enemy's");
+            assert!(
+                e.flags & projectile_flags::ENEMY != 0,
+                "{kind:?} flagged as an enemy's"
+            );
             let predicted = replicated_position(&e, now, 60, &a.tuning.combat);
             let err = predicted.distance(pos);
             assert!(err < 0.02, "{kind:?}: trajectory error {err} m");
@@ -139,7 +152,10 @@ fn ember_bombs_and_needles_replicate_by_trajectory() {
         }
     }
     println!("checked trajectory samples per kind: {checked:?}");
-    assert!(checked.get(&kind::EMBER_BOMB).is_some_and(|n| *n > 20), "ember bombs");
+    assert!(
+        checked.get(&kind::EMBER_BOMB).is_some_and(|n| *n > 20),
+        "ember bombs"
+    );
     assert!(checked.contains_key(&kind::NEEDLE), "needles");
 }
 
@@ -148,7 +164,10 @@ fn heron_aim_laser_survives_the_wire() {
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::new(3.0, 0.0, 0.0), 0.0);
     a.world.players.get_mut(&p).unwrap().combat.god = true;
-    let heron = a.world.spawn_enemy("heron", Vec3::new(0.0, 0.0, -36.0), 0.0).unwrap();
+    let heron = a
+        .world
+        .spawn_enemy("heron", Vec3::new(0.0, 0.0, -36.0), 0.0)
+        .unwrap();
     let mut samples = 0;
     for _ in 0..(6 * 60) {
         a.tick();
@@ -163,7 +182,11 @@ fn heron_aim_laser_survives_the_wire() {
             let aim = a.world.enemies[&heron].aim;
             let drawn = shared::input::look_dir(e.yaw, e.pitch);
             let err = drawn.angle_between(aim);
-            assert!(err < 2e-4, "laser drawn {:.4} degrees off the aim", err.to_degrees());
+            assert!(
+                err < 2e-4,
+                "laser drawn {:.4} degrees off the aim",
+                err.to_degrees()
+            );
             samples += 1;
         }
     }
@@ -192,11 +215,25 @@ fn stuck_and_deflected_projectiles_replicate_their_state() {
     // An enemy projectile turned around by a Gust flies straight and is the player's now.
     let d = dummy(&mut a, Vec3::new(20.0, 0.0, -20.0), PI, 1000.0);
     let t = a.tuning.clone();
-    let kind = ProjectileKind::ALL.into_iter().find(|k| k.parryable()).unwrap();
+    let kind = ProjectileKind::ALL
+        .into_iter()
+        .find(|k| k.parryable())
+        .unwrap();
     let eye = a.eye(p);
     let id = a
         .world
-        .spawn_enemy_projectile(&t, kind, d, Attack::Enemy { kind: 60, attack: 0 }, eye + Vec3::new(0.0, 0.0, -3.0), Vec3::new(0.0, 0.0, 15.0), 10.0)
+        .spawn_enemy_projectile(
+            &t,
+            kind,
+            d,
+            Attack::Enemy {
+                kind: 60,
+                attack: 0,
+            },
+            eye + Vec3::new(0.0, 0.0, -3.0),
+            Vec3::new(0.0, 0.0, 15.0),
+            10.0,
+        )
         .unwrap();
     assert!(frame_state(&a, id).flags & projectile_flags::ENEMY != 0);
     a.select(p, 1, 0);
@@ -207,7 +244,10 @@ fn stuck_and_deflected_projectiles_replicate_their_state() {
     assert!(e.flags & projectile_flags::PARRIED != 0);
     assert_eq!(e.owner, 0);
     let later = replicated_position(&e, a.world.tick as f64 + 10.0, 60, &t.combat);
-    assert!((later.y - e.position.y).abs() < 1e-3, "no gravity once deflected");
+    assert!(
+        (later.y - e.position.y).abs() < 1e-3,
+        "no gravity once deflected"
+    );
 }
 
 #[test]

@@ -230,15 +230,7 @@ fn stale_gains_are_cut_and_reported() {
     assert_eq!(bonuses(&ev), [(StyleBonus::Kill, 30.0)]);
     // Spam the Bellows until it is stale.
     for tick in 2..8 {
-        s.award(
-            &t,
-            p,
-            Some(StyleKey::Bellows),
-            &items,
-            false,
-            tick,
-            &mut ev,
-        );
+        s.award(&t, p, Some(StyleKey::Bellows), &items, false, tick, &mut ev);
     }
     ev.clear();
     let f = s.freshness(StyleKey::Bellows);
@@ -361,11 +353,23 @@ fn style_keys_follow_the_attack() {
         attack: 0,
     };
     let parried = DamageFlags::PROJECTILE | DamageFlags::PARRIED;
-    assert_eq!(StyleKey::for_damage(enemy, parried, true), Some(StyleKey::Parry));
-    assert_eq!(StyleKey::for_damage(Attack::Gust, parried, true), Some(StyleKey::Gust));
-    assert_eq!(StyleKey::for_damage(enemy, DamageFlags::PROJECTILE, true), None);
+    assert_eq!(
+        StyleKey::for_damage(enemy, parried, true),
+        Some(StyleKey::Parry)
+    );
+    assert_eq!(
+        StyleKey::for_damage(Attack::Gust, parried, true),
+        Some(StyleKey::Gust)
+    );
+    assert_eq!(
+        StyleKey::for_damage(enemy, DamageFlags::PROJECTILE, true),
+        None
+    );
     assert_eq!(StyleKey::from_attack(Attack::Thorn), Some(StyleKey::Thorn));
-    assert_eq!(StyleKey::from_attack(Attack::Splinter), Some(StyleKey::Splinter));
+    assert_eq!(
+        StyleKey::from_attack(Attack::Splinter),
+        Some(StyleKey::Splinter)
+    );
     assert_eq!(StyleKey::Discharge.label(), "DISCHARGE");
     assert_eq!(StyleBonus::Deflect.label(), "DEFLECT");
     assert_eq!(StyleKey::ALL.len(), StyleKey::COUNT);

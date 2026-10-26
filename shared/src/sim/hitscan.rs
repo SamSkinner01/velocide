@@ -264,7 +264,8 @@ impl SimWorld {
             .world
             .cast_ray(origin, dir, spec.range, MASK_SHOTS);
         let world_t = world.map_or(spec.range, |h| h.distance);
-        let hit = self.first_target_on_ray(t, shooter, hitboxes, origin, dir, world_t, spec.exclude);
+        let hit =
+            self.first_target_on_ray(t, shooter, hitboxes, origin, dir, world_t, spec.exclude);
         let block_t = hit.map_or(world_t, |h| h.0);
         let thorn = if spec.ricochet {
             self.thorn_on_ray(t, origin, dir, block_t, thorn_time)
@@ -361,7 +362,9 @@ impl SimWorld {
         self.thorns
             .values()
             .filter_map(|th| {
-                let pos = time.and_then(|time| th.trail.at(time)).unwrap_or(th.position);
+                let pos = time
+                    .and_then(|time| th.trail.at(time))
+                    .unwrap_or(th.position);
                 let along = (pos - origin).dot(dir);
                 if along <= 0.0 || along >= max_t {
                     return None;

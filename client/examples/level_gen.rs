@@ -271,12 +271,28 @@ impl Gen {
     /// Walkable ramp rising from `(z_a, y_a)` to `(z_b, y_b)` along Z; the low end is buried
     /// 1 m into the ground. `thick` big enough fills the wedge underneath.
     #[allow(clippy::too_many_arguments)]
-    fn ramp_z(&mut self, note: &str, x: (f32, f32), a: (f32, f32), b: (f32, f32), thick: f32, m: Mat) {
+    fn ramp_z(
+        &mut self,
+        note: &str,
+        x: (f32, f32),
+        a: (f32, f32),
+        b: (f32, f32),
+        thick: f32,
+        m: Mat,
+    ) {
         self.slope(note, false, x, a, b, thick, true, (1.0, 0.0), m);
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn ramp_x(&mut self, note: &str, z: (f32, f32), a: (f32, f32), b: (f32, f32), thick: f32, m: Mat) {
+    fn ramp_x(
+        &mut self,
+        note: &str,
+        z: (f32, f32),
+        a: (f32, f32),
+        b: (f32, f32),
+        thick: f32,
+        m: Mat,
+    ) {
         self.slope(note, true, z, a, b, thick, true, (1.0, 0.0), m);
     }
 
@@ -285,7 +301,12 @@ impl Gen {
         let [x1, y1, z1] = r.hi;
         let bottom = r.bottom.unwrap_or(y0 - T);
         if let Some(m) = r.floor {
-            self.bx(&format!("{} floor", r.name), [x0, y0 - T, z0], [x1, y0, z1], m);
+            self.bx(
+                &format!("{} floor", r.name),
+                [x0, y0 - T, z0],
+                [x1, y0, z1],
+                m,
+            );
         }
         if let Some(m) = r.ceiling {
             let ex = |side, v: f32, d: f32| if r.walled(side) { v + d } else { v };
@@ -320,8 +341,12 @@ impl Gen {
                 };
                 g.bx(&note, min, max, r.wall);
             };
-            let mut ops: Vec<Opening> =
-                r.openings.iter().copied().filter(|o| o.side == side).collect();
+            let mut ops: Vec<Opening> = r
+                .openings
+                .iter()
+                .copied()
+                .filter(|o| o.side == side)
+                .collect();
             ops.sort_by(|a, b| a.lo.total_cmp(&b.lo));
             let mut cur = a0;
             for o in ops {
@@ -641,8 +666,8 @@ const L_TOXIC: [f32; 3] = [0.55, 1.1, 0.35];
 const L_HOLY: [f32; 3] = [1.3, 1.1, 0.9];
 
 fn crucible() -> Gen {
-    use veins::*;
     use Side::*;
+    use veins::*;
     let mut g = Gen::new(
         "Crucible of Veins",
         LevelKind::Campaign,
@@ -674,22 +699,67 @@ fn crucible() -> Gen {
     for (x0, x1) in [(-12.0, -10.0), (-1.0, 1.0), (10.0, 12.0)] {
         g.bx("R0 channel end", [x0, -1.0, 2.0], [x1, 0.0, 4.0], FLOOR);
         g.bx("R0 channel end", [x0, -1.0, 30.0], [x1, 0.0, 32.0], FLOOR);
-        g.bx("R0 channel slag (under grate)", [x0, -1.0, 4.0], [x1, -0.8, 30.0], SLAG);
+        g.bx(
+            "R0 channel slag (under grate)",
+            [x0, -1.0, 4.0],
+            [x1, -0.8, 30.0],
+            SLAG,
+        );
         g.bx("R0 channel grate", [x0, -0.1, 4.0], [x1, 0.0, 30.0], GRATE);
     }
     for (x, z) in [(-8.5, 9.0), (8.5, 9.0), (-8.5, 19.0), (8.5, 19.0)] {
-        g.bx("R0 pillar", [x - 1.0, 0.8, z - 1.0], [x + 1.0, 10.0, z + 1.0], BRICK_DARK);
-        g.bx("R0 pillar base", [x - 1.3, 0.0, z - 1.3], [x + 1.3, 0.8, z + 1.3], RUST_DARK);
+        g.bx(
+            "R0 pillar",
+            [x - 1.0, 0.8, z - 1.0],
+            [x + 1.0, 10.0, z + 1.0],
+            BRICK_DARK,
+        );
+        g.bx(
+            "R0 pillar base",
+            [x - 1.3, 0.0, z - 1.3],
+            [x + 1.3, 0.8, z + 1.3],
+            RUST_DARK,
+        );
     }
     for z in [4.0, 14.0, 24.0] {
-        g.bx("R0 ceiling beam", [-12.0, 9.2, z - 0.4], [12.0, 10.0, z + 0.4], RUST_DARK);
+        g.bx(
+            "R0 ceiling beam",
+            [-12.0, 9.2, z - 0.4],
+            [12.0, 10.0, z + 0.4],
+            RUST_DARK,
+        );
     }
-    g.bx("R0 furnace machine", [-6.0, 0.0, 30.5], [6.0, 6.0, 32.0], PANEL);
-    g.bx("R0 furnace mouth", [-4.0, 1.0, 30.3], [4.0, 4.0, 30.5], SLAG);
-    g.bx("R0 furnace grille", [-4.2, 0.8, 30.1], [4.2, 4.2, 30.3], GRATE);
-    g.bx("R0 door frame W", [-3.5, 0.0, 2.0], [-2.5, 5.5, 2.4], HAZARD);
+    g.bx(
+        "R0 furnace machine",
+        [-6.0, 0.0, 30.5],
+        [6.0, 6.0, 32.0],
+        PANEL,
+    );
+    g.bx(
+        "R0 furnace mouth",
+        [-4.0, 1.0, 30.3],
+        [4.0, 4.0, 30.5],
+        SLAG,
+    );
+    g.bx(
+        "R0 furnace grille",
+        [-4.2, 0.8, 30.1],
+        [4.2, 4.2, 30.3],
+        GRATE,
+    );
+    g.bx(
+        "R0 door frame W",
+        [-3.5, 0.0, 2.0],
+        [-2.5, 5.5, 2.4],
+        HAZARD,
+    );
     g.bx("R0 door frame E", [2.5, 0.0, 2.0], [3.5, 5.5, 2.4], HAZARD);
-    g.bx("R0 door frame top", [-2.5, 5.0, 2.0], [2.5, 5.5, 2.4], HAZARD);
+    g.bx(
+        "R0 door frame top",
+        [-2.5, 5.0, 2.0],
+        [2.5, 5.5, 2.4],
+        HAZARD,
+    );
     g.light("R0 hall", [0.0, 8.0, 17.0], L_WARM, 18.0);
     g.light("R0 gutter", [-11.0, 0.4, 10.0], L_FIRE, 8.0);
     g.light("R0 gutter", [-11.0, 0.4, 24.0], L_FIRE, 8.0);
@@ -709,8 +779,18 @@ fn crucible() -> Gen {
         .open(&[N, S]);
     g.room(&c1);
     g.bx("C1 divider", [-0.5, 0.0, -16.0], [0.5, 6.0, -6.0], STONE);
-    g.bx("C1 shutter (slide under)", [-3.0, 1.2, -12.0], [-0.5, 6.0, -11.0], HAZARD);
-    g.bx("C1 hurdle (jump over)", [0.5, 0.0, -12.0], [3.0, 1.0, -11.0], RUST);
+    g.bx(
+        "C1 shutter (slide under)",
+        [-3.0, 1.2, -12.0],
+        [-0.5, 6.0, -11.0],
+        HAZARD,
+    );
+    g.bx(
+        "C1 hurdle (jump over)",
+        [0.5, 0.0, -12.0],
+        [3.0, 1.0, -11.0],
+        RUST,
+    );
     g.light("C1 south", [0.0, 5.0, -2.0], L_DIM, 9.0);
     g.light("C1 slot", [-1.75, 0.6, -10.0], L_FIRE, 5.0);
     g.light("C1 north", [0.0, 5.0, -19.5], L_EMBER, 9.0);
@@ -725,26 +805,75 @@ fn crucible() -> Gen {
         .opening(r1_in)
         .opening(r1_out);
     g.room(&r1);
-    g.door(1, "door 1: R1 entry (locked by encounter 1)", &r1, r1_in, true, DOOR);
-    g.door(2, "door 2: R1 exit (opened by encounter 1)", &r1, r1_out, false, EXIT_DOOR);
-    for ((x0, x1), (l0, l1)) in [((-20.0, -14.0), (-14.6, -14.0)), ((14.0, 20.0), (14.0, 14.6))] {
+    g.door(
+        1,
+        "door 1: R1 entry (locked by encounter 1)",
+        &r1,
+        r1_in,
+        true,
+        DOOR,
+    );
+    g.door(
+        2,
+        "door 2: R1 exit (opened by encounter 1)",
+        &r1,
+        r1_out,
+        false,
+        EXIT_DOOR,
+    );
+    for ((x0, x1), (l0, l1)) in [
+        ((-20.0, -14.0), (-14.6, -14.0)),
+        ((14.0, 20.0), (14.0, 14.6)),
+    ] {
         g.bx("R1 terrace", [x0, 0.0, -63.0], [x1, 4.0, -35.0], STONE);
-        g.ramp_z("R1 terrace ramp", (x0, x1), (-27.0, 0.0), (-35.0, 4.0), 5.0, STONE);
-        g.bx("R1 terrace lip", [l0, 4.0, -63.0], [l1, 4.15, -35.0], HAZARD);
+        g.ramp_z(
+            "R1 terrace ramp",
+            (x0, x1),
+            (-27.0, 0.0),
+            (-35.0, 4.0),
+            5.0,
+            STONE,
+        );
+        g.bx(
+            "R1 terrace lip",
+            [l0, 4.0, -63.0],
+            [l1, 4.15, -35.0],
+            HAZARD,
+        );
     }
     g.bx("R1 vat base", [-3.0, 0.0, -46.0], [3.0, 1.9, -40.0], RUST);
     g.bx("R1 vat rim N", [-3.0, 1.9, -46.0], [3.0, 2.4, -45.5], METAL);
     g.bx("R1 vat rim S", [-3.0, 1.9, -40.5], [3.0, 2.4, -40.0], METAL);
-    g.bx("R1 vat rim W", [-3.0, 1.9, -45.5], [-2.5, 2.4, -40.5], METAL);
+    g.bx(
+        "R1 vat rim W",
+        [-3.0, 1.9, -45.5],
+        [-2.5, 2.4, -40.5],
+        METAL,
+    );
     g.bx("R1 vat rim E", [2.5, 1.9, -45.5], [3.0, 2.4, -40.5], METAL);
     g.bx("R1 vat slag", [-2.5, 1.9, -45.5], [2.5, 2.0, -40.5], SLAG);
     g.kill("R1 vat", vol([-2.5, 1.9, -45.5], [2.5, 2.25, -40.5]));
     // Hanging hood above the vat: a perch reachable with a dash-jump from either terrace
     // (12 m out, 1.6 m up) — or a fall into the slag.
-    g.deco("R1 vat chain", [-0.2, 5.6, -43.2], [0.2, 12.0, -42.8], METAL_DARK);
-    g.bx("R1 vat perch", [-2.0, 5.0, -45.0], [2.0, 5.6, -41.0], RUST_DARK);
+    g.deco(
+        "R1 vat chain",
+        [-0.2, 5.6, -43.2],
+        [0.2, 12.0, -42.8],
+        METAL_DARK,
+    );
+    g.bx(
+        "R1 vat perch",
+        [-2.0, 5.0, -45.0],
+        [2.0, 5.6, -41.0],
+        RUST_DARK,
+    );
     for (x, z) in [(-8.0, -33.0), (8.0, -33.0), (-8.0, -54.0), (8.0, -54.0)] {
-        g.bx("R1 pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 12.0, z + 1.0], BRICK_DARK);
+        g.bx(
+            "R1 pillar",
+            [x - 1.0, 0.0, z - 1.0],
+            [x + 1.0, 12.0, z + 1.0],
+            BRICK_DARK,
+        );
     }
     g.light("R1 vat", [0.0, 3.6, -43.0], L_FIRE, 13.0);
     g.light("R1 terrace W", [-17.0, 8.0, -50.0], L_EMBER, 14.0);
@@ -767,20 +896,26 @@ fn crucible() -> Gen {
             lock_doors: vec![1],
             unlock_doors: vec![2],
             waves: vec![
-                wave(0.5, vec![
-                    enemy("gnawer", [-10.0, 0.0, -57.0], 180.0),
-                    enemy("gnawer", [10.0, 0.0, -57.0], 180.0),
-                    enemy("gnawer", [-4.0, 0.0, -52.0], 180.0),
-                    enemy("gnawer", [4.0, 0.0, -52.0], 180.0),
-                ]),
-                wave(1.5, vec![
-                    enemy("gnawer", [-17.0, 4.0, -52.0], 180.0),
-                    enemy("gnawer", [17.0, 4.0, -52.0], 180.0),
-                    enemy("gnawer", [-11.0, 0.0, -40.0], 180.0),
-                    enemy("gnawer", [11.0, 0.0, -40.0], 180.0),
-                    enemy("gnawer", [-5.0, 0.0, -60.0], 180.0),
-                    enemy("gnawer", [5.0, 0.0, -60.0], 180.0),
-                ]),
+                wave(
+                    0.5,
+                    vec![
+                        enemy("gnawer", [-10.0, 0.0, -57.0], 180.0),
+                        enemy("gnawer", [10.0, 0.0, -57.0], 180.0),
+                        enemy("gnawer", [-4.0, 0.0, -52.0], 180.0),
+                        enemy("gnawer", [4.0, 0.0, -52.0], 180.0),
+                    ],
+                ),
+                wave(
+                    1.5,
+                    vec![
+                        enemy("gnawer", [-17.0, 4.0, -52.0], 180.0),
+                        enemy("gnawer", [17.0, 4.0, -52.0], 180.0),
+                        enemy("gnawer", [-11.0, 0.0, -40.0], 180.0),
+                        enemy("gnawer", [11.0, 0.0, -40.0], 180.0),
+                        enemy("gnawer", [-5.0, 0.0, -60.0], 180.0),
+                        enemy("gnawer", [5.0, 0.0, -60.0], 180.0),
+                    ],
+                ),
             ],
         },
     );
@@ -794,9 +929,24 @@ fn crucible() -> Gen {
     g.room(&c2);
     g.bx("C2 floor S", [-3.0, -4.0, -75.0], [3.0, 0.0, -64.0], FLOOR);
     g.bx("C2 floor N", [-3.0, -4.0, -90.0], [3.0, 0.0, -80.0], FLOOR);
-    g.bx("C2 trench slag", [-3.0, -4.0, -80.0], [3.0, -3.0, -75.0], SLAG);
-    g.bx("C2 trench edge S", [-3.0, -0.15, -75.4], [3.0, 0.0, -75.0], HAZARD);
-    g.bx("C2 trench edge N", [-3.0, -0.15, -80.0], [3.0, 0.0, -79.6], HAZARD);
+    g.bx(
+        "C2 trench slag",
+        [-3.0, -4.0, -80.0],
+        [3.0, -3.0, -75.0],
+        SLAG,
+    );
+    g.bx(
+        "C2 trench edge S",
+        [-3.0, -0.15, -75.4],
+        [3.0, 0.0, -75.0],
+        HAZARD,
+    );
+    g.bx(
+        "C2 trench edge N",
+        [-3.0, -0.15, -80.0],
+        [3.0, 0.0, -79.6],
+        HAZARD,
+    );
     g.kill("C2 trench", vol([-3.0, -4.0, -80.0], [3.0, -1.5, -75.0]));
     for z in [-68.0, -86.0] {
         g.bx("C2 pipe", [-3.0, 5.6, z - 0.4], [3.0, 6.4, z + 0.4], BRASS);
@@ -814,43 +964,149 @@ fn crucible() -> Gen {
         .opening(r2_in)
         .opening(r2_out);
     g.room(&r2);
-    g.door(3, "door 3: R2 entry (locked by encounter 2)", &r2, r2_in, true, DOOR);
-    g.door(4, "door 4: R2 exit on the mezzanine (opened by encounter 2)", &r2, r2_out, false, EXIT_DOOR);
-    g.bx("R2 floor S", [-30.0, -4.0, -114.0], [30.0, 0.0, -91.0], TILE);
-    g.bx("R2 floor N", [-30.0, -4.0, -141.0], [30.0, 0.0, -122.0], TILE);
-    g.bx("R2 trench slag", [-30.0, -4.0, -122.0], [30.0, -3.0, -114.0], SLAG);
-    g.kill("R2 trench", vol([-30.0, -4.0, -122.0], [30.0, -1.5, -114.0]));
+    g.door(
+        3,
+        "door 3: R2 entry (locked by encounter 2)",
+        &r2,
+        r2_in,
+        true,
+        DOOR,
+    );
+    g.door(
+        4,
+        "door 4: R2 exit on the mezzanine (opened by encounter 2)",
+        &r2,
+        r2_out,
+        false,
+        EXIT_DOOR,
+    );
+    g.bx(
+        "R2 floor S",
+        [-30.0, -4.0, -114.0],
+        [30.0, 0.0, -91.0],
+        TILE,
+    );
+    g.bx(
+        "R2 floor N",
+        [-30.0, -4.0, -141.0],
+        [30.0, 0.0, -122.0],
+        TILE,
+    );
+    g.bx(
+        "R2 trench slag",
+        [-30.0, -4.0, -122.0],
+        [30.0, -3.0, -114.0],
+        SLAG,
+    );
+    g.kill(
+        "R2 trench",
+        vol([-30.0, -4.0, -122.0], [30.0, -1.5, -114.0]),
+    );
     for (x0, x1) in [(-18.0, -13.0), (13.0, 18.0)] {
         g.bx("R2 bridge", [x0, -0.6, -122.0], [x1, 0.0, -114.0], METAL);
     }
     // Hazard strips overhanging both trench edges (between the bridges).
     for (x0, x1) in [(-30.0, -18.0), (-13.0, 13.0), (18.0, 30.0)] {
-        g.bx("R2 trench edge S", [x0, -0.15, -114.4], [x1, 0.0, -114.0], HAZARD);
-        g.bx("R2 trench edge N", [x0, -0.15, -122.0], [x1, 0.0, -121.6], HAZARD);
+        g.bx(
+            "R2 trench edge S",
+            [x0, -0.15, -114.4],
+            [x1, 0.0, -114.0],
+            HAZARD,
+        );
+        g.bx(
+            "R2 trench edge N",
+            [x0, -0.15, -122.0],
+            [x1, 0.0, -121.6],
+            HAZARD,
+        );
     }
-    g.bx("R2 mezzanine", [-30.0, 4.4, -141.0], [30.0, 5.0, -133.0], METAL);
+    g.bx(
+        "R2 mezzanine",
+        [-30.0, 4.4, -141.0],
+        [30.0, 5.0, -133.0],
+        METAL,
+    );
     for x in [-18.0, -6.0, 6.0, 18.0] {
-        g.bx("R2 mezzanine post", [x - 0.5, 0.0, -134.5], [x + 0.5, 4.4, -133.5], RUST);
+        g.bx(
+            "R2 mezzanine post",
+            [x - 0.5, 0.0, -134.5],
+            [x + 0.5, 4.4, -133.5],
+            RUST,
+        );
     }
-    g.bx("R2 parapet W", [-24.0, 5.0, -133.4], [-4.0, 6.0, -133.0], BRICK);
-    g.bx("R2 parapet E", [4.0, 5.0, -133.4], [24.0, 6.0, -133.0], BRICK);
-    g.ramp_z("R2 ramp W", (-30.0, -25.0), (-123.0, 0.0), (-133.0, 5.0), 6.0, STONE);
-    g.ramp_z("R2 ramp E", (25.0, 30.0), (-123.0, 0.0), (-133.0, 5.0), 6.0, STONE);
+    g.bx(
+        "R2 parapet W",
+        [-24.0, 5.0, -133.4],
+        [-4.0, 6.0, -133.0],
+        BRICK,
+    );
+    g.bx(
+        "R2 parapet E",
+        [4.0, 5.0, -133.4],
+        [24.0, 6.0, -133.0],
+        BRICK,
+    );
+    g.ramp_z(
+        "R2 ramp W",
+        (-30.0, -25.0),
+        (-123.0, 0.0),
+        (-133.0, 5.0),
+        6.0,
+        STONE,
+    );
+    g.ramp_z(
+        "R2 ramp E",
+        (25.0, 30.0),
+        (-123.0, 0.0),
+        (-133.0, 5.0),
+        6.0,
+        STONE,
+    );
     g.pad(
         "R2 floor -> mezzanine",
         vol([-2.0, 0.0, -128.0], [2.0, 1.0, -124.0]),
         [0.0, 24.0, -8.0],
     );
-    g.bx("R2 pad ring", [-2.6, 0.0, -128.6], [2.6, 0.06, -123.4], HAZARD);
-    for (x, z) in [(-10.0, -100.0), (10.0, -100.0), (-10.0, -108.0), (10.0, -108.0)] {
-        g.bx("R2 cloister pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 14.0, z + 1.0], WAX);
+    g.bx(
+        "R2 pad ring",
+        [-2.6, 0.0, -128.6],
+        [2.6, 0.06, -123.4],
+        HAZARD,
+    );
+    for (x, z) in [
+        (-10.0, -100.0),
+        (10.0, -100.0),
+        (-10.0, -108.0),
+        (10.0, -108.0),
+    ] {
+        g.bx(
+            "R2 cloister pillar",
+            [x - 1.0, 0.0, z - 1.0],
+            [x + 1.0, 14.0, z + 1.0],
+            WAX,
+        );
     }
     for x in [-10.0, 10.0] {
-        g.bx("R2 arch beam", [x - 0.4, 10.0, -107.0], [x + 0.4, 11.0, -101.0], WAX);
+        g.bx(
+            "R2 arch beam",
+            [x - 0.4, 10.0, -107.0],
+            [x + 0.4, 11.0, -101.0],
+            WAX,
+        );
     }
     for z in [-102.0, -127.0] {
-        g.bx("R2 wax drape W", [-30.0, 3.0, z - 2.0], [-29.6, 12.0, z + 2.0], WAX_DRAPE);
-        g.bx("R2 wax drape E", [29.6, 3.0, z - 2.0], [30.0, 12.0, z + 2.0], WAX_DRAPE);
+        g.bx(
+            "R2 wax drape W",
+            [-30.0, 3.0, z - 2.0],
+            [-29.6, 12.0, z + 2.0],
+            WAX_DRAPE,
+        );
+        g.bx(
+            "R2 wax drape E",
+            [29.6, 3.0, z - 2.0],
+            [30.0, 12.0, z + 2.0],
+            WAX_DRAPE,
+        );
     }
     g.light("R2 trench W", [-20.0, -1.5, -118.0], L_FIRE, 10.0);
     g.light("R2 trench", [0.0, -1.5, -118.0], L_FIRE, 10.0);
@@ -876,25 +1132,31 @@ fn crucible() -> Gen {
             lock_doors: vec![3],
             unlock_doors: vec![4],
             waves: vec![
-                wave(0.5, vec![
-                    enemy("gnawer", [-13.0, 0.0, -110.0], 180.0),
-                    enemy("gnawer", [13.0, 0.0, -110.0], 180.0),
-                    enemy("gnawer", [-6.0, 0.0, -127.0], 180.0),
-                    enemy("gnawer", [6.0, 0.0, -127.0], 180.0),
-                    enemy("censer", [-15.0, 5.0, -137.0], 180.0),
-                    enemy("censer", [15.0, 5.0, -137.0], 180.0),
-                ]),
-                wave(1.5, vec![
-                    // Herons at the ends of the mezzanine: 45 m down the cloister.
-                    enemy("heron", [-21.0, 5.0, -138.0], 180.0),
-                    enemy("heron", [21.0, 5.0, -138.0], 180.0),
-                    enemy("censer", [-8.0, 5.0, -137.0], 180.0),
-                    enemy("censer", [8.0, 5.0, -137.0], 180.0),
-                    enemy("gnawer", [-22.0, 0.0, -128.0], 180.0),
-                    enemy("gnawer", [22.0, 0.0, -128.0], 180.0),
-                    enemy("gnawer", [-6.0, 0.0, -104.0], 180.0),
-                    enemy("gnawer", [6.0, 0.0, -104.0], 180.0),
-                ]),
+                wave(
+                    0.5,
+                    vec![
+                        enemy("gnawer", [-13.0, 0.0, -110.0], 180.0),
+                        enemy("gnawer", [13.0, 0.0, -110.0], 180.0),
+                        enemy("gnawer", [-6.0, 0.0, -127.0], 180.0),
+                        enemy("gnawer", [6.0, 0.0, -127.0], 180.0),
+                        enemy("censer", [-15.0, 5.0, -137.0], 180.0),
+                        enemy("censer", [15.0, 5.0, -137.0], 180.0),
+                    ],
+                ),
+                wave(
+                    1.5,
+                    vec![
+                        // Herons at the ends of the mezzanine: 45 m down the cloister.
+                        enemy("heron", [-21.0, 5.0, -138.0], 180.0),
+                        enemy("heron", [21.0, 5.0, -138.0], 180.0),
+                        enemy("censer", [-8.0, 5.0, -137.0], 180.0),
+                        enemy("censer", [8.0, 5.0, -137.0], 180.0),
+                        enemy("gnawer", [-22.0, 0.0, -128.0], 180.0),
+                        enemy("gnawer", [22.0, 0.0, -128.0], 180.0),
+                        enemy("gnawer", [-6.0, 0.0, -104.0], 180.0),
+                        enemy("gnawer", [6.0, 0.0, -104.0], 180.0),
+                    ],
+                ),
             ],
         },
     );
@@ -906,13 +1168,45 @@ fn crucible() -> Gen {
         .bottom(4.0)
         .open(&[N, S]);
     g.room(&c3);
-    g.bx("C3 floor", [-26.0, 4.0, -150.0], [-19.0, 5.0, -142.0], FLOOR);
-    g.ramp_z("C3 ramp", (-26.0, -19.0), (-150.0, 5.0), (-162.0, 10.0), 6.0, FLOOR);
-    g.bx("C3 landing", [-26.0, 4.0, -172.0], [-19.0, 10.0, -162.0], FLOOR);
+    g.bx(
+        "C3 floor",
+        [-26.0, 4.0, -150.0],
+        [-19.0, 5.0, -142.0],
+        FLOOR,
+    );
+    g.ramp_z(
+        "C3 ramp",
+        (-26.0, -19.0),
+        (-150.0, 5.0),
+        (-162.0, 10.0),
+        6.0,
+        FLOOR,
+    );
+    g.bx(
+        "C3 landing",
+        [-26.0, 4.0, -172.0],
+        [-19.0, 10.0, -162.0],
+        FLOOR,
+    );
     for z in [-146.0, -154.0, -163.0, -170.0] {
-        g.bx("C3 brass rib W", [-26.0, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4], [-25.6, 17.0, z + 0.4], BRASS);
-        g.bx("C3 brass rib E", [-19.4, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4], [-19.0, 17.0, z + 0.4], BRASS);
-        g.bx("C3 brass rib arch", [-26.0, 16.4, z - 0.4], [-19.0, 17.0, z + 0.4], BRASS);
+        g.bx(
+            "C3 brass rib W",
+            [-26.0, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4],
+            [-25.6, 17.0, z + 0.4],
+            BRASS,
+        );
+        g.bx(
+            "C3 brass rib E",
+            [-19.4, if z < -160.0 { 10.0 } else { 5.0 }, z - 0.4],
+            [-19.0, 17.0, z + 0.4],
+            BRASS,
+        );
+        g.bx(
+            "C3 brass rib arch",
+            [-26.0, 16.4, z - 0.4],
+            [-19.0, 17.0, z + 0.4],
+            BRASS,
+        );
     }
     g.light("C3 low", [-22.5, 9.0, -146.0], L_EMBER, 12.0);
     g.light("C3 high", [-22.5, 14.0, -166.0], L_EMBER, 12.0);
@@ -926,14 +1220,56 @@ fn crucible() -> Gen {
         .opening(r3_in)
         .opening(r3_out);
     g.room(&r3);
-    g.door(5, "door 5: R3 entry (locked by encounter 3)", &r3, r3_in, true, DOOR);
-    g.door(6, "door 6: R3 exit on the upper platform (opened by encounter 3)", &r3, r3_out, false, EXIT_DOOR);
-    g.bx("R3 floor S", [-44.0, -5.0, -188.0], [0.0, 10.0, -173.0], FLOOR);
-    g.bx("R3 floor N", [-44.0, -5.0, -215.0], [0.0, 10.0, -200.0], FLOOR);
-    g.bx("R3 floor W", [-44.0, -5.0, -200.0], [-28.0, 10.0, -188.0], FLOOR);
-    g.bx("R3 floor E", [-16.0, -5.0, -200.0], [0.0, 10.0, -188.0], FLOOR);
-    g.bx("R3 pit bottom (slag crust)", [-28.0, -6.0, -200.0], [-16.0, -5.0, -188.0], RUST_DARK);
-    g.kill("R3 bell pit", vol([-28.0, -5.0, -200.0], [-16.0, 3.0, -188.0]));
+    g.door(
+        5,
+        "door 5: R3 entry (locked by encounter 3)",
+        &r3,
+        r3_in,
+        true,
+        DOOR,
+    );
+    g.door(
+        6,
+        "door 6: R3 exit on the upper platform (opened by encounter 3)",
+        &r3,
+        r3_out,
+        false,
+        EXIT_DOOR,
+    );
+    g.bx(
+        "R3 floor S",
+        [-44.0, -5.0, -188.0],
+        [0.0, 10.0, -173.0],
+        FLOOR,
+    );
+    g.bx(
+        "R3 floor N",
+        [-44.0, -5.0, -215.0],
+        [0.0, 10.0, -200.0],
+        FLOOR,
+    );
+    g.bx(
+        "R3 floor W",
+        [-44.0, -5.0, -200.0],
+        [-28.0, 10.0, -188.0],
+        FLOOR,
+    );
+    g.bx(
+        "R3 floor E",
+        [-16.0, -5.0, -200.0],
+        [0.0, 10.0, -188.0],
+        FLOOR,
+    );
+    g.bx(
+        "R3 pit bottom (slag crust)",
+        [-28.0, -6.0, -200.0],
+        [-16.0, -5.0, -188.0],
+        RUST_DARK,
+    );
+    g.kill(
+        "R3 bell pit",
+        vol([-28.0, -5.0, -200.0], [-16.0, 3.0, -188.0]),
+    );
     for (x0, z0, x1, z1) in [
         (-28.6, -200.6, -15.4, -200.0),
         (-28.6, -188.0, -15.4, -187.4),
@@ -943,15 +1279,65 @@ fn crucible() -> Gen {
         g.bx("R3 pit lip", [x0, 10.0, z0], [x1, 10.2, z1], HAZARD);
     }
     // Tier 1 (y 16): west balcony + north catwalk; tier 2 (y 22): east platform.
-    g.bx("R3 balcony W (tier 1)", [-44.0, 15.4, -215.0], [-36.0, 16.0, -180.0], METAL);
-    g.bx("R3 balcony post", [-37.0, 10.0, -191.0], [-36.0, 15.4, -190.0], RUST);
-    g.bx("R3 balcony post", [-37.0, 10.0, -206.0], [-36.0, 15.4, -205.0], RUST);
-    g.bx("R3 catwalk N (tier 1)", [-36.0, 15.4, -215.0], [-20.0, 16.0, -208.0], METAL);
-    g.slope("R3 ramp tier 1 -> 2", true, (-215.0, -208.0), (-20.0, 16.0), (-8.0, 22.0), 0.6, true, (0.6, 0.0), METAL);
-    g.bx("R3 platform E (tier 2)", [-8.0, 21.4, -215.0], [0.0, 22.0, -195.0], METAL);
-    g.bx("R3 platform post", [-8.0, 10.0, -197.0], [-7.0, 21.4, -196.0], RUST);
-    g.bx("R3 platform post", [-8.0, 10.0, -214.0], [-7.0, 21.4, -213.0], RUST);
-    g.bx("R3 platform fascia", [-8.3, 21.3, -195.0], [0.0, 22.1, -194.7], HAZARD);
+    g.bx(
+        "R3 balcony W (tier 1)",
+        [-44.0, 15.4, -215.0],
+        [-36.0, 16.0, -180.0],
+        METAL,
+    );
+    g.bx(
+        "R3 balcony post",
+        [-37.0, 10.0, -191.0],
+        [-36.0, 15.4, -190.0],
+        RUST,
+    );
+    g.bx(
+        "R3 balcony post",
+        [-37.0, 10.0, -206.0],
+        [-36.0, 15.4, -205.0],
+        RUST,
+    );
+    g.bx(
+        "R3 catwalk N (tier 1)",
+        [-36.0, 15.4, -215.0],
+        [-20.0, 16.0, -208.0],
+        METAL,
+    );
+    g.slope(
+        "R3 ramp tier 1 -> 2",
+        true,
+        (-215.0, -208.0),
+        (-20.0, 16.0),
+        (-8.0, 22.0),
+        0.6,
+        true,
+        (0.6, 0.0),
+        METAL,
+    );
+    g.bx(
+        "R3 platform E (tier 2)",
+        [-8.0, 21.4, -215.0],
+        [0.0, 22.0, -195.0],
+        METAL,
+    );
+    g.bx(
+        "R3 platform post",
+        [-8.0, 10.0, -197.0],
+        [-7.0, 21.4, -196.0],
+        RUST,
+    );
+    g.bx(
+        "R3 platform post",
+        [-8.0, 10.0, -214.0],
+        [-7.0, 21.4, -213.0],
+        RUST,
+    );
+    g.bx(
+        "R3 platform fascia",
+        [-8.3, 21.3, -195.0],
+        [0.0, 22.1, -194.7],
+        HAZARD,
+    );
     g.pad(
         "R3 floor -> west balcony (tier 1)",
         vol([-34.0, 10.0, -186.0], [-30.0, 11.0, -182.0]),
@@ -962,26 +1348,95 @@ fn crucible() -> Gen {
         vol([-12.0, 10.0, -186.0], [-8.0, 11.0, -182.0]),
         [3.0, 34.0, -11.0],
     );
-    g.bx("R3 wall-jump fin", [-40.5, 10.0, -180.0], [-39.5, 19.0, -174.0], BRICK);
+    g.bx(
+        "R3 wall-jump fin",
+        [-40.5, 10.0, -180.0],
+        [-39.5, 19.0, -174.0],
+        BRICK,
+    );
     // Boilers: floor cover with glowing fireboxes behind grilles.
-    g.bx("R3 boiler W", [-44.0, 10.0, -200.0], [-40.0, 13.0, -193.0], RUST_DARK);
-    g.bx("R3 boiler W fire", [-40.0, 10.5, -198.5], [-39.9, 12.5, -194.5], SLAG);
-    g.bx("R3 boiler W grille", [-39.9, 10.3, -198.7], [-39.7, 12.7, -194.3], GRATE);
-    g.bx("R3 boiler E", [-4.0, 10.0, -211.0], [0.0, 13.0, -204.0], RUST_DARK);
-    g.bx("R3 boiler E fire", [-4.1, 10.5, -209.5], [-4.0, 12.5, -205.5], SLAG);
-    g.bx("R3 boiler E grille", [-4.3, 10.3, -209.7], [-4.1, 12.7, -205.3], GRATE);
-    g.bx("R3 bell", [-26.0, 30.0, -198.0], [-18.0, 38.0, -190.0], METAL_DARK);
-    g.bx("R3 bell lip", [-27.0, 29.4, -199.0], [-17.0, 30.0, -189.0], BRASS);
-    g.bx("R3 bell crown", [-24.0, 38.0, -196.0], [-20.0, 39.0, -192.0], BRASS);
-    g.bx("R3 bell rod", [-22.5, 39.0, -194.5], [-21.5, 46.0, -193.5], METAL_DARK);
-    for (i, x) in [-42.0f32, -40.5, -39.0, -37.5, -36.0, -34.5, -16.5, -15.0, -13.5, -12.0, -10.5, -9.0]
-        .into_iter()
-        .enumerate()
+    g.bx(
+        "R3 boiler W",
+        [-44.0, 10.0, -200.0],
+        [-40.0, 13.0, -193.0],
+        RUST_DARK,
+    );
+    g.bx(
+        "R3 boiler W fire",
+        [-40.0, 10.5, -198.5],
+        [-39.9, 12.5, -194.5],
+        SLAG,
+    );
+    g.bx(
+        "R3 boiler W grille",
+        [-39.9, 10.3, -198.7],
+        [-39.7, 12.7, -194.3],
+        GRATE,
+    );
+    g.bx(
+        "R3 boiler E",
+        [-4.0, 10.0, -211.0],
+        [0.0, 13.0, -204.0],
+        RUST_DARK,
+    );
+    g.bx(
+        "R3 boiler E fire",
+        [-4.1, 10.5, -209.5],
+        [-4.0, 12.5, -205.5],
+        SLAG,
+    );
+    g.bx(
+        "R3 boiler E grille",
+        [-4.3, 10.3, -209.7],
+        [-4.1, 12.7, -205.3],
+        GRATE,
+    );
+    g.bx(
+        "R3 bell",
+        [-26.0, 30.0, -198.0],
+        [-18.0, 38.0, -190.0],
+        METAL_DARK,
+    );
+    g.bx(
+        "R3 bell lip",
+        [-27.0, 29.4, -199.0],
+        [-17.0, 30.0, -189.0],
+        BRASS,
+    );
+    g.bx(
+        "R3 bell crown",
+        [-24.0, 38.0, -196.0],
+        [-20.0, 39.0, -192.0],
+        BRASS,
+    );
+    g.bx(
+        "R3 bell rod",
+        [-22.5, 39.0, -194.5],
+        [-21.5, 46.0, -193.5],
+        METAL_DARK,
+    );
+    for (i, x) in [
+        -42.0f32, -40.5, -39.0, -37.5, -36.0, -34.5, -16.5, -15.0, -13.5, -12.0, -10.5, -9.0,
+    ]
+    .into_iter()
+    .enumerate()
     {
-        let h = [30.0, 34.0, 38.0, 35.0, 31.0, 27.0, 27.0, 31.0, 35.0, 38.0, 34.0, 30.0][i];
-        g.deco("R3 organ pipe", [x, 20.0, -174.0], [x + 1.0, h, -173.0], BRASS);
+        let h = [
+            30.0, 34.0, 38.0, 35.0, 31.0, 27.0, 27.0, 31.0, 35.0, 38.0, 34.0, 30.0,
+        ][i];
+        g.deco(
+            "R3 organ pipe",
+            [x, 20.0, -174.0],
+            [x + 1.0, h, -173.0],
+            BRASS,
+        );
     }
-    g.bx("R3 organ console", [-43.0, 19.0, -174.2], [-8.0, 20.0, -173.0], RUST_DARK);
+    g.bx(
+        "R3 organ console",
+        [-43.0, 19.0, -174.2],
+        [-8.0, 20.0, -173.0],
+        RUST_DARK,
+    );
     g.light("R3 pit glow", [-22.0, -2.0, -194.0], L_EMBER, 18.0);
     g.light("R3 under bell", [-22.0, 27.5, -194.0], L_FIRE, 14.0);
     g.light("R3 balcony", [-40.0, 19.5, -197.0], L_WARM, 12.0);
@@ -1007,39 +1462,81 @@ fn crucible() -> Gen {
             lock_doors: vec![5],
             unlock_doors: vec![6],
             waves: vec![
-                wave(0.5, vec![
-                    enemy("harrier", [-34.0, 16.0, -192.0], 180.0),
-                    enemy("harrier", [-11.0, 16.0, -194.0], 180.0),
-                    enemy("harrier", [-22.0, 17.0, -183.0], 180.0),
-                    enemy("harrier", [-22.0, 17.0, -207.0], 180.0),
-                    enemy("gnawer", [-36.0, 10.0, -208.0], 180.0),
-                    enemy("gnawer", [-4.0, 10.0, -190.0], 180.0),
-                ]),
-                wave(1.5, vec![
-                    enemy("harrier", [-36.0, 23.0, -199.0], 180.0),
-                    enemy("harrier", [-4.0, 28.0, -203.0], 180.0),
-                    enemy("harrier", [-12.0, 16.0, -180.0], 180.0),
-                    enemy("harrier", [-14.0, 17.0, -207.0], 180.0),
-                    enemy("censer", [-40.0, 16.0, -200.0], 180.0),
-                    enemy("censer", [-4.0, 22.0, -210.0], 180.0),
-                    enemy("gnawer", [-30.0, 10.0, -207.0], 180.0),
-                    enemy("gnawer", [-10.0, 10.0, -182.0], 180.0),
-                ]),
+                wave(
+                    0.5,
+                    vec![
+                        enemy("harrier", [-34.0, 16.0, -192.0], 180.0),
+                        enemy("harrier", [-11.0, 16.0, -194.0], 180.0),
+                        enemy("harrier", [-22.0, 17.0, -183.0], 180.0),
+                        enemy("harrier", [-22.0, 17.0, -207.0], 180.0),
+                        enemy("gnawer", [-36.0, 10.0, -208.0], 180.0),
+                        enemy("gnawer", [-4.0, 10.0, -190.0], 180.0),
+                    ],
+                ),
+                wave(
+                    1.5,
+                    vec![
+                        enemy("harrier", [-36.0, 23.0, -199.0], 180.0),
+                        enemy("harrier", [-4.0, 28.0, -203.0], 180.0),
+                        enemy("harrier", [-12.0, 16.0, -180.0], 180.0),
+                        enemy("harrier", [-14.0, 17.0, -207.0], 180.0),
+                        enemy("censer", [-40.0, 16.0, -200.0], 180.0),
+                        enemy("censer", [-4.0, 22.0, -210.0], 180.0),
+                        enemy("gnawer", [-30.0, 10.0, -207.0], 180.0),
+                        enemy("gnawer", [-10.0, 10.0, -182.0], 180.0),
+                    ],
+                ),
             ],
         },
     );
 
     // ---------------------------------------------------------------- C4 Spillway
     g.section("C4 Spillway (long downhill slide)");
-    let c4 = Room::new("C4", [1.0, 0.0, -212.0], [65.0, 30.0, -205.0], RUST_DARK)
-        .open(&[W, E]);
+    let c4 = Room::new("C4", [1.0, 0.0, -212.0], [65.0, 30.0, -205.0], RUST_DARK).open(&[W, E]);
     g.room(&c4);
-    g.bx("C4 top landing", [1.0, 18.0, -212.0], [6.0, 22.0, -205.0], FLOOR);
-    g.ramp_x("C4 slide ramp", (-212.0, -205.0), (54.0, 0.0), (6.0, 22.0), 4.0, TILE);
-    g.bx("C4 run-out floor", [54.0, -1.0, -212.0], [65.0, 0.0, -205.0], FLOOR);
-    g.bx("C4 ceiling top", [1.0, 29.0, -212.0], [6.0, 30.0, -205.0], METAL_DARK);
-    g.slope("C4 ceiling slope", true, (-212.0, -205.0), (54.0, 7.0), (6.0, 29.0), 1.0, false, (0.0, 1.5), METAL_DARK);
-    g.bx("C4 ceiling bottom", [54.0, 7.0, -212.0], [65.0, 8.0, -205.0], METAL_DARK);
+    g.bx(
+        "C4 top landing",
+        [1.0, 18.0, -212.0],
+        [6.0, 22.0, -205.0],
+        FLOOR,
+    );
+    g.ramp_x(
+        "C4 slide ramp",
+        (-212.0, -205.0),
+        (54.0, 0.0),
+        (6.0, 22.0),
+        4.0,
+        TILE,
+    );
+    g.bx(
+        "C4 run-out floor",
+        [54.0, -1.0, -212.0],
+        [65.0, 0.0, -205.0],
+        FLOOR,
+    );
+    g.bx(
+        "C4 ceiling top",
+        [1.0, 29.0, -212.0],
+        [6.0, 30.0, -205.0],
+        METAL_DARK,
+    );
+    g.slope(
+        "C4 ceiling slope",
+        true,
+        (-212.0, -205.0),
+        (54.0, 7.0),
+        (6.0, 29.0),
+        1.0,
+        false,
+        (0.0, 1.5),
+        METAL_DARK,
+    );
+    g.bx(
+        "C4 ceiling bottom",
+        [54.0, 7.0, -212.0],
+        [65.0, 8.0, -205.0],
+        METAL_DARK,
+    );
     g.light("C4 top", [3.5, 26.0, -208.5], L_EMBER, 10.0);
     g.light("C4 upper", [18.0, 21.0, -208.5], L_FIRE, 12.0);
     g.light("C4 middle", [32.0, 15.0, -208.5], L_EMBER, 12.0);
@@ -1055,28 +1552,128 @@ fn crucible() -> Gen {
         .opening(r4_in)
         .opening(r4_out);
     g.room(&r4);
-    g.door(7, "door 7: R4 entry (locked by encounter 4)", &r4, r4_in, true, DOOR);
-    g.door(8, "door 8: R4 exit (opened by encounter 4)", &r4, r4_out, false, EXIT_DOOR);
-    g.bx("R4 floor W", [66.0, -4.0, -233.0], [82.0, 0.0, -183.0], FLOOR);
-    g.bx("R4 floor E", [100.0, -4.0, -233.0], [116.0, 0.0, -183.0], FLOOR);
-    g.bx("R4 floor N", [82.0, -4.0, -233.0], [100.0, 0.0, -217.0], FLOOR);
-    g.bx("R4 floor S", [82.0, -4.0, -199.0], [100.0, 0.0, -183.0], FLOOR);
-    g.bx("R4 cauldron moat slag", [82.0, -4.0, -217.0], [100.0, -3.0, -199.0], SLAG);
-    g.kill("R4 cauldron moat", vol([82.0, -4.0, -217.0], [100.0, -1.2, -199.0]));
+    g.door(
+        7,
+        "door 7: R4 entry (locked by encounter 4)",
+        &r4,
+        r4_in,
+        true,
+        DOOR,
+    );
+    g.door(
+        8,
+        "door 8: R4 exit (opened by encounter 4)",
+        &r4,
+        r4_out,
+        false,
+        EXIT_DOOR,
+    );
+    g.bx(
+        "R4 floor W",
+        [66.0, -4.0, -233.0],
+        [82.0, 0.0, -183.0],
+        FLOOR,
+    );
+    g.bx(
+        "R4 floor E",
+        [100.0, -4.0, -233.0],
+        [116.0, 0.0, -183.0],
+        FLOOR,
+    );
+    g.bx(
+        "R4 floor N",
+        [82.0, -4.0, -233.0],
+        [100.0, 0.0, -217.0],
+        FLOOR,
+    );
+    g.bx(
+        "R4 floor S",
+        [82.0, -4.0, -199.0],
+        [100.0, 0.0, -183.0],
+        FLOOR,
+    );
+    g.bx(
+        "R4 cauldron moat slag",
+        [82.0, -4.0, -217.0],
+        [100.0, -3.0, -199.0],
+        SLAG,
+    );
+    g.kill(
+        "R4 cauldron moat",
+        vol([82.0, -4.0, -217.0], [100.0, -1.2, -199.0]),
+    );
     g.bx("R4 island", [85.0, -3.0, -214.0], [97.0, 1.0, -202.0], TILE);
-    for (x, z) in [(86.0, -213.0), (96.0, -213.0), (86.0, -203.0), (96.0, -203.0)] {
-        g.bx("R4 island spike", [x - 0.5, 1.0, z - 0.5], [x + 0.5, 3.5, z + 0.5], BRASS);
+    for (x, z) in [
+        (86.0, -213.0),
+        (96.0, -213.0),
+        (86.0, -203.0),
+        (96.0, -203.0),
+    ] {
+        g.bx(
+            "R4 island spike",
+            [x - 0.5, 1.0, z - 0.5],
+            [x + 0.5, 3.5, z + 0.5],
+            BRASS,
+        );
     }
-    g.ramp_x("R4 bridge W", (-209.5, -206.5), (82.0, 0.0), (85.0, 1.0), 0.6, METAL);
-    g.ramp_x("R4 bridge E", (-209.5, -206.5), (100.0, 0.0), (97.0, 1.0), 0.6, METAL);
-    g.ramp_z("R4 bridge N", (89.5, 92.5), (-217.0, 0.0), (-214.0, 1.0), 0.6, METAL);
-    g.ramp_z("R4 bridge S", (89.5, 92.5), (-199.0, 0.0), (-202.0, 1.0), 0.6, METAL);
-    for (x, z) in [(78.0, -195.0), (104.0, -195.0), (78.0, -221.0), (104.0, -221.0)] {
-        g.bx("R4 wax column", [x - 1.5, 0.0, z - 1.5], [x + 1.5, 18.0, z + 1.5], WAX);
+    g.ramp_x(
+        "R4 bridge W",
+        (-209.5, -206.5),
+        (82.0, 0.0),
+        (85.0, 1.0),
+        0.6,
+        METAL,
+    );
+    g.ramp_x(
+        "R4 bridge E",
+        (-209.5, -206.5),
+        (100.0, 0.0),
+        (97.0, 1.0),
+        0.6,
+        METAL,
+    );
+    g.ramp_z(
+        "R4 bridge N",
+        (89.5, 92.5),
+        (-217.0, 0.0),
+        (-214.0, 1.0),
+        0.6,
+        METAL,
+    );
+    g.ramp_z(
+        "R4 bridge S",
+        (89.5, 92.5),
+        (-199.0, 0.0),
+        (-202.0, 1.0),
+        0.6,
+        METAL,
+    );
+    for (x, z) in [
+        (78.0, -195.0),
+        (104.0, -195.0),
+        (78.0, -221.0),
+        (104.0, -221.0),
+    ] {
+        g.bx(
+            "R4 wax column",
+            [x - 1.5, 0.0, z - 1.5],
+            [x + 1.5, 18.0, z + 1.5],
+            WAX,
+        );
     }
     for (z0, z1) in [(-233.0, -223.0), (-193.0, -183.0)] {
-        g.bx("R4 corner platform", [106.0, 0.0, z0], [116.0, 4.0, z1], STONE);
-        g.bx("R4 corner platform lip", [105.7, 4.0, z0], [106.0, 4.15, z1], HAZARD);
+        g.bx(
+            "R4 corner platform",
+            [106.0, 0.0, z0],
+            [116.0, 4.0, z1],
+            STONE,
+        );
+        g.bx(
+            "R4 corner platform lip",
+            [105.7, 4.0, z0],
+            [106.0, 4.15, z1],
+            HAZARD,
+        );
     }
     g.pad(
         "R4 floor -> NE platform",
@@ -1088,13 +1685,43 @@ fn crucible() -> Gen {
         vol([101.0, 0.0, -189.0], [104.0, 1.0, -186.0]),
         [9.0, 22.0, 0.0],
     );
-    g.bx("R4 crucible", [87.0, 12.0, -212.0], [95.0, 14.5, -204.0], RUST_DARK);
-    g.bx("R4 crucible glow", [87.5, 11.8, -211.5], [94.5, 12.0, -204.5], SLAG);
-    g.deco("R4 crucible chain", [86.8, 14.5, -212.2], [87.2, 18.0, -211.8], METAL_DARK);
-    g.deco("R4 crucible chain", [94.8, 14.5, -204.2], [95.2, 18.0, -203.8], METAL_DARK);
+    g.bx(
+        "R4 crucible",
+        [87.0, 12.0, -212.0],
+        [95.0, 14.5, -204.0],
+        RUST_DARK,
+    );
+    g.bx(
+        "R4 crucible glow",
+        [87.5, 11.8, -211.5],
+        [94.5, 12.0, -204.5],
+        SLAG,
+    );
+    g.deco(
+        "R4 crucible chain",
+        [86.8, 14.5, -212.2],
+        [87.2, 18.0, -211.8],
+        METAL_DARK,
+    );
+    g.deco(
+        "R4 crucible chain",
+        [94.8, 14.5, -204.2],
+        [95.2, 18.0, -203.8],
+        METAL_DARK,
+    );
     for z in [-196.0, -220.0] {
-        g.bx("R4 wax seep W", [66.0, 2.0, z - 3.0], [66.4, 14.0, z + 3.0], WAX_DRAPE);
-        g.bx("R4 wax seep E", [115.6, 6.0, z - 3.0], [116.0, 14.0, z + 3.0], WAX_DRAPE);
+        g.bx(
+            "R4 wax seep W",
+            [66.0, 2.0, z - 3.0],
+            [66.4, 14.0, z + 3.0],
+            WAX_DRAPE,
+        );
+        g.bx(
+            "R4 wax seep E",
+            [115.6, 6.0, z - 3.0],
+            [116.0, 14.0, z + 3.0],
+            WAX_DRAPE,
+        );
     }
     g.light("R4 moat W", [83.5, -1.0, -208.0], L_FIRE, 10.0);
     g.light("R4 moat E", [98.5, -1.0, -208.0], L_FIRE, 10.0);
@@ -1121,23 +1748,29 @@ fn crucible() -> Gen {
             lock_doors: vec![7],
             unlock_doors: vec![8],
             waves: vec![
-                wave(1.0, vec![
-                    enemy("gaoler", [91.0, 1.0, -208.0], 90.0),
-                    enemy("gnawer", [78.0, 0.0, -189.0], -90.0),
-                    enemy("gnawer", [78.0, 0.0, -227.0], -90.0),
-                    enemy("gnawer", [104.0, 0.0, -201.0], 90.0),
-                    enemy("gnawer", [104.0, 0.0, -215.0], 90.0),
-                ]),
-                wave(1.5, vec![
-                    enemy("censer", [111.0, 4.0, -228.0], 90.0),
-                    enemy("censer", [111.0, 4.0, -188.0], 90.0),
-                    enemy("harrier", [91.0, 7.0, -190.0], 90.0),
-                    enemy("harrier", [91.0, 7.0, -226.0], 90.0),
-                    enemy("harrier", [108.0, 7.0, -208.0], 90.0),
-                    enemy("gnawer", [76.0, 0.0, -200.0], -90.0),
-                    enemy("gnawer", [76.0, 0.0, -216.0], -90.0),
-                    enemy("gnawer", [108.0, 0.0, -200.0], 90.0),
-                ]),
+                wave(
+                    1.0,
+                    vec![
+                        enemy("gaoler", [91.0, 1.0, -208.0], 90.0),
+                        enemy("gnawer", [78.0, 0.0, -189.0], -90.0),
+                        enemy("gnawer", [78.0, 0.0, -227.0], -90.0),
+                        enemy("gnawer", [104.0, 0.0, -201.0], 90.0),
+                        enemy("gnawer", [104.0, 0.0, -215.0], 90.0),
+                    ],
+                ),
+                wave(
+                    1.5,
+                    vec![
+                        enemy("censer", [111.0, 4.0, -228.0], 90.0),
+                        enemy("censer", [111.0, 4.0, -188.0], 90.0),
+                        enemy("harrier", [91.0, 7.0, -190.0], 90.0),
+                        enemy("harrier", [91.0, 7.0, -226.0], 90.0),
+                        enemy("harrier", [108.0, 7.0, -208.0], 90.0),
+                        enemy("gnawer", [76.0, 0.0, -200.0], -90.0),
+                        enemy("gnawer", [76.0, 0.0, -216.0], -90.0),
+                        enemy("gnawer", [108.0, 0.0, -200.0], 90.0),
+                    ],
+                ),
             ],
         },
     );
@@ -1150,9 +1783,24 @@ fn crucible() -> Gen {
         .open(&[N, S]);
     g.room(&c5);
     for z in [-242.0, -248.0, -254.0] {
-        g.bx("C5 pipe (1.2 m under, 1.9 m top)", [87.0, 1.2, z - 0.35], [95.0, 1.9, z + 0.35], BRASS);
-        g.bx("C5 pipe hanger W", [88.0, 1.9, z - 0.15], [88.3, 8.0, z + 0.15], METAL);
-        g.bx("C5 pipe hanger E", [93.7, 1.9, z - 0.15], [94.0, 8.0, z + 0.15], METAL);
+        g.bx(
+            "C5 pipe (1.2 m under, 1.9 m top)",
+            [87.0, 1.2, z - 0.35],
+            [95.0, 1.9, z + 0.35],
+            BRASS,
+        );
+        g.bx(
+            "C5 pipe hanger W",
+            [88.0, 1.9, z - 0.15],
+            [88.3, 8.0, z + 0.15],
+            METAL,
+        );
+        g.bx(
+            "C5 pipe hanger E",
+            [93.7, 1.9, z - 0.15],
+            [94.0, 8.0, z + 0.15],
+            METAL,
+        );
     }
     g.light("C5 toxic", [91.0, 5.0, -245.0], L_TOXIC, 10.0);
     g.light("C5 toxic", [91.0, 5.0, -256.0], L_TOXIC, 10.0);
@@ -1167,34 +1815,113 @@ fn crucible() -> Gen {
         .opening(r5_in)
         .opening(r5_out);
     g.room(&r5);
-    g.door(9, "door 9: R5 entry (locked by encounter 5)", &r5, r5_in, true, DOOR);
-    g.door(10, "door 10: R5 exit behind the altar (opened by encounter 5)", &r5, r5_out, false, EXIT_DOOR);
+    g.door(
+        9,
+        "door 9: R5 entry (locked by encounter 5)",
+        &r5,
+        r5_in,
+        true,
+        DOOR,
+    );
+    g.door(
+        10,
+        "door 10: R5 exit behind the altar (opened by encounter 5)",
+        &r5,
+        r5_out,
+        false,
+        EXIT_DOOR,
+    );
     // Floors: nave (x 73..109) split by the chasm (z -299..-291); aisles W/E with slag pools.
-    g.bx("R5 nave floor S", [73.0, -21.0, -291.0], [109.0, 0.0, -263.0], TILE);
-    g.bx("R5 nave floor N", [73.0, -21.0, -330.0], [109.0, 0.0, -299.0], TILE);
-    g.bx("R5 chasm bottom (slag crust)", [73.0, -22.0, -299.0], [109.0, -21.0, -291.0], RUST_DARK);
-    g.kill("R5 chasm", vol([73.0, -21.0, -299.0], [109.0, -8.0, -291.0]));
-    g.bx("R5 chasm bridge", [89.0, -1.0, -299.0], [93.0, 0.0, -291.0], METAL);
+    g.bx(
+        "R5 nave floor S",
+        [73.0, -21.0, -291.0],
+        [109.0, 0.0, -263.0],
+        TILE,
+    );
+    g.bx(
+        "R5 nave floor N",
+        [73.0, -21.0, -330.0],
+        [109.0, 0.0, -299.0],
+        TILE,
+    );
+    g.bx(
+        "R5 chasm bottom (slag crust)",
+        [73.0, -22.0, -299.0],
+        [109.0, -21.0, -291.0],
+        RUST_DARK,
+    );
+    g.kill(
+        "R5 chasm",
+        vol([73.0, -21.0, -299.0], [109.0, -8.0, -291.0]),
+    );
+    g.bx(
+        "R5 chasm bridge",
+        [89.0, -1.0, -299.0],
+        [93.0, 0.0, -291.0],
+        METAL,
+    );
     // Aisles: (x range, pool x range, the two paths beside the pool).
     for ((x0, x1), (px0, px1), paths) in [
         ((60.0, 73.0), (62.0, 70.0), [(60.0, 62.0), (70.0, 73.0)]),
-        ((109.0, 122.0), (112.0, 120.0), [(109.0, 112.0), (120.0, 122.0)]),
+        (
+            (109.0, 122.0),
+            (112.0, 120.0),
+            [(109.0, 112.0), (120.0, 122.0)],
+        ),
     ] {
-        g.bx("R5 aisle floor S", [x0, -21.0, -290.0], [x1, 0.0, -263.0], FLOOR);
-        g.bx("R5 aisle floor N", [x0, -21.0, -330.0], [x1, 0.0, -300.0], FLOOR);
+        g.bx(
+            "R5 aisle floor S",
+            [x0, -21.0, -290.0],
+            [x1, 0.0, -263.0],
+            FLOOR,
+        );
+        g.bx(
+            "R5 aisle floor N",
+            [x0, -21.0, -330.0],
+            [x1, 0.0, -300.0],
+            FLOOR,
+        );
         for (a, b) in paths {
-            g.bx("R5 aisle path beside the pool", [a, -21.0, -300.0], [b, 0.0, -290.0], FLOOR);
+            g.bx(
+                "R5 aisle path beside the pool",
+                [a, -21.0, -300.0],
+                [b, 0.0, -290.0],
+                FLOOR,
+            );
         }
-        g.bx("R5 aisle slag pool", [px0, -3.0, -300.0], [px1, -2.0, -290.0], SLAG);
-        g.kill("R5 aisle slag pool", vol([px0, -3.0, -300.0], [px1, -0.8, -290.0]));
+        g.bx(
+            "R5 aisle slag pool",
+            [px0, -3.0, -300.0],
+            [px1, -2.0, -290.0],
+            SLAG,
+        );
+        g.kill(
+            "R5 aisle slag pool",
+            vol([px0, -3.0, -300.0], [px1, -0.8, -290.0]),
+        );
     }
     for x in [72.0, 110.0] {
         for z in [-272.0, -284.0, -306.0, -318.0] {
-            g.bx("R5 wax colonnade pillar", [x - 1.0, 0.0, z - 1.0], [x + 1.0, 28.0, z + 1.0], WAX);
+            g.bx(
+                "R5 wax colonnade pillar",
+                [x - 1.0, 0.0, z - 1.0],
+                [x + 1.0, 28.0, z + 1.0],
+                WAX,
+            );
         }
     }
-    g.bx("R5 gallery W", [60.0, 7.4, -322.0], [71.0, 8.0, -268.0], METAL);
-    g.bx("R5 gallery E", [111.0, 7.4, -322.0], [122.0, 8.0, -268.0], METAL);
+    g.bx(
+        "R5 gallery W",
+        [60.0, 7.4, -322.0],
+        [71.0, 8.0, -268.0],
+        METAL,
+    );
+    g.bx(
+        "R5 gallery E",
+        [111.0, 7.4, -322.0],
+        [122.0, 8.0, -268.0],
+        METAL,
+    );
     g.pad(
         "R5 nave -> west gallery",
         vol([75.0, 0.0, -280.0], [78.0, 1.0, -277.0]),
@@ -1205,29 +1932,118 @@ fn crucible() -> Gen {
         vol([104.0, 0.0, -280.0], [107.0, 1.0, -277.0]),
         [9.0, 28.0, 0.0],
     );
-    g.bx("R5 altar dais", [76.0, 0.0, -330.0], [106.0, 4.0, -314.0], STONE);
-    g.bx("R5 dais lip", [76.0, 4.0, -314.3], [106.0, 4.15, -314.0], HAZARD);
-    g.ramp_z("R5 dais ramp W", (78.0, 83.0), (-306.0, 0.0), (-314.0, 4.0), 5.0, STONE);
-    g.ramp_z("R5 dais ramp E", (99.0, 104.0), (-306.0, 0.0), (-314.0, 4.0), 5.0, STONE);
+    g.bx(
+        "R5 altar dais",
+        [76.0, 0.0, -330.0],
+        [106.0, 4.0, -314.0],
+        STONE,
+    );
+    g.bx(
+        "R5 dais lip",
+        [76.0, 4.0, -314.3],
+        [106.0, 4.15, -314.0],
+        HAZARD,
+    );
+    g.ramp_z(
+        "R5 dais ramp W",
+        (78.0, 83.0),
+        (-306.0, 0.0),
+        (-314.0, 4.0),
+        5.0,
+        STONE,
+    );
+    g.ramp_z(
+        "R5 dais ramp E",
+        (99.0, 104.0),
+        (-306.0, 0.0),
+        (-314.0, 4.0),
+        5.0,
+        STONE,
+    );
     for (x0, x1) in [(80.0, 86.0), (96.0, 102.0)] {
         g.bx("R5 furnace", [x0, 4.0, -330.0], [x1, 11.0, -325.0], RUST);
-        g.bx("R5 furnace fire", [x0 + 1.0, 5.0, -325.0], [x1 - 1.0, 8.0, -324.9], SLAG);
-        g.bx("R5 furnace grille", [x0 + 0.8, 4.8, -324.9], [x1 - 0.8, 8.2, -324.6], GRATE);
-        g.bx("R5 furnace flue", [x0 + 1.5, 11.0, -330.0], [x1 - 1.5, 28.0, -327.0], RUST_DARK);
+        g.bx(
+            "R5 furnace fire",
+            [x0 + 1.0, 5.0, -325.0],
+            [x1 - 1.0, 8.0, -324.9],
+            SLAG,
+        );
+        g.bx(
+            "R5 furnace grille",
+            [x0 + 0.8, 4.8, -324.9],
+            [x1 - 0.8, 8.2, -324.6],
+            GRATE,
+        );
+        g.bx(
+            "R5 furnace flue",
+            [x0 + 1.5, 11.0, -330.0],
+            [x1 - 1.5, 28.0, -327.0],
+            RUST_DARK,
+        );
     }
-    g.bx("R5 rose window fire", [86.0, 14.0, -330.0], [96.0, 24.0, -329.8], SLAG);
-    g.bx("R5 rose window grille", [85.8, 13.8, -329.8], [96.2, 24.2, -329.5], GRATE);
-    g.deco("R5 rose mullion V", [90.6, 13.8, -329.5], [91.4, 24.2, -329.2], BRASS);
-    g.deco("R5 rose mullion H", [85.8, 18.6, -329.5], [96.2, 19.4, -329.2], BRASS);
-    g.bx("R5 chandelier", [87.0, 17.0, -287.0], [95.0, 19.0, -279.0], RUST_DARK);
-    g.bx("R5 chandelier glow", [87.5, 16.8, -286.5], [94.5, 17.0, -279.5], SLAG);
-    g.deco("R5 chandelier chain", [90.8, 19.0, -283.2], [91.2, 28.0, -282.8], METAL_DARK);
+    g.bx(
+        "R5 rose window fire",
+        [86.0, 14.0, -330.0],
+        [96.0, 24.0, -329.8],
+        SLAG,
+    );
+    g.bx(
+        "R5 rose window grille",
+        [85.8, 13.8, -329.8],
+        [96.2, 24.2, -329.5],
+        GRATE,
+    );
+    g.deco(
+        "R5 rose mullion V",
+        [90.6, 13.8, -329.5],
+        [91.4, 24.2, -329.2],
+        BRASS,
+    );
+    g.deco(
+        "R5 rose mullion H",
+        [85.8, 18.6, -329.5],
+        [96.2, 19.4, -329.2],
+        BRASS,
+    );
+    g.bx(
+        "R5 chandelier",
+        [87.0, 17.0, -287.0],
+        [95.0, 19.0, -279.0],
+        RUST_DARK,
+    );
+    g.bx(
+        "R5 chandelier glow",
+        [87.5, 16.8, -286.5],
+        [94.5, 17.0, -279.5],
+        SLAG,
+    );
+    g.deco(
+        "R5 chandelier chain",
+        [90.8, 19.0, -283.2],
+        [91.2, 28.0, -282.8],
+        METAL_DARK,
+    );
     for z in [-276.0, -296.0, -316.0] {
-        g.bx("R5 ceiling rib", [60.0, 26.8, z - 0.5], [122.0, 28.0, z + 0.5], WAX);
+        g.bx(
+            "R5 ceiling rib",
+            [60.0, 26.8, z - 0.5],
+            [122.0, 28.0, z + 0.5],
+            WAX,
+        );
     }
     for z in [-278.0, -308.0] {
-        g.bx("R5 wax drape W", [60.0, 10.0, z - 4.0], [60.4, 24.0, z + 4.0], WAX_DRAPE);
-        g.bx("R5 wax drape E", [121.6, 10.0, z - 4.0], [122.0, 24.0, z + 4.0], WAX_DRAPE);
+        g.bx(
+            "R5 wax drape W",
+            [60.0, 10.0, z - 4.0],
+            [60.4, 24.0, z + 4.0],
+            WAX_DRAPE,
+        );
+        g.bx(
+            "R5 wax drape E",
+            [121.6, 10.0, z - 4.0],
+            [122.0, 24.0, z + 4.0],
+            WAX_DRAPE,
+        );
     }
     g.light("R5 entry", [91.0, 10.0, -268.0], L_WARM, 16.0);
     g.light("R5 chandelier", [91.0, 14.0, -283.0], L_FIRE, 18.0);
@@ -1257,50 +2073,62 @@ fn crucible() -> Gen {
             lock_doors: vec![9],
             unlock_doors: vec![10],
             waves: vec![
-                wave(0.5, vec![
-                    enemy("gnawer", [80.0, 0.0, -280.0], 180.0),
-                    enemy("gnawer", [102.0, 0.0, -280.0], 180.0),
-                    enemy("gnawer", [66.0, 0.0, -284.0], 180.0),
-                    enemy("gnawer", [116.0, 0.0, -284.0], 180.0),
-                    enemy("gnawer", [85.0, 0.0, -308.0], 180.0),
-                    enemy("gnawer", [97.0, 0.0, -308.0], 180.0),
-                    enemy("censer", [86.0, 4.0, -319.0], 180.0),
-                    enemy("censer", [96.0, 4.0, -319.0], 180.0),
-                ]),
-                wave(1.5, vec![
-                    // Herons on the dais, 55 m up the nave from the entrance.
-                    enemy("heron", [79.0, 4.0, -320.0], 180.0),
-                    enemy("heron", [103.0, 4.0, -320.0], 180.0),
-                    enemy("harrier", [80.0, 6.0, -284.0], 180.0),
-                    enemy("harrier", [102.0, 6.0, -284.0], 180.0),
-                    enemy("harrier", [91.0, 7.0, -306.0], 180.0),
-                    enemy("censer", [65.0, 8.0, -300.0], -90.0),
-                    enemy("censer", [117.0, 8.0, -300.0], 90.0),
-                    enemy("gnawer", [76.0, 0.0, -310.0], 180.0),
-                    enemy("gnawer", [106.0, 0.0, -310.0], 180.0),
-                ]),
-                wave(2.0, vec![
-                    enemy("gaoler", [91.0, 0.0, -305.0], 180.0),
-                    enemy("gnawer", [66.0, 0.0, -271.0], 180.0),
-                    enemy("gnawer", [116.0, 0.0, -271.0], 180.0),
-                    enemy("gnawer", [66.0, 0.0, -320.0], 180.0),
-                    enemy("gnawer", [116.0, 0.0, -320.0], 180.0),
-                    enemy("harrier", [91.0, 8.0, -295.0], 180.0),
-                    enemy("harrier", [84.0, 6.0, -274.0], 180.0),
-                    enemy("harrier", [98.0, 6.0, -274.0], 180.0),
-                ]),
-                wave(2.0, vec![
-                    enemy("gaoler", [91.0, 4.0, -321.0], 180.0),
-                    enemy("heron", [103.0, 4.0, -320.0], 180.0),
-                    enemy("censer", [65.0, 8.0, -275.0], -90.0),
-                    enemy("censer", [117.0, 8.0, -275.0], 90.0),
-                    enemy("harrier", [78.0, 7.0, -303.0], 180.0),
-                    enemy("harrier", [104.0, 7.0, -303.0], 180.0),
-                    enemy("harrier", [91.0, 7.0, -287.0], 180.0),
-                    enemy("gnawer", [76.0, 0.0, -274.0], 180.0),
-                    enemy("gnawer", [106.0, 0.0, -274.0], 180.0),
-                    enemy("gnawer", [75.0, 0.0, -310.0], 180.0),
-                ]),
+                wave(
+                    0.5,
+                    vec![
+                        enemy("gnawer", [80.0, 0.0, -280.0], 180.0),
+                        enemy("gnawer", [102.0, 0.0, -280.0], 180.0),
+                        enemy("gnawer", [66.0, 0.0, -284.0], 180.0),
+                        enemy("gnawer", [116.0, 0.0, -284.0], 180.0),
+                        enemy("gnawer", [85.0, 0.0, -308.0], 180.0),
+                        enemy("gnawer", [97.0, 0.0, -308.0], 180.0),
+                        enemy("censer", [86.0, 4.0, -319.0], 180.0),
+                        enemy("censer", [96.0, 4.0, -319.0], 180.0),
+                    ],
+                ),
+                wave(
+                    1.5,
+                    vec![
+                        // Herons on the dais, 55 m up the nave from the entrance.
+                        enemy("heron", [79.0, 4.0, -320.0], 180.0),
+                        enemy("heron", [103.0, 4.0, -320.0], 180.0),
+                        enemy("harrier", [80.0, 6.0, -284.0], 180.0),
+                        enemy("harrier", [102.0, 6.0, -284.0], 180.0),
+                        enemy("harrier", [91.0, 7.0, -306.0], 180.0),
+                        enemy("censer", [65.0, 8.0, -300.0], -90.0),
+                        enemy("censer", [117.0, 8.0, -300.0], 90.0),
+                        enemy("gnawer", [76.0, 0.0, -310.0], 180.0),
+                        enemy("gnawer", [106.0, 0.0, -310.0], 180.0),
+                    ],
+                ),
+                wave(
+                    2.0,
+                    vec![
+                        enemy("gaoler", [91.0, 0.0, -305.0], 180.0),
+                        enemy("gnawer", [66.0, 0.0, -271.0], 180.0),
+                        enemy("gnawer", [116.0, 0.0, -271.0], 180.0),
+                        enemy("gnawer", [66.0, 0.0, -320.0], 180.0),
+                        enemy("gnawer", [116.0, 0.0, -320.0], 180.0),
+                        enemy("harrier", [91.0, 8.0, -295.0], 180.0),
+                        enemy("harrier", [84.0, 6.0, -274.0], 180.0),
+                        enemy("harrier", [98.0, 6.0, -274.0], 180.0),
+                    ],
+                ),
+                wave(
+                    2.0,
+                    vec![
+                        enemy("gaoler", [91.0, 4.0, -321.0], 180.0),
+                        enemy("heron", [103.0, 4.0, -320.0], 180.0),
+                        enemy("censer", [65.0, 8.0, -275.0], -90.0),
+                        enemy("censer", [117.0, 8.0, -275.0], 90.0),
+                        enemy("harrier", [78.0, 7.0, -303.0], 180.0),
+                        enemy("harrier", [104.0, 7.0, -303.0], 180.0),
+                        enemy("harrier", [91.0, 7.0, -287.0], 180.0),
+                        enemy("gnawer", [76.0, 0.0, -274.0], 180.0),
+                        enemy("gnawer", [106.0, 0.0, -274.0], 180.0),
+                        enemy("gnawer", [75.0, 0.0, -310.0], 180.0),
+                    ],
+                ),
             ],
         },
     );
@@ -1312,22 +2140,45 @@ fn crucible() -> Gen {
         .ceiling(METAL_DARK)
         .open(&[N, S]);
     g.room(&c6);
-    let ex = Room::new("Exit", [81.0, 4.0, -372.0], [101.0, 20.0, -352.0], BRICK_DARK)
-        .floor(STONE)
-        .ceiling(METAL_DARK)
-        .opening(op(S, 87.0, 95.0, 4.0, 11.0));
+    let ex = Room::new(
+        "Exit",
+        [81.0, 4.0, -372.0],
+        [101.0, 20.0, -352.0],
+        BRICK_DARK,
+    )
+    .floor(STONE)
+    .ceiling(METAL_DARK)
+    .opening(op(S, 87.0, 95.0, 4.0, 11.0));
     g.room(&ex);
     g.bx("Exit dais", [86.0, 4.0, -367.0], [96.0, 4.3, -357.0], PANEL);
-    for (x, z) in [(84.0, -355.0), (98.0, -355.0), (84.0, -369.0), (98.0, -369.0)] {
-        g.bx("Exit pillar", [x - 0.75, 4.0, z - 0.75], [x + 0.75, 20.0, z + 0.75], WAX);
+    for (x, z) in [
+        (84.0, -355.0),
+        (98.0, -355.0),
+        (84.0, -369.0),
+        (98.0, -369.0),
+    ] {
+        g.bx(
+            "Exit pillar",
+            [x - 0.75, 4.0, z - 0.75],
+            [x + 0.75, 20.0, z + 0.75],
+            WAX,
+        );
     }
-    g.bx("Exit halo", [86.0, 18.0, -367.0], [96.0, 19.0, -357.0], SLAG);
+    g.bx(
+        "Exit halo",
+        [86.0, 18.0, -367.0],
+        [96.0, 19.0, -357.0],
+        SLAG,
+    );
     g.light("C6 hall", [91.0, 9.0, -341.0], L_WARM, 12.0);
     g.light("Exit halo", [91.0, 16.0, -362.0], L_HOLY, 18.0);
     g.light("Exit floor", [91.0, 6.0, -362.0], L_EMBER, 10.0);
     g.def.exit = Some(vol([86.0, 4.0, -367.0], [96.0, 12.0, -357.0]));
 
-    g.kill("below the world", vol([-1000.0, -200.0, -1000.0], [1000.0, -40.0, 1000.0]));
+    g.kill(
+        "below the world",
+        vol([-1000.0, -200.0, -1000.0], [1000.0, -40.0, 1000.0]),
+    );
     g
 }
 
@@ -1382,18 +2233,50 @@ fn cistern() -> Gen {
     g.section("Outer shell (open sky, clipped at 32 m)");
     let shell = Room::new("Shell", [-H, 0.0, -H], [H, TOP, H], WALL).bottom(-4.0);
     g.room(&shell);
-    g.clip("sky clip wall N", [-H - 1.0, TOP, -H - 1.0], [H + 1.0, SKY, -H]);
-    g.clip("sky clip wall S", [-H - 1.0, TOP, H], [H + 1.0, SKY, H + 1.0]);
+    g.clip(
+        "sky clip wall N",
+        [-H - 1.0, TOP, -H - 1.0],
+        [H + 1.0, SKY, -H],
+    );
+    g.clip(
+        "sky clip wall S",
+        [-H - 1.0, TOP, H],
+        [H + 1.0, SKY, H + 1.0],
+    );
     g.clip("sky clip wall W", [-H - 1.0, TOP, -H], [-H, SKY, H]);
     g.clip("sky clip wall E", [H, TOP, -H], [H + 1.0, SKY, H]);
-    g.clip("sky clip ceiling", [-H - 1.0, SKY, -H - 1.0], [H + 1.0, SKY + 1.0, H + 1.0]);
+    g.clip(
+        "sky clip ceiling",
+        [-H - 1.0, SKY, -H - 1.0],
+        [H + 1.0, SKY + 1.0, H + 1.0],
+    );
     for x in [-24.0, -12.0, 0.0, 12.0, 24.0] {
-        g.bx("pilaster N", [x - 1.0, 0.0, -H], [x + 1.0, TOP, -H + 0.6], WALL_TILE);
-        g.bx("pilaster S", [x - 1.0, 0.0, H - 0.6], [x + 1.0, TOP, H], WALL_TILE);
+        g.bx(
+            "pilaster N",
+            [x - 1.0, 0.0, -H],
+            [x + 1.0, TOP, -H + 0.6],
+            WALL_TILE,
+        );
+        g.bx(
+            "pilaster S",
+            [x - 1.0, 0.0, H - 0.6],
+            [x + 1.0, TOP, H],
+            WALL_TILE,
+        );
     }
     for z in [-20.0, 0.0, 20.0] {
-        g.deco("wall pipe W", [-H, 11.0, z - 6.0], [-H + 1.2, 12.2, z + 6.0], METAL);
-        g.deco("wall pipe E", [H - 1.2, 11.0, z - 6.0], [H, 12.2, z + 6.0], METAL);
+        g.deco(
+            "wall pipe W",
+            [-H, 11.0, z - 6.0],
+            [-H + 1.2, 12.2, z + 6.0],
+            METAL,
+        );
+        g.deco(
+            "wall pipe E",
+            [H - 1.2, 11.0, z - 6.0],
+            [H, 12.2, z + 6.0],
+            METAL,
+        );
     }
 
     // Ring floor (y 0) around the sunken bowl, coolant pits N/S, slide trenches W/E.
@@ -1403,13 +2286,46 @@ fn cistern() -> Gen {
         let (o0, o1) = span(s, H, 26.0);
         let (i0, i1) = span(s, 20.0, 16.0);
         let (p0, p1) = span(s, 26.0, 20.0);
-        g.bx(&format!("ring {side} outer band"), [-H, -4.0, o0], [H, 0.0, o1], FLOOR);
-        g.bx(&format!("ring {side} inner band"), [-H, -4.0, i0], [H, 0.0, i1], FLOOR);
-        g.bx(&format!("ring {side} beside pit W"), [-H, -4.0, p0], [-4.0, 0.0, p1], FLOOR);
-        g.bx(&format!("ring {side} beside pit E"), [4.0, -4.0, p0], [H, 0.0, p1], FLOOR);
-        g.bx(&format!("coolant pit {side} bed"), [-4.0, -4.0, p0], [4.0, -3.4, p1], DEEP);
-        g.bx(&format!("coolant pit {side} surface"), [-4.0, -3.4, p0], [4.0, -3.0, p1], COOLANT);
-        g.kill(&format!("coolant pit {side}"), vol([-4.0, -4.0, p0], [4.0, -1.5, p1]));
+        g.bx(
+            &format!("ring {side} outer band"),
+            [-H, -4.0, o0],
+            [H, 0.0, o1],
+            FLOOR,
+        );
+        g.bx(
+            &format!("ring {side} inner band"),
+            [-H, -4.0, i0],
+            [H, 0.0, i1],
+            FLOOR,
+        );
+        g.bx(
+            &format!("ring {side} beside pit W"),
+            [-H, -4.0, p0],
+            [-4.0, 0.0, p1],
+            FLOOR,
+        );
+        g.bx(
+            &format!("ring {side} beside pit E"),
+            [4.0, -4.0, p0],
+            [H, 0.0, p1],
+            FLOOR,
+        );
+        g.bx(
+            &format!("coolant pit {side} bed"),
+            [-4.0, -4.0, p0],
+            [4.0, -3.4, p1],
+            DEEP,
+        );
+        g.bx(
+            &format!("coolant pit {side} surface"),
+            [-4.0, -3.4, p0],
+            [4.0, -3.0, p1],
+            COOLANT,
+        );
+        g.kill(
+            &format!("coolant pit {side}"),
+            vol([-4.0, -4.0, p0], [4.0, -1.5, p1]),
+        );
         for (x0, x1, a, b) in [
             (-4.3, 4.3, 26.0, 26.3),
             (-4.3, 4.3, 19.7, 20.0),
@@ -1417,7 +2333,12 @@ fn cistern() -> Gen {
             (4.0, 4.3, 20.0, 26.0),
         ] {
             let (l0, l1) = span(s, a, b);
-            g.bx(&format!("coolant pit {side} lip"), [x0, 0.0, l0], [x1, 0.12, l1], HAZARD);
+            g.bx(
+                &format!("coolant pit {side} lip"),
+                [x0, 0.0, l0],
+                [x1, 0.12, l1],
+                HAZARD,
+            );
         }
     }
     for s in [-1.0f32, 1.0] {
@@ -1426,30 +2347,109 @@ fn cistern() -> Gen {
         let (e0, e1) = span(s, H, 28.0);
         let (t0, t1) = span(s, 20.0, 16.0);
         let (w0, w1) = span(s, 26.0, 20.0);
-        g.bx(&format!("ring {side} band north"), [b0, -4.0, -16.0], [b1, 0.0, -1.5], FLOOR);
-        g.bx(&format!("ring {side} band south"), [b0, -4.0, 1.5], [b1, 0.0, 16.0], FLOOR);
-        g.bx(&format!("ring {side} trench end"), [e0, -4.0, -1.5], [e1, 0.0, 1.5], FLOOR);
-        g.bx(&format!("slide tunnel {side} floor"), [t0, -4.0, -1.5], [t1, -3.0, 1.5], BOWL);
-        g.bx(&format!("slide tunnel {side} roof (1.2 m gap)"), [t0, -1.8, -1.5], [t1, 0.0, 1.5], GRATE);
-        g.ramp_x(&format!("slide trench {side} ramp"), (-1.5, 1.5), (s * 20.0, -3.0), (s * 28.0, 0.0), 4.0, BOWL);
+        g.bx(
+            &format!("ring {side} band north"),
+            [b0, -4.0, -16.0],
+            [b1, 0.0, -1.5],
+            FLOOR,
+        );
+        g.bx(
+            &format!("ring {side} band south"),
+            [b0, -4.0, 1.5],
+            [b1, 0.0, 16.0],
+            FLOOR,
+        );
+        g.bx(
+            &format!("ring {side} trench end"),
+            [e0, -4.0, -1.5],
+            [e1, 0.0, 1.5],
+            FLOOR,
+        );
+        g.bx(
+            &format!("slide tunnel {side} floor"),
+            [t0, -4.0, -1.5],
+            [t1, -3.0, 1.5],
+            BOWL,
+        );
+        g.bx(
+            &format!("slide tunnel {side} roof (1.2 m gap)"),
+            [t0, -1.8, -1.5],
+            [t1, 0.0, 1.5],
+            GRATE,
+        );
+        g.ramp_x(
+            &format!("slide trench {side} ramp"),
+            (-1.5, 1.5),
+            (s * 20.0, -3.0),
+            (s * 28.0, 0.0),
+            4.0,
+            BOWL,
+        );
         for (za, zb) in [(-6.0, -5.0), (5.0, 6.0)] {
-            g.bx(&format!("ring {side} low wall"), [w0, 0.0, za], [w1, 1.2, zb], RUST);
+            g.bx(
+                &format!("ring {side} low wall"),
+                [w0, 0.0, za],
+                [w1, 1.2, zb],
+                RUST,
+            );
         }
     }
 
     g.section("Bowl (y -3) and reactor core");
     g.bx("bowl floor", [-16.0, -4.0, -16.0], [16.0, -3.0, 16.0], BOWL);
-    g.ramp_z("bowl ramp N", (-3.0, 3.0), (-8.0, -3.0), (-16.0, 0.0), 4.0, METAL);
-    g.ramp_z("bowl ramp S", (-3.0, 3.0), (8.0, -3.0), (16.0, 0.0), 4.0, METAL);
+    g.ramp_z(
+        "bowl ramp N",
+        (-3.0, 3.0),
+        (-8.0, -3.0),
+        (-16.0, 0.0),
+        4.0,
+        METAL,
+    );
+    g.ramp_z(
+        "bowl ramp S",
+        (-3.0, 3.0),
+        (8.0, -3.0),
+        (16.0, 0.0),
+        4.0,
+        METAL,
+    );
     for (x, z) in [(-10.0, -10.0), (10.0, -10.0), (-10.0, 10.0), (10.0, 10.0)] {
-        g.bx("bowl pillar", [x - 1.0, -3.0, z - 1.0], [x + 1.0, 9.0, z + 1.0], WALL_TILE);
-        g.bx("bowl pillar cap", [x - 1.3, 9.0, z - 1.3], [x + 1.3, 9.6, z + 1.3], METAL_DARK);
+        g.bx(
+            "bowl pillar",
+            [x - 1.0, -3.0, z - 1.0],
+            [x + 1.0, 9.0, z + 1.0],
+            WALL_TILE,
+        );
+        g.bx(
+            "bowl pillar cap",
+            [x - 1.3, 9.0, z - 1.3],
+            [x + 1.3, 9.6, z + 1.3],
+            METAL_DARK,
+        );
     }
     g.bx("reactor core", [-3.0, -3.0, -3.0], [3.0, 3.9, 3.0], METAL);
-    g.bx("reactor core band", [-3.3, 0.6, -3.3], [3.3, 1.4, 3.3], PANEL);
-    g.bx("reactor core cap", [-3.0, 3.9, -3.0], [3.0, 4.0, 3.0], VIOLET);
-    g.pad("bowl E -> core top", vol([8.0, -3.0, -1.25], [10.5, -2.0, 1.25]), [-7.0, 26.0, 0.0]);
-    g.pad("bowl W -> core top", vol([-10.5, -3.0, -1.25], [-8.0, -2.0, 1.25]), [7.0, 26.0, 0.0]);
+    g.bx(
+        "reactor core band",
+        [-3.3, 0.6, -3.3],
+        [3.3, 1.4, 3.3],
+        PANEL,
+    );
+    g.bx(
+        "reactor core cap",
+        [-3.0, 3.9, -3.0],
+        [3.0, 4.0, 3.0],
+        VIOLET,
+    );
+    g.pad(
+        "bowl E -> core top",
+        vol([8.0, -3.0, -1.25], [10.5, -2.0, 1.25]),
+        [-7.0, 26.0, 0.0],
+    );
+    g.pad(
+        "bowl W -> core top",
+        vol([-10.5, -3.0, -1.25], [-8.0, -2.0, 1.25]),
+        [7.0, 26.0, 0.0],
+    );
 
     g.section("Corner towers (y 6), catwalks, ramps, wall-jump fins, cover");
     for (sx, sz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
@@ -1458,7 +2458,14 @@ fn cistern() -> Gen {
         g.bx("tower", [x0, 0.0, z0], [x1, 5.9, z1], WALL_TILE);
         g.bx("tower top plate", [x0, 5.9, z0], [x1, 6.0, z1], VIOLET);
         // Ramp along the outer W/E wall from the ring (z ±10) up to the tower (z ±28).
-        g.ramp_z("tower ramp", span(sx, H, 32.0), (sz * 10.0, 0.0), (sz * 28.0, 6.0), 8.0, FLOOR);
+        g.ramp_z(
+            "tower ramp",
+            span(sx, H, 32.0),
+            (sz * 10.0, 0.0),
+            (sz * 28.0, 6.0),
+            8.0,
+            FLOOR,
+        );
         // Fin parallel to the tower's inner face: a 3.5 m wall-jump shaft onto the tower.
         let (fx0, fx1) = span(sx, 24.5, 23.5);
         let (fz0, fz1) = span(sz, 32.0, 28.5);
@@ -1469,14 +2476,29 @@ fn cistern() -> Gen {
         g.bx("catwalk", [-28.0, 5.5, z0], [28.0, 6.0, z1], METAL);
         let (pz0, pz1) = span(s, 35.0, 34.0);
         for x in [-14.0, 0.0, 14.0] {
-            g.bx("catwalk post", [x - 0.4, 0.0, pz0], [x + 0.4, 5.5, pz1], METAL_DARK);
+            g.bx(
+                "catwalk post",
+                [x - 0.4, 0.0, pz0],
+                [x + 0.4, 5.5, pz1],
+                METAL_DARK,
+            );
         }
     }
     for (x, z) in [(-22.0, -22.0), (22.0, 22.0)] {
-        g.bx("crate", [x - 1.5, 0.0, z - 1.5], [x + 1.5, 2.0, z + 1.5], RUST);
+        g.bx(
+            "crate",
+            [x - 1.5, 0.0, z - 1.5],
+            [x + 1.5, 2.0, z + 1.5],
+            RUST,
+        );
     }
     for (x, z) in [(22.0, -22.0), (-22.0, 22.0)] {
-        g.bx("low crate", [x - 1.0, 0.0, z - 1.5], [x + 1.0, 1.2, z + 1.5], RUST);
+        g.bx(
+            "low crate",
+            [x - 1.0, 0.0, z - 1.5],
+            [x + 1.0, 1.2, z + 1.5],
+            RUST,
+        );
     }
     // Pump houses on the north/south ring: a 3 m layer between the ring and the catwalks that
     // breaks the catwalk sightlines; a step crate on the bowl side makes them climbable.
@@ -1487,7 +2509,12 @@ fn cistern() -> Gen {
             g.bx("pump house", [x0, 0.0, z0], [x1, 2.9, z1], METAL_DARK);
             g.bx("pump house roof", [x0, 2.9, z0], [x1, 3.0, z1], PANEL);
             let cx = (x0 + x1) * 0.5;
-            g.bx("pump house step", [cx - 1.5, 0.0, c0], [cx + 1.5, 1.2, c1], RUST);
+            g.bx(
+                "pump house step",
+                [cx - 1.5, 0.0, c0],
+                [cx + 1.5, 1.2, c1],
+                RUST,
+            );
         }
     }
 
@@ -1520,7 +2547,10 @@ fn cistern() -> Gen {
     ] {
         g.spawn([x, y, z], r4(f32::atan2(x, z).to_degrees()));
     }
-    g.kill("below the world", vol([-1000.0, -200.0, -1000.0], [1000.0, -30.0, 1000.0]));
+    g.kill(
+        "below the world",
+        vol([-1000.0, -200.0, -1000.0], [1000.0, -30.0, 1000.0]),
+    );
     g
 }
 
@@ -1577,6 +2607,9 @@ fn main() -> anyhow::Result<()> {
             );
         }
     }
-    anyhow::ensure!(stale.is_empty(), "out of date (re-run level_gen): {stale:?}");
+    anyhow::ensure!(
+        stale.is_empty(),
+        "out of date (re-run level_gen): {stale:?}"
+    );
     Ok(())
 }

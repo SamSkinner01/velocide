@@ -523,7 +523,9 @@ pub fn bolt(a: Vec3, b: Vec3, segments: usize, jitter: f32, seed: u32, width: f3
     let mut points = vec![a];
     for i in 1..segments.max(1) {
         let t = i as f32 / segments as f32;
-        let h = seed.wrapping_mul(2_654_435_761).wrapping_add(i as u32 * 40_503) as f32;
+        let h = seed
+            .wrapping_mul(2_654_435_761)
+            .wrapping_add(i as u32 * 40_503) as f32;
         let (s, c) = (h * 0.0137).sin_cos();
         points.push(a.lerp(b, t) + side * (s * jitter) + depth * (c * jitter));
     }
@@ -531,7 +533,13 @@ pub fn bolt(a: Vec3, b: Vec3, segments: usize, jitter: f32, seed: u32, width: f3
     for w in points.windows(2) {
         add(
             &mut m,
-            limb(w[0], w[1], Vec2::splat(width), Vec2::splat(width * 0.8), Vec4::ONE),
+            limb(
+                w[0],
+                w[1],
+                Vec2::splat(width),
+                Vec2::splat(width * 0.8),
+                Vec4::ONE,
+            ),
         );
     }
     m

@@ -107,7 +107,9 @@ impl SimWorld {
         }
         let n = self.level.encounters.len();
         if self.encounters.states.len() != n {
-            self.encounters.states.resize_with(n, EncounterState::default);
+            self.encounters
+                .states
+                .resize_with(n, EncounterState::default);
         }
         let now = self.tick;
         for i in 0..n {
@@ -403,7 +405,12 @@ impl SimWorld {
     }
 
     /// A free spot near spawn `s` for its `copy`-th extra copy, not overlapping `taken`.
-    fn find_copy_spot(&self, s: &EnemySpawn, copy: usize, taken: &[(EnemySpawn, Vec3)]) -> Option<Vec3> {
+    fn find_copy_spot(
+        &self,
+        s: &EnemySpawn,
+        copy: usize,
+        taken: &[(EnemySpawn, Vec3)],
+    ) -> Option<Vec3> {
         let def = self.enemy_defs.get(&s.enemy)?;
         let flying = matches!(def.locomotion, super::enemy::Locomotion::Flying { .. });
         let r = def.radius;

@@ -145,7 +145,12 @@ impl CollisionWorld {
     }
 
     /// Adds a convex hull of the given world-space points (wedges, ramps, pillars...).
-    pub fn add_convex_hull(&mut self, points: &[Vec3], groups: u32, tag: u32) -> Option<ColliderId> {
+    pub fn add_convex_hull(
+        &mut self,
+        points: &[Vec3],
+        groups: u32,
+        tag: u32,
+    ) -> Option<ColliderId> {
         let shape = SharedShape::convex_hull(points)?;
         Some(self.add_shape(shape, Pose::IDENTITY, groups, tag))
     }
@@ -162,7 +167,13 @@ impl CollisionWorld {
         Some(self.add_shape(shape, Pose::IDENTITY, groups, tag))
     }
 
-    pub fn add_shape(&mut self, shape: SharedShape, pose: Pose, groups: u32, tag: u32) -> ColliderId {
+    pub fn add_shape(
+        &mut self,
+        shape: SharedShape,
+        pose: Pose,
+        groups: u32,
+        tag: u32,
+    ) -> ColliderId {
         let aabb = shape.compute_aabb(&pose);
         let id = self.colliders.len() as u32;
         let (aabb_min, aabb_max) = (aabb.mins, aabb.maxs);
@@ -178,7 +189,10 @@ impl CollisionWorld {
             }
             self.grid_bounds = Some(match self.grid_bounds {
                 None => (lo, hi),
-                Some((a, b)) => ((a.0.min(lo.0), a.1.min(lo.1)), (b.0.max(hi.0), b.1.max(hi.1))),
+                Some((a, b)) => (
+                    (a.0.min(lo.0), a.1.min(lo.1)),
+                    (b.0.max(hi.0), b.1.max(hi.1)),
+                ),
             });
         }
         self.colliders.push(Collider {
@@ -290,7 +304,13 @@ impl CollisionWorld {
 
     /// Casts a ray. `dir` does not need to be normalized; `max_distance` is in world units
     /// (clamped to [`MAX_RAY_DISTANCE`]). Non-finite inputs never hit.
-    pub fn cast_ray(&self, origin: Vec3, dir: Vec3, max_distance: f32, mask: u32) -> Option<RayHit> {
+    pub fn cast_ray(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_distance: f32,
+        mask: u32,
+    ) -> Option<RayHit> {
         if !origin.is_finite() || !dir.is_finite() || max_distance.is_nan() {
             return None;
         }
@@ -351,8 +371,16 @@ impl CollisionWorld {
         } else {
             f32::INFINITY
         };
-        let t_delta_x = if dir.x.abs() > 1e-8 { CELL_SIZE / dir.x.abs() } else { f32::INFINITY };
-        let t_delta_z = if dir.z.abs() > 1e-8 { CELL_SIZE / dir.z.abs() } else { f32::INFINITY };
+        let t_delta_x = if dir.x.abs() > 1e-8 {
+            CELL_SIZE / dir.x.abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_delta_z = if dir.z.abs() > 1e-8 {
+            CELL_SIZE / dir.z.abs()
+        } else {
+            f32::INFINITY
+        };
         // A cell outside the grid's range on an axis the ray moves away from (or doesn't move
         // along) can never lead back into the grid.
         let gone = |c: i32, step: i32, moves: bool, lo: i32, hi: i32| {
@@ -425,7 +453,13 @@ impl CollisionWorld {
         hit
     }
 
-    pub fn intersects_capsule(&self, center: Vec3, half_height: f32, radius: f32, mask: u32) -> bool {
+    pub fn intersects_capsule(
+        &self,
+        center: Vec3,
+        half_height: f32,
+        radius: f32,
+        mask: u32,
+    ) -> bool {
         let capsule = parry3d::shape::Capsule::new_y(half_height, radius);
         self.intersects(&capsule, center, mask)
     }
@@ -481,13 +515,7 @@ impl CollisionWorld {
 
     /// Calls `f` once for every enabled collider matching `mask` whose bounding box overlaps
     /// `lo..=hi` (nothing for a non-finite box).
-    fn for_each_candidate(
-        &self,
-        lo: Vec3,
-        hi: Vec3,
-        mask: u32,
-        mut f: impl FnMut(u32, &Collider),
-    ) {
+    fn for_each_candidate(&self, lo: Vec3, hi: Vec3, mask: u32, mut f: impl FnMut(u32, &Collider)) {
         if !lo.is_finite() || !hi.is_finite() {
             return;
         }
@@ -522,7 +550,9 @@ impl CollisionWorld {
             return;
         }
         for cell in cells_overlapping(lo, hi) {
-            let Some(ids) = self.grid.get(&cell) else { continue };
+            let Some(ids) = self.grid.get(&cell) else {
+                continue;
+            };
             for &id in ids {
                 visit(id);
             }
@@ -640,10 +670,21 @@ mod tests {
     fn capsule_sweep_stops_at_wall() {
         let w = floor_world();
         let hit = w
-            .cast_capsule(Vec3::new(0.0, 1.0, 0.0), 0.5, 0.4, Vec3::new(10.0, 0.0, 0.0), 0.0, MASK_MOVEMENT)
+            .cast_capsule(
+                Vec3::new(0.0, 1.0, 0.0),
+                0.5,
+                0.4,
+                Vec3::new(10.0, 0.0, 0.0),
+                0.0,
+                MASK_MOVEMENT,
+            )
             .expect("hit");
         // Capsule surface touches the wall at x = 5 when its centre is at x = 4.6.
-        assert!((hit.fraction * 10.0 - 4.6).abs() < 1e-2, "fraction {}", hit.fraction);
+        assert!(
+            (hit.fraction * 10.0 - 4.6).abs() < 1e-2,
+            "fraction {}",
+            hit.fraction
+        );
         assert!(hit.normal.dot(-Vec3::X) > 0.99);
     }
 
@@ -651,15 +692,17 @@ mod tests {
     fn capsule_resting_on_floor_can_move_up() {
         let w = floor_world();
         let center = Vec3::new(0.0, 0.9, -3.0);
-        assert!(w.cast_capsule(center, 0.5, 0.4, Vec3::Y, 0.0, MASK_MOVEMENT).is_none());
+        assert!(
+            w.cast_capsule(center, 0.5, 0.4, Vec3::Y, 0.0, MASK_MOVEMENT)
+                .is_none()
+        );
     }
 
     #[test]
     fn disabled_colliders_are_ignored() {
         let mut w = floor_world();
         w.set_enabled(ColliderId(1), false);
-        let hit = w
-            .cast_ray(Vec3::new(-19.0, 1.0, 0.0), Vec3::X, 100.0, MASK_SHOTS);
+        let hit = w.cast_ray(Vec3::new(-19.0, 1.0, 0.0), Vec3::X, 100.0, MASK_SHOTS);
         assert!(hit.is_none());
     }
 
@@ -679,7 +722,14 @@ mod tests {
             for gap in [-0.0056, -0.002, 0.002, 0.005, 0.008, 0.0099] {
                 let c = Vec3::new(x, 0.9 + gap, z);
                 let hit = w
-                    .cast_capsule(c, 0.5, 0.4, Vec3::new(0.0, -0.0106, 0.0), 0.01, MASK_MOVEMENT)
+                    .cast_capsule(
+                        c,
+                        0.5,
+                        0.4,
+                        Vec3::new(0.0, -0.0106, 0.0),
+                        0.01,
+                        MASK_MOVEMENT,
+                    )
                     .unwrap_or_else(|| panic!("missed the floor at ({x}, {gap}, {z})"));
                 assert_eq!(hit.fraction, 0.0);
                 if gap > 0.001 {
@@ -707,12 +757,20 @@ mod tests {
         let w = floor_world();
         for len in [1.0e8, 1.3e8, 1.0e12, f32::MAX, f32::INFINITY] {
             // Through the wall: still hit.
-            let hit = quick(1.0, || w.cast_ray(Vec3::new(-19.0, 1.0, 0.3), Vec3::X, len, MASK_SHOTS))
-                .expect("hit wall");
+            let hit = quick(1.0, || {
+                w.cast_ray(Vec3::new(-19.0, 1.0, 0.3), Vec3::X, len, MASK_SHOTS)
+            })
+            .expect("hit wall");
             assert_eq!(hit.tag, 1);
             // Over everything, away from the grid: nothing, quickly.
-            for dir in [Vec3::new(1.0, 0.2, 0.7), Vec3::new(-0.3, 0.01, -1.0), Vec3::Y] {
-                let miss = quick(1.0, || w.cast_ray(Vec3::new(0.0, 30.0, 0.0), dir, len, MASK_SHOTS));
+            for dir in [
+                Vec3::new(1.0, 0.2, 0.7),
+                Vec3::new(-0.3, 0.01, -1.0),
+                Vec3::Y,
+            ] {
+                let miss = quick(1.0, || {
+                    w.cast_ray(Vec3::new(0.0, 30.0, 0.0), dir, len, MASK_SHOTS)
+                });
                 assert!(miss.is_none());
             }
         }
@@ -730,15 +788,35 @@ mod tests {
         let inf = Vec3::new(f32::INFINITY, 0.0, 0.0);
         for bad in [nan, inf, -inf] {
             assert!(w.cast_ray(bad, Vec3::X, 10.0, MASK_SHOTS).is_none());
-            assert!(w.cast_ray(Vec3::new(0.0, 1.0, 0.0), bad, 10.0, MASK_SHOTS).is_none());
+            assert!(
+                w.cast_ray(Vec3::new(0.0, 1.0, 0.0), bad, 10.0, MASK_SHOTS)
+                    .is_none()
+            );
             assert!(w.cast_sphere(bad, 0.5, Vec3::X, MASK_SHOTS).is_none());
-            assert!(w.cast_sphere(Vec3::new(0.0, 1.0, 0.0), 0.5, bad, MASK_SHOTS).is_none());
+            assert!(
+                w.cast_sphere(Vec3::new(0.0, 1.0, 0.0), 0.5, bad, MASK_SHOTS)
+                    .is_none()
+            );
             assert!(!w.intersects_capsule(bad, 0.5, 0.4, MASK_MOVEMENT));
-            assert!(w.capsule_contacts(bad, 0.5, 0.4, 0.01, MASK_MOVEMENT).is_empty());
+            assert!(
+                w.capsule_contacts(bad, 0.5, 0.4, 0.01, MASK_MOVEMENT)
+                    .is_empty()
+            );
         }
-        assert!(w.cast_ray(Vec3::new(0.0, 1.0, 0.0), -Vec3::Y, f32::NAN, MASK_SHOTS).is_none());
+        assert!(
+            w.cast_ray(Vec3::new(0.0, 1.0, 0.0), -Vec3::Y, f32::NAN, MASK_SHOTS)
+                .is_none()
+        );
         // A non-finite shape size: no hang, no hit.
-        assert!(quick(1.0, || w.cast_sphere(Vec3::new(0.0, 1.0, 0.0), f32::NAN, Vec3::X, MASK_SHOTS)).is_none());
+        assert!(
+            quick(1.0, || w.cast_sphere(
+                Vec3::new(0.0, 1.0, 0.0),
+                f32::NAN,
+                Vec3::X,
+                MASK_SHOTS
+            ))
+            .is_none()
+        );
     }
 
     #[test]
@@ -773,9 +851,27 @@ mod tests {
         assert_eq!(w.oversize.len(), 1);
         assert!(w.grid.is_empty());
         // Broken colliders are kept (ids stay dense) but never hit.
-        w.add_box(Vec3::splat(f32::NAN), Vec3::ONE, Quat::IDENTITY, GROUP_WORLD, 8);
-        w.add_box(Vec3::ZERO, Vec3::splat(f32::INFINITY), Quat::IDENTITY, GROUP_WORLD, 9);
-        w.add_box(Vec3::new(30.0, 1.0, 0.0), Vec3::ONE, Quat::IDENTITY, GROUP_WORLD, 10);
+        w.add_box(
+            Vec3::splat(f32::NAN),
+            Vec3::ONE,
+            Quat::IDENTITY,
+            GROUP_WORLD,
+            8,
+        );
+        w.add_box(
+            Vec3::ZERO,
+            Vec3::splat(f32::INFINITY),
+            Quat::IDENTITY,
+            GROUP_WORLD,
+            9,
+        );
+        w.add_box(
+            Vec3::new(30.0, 1.0, 0.0),
+            Vec3::ONE,
+            Quat::IDENTITY,
+            GROUP_WORLD,
+            10,
+        );
         assert_eq!(w.len(), 4);
         // Queries still see the huge floor (and the ordinary box) everywhere.
         for x in [0.0, 5.0e4, -9.0e4] {

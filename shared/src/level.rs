@@ -8,9 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use engine::physics::{
-    ColliderId, CollisionWorld, GROUP_DOOR, GROUP_PLAYER_CLIP, GROUP_WORLD,
-};
+use engine::physics::{ColliderId, CollisionWorld, GROUP_DOOR, GROUP_PLAYER_CLIP, GROUP_WORLD};
 use glam::{EulerRot, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -277,7 +275,9 @@ fn check_count(what: &str, n: usize, max: usize) -> Result<(), String> {
 
 fn check_text(what: &str, s: &str) -> Result<(), String> {
     if s.len() > MAX_LEVEL_STRING_BYTES {
-        Err(format!("{what} is longer than {MAX_LEVEL_STRING_BYTES} bytes"))
+        Err(format!(
+            "{what} is longer than {MAX_LEVEL_STRING_BYTES} bytes"
+        ))
     } else {
         Ok(())
     }
@@ -396,7 +396,12 @@ impl LevelDef {
         ] {
             check_vec(what, v, MAX_LEVEL_COORD)?;
         }
-        check_num("fog_start", env.fog_start, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)?;
+        check_num(
+            "fog_start",
+            env.fog_start,
+            -MAX_LEVEL_COORD,
+            MAX_LEVEL_COORD,
+        )?;
         check_num("fog_end", env.fog_end, -MAX_LEVEL_COORD, MAX_LEVEL_COORD)?;
         check_text("music", &env.music)?;
         check_each("brush", &self.brushes, MAX_BRUSHES, check_brush)?;
@@ -434,7 +439,12 @@ impl LevelDef {
             check_volume(&j.trigger)?;
             check_vec("velocity", j.velocity, MAX_JUMP_PAD_SPEED)
         })?;
-        check_each("kill volume", &self.kill_volumes, MAX_KILL_VOLUMES, check_volume)?;
+        check_each(
+            "kill volume",
+            &self.kill_volumes,
+            MAX_KILL_VOLUMES,
+            check_volume,
+        )?;
         check_each("prop", &self.props, MAX_PROPS, |p| {
             check_text("model", &p.model)?;
             check_point("position", p.position)?;
@@ -471,7 +481,11 @@ impl LevelDef {
             if brush.no_collide {
                 continue;
             }
-            let group = if brush.clip_only { GROUP_PLAYER_CLIP } else { GROUP_WORLD };
+            let group = if brush.clip_only {
+                GROUP_PLAYER_CLIP
+            } else {
+                GROUP_WORLD
+            };
             world.add_box(
                 brush.center(),
                 brush.half_extents(),
@@ -550,7 +564,13 @@ mod tests {
         bad(&|l| l.doors[0].brush.max.z = 2.0e4);
         bad(&|l| l.kill_volumes[0].min.y = -1.0e9);
         bad(&|l| l.jump_pads[0].velocity.y = 1.0e6);
-        bad(&|l| l.lights.push(LightDef { position: Vec3::ZERO, color: Vec3::ONE, radius: f32::NAN }));
+        bad(&|l| {
+            l.lights.push(LightDef {
+                position: Vec3::ZERO,
+                color: Vec3::ONE,
+                radius: f32::NAN,
+            })
+        });
         bad(&|l| l.environment.fog_end = f32::INFINITY);
         bad(&|l| l.par_time = -1.0);
         bad(&|l| l.name = "x".repeat(MAX_LEVEL_STRING_BYTES + 1));
@@ -562,7 +582,10 @@ mod tests {
         assert!(e.contains("too many brush"), "{e}");
         bad(&|l| {
             l.encounters.push(Encounter {
-                trigger: Volume { min: Vec3::ZERO, max: Vec3::ONE },
+                trigger: Volume {
+                    min: Vec3::ZERO,
+                    max: Vec3::ONE,
+                },
                 arena: None,
                 rally: None,
                 lock_doors: vec![],
@@ -570,7 +593,11 @@ mod tests {
                 waves: vec![Wave {
                     delay: 0.0,
                     spawns: vec![
-                        EnemySpawn { enemy: "gnawer".into(), position: Vec3::ZERO, yaw: 0.0 };
+                        EnemySpawn {
+                            enemy: "gnawer".into(),
+                            position: Vec3::ZERO,
+                            yaw: 0.0
+                        };
                         MAX_WAVE_SPAWNS + 1
                     ],
                 }],

@@ -344,7 +344,10 @@ impl SimWorld {
         // Line of sight to the target (attacks, ranged positioning, losing interest).
         e.has_los = target.is_some_and(|tp| {
             tp.chest.distance(e.eye()) <= def.ai.sight_range
-                && !self.collision.world.line_blocked(e.eye(), tp.chest, MASK_SHOTS)
+                && !self
+                    .collision
+                    .world
+                    .line_blocked(e.eye(), tp.chest, MASK_SHOTS)
         });
         if let Some(tp) = &target
             && e.has_los
@@ -544,7 +547,13 @@ impl SimWorld {
 
     /// Laser wind-up: the aim follows the target at `track_rate` until the last `lock`
     /// seconds, then stays put (dodge window). The body turns with it.
-    fn track_aim(&self, e: &mut Enemy, a: &AttackDef, laser: &AimLaser, target: Option<&PlayerView>) {
+    fn track_aim(
+        &self,
+        e: &mut Enemy,
+        a: &AttackDef,
+        laser: &AimLaser,
+        target: Option<&PlayerView>,
+    ) {
         let remaining = e.state_len.saturating_sub(e.state_ticks);
         let lock = secs_to_ticks(laser.lock, self.tick_rate, 0) as u32;
         if remaining <= lock {
@@ -667,7 +676,9 @@ impl SimWorld {
                 AttackKind::Projectile => {
                     let muzzle = Self::muzzle(e, a);
                     let d = tp.chest.distance(muzzle);
-                    d <= a.range && d >= a.min_range && !world.line_blocked(muzzle, tp.chest, MASK_SHOTS)
+                    d <= a.range
+                        && d >= a.min_range
+                        && !world.line_blocked(muzzle, tp.chest, MASK_SHOTS)
                 }
                 AttackKind::Dive => {
                     let center = e.center();
@@ -719,7 +730,8 @@ impl SimWorld {
                 }
                 let mut strafe = Vec3::ZERO;
                 if def.ai.strafe {
-                    if !steer::can_step(world, nav, e, side * e.strafe_sign) && e.strafe_flip_in == 0
+                    if !steer::can_step(world, nav, e, side * e.strafe_sign)
+                        && e.strafe_flip_in == 0
                     {
                         e.strafe_sign = -e.strafe_sign;
                         e.strafe_flip_in = 45;
@@ -758,7 +770,9 @@ impl SimWorld {
                 let reach = def
                     .attacks
                     .iter()
-                    .filter(|a| matches!(a.kind, AttackKind::Melee | AttackKind::Slam) && a.lunge <= 0.0)
+                    .filter(|a| {
+                        matches!(a.kind, AttackKind::Melee | AttackKind::Slam) && a.lunge <= 0.0
+                    })
                     .map(|a| a.range)
                     .fold(f32::INFINITY, f32::min);
                 let surface = dist - e.radius() - tp.radius;
@@ -824,7 +838,10 @@ impl SimWorld {
         let mut hits = Vec::new();
         // A lunge's `range` is how far it leaps from; it rakes what is right in front.
         let reach = if a.lunge > 0.0 { LUNGE_REACH } else { a.range };
-        for p in players.iter().filter(|p| p.targetable && !skip.contains(&p.id)) {
+        for p in players
+            .iter()
+            .filter(|p| p.targetable && !skip.contains(&p.id))
+        {
             let to = horizontal(p.position - feet);
             let dist = to.length();
             if dist - e.radius() - p.radius > reach + 0.25 {
@@ -890,12 +907,12 @@ impl SimWorld {
                     let time = (to.length() - e.radius() - tp.radius).max(0.0) / a.lunge;
                     horizontal(tp.position + tp.velocity * time - feet).normalize_or(e.forward())
                 });
-                let direct = target.map(|tp| horizontal(tp.position - feet).normalize_or(e.forward()));
+                let direct =
+                    target.map(|tp| horizontal(tp.position - feet).normalize_or(e.forward()));
                 // The airborne part of a pounce is beyond the edge guard: only leap where the
                 // whole arc lands on safe ground (led, else straight at the target, else run).
-                let airborne = a.lunge * 2.0 * a.lunge_up / t.movement.gravity.max(1.0)
-                    + e.radius()
-                    + 0.5;
+                let airborne =
+                    a.lunge * 2.0 * a.lunge_up / t.movement.gravity.max(1.0) + e.radius() + 0.5;
                 let safe = |dir: Vec3| {
                     nav.is_none_or(|n| {
                         n.is_empty()
@@ -904,7 +921,10 @@ impl SimWorld {
                             })
                     })
                 };
-                let leap = [led, direct].into_iter().flatten().find(|d| a.lunge_up <= 0.0 || safe(*d));
+                let leap = [led, direct]
+                    .into_iter()
+                    .flatten()
+                    .find(|d| a.lunge_up <= 0.0 || safe(*d));
                 let dir = leap.or(direct).unwrap_or(e.forward());
                 if let Some(yaw) = yaw_towards(dir) {
                     e.yaw = yaw;
@@ -1025,7 +1045,10 @@ impl SimWorld {
         };
         let center = e.center();
         let mut hits = Vec::new();
-        for p in players.iter().filter(|p| p.targetable && !e.lunge_hits.contains(&p.id)) {
+        for p in players
+            .iter()
+            .filter(|p| p.targetable && !e.lunge_hits.contains(&p.id))
+        {
             let lo = p.position + Vec3::Y * p.radius;
             let hi = p.position + Vec3::Y * (p.height - p.radius).max(p.radius);
             let closest = closest_on_segment(lo, hi, center);
@@ -1176,7 +1199,12 @@ impl SimWorld {
             if !e.is_flying()
                 && e.on_ground
                 && nav.is_some_and(|n| {
-                    !n.is_empty() && !n.ground_ok(feet + push.normalize_or_zero() * e.def.radius, feet.y, STEP_UP + 0.1)
+                    !n.is_empty()
+                        && !n.ground_ok(
+                            feet + push.normalize_or_zero() * e.def.radius,
+                            feet.y,
+                            STEP_UP + 0.1,
+                        )
                 })
             {
                 continue;
@@ -1284,7 +1312,12 @@ pub(crate) fn move_enemy(
                 // out" 4.7 m downwards): deep pushes are only trusted when a slightly shrunk
                 // capsule really overlaps the level.
                 if c.distance < -DEEP_CONTACT
-                    && !world.intersects_capsule(center, half, (r - DEEP_CONTACT).max(0.01), MASK_MOVEMENT)
+                    && !world.intersects_capsule(
+                        center,
+                        half,
+                        (r - DEEP_CONTACT).max(0.01),
+                        MASK_MOVEMENT,
+                    )
                 {
                     continue;
                 }

@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use super::dsp::{
     Osc, Rng, SR, Svf, Wave, adsr, bell, crush, db_to_gain, drive, echo, fade_out, glide, highpass,
-    layer, lerp, loudness, lowpass, midi_hz, mix_at, peak, perc, remove_dc, render, reverb, samples,
-    scale, smoothstep, soft_limit, sweep, trim_tail,
+    layer, lerp, loudness, lowpass, midi_hz, mix_at, peak, perc, remove_dc, render, reverb,
+    samples, scale, smoothstep, soft_limit, sweep, trim_tail,
 };
 
 /// Every sound effect in the game.
@@ -452,12 +452,23 @@ pub(super) enum Pass {
 /// Pitch-swept sine: kick drums, booms, body thumps.
 pub(super) fn thump(dur: f32, f0: f32, f1: f32, pitch_tau: f32, decay: f32) -> Vec<f32> {
     let mut osc = Osc::new(Wave::Sine);
-    render(dur, |t, _| osc.next(glide(t, f0, f1, pitch_tau)) * perc(t, 0.0008, decay))
+    render(dur, |t, _| {
+        osc.next(glide(t, f0, f1, pitch_tau)) * perc(t, 0.0008, decay)
+    })
 }
 
 /// Filtered white noise, cutoff sweeping exponentially `f0 → f1` over `dur`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn noise(rng: &mut Rng, dur: f32, pass: Pass, f0: f32, f1: f32, q: f32, attack: f32, decay: f32) -> Vec<f32> {
+pub(super) fn noise(
+    rng: &mut Rng,
+    dur: f32,
+    pass: Pass,
+    f0: f32,
+    f1: f32,
+    q: f32,
+    attack: f32,
+    decay: f32,
+) -> Vec<f32> {
     let mut n = Rng::new(rng.next_u64());
     let mut svf = Svf::default();
     render(dur, |t, _| {
@@ -473,14 +484,33 @@ pub(super) fn noise(rng: &mut Rng, dur: f32, pass: Pass, f0: f32, f1: f32, q: f3
 
 /// Broadband transient.
 pub(super) fn click(rng: &mut Rng, decay: f32) -> Vec<f32> {
-    noise(rng, decay * 6.0 + 0.002, Pass::High, 2500.0, 2500.0, 0.6, 0.0002, decay)
+    noise(
+        rng,
+        decay * 6.0 + 0.002,
+        Pass::High,
+        2500.0,
+        2500.0,
+        0.6,
+        0.0002,
+        decay,
+    )
 }
 
 /// Oscillator with an exponential pitch sweep and a percussive envelope.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn tone(dur: f32, wave: Wave, f0: f32, f1: f32, sweep_dur: f32, attack: f32, decay: f32) -> Vec<f32> {
+pub(super) fn tone(
+    dur: f32,
+    wave: Wave,
+    f0: f32,
+    f1: f32,
+    sweep_dur: f32,
+    attack: f32,
+    decay: f32,
+) -> Vec<f32> {
     let mut osc = Osc::new(wave);
-    render(dur, |t, _| osc.next(sweep(t, f0, f1, sweep_dur)) * perc(t, attack, decay))
+    render(dur, |t, _| {
+        osc.next(sweep(t, f0, f1, sweep_dur)) * perc(t, attack, decay)
+    })
 }
 
 /// Inharmonic partials `(ratio, amplitude, decay)` over `base`: bells, clangs, pings.
@@ -492,14 +522,25 @@ pub(super) fn metal(dur: f32, base: f32, partials: &[(f32, f32, f32)]) -> Vec<f3
         partials
             .iter()
             .zip(oscs.iter_mut())
-            .map(|(&(ratio, amp, decay), osc)| osc.next(base * ratio) * amp * perc(t, 0.0005, decay))
+            .map(|(&(ratio, amp, decay), osc)| {
+                osc.next(base * ratio) * amp * perc(t, 0.0005, decay)
+            })
             .sum()
     })
 }
 
 /// Two-operator FM. Carrier sweeps `fc0 → fc1`; the modulation index decays from `i0` to `i1`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn fm(dur: f32, fc0: f32, fc1: f32, ratio: f32, i0: f32, i1: f32, attack: f32, decay: f32) -> Vec<f32> {
+pub(super) fn fm(
+    dur: f32,
+    fc0: f32,
+    fc1: f32,
+    ratio: f32,
+    i0: f32,
+    i1: f32,
+    attack: f32,
+    decay: f32,
+) -> Vec<f32> {
     let mut car = Osc::new(Wave::Sine);
     let mut modu = Osc::new(Wave::Sine);
     render(dur, |t, _| {
@@ -541,7 +582,16 @@ pub(super) fn crackle(rng: &mut Rng, dur: f32, density: f32, decay: f32) -> Vec<
 /// Voice-like growl: jittery saw through two formant band-passes. The formants follow the pitch
 /// sweep (by its square root), so rising growls read as rising screeches.
 #[allow(clippy::too_many_arguments)]
-fn growl(rng: &mut Rng, dur: f32, f0: f32, f1: f32, formants: [f32; 2], jitter: f32, attack: f32, decay: f32) -> Vec<f32> {
+fn growl(
+    rng: &mut Rng,
+    dur: f32,
+    f0: f32,
+    f1: f32,
+    formants: [f32; 2],
+    jitter: f32,
+    attack: f32,
+    decay: f32,
+) -> Vec<f32> {
     let mut n = Rng::new(rng.next_u64());
     let mut osc = Osc::new(Wave::Saw);
     let mut sub = Osc::new(Wave::Square);
@@ -553,14 +603,24 @@ fn growl(rng: &mut Rng, dur: f32, f0: f32, f1: f32, formants: [f32; 2], jitter: 
         let f = base * (1.0 + wobble * jitter * 6.0);
         let x = osc.next(f) + sub.next(f * 0.5) * 0.4 + n.bipolar() * 0.2;
         let shift = (base / f0).sqrt();
-        let y = a.bandpass(x, formants[0] * shift, 3.0) + b.bandpass(x, formants[1] * shift, 4.0) * 0.7;
+        let y =
+            a.bandpass(x, formants[0] * shift, 3.0) + b.bandpass(x, formants[1] * shift, 4.0) * 0.7;
         y * perc(t, attack, decay)
     })
 }
 
 /// Detuned saw stack chord through a swept low-pass. `notes` are MIDI numbers.
 #[allow(clippy::too_many_arguments)]
-fn chord(notes: &[f32], dur: f32, wave: Wave, cutoff0: f32, cutoff1: f32, attack: f32, decay: f32, release_at: f32) -> Vec<f32> {
+fn chord(
+    notes: &[f32],
+    dur: f32,
+    wave: Wave,
+    cutoff0: f32,
+    cutoff1: f32,
+    attack: f32,
+    decay: f32,
+    release_at: f32,
+) -> Vec<f32> {
     let mut oscs: Vec<(Osc, f32)> = Vec::new();
     for (i, &n) in notes.iter().enumerate() {
         for (j, cents) in [-9.0f32, 0.0, 8.0].iter().enumerate() {
@@ -578,7 +638,14 @@ fn chord(notes: &[f32], dur: f32, wave: Wave, cutoff0: f32, cutoff1: f32, attack
 }
 
 /// A melodic line: `(midi, start, length)` notes on two slightly detuned oscillators.
-fn notes(seq: &[(f32, f32, f32)], wave: Wave, attack: f32, release: f32, cutoff: f32, vibrato: f32) -> Vec<f32> {
+fn notes(
+    seq: &[(f32, f32, f32)],
+    wave: Wave,
+    attack: f32,
+    release: f32,
+    cutoff: f32,
+    vibrato: f32,
+) -> Vec<f32> {
     let mut out = Vec::new();
     for &(note, start, len) in seq {
         let f = midi_hz(note);
@@ -609,7 +676,10 @@ fn gutter(rng: &mut Rng, dur: f32, f0: f32, f1: f32, flutter: f32, decay: f32) -
             depth = n.range(0.3, 0.95);
         }
         let flicker = 1.0 - depth * (std::f32::consts::PI * phase).sin();
-        svf.process(n.bipolar(), sweep(t, f0, f1, dur), 1.3, SR).band * flicker * perc(t, 0.002, decay)
+        svf.process(n.bipolar(), sweep(t, f0, f1, dur), 1.3, SR)
+            .band
+            * flicker
+            * perc(t, 0.002, decay)
     })
 }
 
@@ -677,7 +747,15 @@ fn glass_spray(rng: &mut Rng, count: usize, spread: f32, lo: f32, hi: f32) -> Ve
         let at = spread * x * x;
         let base = rng.range(lo, hi);
         let decay = rng.range(0.004, 0.012);
-        let tick = metal(decay * 6.0, base, &[(1.0, 1.0, decay), (1.62, 0.6, decay * 0.8), (2.71, 0.4, decay * 0.6)]);
+        let tick = metal(
+            decay * 6.0,
+            base,
+            &[
+                (1.0, 1.0, decay),
+                (1.62, 0.6, decay * 0.8),
+                (2.71, 0.4, decay * 0.6),
+            ],
+        );
         let gain = 0.9 * (1.0 - 0.6 * k as f32 / count as f32);
         mix_at(&mut b, &tick, gain, at);
     }
@@ -688,15 +766,34 @@ fn glass_spray(rng: &mut Rng, count: usize, spread: f32, lo: f32, hi: f32) -> Ve
 /// over a small, high body thump. `pitch` scales it (heavier modes go lower).
 fn quill_crack(rng: &mut Rng, pitch: f32) -> Vec<f32> {
     let snap = click(rng, 0.0015);
-    let whip = noise(rng, 0.05, Pass::Band, 7000.0 * pitch, 2200.0 * pitch, 1.4, 0.0003, 0.007);
+    let whip = noise(
+        rng,
+        0.05,
+        Pass::Band,
+        7000.0 * pitch,
+        2200.0 * pitch,
+        1.4,
+        0.0003,
+        0.007,
+    );
     let mut string = pluck(rng, 0.14, 820.0 * pitch, 0.985);
     for (i, s) in string.iter_mut().enumerate() {
         *s *= perc(i as f32 / SR, 0.0005, 0.035);
     }
     highpass(&mut string, 300.0);
-    let tick = metal(0.05, 4300.0 * pitch, &[(1.0, 1.0, 0.008), (1.83, 0.5, 0.006), (2.9, 0.3, 0.004)]);
+    let tick = metal(
+        0.05,
+        4300.0 * pitch,
+        &[(1.0, 1.0, 0.008), (1.83, 0.5, 0.006), (2.9, 0.3, 0.004)],
+    );
     let body = thump(0.07, 420.0 * pitch, 160.0 * pitch, 0.006, 0.014);
-    layer(&[(&snap, 0.8, 0.0), (&whip, 1.0, 0.0), (&string, 0.5, 0.002), (&tick, 0.3, 0.0), (&body, 0.8, 0.0)])
+    layer(&[
+        (&snap, 0.8, 0.0),
+        (&whip, 1.0, 0.0),
+        (&string, 0.5, 0.002),
+        (&tick, 0.3, 0.0),
+        (&body, 0.8, 0.0),
+    ])
 }
 
 /// Bellows blast core: a breathy, low "whumpf" of air behind the shot rather than a sharp
@@ -704,7 +801,16 @@ fn quill_crack(rng: &mut Rng, pitch: f32) -> Vec<f32> {
 fn bellows_core(rng: &mut Rng, weight: f32) -> Vec<f32> {
     let snap = click(rng, 0.003);
     let body = thump(0.45 * weight, 150.0 / weight, 40.0, 0.02, 0.1 * weight);
-    let whumpf = noise(rng, 0.5 * weight, Pass::Low, 2600.0, 280.0, 0.9, 0.006, 0.11 * weight);
+    let whumpf = noise(
+        rng,
+        0.5 * weight,
+        Pass::Low,
+        2600.0,
+        280.0,
+        0.9,
+        0.006,
+        0.11 * weight,
+    );
     let breath = noise(rng, 0.35, Pass::Band, 1100.0, 500.0, 1.1, 0.01, 0.08);
     let grit = noise(rng, 0.12, Pass::Band, 2400.0, 1600.0, 1.0, 0.0005, 0.025);
     let crack = noise(rng, 0.08, Pass::Band, 3200.0, 1800.0, 1.0, 0.0003, 0.015);
@@ -750,11 +856,25 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             b
         }
         UiSelect => {
-            let mut b = notes(&[(84.0, 0.0, 0.045), (91.0, 0.05, 0.08)], Wave::Square, 0.002, 0.04, 5000.0, 0.0);
+            let mut b = notes(
+                &[(84.0, 0.0, 0.045), (91.0, 0.05, 0.08)],
+                Wave::Square,
+                0.002,
+                0.04,
+                5000.0,
+                0.0,
+            );
             echo(&mut b, 0.07, 0.25, 0.25, 3000.0, 0.15);
             b
         }
-        UiBack => notes(&[(86.0, 0.0, 0.045), (79.0, 0.05, 0.07)], Wave::Triangle, 0.002, 0.05, 4000.0, 0.0),
+        UiBack => notes(
+            &[(86.0, 0.0, 0.045), (79.0, 0.05, 0.07)],
+            Wave::Triangle,
+            0.002,
+            0.05,
+            4000.0,
+            0.0,
+        ),
         ChatMessage => {
             let a = fm(0.35, 880.0, 880.0, 3.5, 2.0, 0.2, 0.002, 0.12);
             let b = fm(0.45, 1318.5, 1318.5, 3.5, 2.0, 0.2, 0.002, 0.16);
@@ -767,7 +887,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let scuff_hz = r.range(2600.0, 3400.0);
             let scuff = noise(r, 0.08, Pass::Low, scuff_hz, 900.0, 0.7, 0.001, 0.016);
             let base = r.range(2300.0, 2900.0);
-            let tick = metal(0.08, base, &[(1.0, 1.0, 0.012), (1.47, 0.6, 0.009), (2.31, 0.4, 0.006)]);
+            let tick = metal(
+                0.08,
+                base,
+                &[(1.0, 1.0, 0.012), (1.47, 0.6, 0.009), (2.31, 0.4, 0.006)],
+            );
             layer(&[(&thud, 1.0, 0.0), (&scuff, 0.7, 0.0), (&tick, 0.22, 0.002)])
         }
         Jump => {
@@ -785,7 +909,16 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         HeavyLand => {
             let thud = thump(0.5, 110.0, 38.0, 0.03, 0.13);
             let crunch = noise(r, 0.3, Pass::Low, 2500.0, 300.0, 0.7, 0.001, 0.07);
-            let clank = metal(0.5, 420.0, &[(1.0, 1.0, 0.15), (2.37, 0.7, 0.1), (3.91, 0.4, 0.06), (5.2, 0.3, 0.04)]);
+            let clank = metal(
+                0.5,
+                420.0,
+                &[
+                    (1.0, 1.0, 0.15),
+                    (2.37, 0.7, 0.1),
+                    (3.91, 0.4, 0.06),
+                    (5.2, 0.3, 0.04),
+                ],
+            );
             let mut b = layer(&[(&thud, 1.0, 0.0), (&crunch, 0.7, 0.0), (&clank, 0.3, 0.0)]);
             drive(&mut b, 2.0);
             crush(&mut b, 10, 1.5);
@@ -808,7 +941,10 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let scrape = render(dur, |t, _| {
                 grit += (n.f32() - grit) * 0.02;
                 let env = smoothstep(0.0, 0.03, t) * (1.0 - smoothstep(0.35, dur, t));
-                svf.process(n.bipolar(), 2800.0 + 600.0 * grit, 1.5, SR).band * env * (0.5 + grit)
+                svf.process(n.bipolar(), 2800.0 + 600.0 * grit, 1.5, SR)
+                    .band
+                    * env
+                    * (0.5 + grit)
             });
             let mut grind = fm(dur, 180.0, 150.0, 7.1, 3.0, 2.0, 0.03, 0.3);
             lowpass(&mut grind, 2500.0);
@@ -825,9 +961,23 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         SlamImpact => {
             let boom = thump(0.8, 120.0, 30.0, 0.04, 0.2);
             let crunch = noise(r, 0.6, Pass::Low, 4000.0, 250.0, 0.8, 0.0005, 0.11);
-            let clank = metal(0.7, 180.0, &[(1.0, 1.0, 0.3), (2.43, 0.8, 0.2), (3.9, 0.5, 0.12), (6.1, 0.3, 0.07)]);
+            let clank = metal(
+                0.7,
+                180.0,
+                &[
+                    (1.0, 1.0, 0.3),
+                    (2.43, 0.8, 0.2),
+                    (3.9, 0.5, 0.12),
+                    (6.1, 0.3, 0.07),
+                ],
+            );
             let debris = crackle(r, 0.5, 300.0, 0.15);
-            let mut b = layer(&[(&boom, 1.2, 0.0), (&crunch, 0.8, 0.0), (&clank, 0.3, 0.0), (&debris, 0.3, 0.02)]);
+            let mut b = layer(&[
+                (&boom, 1.2, 0.0),
+                (&crunch, 0.8, 0.0),
+                (&clank, 0.3, 0.0),
+                (&debris, 0.3, 0.02),
+            ]);
             drive(&mut b, 2.5);
             crush(&mut b, 10, 2.0);
             reverb(&mut b, 0.5, 0.5, 0.2, 0.4);
@@ -835,14 +985,19 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         WallJump => {
             let kick = thump(0.12, 220.0, 100.0, 0.01, 0.035);
-            let ping = metal(0.3, 1700.0, &[(1.0, 1.0, 0.06), (1.62, 0.6, 0.045), (2.71, 0.4, 0.03)]);
+            let ping = metal(
+                0.3,
+                1700.0,
+                &[(1.0, 1.0, 0.06), (1.62, 0.6, 0.045), (2.71, 0.4, 0.03)],
+            );
             let air = whoosh(r, 0.22, 800.0, 3000.0, 1.1);
             layer(&[(&kick, 0.8, 0.0), (&ping, 0.35, 0.0), (&air, 0.8, 0.02)])
         }
         JumpPad => {
             let mut osc = Osc::new(Wave::Sine);
             let boing = render(0.5, |t, _| {
-                let f = sweep(t, 80.0, 700.0, 0.3) * (1.0 + 0.04 * (t * 18.0 * std::f32::consts::TAU).sin());
+                let f = sweep(t, 80.0, 700.0, 0.3)
+                    * (1.0 + 0.04 * (t * 18.0 * std::f32::consts::TAU).sin());
                 osc.next(f) * perc(t, 0.002, 0.18)
             });
             let air = whoosh(r, 0.5, 500.0, 6000.0, 1.0);
@@ -870,7 +1025,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut bp = Svf::default();
             let inhale = render(dur, |t, _| {
                 let env = smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.21, 0.28, t));
-                bp.process(n.bipolar(), sweep(t, 450.0, 3000.0, 0.22), 1.4, SR).band * env
+                bp.process(n.bipolar(), sweep(t, 450.0, 3000.0, 0.22), 1.4, SR)
+                    .band
+                    * env
             });
             let sparks = envelope(crackle(r, 0.3, 220.0, -0.18), 0.02, 0.2);
             let catch = noise(r, 0.3, Pass::Low, 1100.0, 280.0, 0.9, 0.005, 0.07);
@@ -892,14 +1049,23 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let snuff = noise(r, 0.3, Pass::Low, 1600.0, 220.0, 0.8, 0.002, 0.06);
             let crunch = noise(r, 0.9, Pass::Low, 3000.0, 200.0, 0.8, 0.0005, 0.25);
             let boom = thump(1.2, 90.0, 28.0, 0.08, 0.3);
-            let mut b = layer(&[(&flame, 0.8, 0.0), (&crunch, 0.9, 0.0), (&boom, 1.0, 0.0), (&snuff, 0.6, 0.75)]);
+            let mut b = layer(&[
+                (&flame, 0.8, 0.0),
+                (&crunch, 0.9, 0.0),
+                (&boom, 1.0, 0.0),
+                (&snuff, 0.6, 0.75),
+            ]);
             drive(&mut b, 2.5);
             crush(&mut b, 8, 2.0);
             reverb(&mut b, 0.6, 0.5, 0.2, 0.5);
             b
         }
         Respawn => {
-            let mut oscs = [Osc::new(Wave::Saw), Osc::new(Wave::Saw).phase(0.3), Osc::new(Wave::Saw).phase(0.6)];
+            let mut oscs = [
+                Osc::new(Wave::Saw),
+                Osc::new(Wave::Saw).phase(0.3),
+                Osc::new(Wave::Saw).phase(0.6),
+            ];
             let mut lp = Svf::default();
             let swell = render(0.8, |t, _| {
                 let f = sweep(t, 110.0, 440.0, 0.7);
@@ -925,20 +1091,39 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         Revive => {
             let arp = notes(
-                &[(57.0, 0.0, 0.05), (64.0, 0.06, 0.05), (69.0, 0.12, 0.05), (76.0, 0.18, 0.3)],
+                &[
+                    (57.0, 0.0, 0.05),
+                    (64.0, 0.06, 0.05),
+                    (69.0, 0.12, 0.05),
+                    (76.0, 0.18, 0.3),
+                ],
                 Wave::Square,
                 0.002,
                 0.12,
                 4000.0,
                 0.006,
             );
-            let shimmer = notes(&[(88.0, 0.18, 0.3)], Wave::Triangle, 0.01, 0.15, 8000.0, 0.01);
+            let shimmer = notes(
+                &[(88.0, 0.18, 0.3)],
+                Wave::Triangle,
+                0.01,
+                0.15,
+                8000.0,
+                0.01,
+            );
             let mut b = layer(&[(&arp, 1.0, 0.0), (&shimmer, 0.3, 0.0)]);
             echo(&mut b, 0.09, 0.3, 0.3, 3000.0, 0.3);
             b
         }
         NoStamina => {
-            let mut buzz = notes(&[(39.0, 0.0, 0.06), (39.0, 0.09, 0.06)], Wave::Square, 0.002, 0.02, 1800.0, 0.0);
+            let mut buzz = notes(
+                &[(39.0, 0.0, 0.06), (39.0, 0.09, 0.06)],
+                Wave::Square,
+                0.002,
+                0.02,
+                1800.0,
+                0.0,
+            );
             drive(&mut buzz, 2.0);
             buzz
         }
@@ -956,7 +1141,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let hiss = noise(r, 0.45, Pass::High, 3800.0, 6500.0, 0.8, 0.02, 0.14);
             let sputter = envelope(crackle(r, 0.45, 400.0, 0.15), 0.01, 0.12);
             let heat = thump(0.3, 160.0, 70.0, 0.02, 0.07);
-            let mut b = layer(&[(&crack, 1.0, 0.0), (&hiss, 0.55, 0.01), (&sputter, 0.35, 0.01), (&heat, 0.5, 0.0)]);
+            let mut b = layer(&[
+                (&crack, 1.0, 0.0),
+                (&hiss, 0.55, 0.01),
+                (&sputter, 0.35, 0.01),
+                (&heat, 0.5, 0.0),
+            ]);
             drive(&mut b, 1.5);
             b
         }
@@ -964,16 +1154,38 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let sear = noise(r, 0.45, Pass::Band, 5000.0, 2200.0, 0.9, 0.003, 0.12);
             let sputter = envelope(crackle(r, 0.4, 600.0, 0.15), 0.005, 0.1);
             // A low, ominous toll: a minor second rubbing against the fundamental.
-            let toll = metal(0.7, 155.6, &[(1.0, 1.0, 0.24), (1.059, 0.5, 0.2), (2.41, 0.45, 0.14), (3.9, 0.25, 0.08)]);
+            let toll = metal(
+                0.7,
+                155.6,
+                &[
+                    (1.0, 1.0, 0.24),
+                    (1.059, 0.5, 0.2),
+                    (2.41, 0.45, 0.14),
+                    (3.9, 0.25, 0.08),
+                ],
+            );
             let mut b = layer(&[(&sear, 0.7, 0.0), (&sputter, 0.3, 0.0), (&toll, 0.9, 0.0)]);
             reverb(&mut b, 0.4, 0.5, 0.15, 0.15);
             b
         }
         SplinterFire => {
-            let glass = metal(0.06, 5200.0, &[(1.0, 1.0, 0.006), (1.47, 0.7, 0.005), (2.23, 0.5, 0.004), (3.31, 0.3, 0.003)]);
+            let glass = metal(
+                0.06,
+                5200.0,
+                &[
+                    (1.0, 1.0, 0.006),
+                    (1.47, 0.7, 0.005),
+                    (2.23, 0.5, 0.004),
+                    (3.31, 0.3, 0.003),
+                ],
+            );
             let crack = quill_crack(r, 0.75);
             let body = thump(0.25, 210.0, 60.0, 0.012, 0.05);
-            let mut b = layer(&[(&glass, 0.6, 0.0), (&crack, 1.0, 0.008), (&body, 0.9, 0.008)]);
+            let mut b = layer(&[
+                (&glass, 0.6, 0.0),
+                (&crack, 1.0, 0.008),
+                (&body, 0.9, 0.008),
+            ]);
             drive(&mut b, 2.2);
             crush(&mut b, 11, 1.0);
             b
@@ -1003,11 +1215,19 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut svf = Svf::default();
             let rush = render(0.8, |t, _| {
                 let env = smoothstep(0.0, 0.045, t) * (-(t - 0.045).max(0.0) / 0.22).exp();
-                svf.process(n.bipolar(), sweep(t, 1800.0, 260.0, 0.7), 0.7, SR).band * env
+                svf.process(n.bipolar(), sweep(t, 1800.0, 260.0, 0.7), 0.7, SR)
+                    .band
+                    * env
             });
             let low = noise(r, 0.7, Pass::Low, 600.0, 140.0, 0.9, 0.03, 0.25);
             let sub = thump(0.5, 70.0, 30.0, 0.06, 0.12);
-            let mut b = layer(&[(&pop, 0.9, 0.0), (&snap, 0.5, 0.0), (&rush, 1.3, 0.006), (&low, 0.9, 0.006), (&sub, 0.6, 0.004)]);
+            let mut b = layer(&[
+                (&pop, 0.9, 0.0),
+                (&snap, 0.5, 0.0),
+                (&rush, 1.3, 0.006),
+                (&low, 0.9, 0.006),
+                (&sub, 0.6, 0.004),
+            ]);
             drive(&mut b, 1.4);
             b
         }
@@ -1038,7 +1258,16 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         Deflect => {
             let fwip = whoosh(r, 0.16, 700.0, 4500.0, 1.4);
-            let ping = metal(0.45, 2794.0, &[(1.0, 1.0, 0.14), (2.76, 0.6, 0.09), (5.4, 0.35, 0.05), (8.1, 0.2, 0.03)]);
+            let ping = metal(
+                0.45,
+                2794.0,
+                &[
+                    (1.0, 1.0, 0.14),
+                    (2.76, 0.6, 0.09),
+                    (5.4, 0.35, 0.05),
+                    (8.1, 0.2, 0.03),
+                ],
+            );
             let snap = click(r, 0.002);
             let mut b = layer(&[(&fwip, 0.9, 0.0), (&snap, 0.6, 0.11), (&ping, 0.7, 0.11)]);
             echo(&mut b, 0.06, 0.25, 0.2, 5000.0, 0.2);
@@ -1056,7 +1285,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         ArcChain => {
             let buzz = zap(r, 0.08, 280.0, 620.0, 0.35, 0.3, 0.025);
             let mut chirp_osc = Osc::new(Wave::Square);
-            let chirp = render(0.07, |t, _| chirp_osc.next(sweep(t, 1400.0, 4200.0, 0.05)) * perc(t, 0.0005, 0.018));
+            let chirp = render(0.07, |t, _| {
+                chirp_osc.next(sweep(t, 1400.0, 4200.0, 0.05)) * perc(t, 0.0005, 0.018)
+            });
             let snap = click(r, 0.001);
             let mut b = layer(&[(&snap, 0.7, 0.0), (&buzz, 0.9, 0.0), (&chirp, 0.25, 0.004)]);
             crush(&mut b, 9, 1.0);
@@ -1067,7 +1298,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let charge = fm(0.4, 120.0, 260.0, 1.41, 5.0, 1.5, 0.004, 0.16);
             let buzz = zap(r, 0.4, 70.0, 230.0, 0.15, 0.15, 0.18);
             let spark = crackle(r, 0.35, 300.0, 0.15);
-            let mut b = layer(&[(&thoom, 1.0, 0.0), (&charge, 0.5, 0.0), (&buzz, 0.6, 0.02), (&spark, 0.3, 0.0)]);
+            let mut b = layer(&[
+                (&thoom, 1.0, 0.0),
+                (&charge, 0.5, 0.0),
+                (&buzz, 0.6, 0.02),
+                (&spark, 0.3, 0.0),
+            ]);
             drive(&mut b, 1.8);
             b
         }
@@ -1075,7 +1311,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             // Soft in and out so it can be retriggered every ~0.45 s along the wisp's path.
             let dur = 0.5;
             let mut n = Rng::new(r.next_u64());
-            let (mut saw, mut square, mut flutter) = (Osc::new(Wave::Saw), Osc::new(Wave::Square).phase(0.3), Osc::new(Wave::Sine));
+            let (mut saw, mut square, mut flutter) = (
+                Osc::new(Wave::Saw),
+                Osc::new(Wave::Square).phase(0.3),
+                Osc::new(Wave::Sine),
+            );
             let mut lp = Svf::default();
             let hum = render(dur, |t, _| {
                 let x = saw.next(98.0) * 0.6 + square.next(147.0) * 0.25 + n.bipolar() * 0.15;
@@ -1101,12 +1341,17 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         DischargeCharge => {
             // A capacitor bank filling: a pulsing whine rising for 1 s, then holding.
             let dur = 1.3;
-            let (mut whine, mut over, mut pulse, mut vib) =
-                (Osc::new(Wave::Sine), Osc::new(Wave::Triangle), Osc::new(Wave::Triangle), Osc::new(Wave::Sine));
+            let (mut whine, mut over, mut pulse, mut vib) = (
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Triangle),
+                Osc::new(Wave::Triangle),
+                Osc::new(Wave::Sine),
+            );
             let mut hum_osc = Osc::new(Wave::Saw);
             let mut hum_lp = Svf::default();
             let cap = render(dur, |t, _| {
-                let f = sweep(t, 380.0, 3100.0, 1.0) * (1.0 + 0.006 * vib.next(7.0) * smoothstep(0.9, 1.1, t));
+                let f = sweep(t, 380.0, 3100.0, 1.0)
+                    * (1.0 + 0.006 * vib.next(7.0) * smoothstep(0.9, 1.1, t));
                 let x = whine.next(f) * 0.6 + over.next(f * 1.5) * 0.25;
                 let gate = 0.7 + 0.3 * pulse.next(lerp(8.0, 40.0, t.min(1.0)));
                 let hum = hum_lp.lowpass(hum_osc.next(sweep(t, 60.0, 90.0, 1.0)), 300.0, 0.8);
@@ -1152,7 +1397,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             drive(&mut b, 2.0);
             // The drum ratchets round to the next bomb.
             for (k, at) in [0.13f32, 0.16, 0.19].into_iter().enumerate() {
-                let tick = metal(0.04, 1700.0 - k as f32 * 120.0, &[(1.0, 1.0, 0.008), (2.3, 0.5, 0.005)]);
+                let tick = metal(
+                    0.04,
+                    1700.0 - k as f32 * 120.0,
+                    &[(1.0, 1.0, 0.008), (2.3, 0.5, 0.005)],
+                );
                 let snap = click(r, 0.001);
                 mix_at(&mut b, &tick, 0.25, at);
                 mix_at(&mut b, &snap, 0.2, at);
@@ -1161,7 +1410,16 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         BombBounce => {
             let base = r.range(560.0, 760.0);
-            let clank = metal(0.18, base, &[(1.0, 1.0, 0.05), (2.41, 0.7, 0.035), (3.93, 0.45, 0.02), (5.6, 0.2, 0.012)]);
+            let clank = metal(
+                0.18,
+                base,
+                &[
+                    (1.0, 1.0, 0.05),
+                    (2.41, 0.7, 0.035),
+                    (3.93, 0.45, 0.02),
+                    (5.6, 0.2, 0.012),
+                ],
+            );
             let thud = thump(0.15, 200.0, 85.0, 0.008, 0.025);
             let snap = click(r, 0.0015);
             let mut b = layer(&[(&thud, 1.0, 0.0), (&clank, 0.6, 0.0), (&snap, 0.5, 0.0)]);
@@ -1195,7 +1453,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             lowpass(&mut tube, 700.0);
             let puff = noise(r, 0.3, Pass::Low, 1200.0, 250.0, 0.9, 0.002, 0.06);
             // The canister's clamps lock as it leaves.
-            let clamp = metal(0.12, 1250.0, &[(1.0, 1.0, 0.025), (1.93, 0.6, 0.018), (3.1, 0.3, 0.01)]);
+            let clamp = metal(
+                0.12,
+                1250.0,
+                &[(1.0, 1.0, 0.025), (1.93, 0.6, 0.018), (3.1, 0.3, 0.01)],
+            );
             let clack = metal(0.1, 900.0, &[(1.0, 1.0, 0.02), (2.6, 0.5, 0.012)]);
             let snap = click(r, 0.002);
             let mut b = layer(&[
@@ -1212,16 +1474,25 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         GravewellHum => {
             let dur = 1.6;
             let mut n = Rng::new(r.next_u64());
-            let (mut sub, mut saw, mut warble) = (Osc::new(Wave::Sine), Osc::new(Wave::Saw), Osc::new(Wave::Sine));
+            let (mut sub, mut saw, mut warble) = (
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Saw),
+                Osc::new(Wave::Sine),
+            );
             let (mut lp, mut bp) = (Svf::default(), Svf::default());
             render(dur, |t, _| {
                 let x = t / dur;
                 let w = warble.next(lerp(5.0, 13.0, x));
                 let f = lerp(48.0, 74.0, x * x) * (1.0 + 0.02 * w);
-                let drone = sub.next(f) * 0.8 + lp.lowpass(saw.next(f * 2.0), lerp(300.0, 1100.0, x), 1.4) * 0.45;
+                let drone = sub.next(f) * 0.8
+                    + lp.lowpass(saw.next(f * 2.0), lerp(300.0, 1100.0, x), 1.4) * 0.45;
                 // Air being sucked inwards: band noise sliding down, swelling with the pull.
-                let suck = bp.bandpass(n.bipolar(), sweep(t, 3000.0, 350.0, dur), 2.0) * (0.25 + 0.5 * x) * (0.7 + 0.3 * w);
-                let env = smoothstep(0.0, 0.12, t) * (0.55 + 0.45 * x) * (1.0 - smoothstep(dur - 0.08, dur, t));
+                let suck = bp.bandpass(n.bipolar(), sweep(t, 3000.0, 350.0, dur), 2.0)
+                    * (0.25 + 0.5 * x)
+                    * (0.7 + 0.3 * w);
+                let env = smoothstep(0.0, 0.12, t)
+                    * (0.55 + 0.45 * x)
+                    * (1.0 - smoothstep(dur - 0.08, dur, t));
                 (drone + suck) * env
             })
         }
@@ -1231,10 +1502,14 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut svf = Svf::default();
             // A reversed swell: grows exponentially and stops dead at the implosion.
             let suck = render(pull, |t, _| {
-                svf.process(n.bipolar(), sweep(t, 300.0, 3500.0, pull), 1.2, SR).band * (-(pull - t) / 0.09).exp()
+                svf.process(n.bipolar(), sweep(t, 300.0, 3500.0, pull), 1.2, SR)
+                    .band
+                    * (-(pull - t) / 0.09).exp()
             });
             let mut rise = Osc::new(Wave::Sine);
-            let groan = render(pull, |t, _| rise.next(sweep(t, 60.0, 240.0, pull)) * (-(pull - t) / 0.12).exp());
+            let groan = render(pull, |t, _| {
+                rise.next(sweep(t, 60.0, 240.0, pull)) * (-(pull - t) / 0.12).exp()
+            });
             let slam = thump(0.6, 140.0, 26.0, 0.02, 0.16);
             let crunch = noise(r, 0.25, Pass::Low, 2500.0, 300.0, 0.9, 0.0005, 0.04);
             let snap = click(r, 0.002);
@@ -1252,13 +1527,19 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         ThornThrow => {
             let air = whoosh(r, 0.18, 2200.0, 7500.0, 3.0);
             let mut osc = Osc::new(Wave::Sine);
-            let whistle = render(0.16, |t, _| osc.next(sweep(t, 3200.0, 5600.0, 0.12)) * bell(t, 0.16));
+            let whistle = render(0.16, |t, _| {
+                osc.next(sweep(t, 3200.0, 5600.0, 0.12)) * bell(t, 0.16)
+            });
             layer(&[(&air, 1.0, 0.0), (&whistle, 0.18, 0.01)])
         }
         ThornPlant => {
             let snap = click(r, 0.0015);
             let tunk = thump(0.08, 520.0, 230.0, 0.005, 0.012);
-            let glass = metal(0.15, 2650.0, &[(1.0, 1.0, 0.03), (2.32, 0.6, 0.02), (4.13, 0.35, 0.012)]);
+            let glass = metal(
+                0.15,
+                2650.0,
+                &[(1.0, 1.0, 0.03), (2.32, 0.6, 0.02), (4.13, 0.35, 0.012)],
+            );
             // Quivering twang: a plucked string with a fast wobble that dies away.
             let mut twang = pluck(r, 0.35, 330.0, 0.996);
             let mut wob = Osc::new(Wave::Sine);
@@ -1266,7 +1547,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
                 *s *= perc(i as f32 / SR, 0.002, 0.14) * (0.6 + 0.4 * wob.next(26.0));
             }
             lowpass(&mut twang, 2500.0);
-            layer(&[(&snap, 0.7, 0.0), (&tunk, 0.9, 0.0), (&glass, 0.5, 0.0), (&twang, 1.0, 0.004)])
+            layer(&[
+                (&snap, 0.7, 0.0),
+                (&tunk, 0.9, 0.0),
+                (&glass, 0.5, 0.0),
+                (&twang, 1.0, 0.004),
+            ])
         }
         ThornShatter => {
             let spray = glass_spray(r, 7, 0.12, 2800.0, 6000.0);
@@ -1281,7 +1567,13 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let body = noise(r, 1.4, Pass::Low, 6000.0, 250.0, 0.8, 0.001, 0.22);
             let rumble = noise(r, 2.0, Pass::Low, 180.0, 80.0, 1.0, 0.01, 0.55);
             let debris = crackle(r, 1.6, 120.0, 0.4);
-            let mut b = layer(&[(&crack, 1.0, 0.0), (&boom, 1.2, 0.0), (&body, 1.0, 0.0), (&rumble, 0.8, 0.0), (&debris, 0.5, 0.01)]);
+            let mut b = layer(&[
+                (&crack, 1.0, 0.0),
+                (&boom, 1.2, 0.0),
+                (&body, 1.0, 0.0),
+                (&rumble, 0.8, 0.0),
+                (&debris, 0.5, 0.01),
+            ]);
             drive(&mut b, 2.2);
             crush(&mut b, 10, 2.0);
             reverb(&mut b, 0.6, 0.6, 0.18, 0.6);
@@ -1292,7 +1584,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let slide = noise(r, 0.1, Pass::Band, 1800.0, 2400.0, 2.0, 0.02, 0.03);
             let clack = metal(0.08, 1500.0, &[(1.0, 1.0, 0.018), (2.2, 0.5, 0.012)]);
             let thud = thump(0.08, 260.0, 160.0, 0.008, 0.02);
-            layer(&[(&first, 0.6, 0.0), (&slide, 0.5, 0.03), (&clack, 0.7, 0.11), (&thud, 0.6, 0.11)])
+            layer(&[
+                (&first, 0.6, 0.0),
+                (&slide, 0.5, 0.03),
+                (&clack, 0.7, 0.11),
+                (&thud, 0.6, 0.11),
+            ])
         }
         ModeSwitch => {
             let mut servo = tone(0.08, Wave::Square, 500.0, 900.0, 0.06, 0.002, 0.03);
@@ -1309,8 +1606,17 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let body = thump(0.3, 190.0, 50.0, 0.012, 0.06);
             let crunch = noise(r, 0.15, Pass::Low, 4000.0, 700.0, 0.8, 0.0005, 0.03);
             let snap = click(r, 0.003);
-            let clang = metal(0.2, 700.0, &[(1.0, 1.0, 0.05), (2.3, 0.6, 0.035), (3.7, 0.4, 0.02)]);
-            let mut b = layer(&[(&body, 1.0, 0.0), (&crunch, 0.8, 0.0), (&snap, 0.6, 0.0), (&clang, 0.25, 0.0)]);
+            let clang = metal(
+                0.2,
+                700.0,
+                &[(1.0, 1.0, 0.05), (2.3, 0.6, 0.035), (3.7, 0.4, 0.02)],
+            );
+            let mut b = layer(&[
+                (&body, 1.0, 0.0),
+                (&crunch, 0.8, 0.0),
+                (&snap, 0.6, 0.0),
+                (&clang, 0.25, 0.0),
+            ]);
             drive(&mut b, 4.0);
             crush(&mut b, 9, 2.0);
             b
@@ -1333,11 +1639,19 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             );
             let ring = {
                 let (mut a, mut b) = (Osc::new(Wave::Sine), Osc::new(Wave::Sine));
-                render(1.2, |t, _| (a.next(3520.0) + b.next(3528.0)) * 0.5 * perc(t, 0.001, 0.6))
+                render(1.2, |t, _| {
+                    (a.next(3520.0) + b.next(3528.0)) * 0.5 * perc(t, 0.001, 0.6)
+                })
             };
             let air = whoosh(r, 0.25, 5000.0, 900.0, 1.0);
             let body = thump(0.2, 300.0, 120.0, 0.01, 0.05);
-            let mut b = layer(&[(&snap, 0.9, 0.0), (&clang, 0.9, 0.0), (&ring, 0.25, 0.0), (&air, 0.7, 0.0), (&body, 0.5, 0.0)]);
+            let mut b = layer(&[
+                (&snap, 0.9, 0.0),
+                (&clang, 0.9, 0.0),
+                (&ring, 0.25, 0.0),
+                (&air, 0.7, 0.0),
+                (&body, 0.5, 0.0),
+            ]);
             for s in b.iter_mut() {
                 *s = super::dsp::soft_clip(*s * 1.5);
             }
@@ -1353,9 +1667,20 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let chime = metal(
                 0.8,
                 base,
-                &[(1.0, 1.0, 0.3), (1.004, 0.6, 0.3), (2.0, 0.55, 0.2), (3.01, 0.35, 0.14), (4.17, 0.25, 0.09), (5.43, 0.15, 0.06)],
+                &[
+                    (1.0, 1.0, 0.3),
+                    (1.004, 0.6, 0.3),
+                    (2.0, 0.55, 0.2),
+                    (3.01, 0.35, 0.14),
+                    (4.17, 0.25, 0.09),
+                    (5.43, 0.15, 0.06),
+                ],
             );
-            let mut b = layer(&[(&shatter, 0.7, 0.0), (&spray, 0.6, 0.0), (&chime, 0.8, 0.006)]);
+            let mut b = layer(&[
+                (&shatter, 0.7, 0.0),
+                (&spray, 0.6, 0.0),
+                (&chime, 0.8, 0.006),
+            ]);
             echo(&mut b, 0.07, 0.3, 0.22, 6000.0, 0.3);
             b
         }
@@ -1370,7 +1695,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let b2 = tone(0.07, Wave::Sine, 4300.0, 4300.0, 0.01, 0.0005, 0.02);
             let crack = noise(r, 0.15, Pass::Band, 1500.0, 800.0, 1.0, 0.0005, 0.03);
             let thud = thump(0.12, 250.0, 120.0, 0.01, 0.03);
-            let mut b = layer(&[(&a, 0.8, 0.0), (&b2, 0.8, 0.03), (&crack, 0.6, 0.0), (&thud, 0.6, 0.0)]);
+            let mut b = layer(&[
+                (&a, 0.8, 0.0),
+                (&b2, 0.8, 0.03),
+                (&crack, 0.6, 0.0),
+                (&thud, 0.6, 0.0),
+            ]);
             crush(&mut b, 9, 1.5);
             b
         }
@@ -1404,11 +1734,20 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         GnawerBite => {
             // Brass teeth slamming shut.
-            let clack = metal(0.12, 1900.0, &[(1.0, 1.0, 0.03), (1.48, 0.7, 0.025), (2.9, 0.4, 0.015)]);
+            let clack = metal(
+                0.12,
+                1900.0,
+                &[(1.0, 1.0, 0.03), (1.48, 0.7, 0.025), (2.9, 0.4, 0.015)],
+            );
             let snap = click(r, 0.003);
             let thud = thump(0.15, 220.0, 90.0, 0.01, 0.04);
             let grunt = growl(r, 0.12, 160.0, 120.0, [700.0, 1200.0], 0.05, 0.004, 0.04);
-            layer(&[(&clack, 0.8, 0.0), (&snap, 0.8, 0.0), (&thud, 0.7, 0.0), (&grunt, 0.4, 0.0)])
+            layer(&[
+                (&clack, 0.8, 0.0),
+                (&snap, 0.8, 0.0),
+                (&thud, 0.7, 0.0),
+                (&grunt, 0.4, 0.0),
+            ])
         }
         GnawerPounceWindup => {
             // Coiling: a low growl swelling, claws scraping the floor.
@@ -1437,7 +1776,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let embers = crackle(r, dur, 120.0, 0.4);
             let mut drone = chord(&[38.0, 45.0], dur, Wave::Saw, 300.0, 600.0, 0.15, 0.5, 0.6);
             lowpass(&mut drone, 700.0);
-            layer(&[(&whoomph, 1.0, 0.0), (&embers, 0.5, 0.05), (&drone, 0.35, 0.0)])
+            layer(&[
+                (&whoomph, 1.0, 0.0),
+                (&embers, 0.5, 0.05),
+                (&drone, 0.35, 0.0),
+            ])
         }
         CenserWhirl => {
             // The censer whirled overhead: whooshes coming faster and faster, the chain
@@ -1450,7 +1793,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
                 // Revolutions per second rise from 2 to 9.
                 phase += sweep(t, 2.0, 9.0, dur) / SR;
                 let pulse = (phase * std::f32::consts::TAU).sin().max(0.0).powi(2);
-                bp.bandpass(n.bipolar(), 600.0 + 1400.0 * pulse, 1.5) * (0.3 + pulse) * smoothstep(0.0, 0.2, t)
+                bp.bandpass(n.bipolar(), 600.0 + 1400.0 * pulse, 1.5)
+                    * (0.3 + pulse)
+                    * smoothstep(0.0, 0.2, t)
             });
             let rattle = crackle(r, dur, 260.0, 2.0);
             let hiss = noise(r, dur, Pass::High, 3000.0, 6000.0, 0.7, 0.5, 0.2);
@@ -1476,7 +1821,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         CenserSwing => {
             let air = whoosh(r, 0.32, 2400.0, 500.0, 1.3);
-            let clang = metal(0.5, 520.0, &[(1.0, 1.0, 0.2), (2.4, 0.6, 0.12), (3.9, 0.3, 0.08)]);
+            let clang = metal(
+                0.5,
+                520.0,
+                &[(1.0, 1.0, 0.2), (2.4, 0.6, 0.12), (3.9, 0.3, 0.08)],
+            );
             let rattle = crackle(r, 0.3, 300.0, 0.15);
             layer(&[(&air, 1.0, 0.0), (&clang, 0.3, 0.12), (&rattle, 0.4, 0.0)])
         }
@@ -1493,7 +1842,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let crack = noise(r, 0.2, Pass::Band, 2500.0, 900.0, 0.9, 0.0003, 0.04);
             let spray = crackle(r, 0.7, 500.0, 0.2);
             let sizzle = noise(r, 0.8, Pass::High, 5000.0, 3000.0, 0.7, 0.01, 0.3);
-            let mut b = layer(&[(&pop, 1.0, 0.0), (&crack, 0.8, 0.0), (&spray, 0.5, 0.01), (&sizzle, 0.3, 0.02)]);
+            let mut b = layer(&[
+                (&pop, 1.0, 0.0),
+                (&crack, 0.8, 0.0),
+                (&spray, 0.5, 0.01),
+                (&sizzle, 0.3, 0.02),
+            ]);
             drive(&mut b, 2.0);
             b
         }
@@ -1530,7 +1884,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let mut flaps = noise(r, 0.5, Pass::Band, 900.0, 500.0, 1.0, 0.02, 0.25);
             stutter(&mut flaps, 11.0, 0.08);
             let squawk = growl(r, 0.25, 520.0, 300.0, [1800.0, 2900.0], 0.2, 0.01, 0.1);
-            layer(&[(&crunch, 0.9, 0.0), (&thud, 1.0, 0.0), (&flaps, 0.5, 0.05), (&squawk, 0.5, 0.02)])
+            layer(&[
+                (&crunch, 0.9, 0.0),
+                (&thud, 1.0, 0.0),
+                (&flaps, 0.5, 0.05),
+                (&squawk, 0.5, 0.02),
+            ])
         }
         GaolerAlert => {
             // A deep iron bellow through the grille, the chain shaken.
@@ -1554,19 +1913,42 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             });
             let mut rumble = {
                 let mut o = Osc::new(Wave::Saw);
-                render(dur, |t, _| o.next(sweep(t, 45.0, 60.0, cue)) * smoothstep(0.0, cue, t) * (1.0 - smoothstep(cue, dur, t)))
+                render(dur, |t, _| {
+                    o.next(sweep(t, 45.0, 60.0, cue))
+                        * smoothstep(0.0, cue, t)
+                        * (1.0 - smoothstep(cue, dur, t))
+                })
             };
             lowpass(&mut rumble, 250.0);
-            let ting = metal(0.5, 2093.0, &[(1.0, 1.0, 0.15), (2.92, 0.5, 0.08), (5.1, 0.3, 0.05)]);
+            let ting = metal(
+                0.5,
+                2093.0,
+                &[(1.0, 1.0, 0.15), (2.92, 0.5, 0.08), (5.1, 0.3, 0.05)],
+            );
             let shimmer = metal(0.4, 3136.0, &[(1.0, 0.5, 0.25), (1.5, 0.3, 0.2)]);
-            let mut b = layer(&[(&grind, 0.8, 0.0), (&rumble, 0.6, 0.0), (&ting, 0.9, cue), (&ting, 0.7, cue + 0.09), (&shimmer, 0.4, cue + 0.12)]);
+            let mut b = layer(&[
+                (&grind, 0.8, 0.0),
+                (&rumble, 0.6, 0.0),
+                (&ting, 0.9, cue),
+                (&ting, 0.7, cue + 0.09),
+                (&shimmer, 0.4, cue + 0.12),
+            ]);
             drive(&mut b, 1.8);
             b
         }
         GaolerBash => {
             // A cell door slammed into you: a huge iron clang over a boom.
             let boom = thump(1.0, 85.0, 28.0, 0.04, 0.3);
-            let clang = metal(1.1, 165.0, &[(1.0, 1.0, 0.45), (2.31, 0.8, 0.3), (3.62, 0.6, 0.22), (5.7, 0.4, 0.12)]);
+            let clang = metal(
+                1.1,
+                165.0,
+                &[
+                    (1.0, 1.0, 0.45),
+                    (2.31, 0.8, 0.3),
+                    (3.62, 0.6, 0.22),
+                    (5.7, 0.4, 0.12),
+                ],
+            );
             let crunch = noise(r, 0.6, Pass::Low, 3000.0, 200.0, 0.8, 0.0005, 0.15);
             let mut b = layer(&[(&boom, 1.2, 0.0), (&clang, 0.55, 0.0), (&crunch, 0.7, 0.0)]);
             drive(&mut b, 2.5);
@@ -1583,7 +1965,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let whirr = render(dur, |t, _| {
                 phase += sweep(t, 1.5, 6.0, dur) / SR;
                 let pulse = (phase * std::f32::consts::TAU).sin().max(0.0);
-                bp.bandpass(n.bipolar(), 250.0 + 600.0 * pulse, 2.0) * (0.3 + pulse) * smoothstep(0.0, 0.25, t)
+                bp.bandpass(n.bipolar(), 250.0 + 600.0 * pulse, 2.0)
+                    * (0.3 + pulse)
+                    * smoothstep(0.0, 0.25, t)
             });
             let links = crackle(r, dur, 220.0, 3.0);
             let hiss = noise(r, dur, Pass::High, 2500.0, 5000.0, 0.8, 0.4, 0.25);
@@ -1596,7 +1980,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let links = crackle(r, 0.5, 400.0, 0.2);
             let scrape = noise(r, 0.4, Pass::Band, 1800.0, 700.0, 4.0, 0.01, 0.15);
             let thud = thump(0.3, 90.0, 40.0, 0.02, 0.08);
-            layer(&[(&air, 1.0, 0.0), (&links, 0.6, 0.0), (&scrape, 0.4, 0.05), (&thud, 0.6, 0.0)])
+            layer(&[
+                (&air, 1.0, 0.0),
+                (&links, 0.6, 0.0),
+                (&scrape, 0.4, 0.05),
+                (&thud, 0.6, 0.0),
+            ])
         }
         GaolerRushWindup => {
             // A snort through the grille, iron feet scraping, a rumble building.
@@ -1605,17 +1994,28 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let scrape = noise(r, dur, Pass::Band, 1400.0, 700.0, 3.0, 0.2, 0.4);
             let mut rumble = {
                 let mut o = Osc::new(Wave::Saw);
-                render(dur, |t, _| o.next(sweep(t, 40.0, 65.0, dur)) * smoothstep(0.0, dur, t))
+                render(dur, |t, _| {
+                    o.next(sweep(t, 40.0, 65.0, dur)) * smoothstep(0.0, dur, t)
+                })
             };
             lowpass(&mut rumble, 220.0);
-            layer(&[(&snort, 1.0, 0.0), (&snort, 0.6, 0.45), (&scrape, 0.4, 0.1), (&rumble, 0.8, 0.0)])
+            layer(&[
+                (&snort, 1.0, 0.0),
+                (&snort, 0.6, 0.45),
+                (&scrape, 0.4, 0.1),
+                (&rumble, 0.8, 0.0),
+            ])
         }
         GaolerRush => {
             // Charging: iron footfalls coming faster.
             let mut b = Vec::new();
             for (k, at) in [0.0f32, 0.18, 0.33, 0.46, 0.57, 0.67].iter().enumerate() {
                 let step = thump(0.25, 100.0, 35.0, 0.02, 0.07);
-                let clank = metal(0.15, 280.0 + 20.0 * k as f32, &[(1.0, 1.0, 0.06), (2.7, 0.5, 0.04)]);
+                let clank = metal(
+                    0.15,
+                    280.0 + 20.0 * k as f32,
+                    &[(1.0, 1.0, 0.06), (2.7, 0.5, 0.04)],
+                );
                 mix_at(&mut b, &step, 1.0, *at);
                 mix_at(&mut b, &clank, 0.25, *at);
             }
@@ -1625,7 +2025,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         GaolerStep => {
             let thud = thump(0.4, r.range(85.0, 100.0), 35.0, 0.03, 0.1);
-            let clank = metal(0.25, r.range(260.0, 320.0), &[(1.0, 1.0, 0.1), (2.6, 0.6, 0.07), (4.1, 0.3, 0.04)]);
+            let clank = metal(
+                0.25,
+                r.range(260.0, 320.0),
+                &[(1.0, 1.0, 0.1), (2.6, 0.6, 0.07), (4.1, 0.3, 0.04)],
+            );
             let jingle = crackle(r, 0.25, 160.0, 0.08);
             layer(&[(&thud, 1.0, 0.0), (&clank, 0.35, 0.0), (&jingle, 0.3, 0.02)])
         }
@@ -1645,16 +2049,24 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         HeronLaser => {
             // The aim laser: an electric hum with a whine climbing towards the lock (1.3 s).
             let dur = 1.3;
-            let (mut saw, mut sine, mut vib) = (Osc::new(Wave::Saw), Osc::new(Wave::Sine), Osc::new(Wave::Sine));
+            let (mut saw, mut sine, mut vib) = (
+                Osc::new(Wave::Saw),
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Sine),
+            );
             let mut bp = Svf::default();
             let hum = render(dur, |t, _| {
                 let f = 110.0 * (1.0 + 0.01 * vib.next(7.0));
                 let x = saw.next(f) * 0.6 + sine.next(f * 4.0) * 0.4;
-                bp.bandpass(x, 700.0, 1.2) * smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(1.22, dur, t))
+                bp.bandpass(x, 700.0, 1.2)
+                    * smoothstep(0.0, 0.08, t)
+                    * (1.0 - smoothstep(1.22, dur, t))
             });
             let mut whine_osc = Osc::new(Wave::Sine);
             let whine = render(dur, |t, _| {
-                whine_osc.next(sweep(t, 900.0, 2600.0, 1.05)) * smoothstep(0.1, 1.05, t) * (1.0 - smoothstep(1.2, dur, t))
+                whine_osc.next(sweep(t, 900.0, 2600.0, 1.05))
+                    * smoothstep(0.1, 1.05, t)
+                    * (1.0 - smoothstep(1.2, dur, t))
             });
             layer(&[(&hum, 1.0, 0.0), (&whine, 0.25, 0.0)])
         }
@@ -1663,7 +2075,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let clk = click(r, 0.002);
             let latch = metal(0.08, 3200.0, &[(1.0, 1.0, 0.02), (1.7, 0.6, 0.015)]);
             let beep = tone(0.06, Wave::Square, 2637.0, 2637.0, 0.01, 0.001, 0.05);
-            let mut b = layer(&[(&clk, 1.0, 0.0), (&latch, 0.7, 0.0), (&beep, 0.35, 0.03), (&beep, 0.35, 0.11)]);
+            let mut b = layer(&[
+                (&clk, 1.0, 0.0),
+                (&latch, 0.7, 0.0),
+                (&beep, 0.35, 0.03),
+                (&beep, 0.35, 0.11),
+            ]);
             lowpass(&mut b, 9000.0);
             b
         }
@@ -1700,7 +2117,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let snap = noise(r, 0.15, Pass::Band, snap_hz, 600.0, 1.5, 0.0005, 0.03);
             let thud = thump(0.12, r.range(150.0, 190.0), 70.0, 0.01, 0.03);
             let hiss = noise(r, 0.25, Pass::High, 4500.0, 3500.0, 0.7, 0.01, 0.08);
-            layer(&[(&crack, 0.8, 0.0), (&snap, 0.7, 0.0), (&thud, 0.8, 0.0), (&hiss, 0.25, 0.02)])
+            layer(&[
+                (&crack, 0.8, 0.0),
+                (&snap, 0.7, 0.0),
+                (&thud, 0.8, 0.0),
+                (&hiss, 0.25, 0.02),
+            ])
         }
         EnemyDeath => {
             // A Mould gives out: wax splitting, a slag thud as it slumps, a long sizzle as it
@@ -1711,7 +2133,13 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let creak = growl(r, 0.5, 120.0, 60.0, [400.0, 800.0], 0.08, 0.02, 0.22);
             let sizzle = noise(r, 1.2, Pass::High, 4000.0, 2500.0, 0.7, 0.05, 0.45);
             let pops = crackle(r, 1.0, 90.0, 0.5);
-            let mut b = layer(&[(&split, 0.8, 0.0), (&thud, 1.0, 0.05), (&creak, 0.35, 0.0), (&sizzle, 0.35, 0.1), (&pops, 0.4, 0.1)]);
+            let mut b = layer(&[
+                (&split, 0.8, 0.0),
+                (&thud, 1.0, 0.05),
+                (&creak, 0.35, 0.0),
+                (&sizzle, 0.35, 0.1),
+                (&pops, 0.4, 0.1),
+            ]);
             drive(&mut b, 1.8);
             reverb(&mut b, 0.4, 0.6, 0.12, 0.3);
             b
@@ -1719,10 +2147,24 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         GaolerDeath => {
             // The jailer falls: the door crashes down, iron collapses, the lantern hisses out.
             let boom = thump(1.2, 70.0, 24.0, 0.05, 0.35);
-            let crash = metal(1.4, 140.0, &[(1.0, 1.0, 0.6), (2.2, 0.8, 0.4), (3.5, 0.5, 0.3), (6.1, 0.3, 0.15)]);
+            let crash = metal(
+                1.4,
+                140.0,
+                &[
+                    (1.0, 1.0, 0.6),
+                    (2.2, 0.8, 0.4),
+                    (3.5, 0.5, 0.3),
+                    (6.1, 0.3, 0.15),
+                ],
+            );
             let chain = crackle(r, 1.0, 300.0, 0.4);
             let hiss = noise(r, 1.6, Pass::High, 4000.0, 2000.0, 0.7, 0.2, 0.6);
-            let mut b = layer(&[(&boom, 1.2, 0.0), (&crash, 0.5, 0.05), (&chain, 0.5, 0.1), (&hiss, 0.35, 0.3)]);
+            let mut b = layer(&[
+                (&boom, 1.2, 0.0),
+                (&crash, 0.5, 0.05),
+                (&chain, 0.5, 0.1),
+                (&hiss, 0.35, 0.3),
+            ]);
             drive(&mut b, 2.2);
             reverb(&mut b, 0.7, 0.5, 0.22, 0.7);
             b
@@ -1738,7 +2180,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             });
             let rise = whoosh(r, 0.8, 500.0, 4000.0, 0.8);
             let embers = crackle(r, dur, 350.0, 0.35);
-            layer(&[(&whoomph, 1.0, 0.0), (&rise, 0.4, 0.05), (&embers, 0.6, 0.05)])
+            layer(&[
+                (&whoomph, 1.0, 0.0),
+                (&rise, 0.4, 0.05),
+                (&embers, 0.6, 0.05),
+            ])
         }
         EnemySpawn => {
             let dur = 0.9;
@@ -1752,7 +2198,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             lowpass(&mut drone, 900.0);
             let zap = fm(0.3, 900.0, 200.0, 1.41, 4.0, 0.5, 0.001, 0.08);
             let thud = thump(0.3, 140.0, 50.0, 0.02, 0.07);
-            layer(&[(&swell, 0.6, 0.0), (&drone, 0.4, 0.0), (&zap, 0.6, 0.6), (&thud, 0.8, 0.6)])
+            layer(&[
+                (&swell, 0.6, 0.0),
+                (&drone, 0.4, 0.0),
+                (&zap, 0.6, 0.6),
+                (&thud, 0.8, 0.6),
+            ])
         }
         ProjectileImpact => {
             // A hot projectile hitting the level: a crack, a thud and a short sizzle.
@@ -1766,21 +2217,42 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         // ----- game -----------------------------------------------------------------------
         RankUp => {
             // A-major arpeggio up an octave, last note held with vibrato plus a third on top.
-            let arp = [(69.0, 0.0, 0.05), (73.0, 0.055, 0.05), (76.0, 0.11, 0.05), (81.0, 0.165, 0.45)];
+            let arp = [
+                (69.0, 0.0, 0.05),
+                (73.0, 0.055, 0.05),
+                (76.0, 0.11, 0.05),
+                (81.0, 0.165, 0.45),
+            ];
             let lead = notes(&arp, Wave::Saw, 0.002, 0.15, 4500.0, 0.008);
             let square = notes(&arp, Wave::Square, 0.002, 0.15, 3000.0, 0.008);
-            let third = notes(&[(85.0, 0.165, 0.45)], Wave::Square, 0.01, 0.15, 3500.0, 0.008);
+            let third = notes(
+                &[(85.0, 0.165, 0.45)],
+                Wave::Square,
+                0.01,
+                0.15,
+                3500.0,
+                0.008,
+            );
             let shimmer = noise(r, 0.6, Pass::High, 6000.0, 6000.0, 0.6, 0.002, 0.25);
             // A saw's fundamental is in anti-phase with a square's: invert the square so the
             // layers reinforce instead of cancelling.
-            let mut b = layer(&[(&lead, 0.6, 0.0), (&square, -0.35, 0.0), (&third, 0.3, 0.0), (&shimmer, 0.15, 0.165)]);
+            let mut b = layer(&[
+                (&lead, 0.6, 0.0),
+                (&square, -0.35, 0.0),
+                (&third, 0.3, 0.0),
+                (&shimmer, 0.15, 0.165),
+            ]);
             echo(&mut b, 0.11, 0.3, 0.3, 4000.0, 0.4);
             b
         }
         RankDown => {
             let mut osc = Osc::new(Wave::Triangle);
             let mut b = render(0.45, |t, _| {
-                let note = if t < 0.12 { 76.0 } else { 72.0 - (t - 0.12) * 1.5 };
+                let note = if t < 0.12 {
+                    76.0
+                } else {
+                    72.0 - (t - 0.12) * 1.5
+                };
                 osc.next(midi_hz(note)) * adsr(t, 0.004, 0.05, 0.7, 0.12, 0.3)
             });
             lowpass(&mut b, 2000.0);
@@ -1792,9 +2264,25 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             layer(&[(&a, 0.7, 0.0), (&b2, 0.7, 0.05)])
         }
         DoorLock => {
-            let clank = metal(0.8, 160.0, &[(1.0, 1.0, 0.25), (2.33, 0.7, 0.18), (3.71, 0.5, 0.12), (5.9, 0.3, 0.08)]);
+            let clank = metal(
+                0.8,
+                160.0,
+                &[
+                    (1.0, 1.0, 0.25),
+                    (2.33, 0.7, 0.18),
+                    (3.71, 0.5, 0.12),
+                    (5.9, 0.3, 0.08),
+                ],
+            );
             let thud = thump(0.4, 100.0, 40.0, 0.02, 0.1);
-            let mut alarm = notes(&[(57.0, 0.15, 0.13), (57.0, 0.4, 0.13)], Wave::Square, 0.003, 0.03, 1500.0, 0.0);
+            let mut alarm = notes(
+                &[(57.0, 0.15, 0.13), (57.0, 0.4, 0.13)],
+                Wave::Square,
+                0.003,
+                0.03,
+                1500.0,
+                0.0,
+            );
             crush(&mut alarm, 7, 2.0);
             layer(&[(&clank, 0.6, 0.0), (&thud, 1.0, 0.0), (&alarm, 0.35, 0.0)])
         }
@@ -1804,7 +2292,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             lowpass(&mut whir, 900.0);
             let clunk = thump(0.3, 130.0, 50.0, 0.015, 0.07);
             let clank = metal(0.3, 400.0, &[(1.0, 1.0, 0.08), (2.5, 0.5, 0.05)]);
-            layer(&[(&hiss, 0.5, 0.0), (&whir, 0.5, 0.0), (&clunk, 1.0, 0.65), (&clank, 0.3, 0.65)])
+            layer(&[
+                (&hiss, 0.5, 0.0),
+                (&whir, 0.5, 0.0),
+                (&clunk, 1.0, 0.65),
+                (&clank, 0.3, 0.65),
+            ])
         }
         Checkpoint => {
             let mut b = Vec::new();
@@ -1816,7 +2309,16 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             b
         }
         WaveStart => {
-            let horn = chord(&[40.0, 47.0, 52.0], 1.0, Wave::Saw, 3000.0, 600.0, 0.01, 0.4, 0.8);
+            let horn = chord(
+                &[40.0, 47.0, 52.0],
+                1.0,
+                Wave::Saw,
+                3000.0,
+                600.0,
+                0.01,
+                0.4,
+                0.8,
+            );
             let hit = thump(0.5, 120.0, 40.0, 0.02, 0.12);
             let crash = noise(r, 1.0, Pass::High, 5000.0, 5000.0, 0.6, 0.001, 0.35);
             let mut b = layer(&[(&horn, 1.0, 0.0), (&hit, 1.0, 0.0), (&crash, 0.3, 0.0)]);
@@ -1824,8 +2326,26 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             b
         }
         EncounterClear => {
-            let swell = chord(&[52.0, 56.0, 59.0, 64.0], 1.4, Wave::Saw, 800.0, 4000.0, 0.05, 0.7, 1.1);
-            let top = fm(1.0, midi_hz(88.0), midi_hz(88.0), 3.0, 1.5, 0.1, 0.002, 0.35);
+            let swell = chord(
+                &[52.0, 56.0, 59.0, 64.0],
+                1.4,
+                Wave::Saw,
+                800.0,
+                4000.0,
+                0.05,
+                0.7,
+                1.1,
+            );
+            let top = fm(
+                1.0,
+                midi_hz(88.0),
+                midi_hz(88.0),
+                3.0,
+                1.5,
+                0.1,
+                0.002,
+                0.35,
+            );
             let crash = noise(r, 1.2, Pass::High, 5000.0, 5000.0, 0.6, 0.002, 0.4);
             let mut b = layer(&[(&swell, 1.0, 0.0), (&top, 0.35, 0.05), (&crash, 0.2, 0.0)]);
             reverb(&mut b, 0.6, 0.4, 0.2, 0.5);
@@ -1833,31 +2353,68 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         LevelComplete => {
             let run = notes(
-                &[(64.0, 0.0, 0.1), (68.0, 0.12, 0.1), (71.0, 0.24, 0.1), (76.0, 0.36, 0.1)],
+                &[
+                    (64.0, 0.0, 0.1),
+                    (68.0, 0.12, 0.1),
+                    (71.0, 0.24, 0.1),
+                    (76.0, 0.36, 0.1),
+                ],
                 Wave::Square,
                 0.003,
                 0.06,
                 4000.0,
                 0.0,
             );
-            let fin = chord(&[76.0, 80.0, 83.0, 88.0], 1.4, Wave::Saw, 1500.0, 5000.0, 0.01, 0.6, 1.0);
+            let fin = chord(
+                &[76.0, 80.0, 83.0, 88.0],
+                1.4,
+                Wave::Saw,
+                1500.0,
+                5000.0,
+                0.01,
+                0.6,
+                1.0,
+            );
             let crash = noise(r, 1.2, Pass::High, 5000.0, 5000.0, 0.6, 0.002, 0.45);
             let hit = thump(0.4, 120.0, 45.0, 0.02, 0.1);
-            let mut b = layer(&[(&run, 0.6, 0.0), (&fin, 0.9, 0.48), (&crash, 0.25, 0.48), (&hit, 0.8, 0.48)]);
+            let mut b = layer(&[
+                (&run, 0.6, 0.0),
+                (&fin, 0.9, 0.48),
+                (&crash, 0.25, 0.48),
+                (&hit, 0.8, 0.48),
+            ]);
             reverb(&mut b, 0.6, 0.4, 0.2, 0.6);
             b
         }
         Countdown => notes(&[(81.0, 0.0, 0.11)], Wave::Square, 0.002, 0.02, 3000.0, 0.0),
         MatchStart => {
             let beep = notes(&[(93.0, 0.0, 0.35)], Wave::Square, 0.002, 0.05, 3500.0, 0.0);
-            let stab = chord(&[45.0, 52.0, 57.0], 0.8, Wave::Saw, 3000.0, 700.0, 0.005, 0.3, 0.6);
+            let stab = chord(
+                &[45.0, 52.0, 57.0],
+                0.8,
+                Wave::Saw,
+                3000.0,
+                700.0,
+                0.005,
+                0.3,
+                0.6,
+            );
             let crash = noise(r, 0.8, Pass::High, 5000.0, 5000.0, 0.6, 0.001, 0.3);
             let mut b = layer(&[(&beep, 0.4, 0.0), (&stab, 1.0, 0.0), (&crash, 0.25, 0.0)]);
             drive(&mut b, 2.0);
             b
         }
         MatchEnd => {
-            let mut horn = chord(&[45.0, 52.0, 57.0, 60.0], 1.6, Wave::Saw, 2500.0, 500.0, 0.01, 0.7, 1.2);
+            let mut horn = chord(
+                &[45.0, 52.0, 57.0, 60.0],
+                1.6,
+                Wave::Saw,
+                2500.0,
+                500.0,
+                0.01,
+                0.7,
+                1.2,
+            );
             // Droop the whole chord down a semitone by resampling.
             let len = horn.len();
             let drooped: Vec<f32> = (0..len)
@@ -1868,7 +2425,16 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
                 })
                 .collect();
             horn = drooped;
-            let gong = metal(1.8, 110.0, &[(1.0, 1.0, 1.0), (2.14, 0.7, 0.7), (3.47, 0.5, 0.5), (5.03, 0.3, 0.3)]);
+            let gong = metal(
+                1.8,
+                110.0,
+                &[
+                    (1.0, 1.0, 1.0),
+                    (2.14, 0.7, 0.7),
+                    (3.47, 0.5, 0.5),
+                    (5.03, 0.3, 0.3),
+                ],
+            );
             let mut b = layer(&[(&horn, 0.8, 0.0), (&gong, 0.5, 0.0)]);
             reverb(&mut b, 0.7, 0.5, 0.2, 0.6);
             b
@@ -1901,7 +2467,10 @@ mod tests {
                 let loud = max_window_rms(&buf, samples(0.05));
                 assert!(loud > db_to_gain(-40.0), "{sfx:?} too quiet: {loud}");
                 let measured = loudness(&buf, SR, 0.05);
-                assert!(measured <= sfx.info().level_db + 0.5, "{sfx:?} louder than its target");
+                assert!(
+                    measured <= sfx.info().level_db + 0.5,
+                    "{sfx:?} louder than its target"
+                );
             }
         }
     }
@@ -1911,7 +2480,10 @@ mod tests {
         for &sfx in &[Sfx::Explosion, Sfx::Parry, Sfx::EnemyHurt, Sfx::Footstep] {
             assert_eq!(render_sfx(sfx), render_sfx(sfx));
         }
-        assert_ne!(render_variant(Sfx::Footstep, 0), render_variant(Sfx::Footstep, 1));
+        assert_ne!(
+            render_variant(Sfx::Footstep, 0),
+            render_variant(Sfx::Footstep, 1)
+        );
     }
 
     #[test]
