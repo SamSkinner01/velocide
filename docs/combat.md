@@ -118,12 +118,14 @@ pub struct DamageInfo {
     source: Owner,        // World | Player(id) | Enemy(net id)
     attack: Attack,       // Quill, Brand, Splinter, Blast, Gust, BothBarrels, Arc, Wisp,
                           // Discharge, Tumble, Breach, Gravewell, Thorn, Fist, Slam,
-                          // Enemy{kind, attack}, World, Dev
+                          // Enemy{kind, attack}, World, Dev, then the expansion's
+                          // primaries and abilities (docs/arsenal.md)
     point: Vec3, dir: Vec3,   // where, and the direction the damage travels
     part: HitPart,        // Body | Head | Weak(i)
     knockback: Vec3,      // velocity change
     flags: DamageFlags,   // HITSCAN PROJECTILE EXPLOSIVE MELEE PARRIED RICOCHET SLAM HEADSHOT WEAK_POINT
                           // SELF CHAINED RETURNED ENVIRONMENT ARMOURED DIRECT BRANDED
+                          // BURN (status damage over time) PIERCED (Skewer past a target)
     ricochets: u8,        // thorn bounces before this hit
     projectile: Option<NetId>,
 }
@@ -434,7 +436,7 @@ block each other (player movement must stay predictable).
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
 | `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BURNING 1<<12, PINNED 1<<13, DRAWING 1<<14, BRANDED 1<<15` | held weapon, selected ability, charge / draw: `protocol::player_weapon(state)` (`docs/arsenal.md`) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
-| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–14 enemies area), `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
+| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–12 enemies area), `BURNING 1<<13`, `PINNED 1<<14`, `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `EMBER_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
 | `THORN` 160 | thrower | **at launch tick**; while `PLANTED`: where it sits / its orientation (unit) | – | `PLANTED 1, LYING 2, DROPPING 4` | – | – | launch tick |

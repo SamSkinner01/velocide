@@ -262,7 +262,7 @@
             bloom_per_shot: 0.25,  // heat per shot (s), drains in real time ...
             bloom_max: 0.6,        // ... up to this ...
             bloom_degrees: 3.0,    // ... spread at full heat (sustained fire settles at 75 %)
-            ability_power: 1.0,
+            ability_power: 0.85,
         ),
         // Drum-fed auto-scattergun (Scatter), automatic while held.
         thresher: (
@@ -272,7 +272,7 @@
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
-            ability_power: 1.0,
+            ability_power: 0.9,
         ),
         // Pneumatic rivet driver (Rapid): fast hot rivets with light gravity.
         riveter: (
@@ -283,7 +283,7 @@
             rivet_radius: 0.06,
             rivet_lifetime: 1.5,
             spread_degrees: 1.2,
-            ability_power: 1.0,
+            ability_power: 0.9,
         ),
         // Box launcher (Explosive): one pull = a salvo of cinder rockets.
         cinderbox: (
@@ -297,7 +297,7 @@
             explosion_radius: 2.6,
             damage: 32.0,
             knockback: 14.0,
-            ability_power: 1.0,
+            ability_power: 0.95,
         ),
         // Recurve bow (Draw): hold to draw, release; speed and damage grow with the draw.
         longwick: (
@@ -319,7 +319,7 @@
             interval: 0.08,        // 5 ticks at 60 Hz
             damage: 3.0,
             burn_stacks: 1,        // per spray
-            ability_power: 1.0,
+            ability_power: 0.85,
         ),
         // Abilities (pools per class: docs/arsenal.md).
         skewer: (
@@ -495,6 +495,9 @@
     // speed)`, 1.0 if left out -- then sets absolute `overrides` by field path inside
     // `combat`. `pve`: campaign, grind. `pvp`: deathmatch, gun game. The server sends clients
     // the effective tuning of the match.
+    // Reasoning per number: docs/arsenal.md ("Balance profiles"). PvP aims at 0.8-1.6 s to
+    // kill for a skilled player at the weapon's range; one-shots only from full-draw bow
+    // headshots and Slug / full-charge Skewer headshots.
     balance: (
         pve: (
             weapons: {},
@@ -502,10 +505,31 @@
             overrides: {},
         ),
         pvp: (
-            weapons: {},
-            abilities: {},
+            weapons: {
+                Lancet: (damage: 0.85),
+                Bellows: (damage: 0.7),
+                Thresher: (damage: 0.8),
+                Cinderbox: (damage: 0.75),
+                Longwick: (damage: 0.5, interval: 0.85),
+                Kiln: (damage: 1.2),
+            },
+            abilities: {
+                BothBarrels: (damage: 0.4),
+                Wisp: (damage: 0.7),
+                Discharge: (damage: 0.9),
+                Breach: (damage: 0.85),
+                Gravewell: (damage: 0.75),
+                Skewer: (damage: 0.58),
+                Flurry: (damage: 0.75),
+                Flak: (damage: 0.8),
+                Volley: (damage: 0.7),
+                Limpet: (damage: 0.6),
+                Mortar: (damage: 0.75, radius: 0.85),
+                TripleNock: (damage: 0.5),
+            },
             overrides: {
-                "thorn.charges": 0.0, // no Thorns in PvP: THROW does nothing
+                "thorn.charges": 0.0,           // no Thorns in PvP: THROW does nothing
+                "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
             },
         ),
     ),

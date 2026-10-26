@@ -765,7 +765,7 @@ impl Default for LancetTuning {
             bloom_per_shot: 0.25,
             bloom_max: 0.6,
             bloom_degrees: 3.0,
-            ability_power: 1.0,
+            ability_power: 0.85,
         }
     }
 }
@@ -792,7 +792,7 @@ impl Default for ThresherTuning {
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
-            ability_power: 1.0,
+            ability_power: 0.9,
         }
     }
 }
@@ -823,7 +823,7 @@ impl Default for RiveterTuning {
             rivet_radius: 0.06,
             rivet_lifetime: 1.5,
             spread_degrees: 1.2,
-            ability_power: 1.0,
+            ability_power: 0.9,
         }
     }
 }
@@ -862,7 +862,7 @@ impl Default for CinderboxTuning {
             explosion_radius: 2.6,
             damage: 32.0,
             knockback: 14.0,
-            ability_power: 1.0,
+            ability_power: 0.95,
         }
     }
 }
@@ -927,7 +927,7 @@ impl Default for KilnTuning {
             interval: 0.08,
             damage: 3.0,
             burn_stacks: 1,
-            ability_power: 1.0,
+            ability_power: 0.85,
         }
     }
 }

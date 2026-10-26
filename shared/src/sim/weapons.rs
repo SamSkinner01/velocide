@@ -790,12 +790,13 @@ pub(crate) const SPLINTER_SALT: u32 = 0x5911_7E00;
 const ABILITY_SALT: u32 = 0xAB11_0000;
 
 /// The tuning an ability fired from `weapon` uses: its damage scaled by the carrier's
-/// `ability_power` relative to the ability's home weapon (unchanged on the home weapon and for
-/// abilities made of the weapon's own shots).
+/// `ability_power` relative to the ability's home weapon, never above the listed numbers
+/// (unchanged on the home weapon, on a weapon at least as powerful and for abilities made of
+/// the weapon's own shots).
 pub fn ability_tuning(t: &Tuning, weapon: WeaponKind, ability: Ability) -> Cow<'_, Tuning> {
     let c = &t.combat;
     let home = ability.home().ability_power(c);
-    let power = weapon.ability_power(c) / home.max(1e-3);
+    let power = (weapon.ability_power(c) / home.max(1e-3)).min(1.0);
     if (power - 1.0).abs() < 1e-6 || ability.uses_primary() {
         return Cow::Borrowed(t);
     }
@@ -973,7 +974,7 @@ impl SimWorld {
         if weapon.class() == WeaponClass::Draw {
             let (kind, scale) = match ability {
                 Ability::PinningArrow => (ProjectileKind::PinArrow, c.pinning_arrow.damage_scale),
-                Ability::EmberArrow => (ProjectileKind::EmberArrow, 1.0),
+                Ability::EmberArrow => (ProjectileKind::EmberArrow, c.ember_arrow.damage_scale),
                 Ability::Brand => (ProjectileKind::BrandArrow, 1.0),
                 _ => (ProjectileKind::Arrow, c.triple_nock.damage_scale),
             };
@@ -1623,14 +1624,24 @@ mod tests {
         assert_eq!(Ability::Wisp.home(), WeaponKind::Arclash);
         assert_eq!(Ability::Volley.home(), WeaponKind::Riveter);
         let mut t = Tuning::default();
+        // At home, and made of the weapon's own shots: unchanged.
         assert!(matches!(
-            ability_tuning(&t, WeaponKind::Lancet, Ability::Splinter),
+            ability_tuning(&t, WeaponKind::Quill, Ability::Splinter),
+            Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            ability_tuning(&t, WeaponKind::Kiln, Ability::Volley),
             Cow::Borrowed(_)
         ));
         t.combat.lancet.ability_power = 0.5;
         let scaled = ability_tuning(&t, WeaponKind::Lancet, Ability::Splinter);
         assert_eq!(scaled.combat.quill.splinter_damage, 10.0);
         assert_eq!(scaled.combat.quill.splinter_cooldown, 1.1);
+        // The other way round: never above the listed numbers.
+        assert!(matches!(
+            ability_tuning(&t, WeaponKind::Quill, Ability::Skewer),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
