@@ -575,7 +575,8 @@ mod tests {
         assert_eq!(r.len(), 5, "{:?}", r.names().collect::<Vec<_>>());
         // (file, name, kind, radius, height, health, speed, weak points (name, offset, r, x)).
         type Weak = (&'static str, [f32; 3], f32, f32);
-        let table: [(&str, &str, u16, f32, f32, f32, f32, &[Weak]); 5] = [
+        type Row = (&'static str, &'static str, u16, f32, f32, f32, f32, &'static [Weak]);
+        let table: [Row; 5] = [
             ("gnawer", "Gnawer", kind::GNAWER, 0.6, 2.0, 45.0, 10.0,
                 &[("head", [0.0, 1.62, -0.38], 0.38, 2.0)]),
             ("censer", "Censer", kind::CENSER, 0.6, 2.5, 80.0, 5.0,
