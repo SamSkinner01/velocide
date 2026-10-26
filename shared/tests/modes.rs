@@ -1447,6 +1447,55 @@ fn a_punch_kill_on_the_fist_tier_wins_the_gun_game() {
 }
 
 #[test]
+fn the_fist_tier_is_fists_only() {
+    let (mut a, ids) = gun_game(2);
+    let (p0, p1) = (ids[0], ids[1]);
+    let fist = a.tuning.gun_game.ladder.len() as u8;
+    a.world.mode.player(p0).stats.tier = fist;
+    a.tick();
+    // No weapon in hand: forced unarmed, replicated as such.
+    assert_eq!(a.world.loadout(p0), Loadout::unarmed());
+    assert!(a.world.players[&p0].combat.weapons.is_unarmed());
+    let mut frame = NetFrame::new();
+    a.world.replicate(&a.tuning, &mut frame);
+    let e = frame.get(NetId::player(p0)).unwrap();
+    assert!(!shared::protocol::player_armed(e.state));
+    // The trigger and the abilities do nothing; the fist still punches.
+    let ev = hold_buttons(&mut a, p0, Buttons::FIRE | Buttons::ALT_FIRE, 60);
+    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Shot(_))), "{ev:?}");
+    assert!(a.world.projectiles.is_empty());
+    let ev = hold_buttons(&mut a, p0, Buttons::PUNCH, 1);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, SimEvent::Punched { player, .. } if *player == p0))
+    );
+    // Still fists only after a death.
+    kill_with(&mut a, p0, p1, Attack::Slam);
+    back_up(&mut a, p0);
+    assert!(a.world.players[&p0].combat.weapons.is_unarmed());
+    // Punched down a tier: armed again with the last build.
+    let ev = kill_with(&mut a, p0, p1, Attack::Fist);
+    assert!(gun_events(&ev).contains(&GunGameEvent::Demoted {
+        player: p0,
+        tier: fist - 1,
+        by: p1,
+    }));
+    back_up(&mut a, p0);
+    let last = *a.tuning.gun_game.ladder.last().unwrap();
+    assert_eq!(a.world.loadout(p0), Loadout::single(last));
+    assert!(!a.world.players[&p0].combat.weapons.is_unarmed());
+}
+
+/// Holds `buttons` for `ticks`, then releases them for a tick; the events.
+fn hold_buttons(a: &mut Arena, p: PlayerId, buttons: Buttons, ticks: u32) -> Vec<SimEvent> {
+    a.set_buttons(p, buttons);
+    let mut ev = a.ticks(ticks);
+    a.set_buttons(p, Buttons::NONE);
+    ev.extend(a.tick());
+    ev
+}
+
+#[test]
 fn gun_game_time_limit_ranks_by_tier() {
     let mut a = Arena::new(arena_level());
     a.world.set_mode_rules(ModeRules::gun_game(5.0));

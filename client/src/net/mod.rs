@@ -252,6 +252,8 @@ pub struct NetClient {
     lobby: Option<LobbyState>,
     levels: Vec<LevelInfo>,
     host_token: Option<u64>,
+    /// The loadout to carry (`set_loadout`), re-sent after the welcome.
+    loadout: Option<shared::loadout::Loadout>,
     /// Latest authoritative combat state of the local player (`OwnState::combat`).
     own_combat: Option<OwnCombat>,
     /// Cosmetic combat events received and not yet drained (de-duplicated by `seq`).
@@ -329,6 +331,7 @@ impl NetClient {
             lobby: None,
             levels: Vec::new(),
             host_token: None,
+            loadout: None,
             own_combat: None,
             fx: Vec::new(),
             fx_seen: std::collections::BTreeSet::new(),
@@ -572,6 +575,22 @@ impl NetClient {
         }
     }
 
+    /// The loadout to carry (`ClientMessage::SetLoadout`): sent now if connected and different from
+    /// the last one sent, and again after every (re)connect. Cheap to call every frame.
+    pub fn set_loadout(&mut self, loadout: shared::loadout::Loadout) {
+        if self.loadout == Some(loadout) {
+            return;
+        }
+        self.loadout = Some(loadout);
+        self.send_loadout();
+    }
+
+    fn send_loadout(&mut self) {
+        if let (Some(loadout), Some(_)) = (self.loadout, &self.welcome) {
+            self.send_reliable(&ClientMessage::SetLoadout(loadout));
+        }
+    }
+
     pub fn set_ready(&mut self, ready: bool) {
         self.send_reliable(&ClientMessage::SetReady { ready });
     }
@@ -712,6 +731,7 @@ impl NetClient {
                 self.welcome = Some(welcome);
                 self.events.push_back(NetEvent::Connected { player_id });
                 self.claim_host();
+                self.send_loadout();
             }
             ServerMessage::Rejected { reason } => {
                 self.rejected = Some(reason.clone());

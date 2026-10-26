@@ -90,7 +90,8 @@ use crate::level::{Brush, Door, JumpPad, LevelCollision, LevelDef, LevelKind, Sp
 use crate::lobby::MatchSettings;
 use crate::movement::{self, MoveEnv, MoveEvents, MoveState, SlamLanded};
 use crate::protocol::{
-    EntityState, NetFrame, NetId, door_flags, kind, pack_player_weapon, player_flags,
+    EntityState, NetFrame, NetId, door_flags, kind, pack_player_unarmed, pack_player_weapon,
+    player_flags,
 };
 use crate::tuning::{MovementTuning, Tuning};
 
@@ -246,11 +247,7 @@ impl SimPlayer {
         if c.protection > 0 || c.god {
             e.flags |= player_flags::PROTECTED;
         }
-        e.state = pack_player_weapon(
-            w.current(),
-            w.ability(),
-            w.charge_level(&t.combat, tick_rate),
-        );
+        e.state = w.replicated_state(&t.combat, tick_rate);
         e.health = c.health(&t.combat).ceil().clamp(0.0, 65535.0) as u16;
         let hard = c.hard.ceil().clamp(0.0, 255.0) as u32;
         let thorns = w.thorns(&t.combat).min(15);
@@ -294,11 +291,10 @@ impl SimPlayer {
             yaw: self.yaw,
             pitch: self.pitch,
             flags,
-            state: pack_player_weapon(
-                self.combat.weapons.current(),
-                self.combat.weapons.ability(),
-                0,
-            ),
+            state: match self.combat.weapons.held() {
+                Some(b) => pack_player_weapon(b.weapon, b.ability(self.combat.weapons.mode), 0),
+                None => pack_player_unarmed(),
+            },
             aux,
             ..Default::default()
         }

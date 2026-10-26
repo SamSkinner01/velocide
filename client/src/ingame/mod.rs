@@ -553,6 +553,8 @@ impl InGame {
         // stay queued for the lobby screen.
         if let Some(s) = &mut self.session {
             s.client_mut().update(Duration::from_secs_f32(dt));
+            // The loadout to carry (sent once per change and after connecting).
+            s.client_mut().set_loadout(common.settings.loadout.current);
         }
         while let Some(ev) = self
             .session
@@ -609,6 +611,9 @@ impl InGame {
         if playing && self.bot.is_none() {
             self.controls.look(input, &common.settings, dt);
         }
+        // Slot keys skip what the carried loadout leaves empty.
+        let loadout = self.combat.predictor.state().loadout;
+        self.controls.weapons.set_loadout(&loadout);
         if playing {
             let change = self.controls.latch(input, &common.settings.bindings);
             match change {
@@ -799,11 +804,11 @@ impl InGame {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
-                let held = *self.combat.predictor.state();
+                let (weapon, ability) = self.held_weapon();
                 self.viewmodel.draw(
                     lib,
-                    crate::models::WeaponKind::for_weapon(held.current()).index(),
-                    held.mode,
+                    weapon,
+                    ability,
                     team,
                     self.camera.dip(),
                     self.camera.roll(),
@@ -1093,7 +1098,7 @@ impl InGame {
             hard_damage,
             stamina: state.stamina(tuning),
             stamina_max: tuning.dash_charges.round().max(1.0) as u32,
-            weapons: &self.controls.weapons,
+            weapons: self.hud_weapons(),
             speed,
             timer: self.spawned.then_some(self.level_time),
             ping_ms: ping,

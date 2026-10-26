@@ -157,6 +157,11 @@ fn main() -> anyhow::Result<()> {
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("menu_join");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
+    h.shot("menu_loadout");
+    // Load the HUNTER preset (preset choice → next, LOAD) and look at its bow.
+    h.menu(&mut menu, &[&[Down; 4], &[Right], &[Down], &[Enter], &[]]);
+    h.shot("menu_loadout_hunter");
+    h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("settings_video");
     for (i, name) in [
         "settings_audio",
@@ -207,6 +212,10 @@ fn main() -> anyhow::Result<()> {
     );
     h.shot("game_pause");
     h.game(&mut game, 3, &[Down, Down], "");
+    h.game(&mut game, 3, &[Enter], "");
+    h.shot("game_pause_loadout");
+    h.game(&mut game, 3, &[Escape], "");
+    h.game(&mut game, 3, &[Down, Down, Down], "");
     h.game(&mut game, 3, &[Enter], "");
     h.shot("game_pause_settings");
     h.game(&mut game, 3, &[Escape], "");

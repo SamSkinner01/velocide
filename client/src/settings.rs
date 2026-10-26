@@ -5,13 +5,16 @@
 //! (`%APPDATA%\velocide\settings.ron` on Windows), else `./settings.ron`. A missing or invalid
 //! file gives the defaults (with a warning) and never stops the game; unknown fields are
 //! ignored and missing ones use their defaults, so old files keep working. Accessibility
-//! options (colour vision, shape cues) are their own `accessibility` section.
+//! options (colour vision, shape cues) are their own `accessibility` section, the LOADOUT
+//! screen (current loadout + presets) its own `loadout` section.
 
 use std::path::{Path, PathBuf};
 
 use engine::color_vision::{ColorVision, ColorVisionMode};
 use engine::gfx::RetroSettings;
 use serde::{Deserialize, Serialize};
+
+use shared::loadout::Loadout;
 
 use crate::controls::Bindings;
 
@@ -59,6 +62,148 @@ impl Accessibility {
             CueMode::On => true,
             CueMode::Off => false,
         }
+    }
+}
+
+/// Most saved loadout presets.
+pub const MAX_PRESETS: usize = 8;
+/// Longest preset name (characters).
+pub const PRESET_NAME_LEN: usize = 16;
+
+/// A named loadout the player saved on the LOADOUT screen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LoadoutPreset {
+    pub name: String,
+    #[serde(with = "loadout_text")]
+    pub loadout: Loadout,
+}
+
+/// The LOADOUT screen (its own section in the settings file): what you carry and your
+/// presets. Loadouts are stored as text ([`loadout_text`]), so typos are repaired, not fatal.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoadoutSettings {
+    /// The loadout you carry: sent to the server on connect and on every change
+    /// (`ClientMessage::SetLoadout`).
+    #[serde(with = "loadout_text")]
+    pub current: Loadout,
+    pub presets: Vec<LoadoutPreset>,
+}
+
+impl Default for LoadoutSettings {
+    fn default() -> Self {
+        Self {
+            current: Loadout::default(),
+            presets: default_presets(),
+        }
+    }
+}
+
+/// The presets a new player starts with.
+pub fn default_presets() -> Vec<LoadoutPreset> {
+    use shared::loadout::WeaponKind as W;
+    let preset = |name: &str, weapons: [W; 4]| LoadoutPreset {
+        name: name.into(),
+        loadout: Loadout {
+            slots: weapons.map(|w| Some(w.default_build())),
+        },
+    };
+    vec![
+        preset("FOUNDRY", [W::Quill, W::Bellows, W::Arclash, W::Tumbler]),
+        preset(
+            "HUNTER",
+            [W::Longwick, W::Lancet, W::Thresher, W::Cinderbox],
+        ),
+        preset("FURNACE", [W::Kiln, W::Riveter, W::Thresher, W::Tumbler]),
+        preset("DUELIST", [W::Lancet, W::Bellows, W::Riveter, W::Cinderbox]),
+    ]
+}
+
+impl LoadoutSettings {
+    /// Valid loadouts, at most [`MAX_PRESETS`] presets with printable, non-empty names.
+    pub fn sanitize(&mut self) {
+        self.current = self.current.sanitized();
+        self.presets.truncate(MAX_PRESETS);
+        for (i, p) in self.presets.iter_mut().enumerate() {
+            p.loadout = p.loadout.sanitized();
+            p.name = p
+                .name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+                .take(PRESET_NAME_LEN)
+                .collect::<String>()
+                .trim()
+                .to_uppercase();
+            if p.name.is_empty() {
+                p.name = format!("PRESET {}", i + 1);
+            }
+        }
+    }
+}
+
+/// Loadouts in the settings file as readable text, one entry per slot key:
+/// `"Longwick: Ember Arrow, Brand"`, or `"-"` for an empty slot. Names are matched ignoring
+/// case and spaces; anything unknown is dropped and the loadout repaired by `sanitize`, so a
+/// hand-edited typo never breaks the file (or resets the other settings).
+pub mod loadout_text {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use shared::loadout::{Ability, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponKind};
+
+    fn key(s: &str) -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    }
+
+    /// One slot's text.
+    pub fn format(build: Option<&WeaponBuild>) -> String {
+        match build {
+            Some(b) => format!(
+                "{}: {}, {}",
+                b.weapon.name(),
+                b.abilities[0].name(),
+                b.abilities[1].name()
+            ),
+            None => "-".into(),
+        }
+    }
+
+    /// Parses one slot's text (`None`: empty or unknown weapon).
+    pub fn parse_slot(text: &str) -> Option<WeaponBuild> {
+        let (weapon, abilities) = text.split_once(':').unwrap_or((text, ""));
+        let weapon = WeaponKind::ALL
+            .into_iter()
+            .find(|w| key(w.name()) == key(weapon))?;
+        let mut build = weapon.default_build();
+        for (i, name) in abilities.split(',').take(2).enumerate() {
+            if let Some(a) = Ability::ALL
+                .into_iter()
+                .find(|a| key(a.name()) == key(name))
+            {
+                build.abilities[i] = a;
+            }
+        }
+        Some(build)
+    }
+
+    pub fn parse(entries: &[String]) -> Loadout {
+        let mut out = Loadout {
+            slots: [None; LOADOUT_SLOTS],
+        };
+        for (slot, text) in out.slots.iter_mut().zip(entries) {
+            *slot = parse_slot(text);
+        }
+        out.sanitized()
+    }
+
+    pub fn serialize<S: Serializer>(loadout: &Loadout, s: S) -> Result<S::Ok, S::Error> {
+        let entries: Vec<String> = loadout.slots.iter().map(|b| format(b.as_ref())).collect();
+        entries.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Loadout, D::Error> {
+        Ok(parse(&Vec::<String>::deserialize(d)?))
     }
 }
 
@@ -113,6 +258,8 @@ pub struct Settings {
     pub show_viewmodel: bool,
     pub fullscreen: bool,
     pub accessibility: Accessibility,
+    /// The LOADOUT screen: the loadout you carry and your presets.
+    pub loadout: LoadoutSettings,
     /// Mode last picked on the single-player page (campaign, or grind on an arena).
     pub sp_mode: shared::lobby::GameMode,
     /// PvE difficulty last picked (single-player page, hosting).
@@ -152,6 +299,7 @@ impl Default for Settings {
             show_viewmodel: true,
             fullscreen: false,
             accessibility: Accessibility::default(),
+            loadout: LoadoutSettings::default(),
             sp_mode: shared::lobby::GameMode::Campaign,
             difficulty: shared::lobby::Difficulty::Normal,
             grind_best: Default::default(),
@@ -266,6 +414,7 @@ impl Settings {
         r.color_bits = r.color_bits.clamp(2, 8);
         self.accessibility.color_vision = self.accessibility.color_vision.sanitized();
         self.bindings.fill_missing();
+        self.loadout.sanitize();
         self.grind_best.retain(|k, _| k.len() <= 96);
         while self.grind_best.len() > MAX_GRIND_RECORDS {
             self.grind_best.pop_last();

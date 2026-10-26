@@ -16,8 +16,9 @@ use shared::sim::{Attack, PlayerId};
 use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
+use super::arsenal::{self, Blast};
 use super::{Rng, attack_style, enemy_fx};
-use crate::models::WeaponKind;
+use crate::models::{WeaponKind, WeaponLook as _};
 use crate::palette::palette;
 
 /// A fading tracer segment.
@@ -254,6 +255,21 @@ impl Beams {
         }
     }
 
+    /// A beam drawn this frame only (per-frame shapes: the Pinned shackles).
+    pub fn frame_beam(&mut self, a: Vec3, b: Vec3, width: f32, color: Vec4) {
+        if !(a.is_finite() && b.is_finite()) || self.frame.len() >= MAX_FRAME_BEAMS {
+            return;
+        }
+        self.frame.push(Beam {
+            a,
+            b,
+            width,
+            color,
+            life: 0.0,
+            max_life: 1.0,
+        });
+    }
+
     /// A light that fades over `life` seconds.
     pub fn light(&mut self, position: Vec3, color: Vec3, radius: f32, life: f32) {
         if self.lights.len() >= MAX_TEMP_LIGHTS {
@@ -440,6 +456,16 @@ pub fn explosion(ctx: &mut FxCtx, position: Vec3, radius: f32, attack: Attack, o
     match attack {
         Attack::Gravewell => implosion(ctx, position, radius),
         Attack::Wisp => wisp_pop(ctx, position, radius),
+        // The expansion arsenal's blasts (arsenal.rs).
+        Attack::Cinderbox => arsenal::blast(ctx, Blast::Cinder, position, radius),
+        Attack::Limpet => arsenal::blast(ctx, Blast::Limpet, position, radius),
+        Attack::Mortar => arsenal::blast(ctx, Blast::Mortar, position, radius),
+        Attack::EmberArrow => arsenal::blast(ctx, Blast::EmberArrow, position, radius),
+        Attack::Flak => {
+            // The ring flies out across the line of sight (no flight direction in the Fx).
+            let across = (position - ctx.listener).normalize_or(Vec3::NEG_Z);
+            arsenal::flak_airburst(ctx, position, across, 10, radius.max(4.0));
+        }
         _ => fireball(ctx, position, radius, attack, own),
     }
 }
@@ -758,6 +784,17 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 gust_puff(ctx.effects, ctx.beams, ctx.rng, muzzle, dir);
                 return;
             }
+            // The Kiln sprays embers; the bow only twangs (its arrows are entities).
+            if *attack == Attack::Kiln {
+                arsenal::kiln_spray(ctx.effects, ctx.rng, muzzle, dir, 13.0, 16.0);
+                return;
+            }
+            if matches!(
+                attack,
+                Attack::Longwick | Attack::TripleNock | Attack::PinningArrow | Attack::EmberArrow
+            ) {
+                return;
+            }
             if *attack == Attack::Arc {
                 ctx.effects.glow(muzzle, ARC_COLOR, 0.3, 0.06);
             } else {
@@ -944,18 +981,10 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             }
             ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
         }
+        // The Flak ring (or a Gust-deflected shell bursting): the arsenal's flak burst.
         Fx::Burst { origin, ends, .. } => {
-            // Stand-in until the expansion has its own effects (arsenal-client): hot pellet
-            // tracers from the burst, a flash and the splinter burst sound.
-            let o = q(*origin);
-            let hot_pellet = hot(WeaponKind::Bellows.glow_color(1), 1.8);
-            for end in ends {
-                let end = q(*end);
-                ctx.beams.beam(o, end, 0.02, hot_pellet, 0.12);
-                world_impact(ctx.effects, ctx.world, o, end, 2);
-            }
-            ctx.effects.glow(o, hot_pellet, 0.9, 0.15);
-            ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
+            let ends: Vec<Vec3> = ends.iter().map(|e| q(*e)).collect();
+            arsenal::flak_burst(ctx, q(*origin), &ends);
         }
         Fx::ArcChain { points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();

@@ -233,6 +233,91 @@ fn old_settings_files_keep_their_throw_binding() {
 }
 
 #[test]
+fn loadout_and_presets_round_trip_and_garbage_falls_back() {
+    use client::settings::{LoadoutPreset, MAX_PRESETS};
+    use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+    let path = scratch("loadout");
+    let mut s = Settings::default();
+    s.loadout.current = Loadout {
+        slots: [
+            Some(WeaponBuild {
+                weapon: WeaponKind::Longwick,
+                abilities: [Ability::EmberArrow, Ability::Brand],
+            }),
+            None,
+            Some(WeaponKind::Kiln.default_build()),
+            None,
+        ],
+    };
+    s.loadout.presets.push(LoadoutPreset {
+        name: "BOWS".into(),
+        loadout: s.loadout.current,
+    });
+    s.save(&path).unwrap();
+    let back = Settings::load(&path);
+    assert_eq!(back.loadout, s.loadout);
+    assert_eq!(back, s);
+
+    // Loadouts are text: an unknown weapon empties its slot, an unknown ability falls back to
+    // the weapon's default, and everything else survives.
+    let text = s
+        .to_ron()
+        .replace("Longwick", "Railgun")
+        .replace("Kiln: Flare", "kiln: SPARKLER");
+    assert!(text.contains("Railgun") && text.contains("Ember Arrow"));
+    let broken = Settings::from_ron(&text).unwrap();
+    assert_eq!(broken.loadout.current.slot(0), None);
+    assert_eq!(
+        broken.loadout.current.slot(2),
+        Some(&WeaponKind::Kiln.default_build())
+    );
+    assert_eq!(broken.loadout.presets.len(), s.loadout.presets.len());
+    assert_eq!(broken.fov, s.fov);
+    assert_eq!(broken.bindings, s.bindings);
+    // A loadout with nothing left is the default one.
+    let text = s
+        .to_ron()
+        .replace("Kiln:", "Nothing:")
+        .replace("Longwick:", "Nothing:");
+    let empty = Settings::from_ron(&text).unwrap();
+    assert_eq!(empty.loadout.current, Loadout::default());
+
+    // Invalid builds and loadouts are repaired, too many presets dropped, names cleaned.
+    let mut s = Settings::default();
+    s.loadout.current = Loadout {
+        slots: [
+            Some(WeaponBuild {
+                weapon: WeaponKind::Lancet,
+                abilities: [Ability::Gust, Ability::Gust],
+            }),
+            Some(WeaponKind::Lancet.default_build()),
+            None,
+            None,
+        ],
+    };
+    s.loadout.presets = vec![
+        LoadoutPreset {
+            name: "   ".into(),
+            loadout: Loadout { slots: [None; 4] },
+        };
+        MAX_PRESETS + 3
+    ];
+    let back = Settings::from_ron(&s.to_ron()).unwrap();
+    assert!(back.loadout.current.is_valid());
+    assert_eq!(
+        back.loadout.current.slot(1),
+        None,
+        "the repeated Lancet is dropped"
+    );
+    assert_eq!(back.loadout.presets.len(), MAX_PRESETS);
+    assert!(back.loadout.presets.iter().all(|p| p.loadout.is_valid()));
+    assert_eq!(back.loadout.presets[2].name, "PRESET 3");
+    // Files from before loadouts get the default loadout and presets.
+    let old = Settings::from_ron("(fov: 100.0)").unwrap();
+    assert_eq!(old.loadout, client::settings::LoadoutSettings::default());
+}
+
+#[test]
 fn fov_is_horizontal_at_16_9() {
     let s = Settings {
         fov: 90.0,

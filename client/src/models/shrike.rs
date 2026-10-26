@@ -844,8 +844,16 @@ pub struct PlayerAnim {
     pub dead: bool,
     /// Seconds (any monotonically increasing clock).
     pub time: f64,
-    /// Held weapon index (0 Quill (one-handed), 1 Bellows, 2 Arclash, 3 Tumbler).
+    /// Held weapon id (`shared::loadout::WeaponKind`; the Quill and the Lancet are one-handed).
     pub weapon: u8,
+    /// Selected ability id (`shared::loadout::Ability`): the weapon glows in its colour (an
+    /// ability the weapon can't take shows its default build's first).
+    pub ability: u8,
+    /// Longwick draw 0..1 (string, arrow and limbs) and alt charge 0..1 (a charging glow).
+    pub draw: f32,
+    pub charge: f32,
+    /// Holding no weapon (gun game's Fist tier).
+    pub unarmed: bool,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
 }
@@ -954,7 +962,7 @@ pub fn pose(a: &PlayerAnim) -> Pose {
         end: 0.0,
     };
     let mut arm_l_out = 0.12f32; // sideways raise of the left arm (+ = outward)
-    let mut two_handed = super::weapons::WeaponKind::from_index(a.weapon).two_handed();
+    let mut two_handed = super::weapons::two_handed(a.weapon) && !a.unarmed;
     // World swing of the coat tails (radians about X, - = streaming back).
     let coat: f32;
     let mut flutter = 0.0f32;
