@@ -2,12 +2,15 @@
 //! turns their state changes into effects:
 //!
 //! * **enemies** (kinds 16..64): `ModelLibrary::draw_enemy` with an [`EnemyAnim`] mapped from
-//!   the replicated AI state (+ wind-up progress in `aux`), speed and facing; a per-enemy walk
-//!   cycle; a white hurt flash + blood when `health` drops; a yellow strobe in the parryable
-//!   phase; gibs, blood and a fade when it dies.
-//! * **projectiles** (64..72): their model at the trajectory position for the render tick
+//!   the replicated AI state (+ wind-up progress and attack index in `aux`), speed and facing;
+//!   a per-enemy walk cycle; a white hurt flash + a spray of wax and sparks when `health`
+//!   drops; a yellow strobe in the parryable phase; on death one big ember burst and a
+//!   smouldering, melting corpse; the Heron's aim laser (`AIMING` / `AIM_LOCKED`), the diving
+//!   Harrier's streak, the swat burst, the Gaoler's footsteps (see `enemy_fx.rs`).
+//! * **projectiles** (64..128): their model at the trajectory position for the render tick
 //!   (`shared::sim::projectiles::replicated_position`), facing their velocity; trails / glows
-//!   / lights per kind; `PARRIED` white-hot, `PENDING` hidden, stuck stickies blink.
+//!   / lights per kind (ember bombs smoke and drop embers, needles draw a long streak);
+//!   `PARRIED` white-hot, `PENDING` hidden, stuck stickies blink.
 //! * **blood bursts** (128): red mist while the pool lasts.
 //! * **prisms** (160): a spinning mirrored shard with glints.
 
@@ -15,6 +18,7 @@ use std::collections::HashMap;
 
 use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
+use engine::physics::CollisionWorld;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::protocol::{EntityState, NetId, blood_flags, enemy_flags, kind, projectile_flags};
 use shared::sim::AiState;
@@ -23,54 +27,37 @@ use shared::tuning::CombatTuning;
 
 use super::super::effects::{Effects, FxTex, OnHit, Particle};
 use super::Rng;
+use super::enemy_fx;
 use super::fx::enemy_projectile_color;
 use crate::models::enemies::{EnemyAnim, EnemyKind, EnemyState};
 use crate::models::{ModelId, ModelLibrary, Tint};
 
-/// Model kind for a replicated enemy kind (unknown kinds draw as Husks).
+/// Model kind for a replicated enemy kind (unknown kinds draw as Gnawers).
 pub fn enemy_kind(k: u16) -> EnemyKind {
-    match k {
-        kind::SPITTER => EnemyKind::Spitter,
-        kind::GNAT => EnemyKind::Gnat,
-        kind::BASTION => EnemyKind::Bastion,
-        _ => EnemyKind::Husk,
-    }
+    enemy_fx::enemy_kind(k)
 }
 
 /// Display name of an enemy kind (kill feed).
 pub fn enemy_name(k: u16) -> &'static str {
-    match k {
-        kind::SPITTER => "SPITTER",
-        kind::GNAT => "GNAT",
-        kind::BASTION => "BASTION",
-        _ => "HUSK",
-    }
+    enemy_fx::enemy_name(k)
 }
 
-/// Approximate hit capsule of an enemy for client-side tracer ends: (radius, height).
+/// Hit capsule of an enemy for client-side tracer ends: (radius, height).
 pub fn enemy_size(k: u16) -> (f32, f32) {
-    match k {
-        kind::SPITTER => (0.5, 1.6),
-        kind::GNAT => (0.45, 0.9),
-        kind::BASTION => (0.9, 3.0),
-        _ => (0.45, 1.9),
-    }
+    enemy_fx::enemy_size(k)
 }
 
-/// Model offset of the enemy's root from its replicated feet position (the Gnat model's
+/// Model offset of the enemy's root from its replicated feet position (the Harrier model's
 /// origin is its hover centre).
 fn root_offset(k: u16) -> Vec3 {
-    if k == kind::GNAT {
-        Vec3::Y * 0.45
-    } else {
-        Vec3::ZERO
-    }
+    Vec3::Y * enemy_kind(k).root_lift()
 }
 
 /// The animation input for a replicated enemy.
 pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
     let k = enemy_kind(e.kind);
     let progress = (e.aux & 0xFF) as f32 / 255.0;
+    let attack = ((e.aux >> 8) & 0xFF) as u8;
     let flat = Vec3::new(e.velocity.x, 0.0, e.velocity.z);
     let speed = flat.length();
     let state = match AiState::from_u16(e.state) {
@@ -84,9 +71,18 @@ pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
     };
     let fwd = shared::input::look_dir(e.yaw, 0.0);
     let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    // Heads aim with the replicated laser pitch; a diving Harrier points down its dive.
+    let aim_pitch = if e.flags & enemy_flags::AIMING != 0 {
+        e.pitch
+    } else if k == EnemyKind::Harrier && state == EnemyState::Attack(progress) {
+        e.velocity.y.atan2(speed.max(1e-3))
+    } else {
+        0.0
+    };
     EnemyAnim {
         kind: k,
         state,
+        attack,
         speed,
         cycle,
         strafe: if speed > 0.1 {
@@ -94,7 +90,8 @@ pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
         } else {
             0.0
         },
-        aim_pitch: 0.0,
+        aim_pitch,
+        aim_locked: e.flags & enemy_flags::AIM_LOCKED != 0,
         time,
         seed: e.id.0.wrapping_mul(2_654_435_761),
     }
@@ -109,8 +106,8 @@ pub fn projectile_model(k: u16) -> Option<ModelId> {
         ProjectileKind::Flak => ModelId::FlakGrenade,
         ProjectileKind::Sticky => ModelId::StickyCharge,
         ProjectileKind::Mortar => ModelId::MortarShell,
-        ProjectileKind::SpitterOrb => ModelId::SpitterOrb,
-        ProjectileKind::GnatBolt => ModelId::GnatBolt,
+        ProjectileKind::EmberBomb => ModelId::EmberBomb,
+        ProjectileKind::Needle => ModelId::Needle,
     })
 }
 
@@ -133,6 +130,14 @@ struct EnemyVis {
     died: bool,
     seen: bool,
     position: Vec3,
+    /// Replicated state last frame (state-change effects).
+    state: u16,
+    locked: bool,
+    /// Seconds since death (the heat-release light), and until the next smoulder puff.
+    dead_for: f32,
+    smoulder: f32,
+    /// The aim laser this frame: (origin, end, locked).
+    laser: Option<(Vec3, Vec3, bool)>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -140,6 +145,9 @@ struct ProjVis {
     trail: f32,
     seen: bool,
     position: Vec3,
+    /// Where it was first drawn (the needle's streak doesn't reach back past its muzzle).
+    start: Vec3,
+    age: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -174,6 +182,8 @@ pub struct EntityFrame<'a> {
     pub own_offset: Vec3,
     /// Camera position (nothing is drawn inside the camera).
     pub camera: Vec3,
+    /// The level (aim lasers stop at walls).
+    pub world: Option<&'a CollisionWorld>,
 }
 
 /// Seconds over which an own projectile blends from the muzzle onto its true path.
@@ -271,7 +281,7 @@ impl EntityView {
         }
         for e in f.entities {
             if kind::is_enemy(e.kind) {
-                self.update_enemy(e, dt, effects, audio, rng);
+                self.update_enemy(e, f, dt, effects, audio, rng);
             } else if e.kind == kind::BLOOD_BURST {
                 let v = self.blood.entry(e.id).or_default();
                 let first = !v.seen && v.puff == 0.0;
@@ -308,7 +318,7 @@ impl EntityView {
             }
         }
         for (e, time, offset) in f.projectiles() {
-            self.update_projectile(e, time, offset, f, dt, effects, rng);
+            self.update_projectile(e, time, offset, f, dt, effects, audio, rng);
         }
         self.enemies.retain(|_, v| v.seen);
         self.projectiles.retain(|_, v| v.seen);
@@ -319,39 +329,149 @@ impl EntityView {
     fn update_enemy(
         &mut self,
         e: &EntityState,
+        f: &EntityFrame,
         dt: f32,
         effects: &mut Effects,
         audio: &mut Audio,
         rng: &mut Rng,
     ) {
-        let (_, height) = enemy_size(e.kind);
-        let center = e.position + Vec3::Y * height * 0.55;
+        let k = enemy_kind(e.kind);
+        let height = k.height();
+        let center = e.position + Vec3::Y * (k.root_lift() + height * if k == EnemyKind::Harrier { 0.0 } else { 0.5 });
         let dying = e.flags & enemy_flags::DYING != 0 || e.state == AiState::Dying as u16;
+        let (wax, heat) = (enemy_fx::wax_color(e.kind), enemy_fx::heat_color(e.kind));
         let v = self.enemies.entry(e.id).or_insert(EnemyVis {
             last_health: e.health,
             died: dying,
+            state: e.state,
             ..Default::default()
         });
         v.seen = true;
         v.position = center;
         let speed = Vec3::new(e.velocity.x, 0.0, e.velocity.z).length();
-        v.cycle = enemy_kind(e.kind).advance_cycle(v.cycle, speed, dt);
+        let before = v.cycle;
+        v.cycle = k.advance_cycle(v.cycle, speed, dt);
         v.flash = (v.flash - dt * 6.0).max(0.0);
         if e.health < v.last_health && !dying {
+            // A hit cracks the wax: chips, molten droplets, sparks.
             let lost = (v.last_health - e.health) as f32;
             v.flash = 1.0;
-            effects.blood(center, rng.dir() + Vec3::Y, (0.5 + lost / 25.0).min(3.0));
+            let dir = (rng.dir() + Vec3::Y * 0.5).normalize_or(Vec3::Y);
+            enemy_fx::wax_hit(effects, rng, center, dir, (0.6 + lost / 20.0).min(3.5), wax, heat);
             audio.play(Sfx::EnemyHurt, PlayParams::at(center));
         }
         v.last_health = e.health;
         if dying && !v.died {
+            // The heat leaves it as one big ember burst; the body slumps and melts.
             v.died = true;
-            let n = if e.kind == kind::BASTION { 16 } else { 9 };
-            effects.gibs(center, n);
-            effects.blood(center, Vec3::Y, 3.0);
-            audio.play(Sfx::EnemyDeath, PlayParams::at(center));
-            audio.play(Sfx::Gib, PlayParams::at(center));
+            let size = (height / 2.2).clamp(0.7, 1.8);
+            enemy_fx::ember_burst(effects, rng, center, size, wax, heat);
+            let death = if k == EnemyKind::Gaoler {
+                Sfx::GaolerDeath
+            } else {
+                Sfx::EnemyDeath
+            };
+            audio.play(death, PlayParams::at(center).with_pitch(1.25 / size.sqrt()));
+            audio.play(Sfx::EmberRelease, PlayParams::at(center));
         }
+        if dying {
+            v.dead_for += dt;
+            v.smoulder -= dt;
+            if v.smoulder <= 0.0 {
+                v.smoulder = rng.range(0.12, 0.3);
+                let spread = enemy_size(e.kind).0;
+                enemy_fx::smoulder(effects, rng, e.position + Vec3::Y * 0.3, spread, heat);
+            }
+        }
+        let state = AiState::from_u16(e.state);
+        let entered = |s: AiState| v.state != s as u16 && state == Some(s);
+        // A swatted Harrier: wax shards and a crunch.
+        if k == EnemyKind::Harrier && entered(AiState::Stunned) {
+            enemy_fx::swat_burst(effects, rng, center, wax, heat);
+            audio.play(Sfx::HarrierSwat, PlayParams::at(center));
+        }
+        // The Heron's laser locks: a click and a flare at the lens.
+        let locked = e.flags & enemy_flags::AIM_LOCKED != 0;
+        v.laser = enemy_fx::aim_laser(e).map(|(origin, dir, locked)| {
+            (origin, enemy_fx::laser_end(f.world, origin, dir, f.entities, f.camera), locked)
+        });
+        if let Some((origin, end, locked)) = v.laser {
+            let c = if locked {
+                Vec4::new(1.0, 0.85, 0.8, 1.0)
+            } else {
+                Vec4::new(1.0, 0.15, 0.08, 0.9)
+            };
+            // The dot where it lands, and a glare on the lens.
+            effects.glow(end, c, if locked { 0.45 } else { 0.32 }, 0.05);
+            effects.glow(origin, c, if locked { 0.9 } else { 0.55 }, 0.05);
+        }
+        if locked && !v.locked
+            && let Some((origin, _, _)) = v.laser
+        {
+            audio.play(Sfx::HeronLock, PlayParams::at(origin));
+            effects.glow(origin, Vec4::new(1.0, 0.95, 0.9, 1.0), 1.4, 0.12);
+        }
+        v.locked = locked;
+        let attack = enemy_fx::attack_name(e.kind, ((e.aux >> 8) & 0xFF) as u8);
+        match (k, state, attack.as_deref()) {
+            // Diving: a hot streak behind it.
+            (EnemyKind::Harrier, Some(AiState::Strike), _) => {
+                let back = -e.velocity.normalize_or_zero();
+                enemy_fx::dive_streak(effects, rng, center, back);
+            }
+            // Whirling the censer overhead: embers flung off the whirl.
+            (EnemyKind::Censer, Some(AiState::Windup | AiState::Strike), Some("volley")) => {
+                if rng.unit() < dt * 30.0 {
+                    let a = rng.angle();
+                    let at = e.position + Vec3::new(a.cos() * 0.9, 3.0, a.sin() * 0.9);
+                    effects.spawn(Particle {
+                        position: at,
+                        velocity: Vec3::new(-a.sin(), 0.3, a.cos()) * rng.range(2.0, 5.0),
+                        gravity: 6.0,
+                        max_life: rng.range(0.3, 0.6),
+                        size: Vec2::splat(0.09),
+                        end_scale: 0.3,
+                        color: Vec4::new(1.0, 0.6, 0.2, 1.0),
+                        texture: FxTex::Spark,
+                        additive: true,
+                        ..Default::default()
+                    });
+                }
+            }
+            // Spinning the chain up low: red sparks thrown off a ring at knee height.
+            (EnemyKind::Gaoler, Some(AiState::Windup), Some("sweep")) => {
+                for _ in 0..3 {
+                    if rng.unit() < dt * 30.0 {
+                        let a = rng.angle();
+                        let r = rng.range(1.7, 2.7);
+                        let at = e.position + Vec3::new(a.cos() * r, rng.range(0.5, 1.1), a.sin() * r);
+                        effects.spawn(Particle {
+                            position: at,
+                            velocity: Vec3::new(-a.sin(), 0.15, a.cos()) * rng.range(3.0, 7.0),
+                            gravity: 4.0,
+                            max_life: rng.range(0.3, 0.6),
+                            size: Vec2::splat(0.2),
+                            end_scale: 0.3,
+                            color: Vec4::new(1.0, 0.25, 0.08, 1.0),
+                            texture: FxTex::Spark,
+                            additive: true,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+            // The rush: dust thrown up behind it.
+            (EnemyKind::Gaoler, Some(AiState::Strike), Some("rush")) if rng.unit() < dt * 20.0 => {
+                effects.dust(e.position, 2, 2.0);
+            }
+            _ => {}
+        }
+        // The Gaoler's heavy footfalls.
+        if k == EnemyKind::Gaoler && !dying && speed > 0.5 && (v.cycle * 2.0).floor() != (before * 2.0).floor() {
+            audio.play(Sfx::GaolerStep, PlayParams::at(e.position));
+            effects.dust(e.position, 3, 1.2);
+        }
+        v.state = e.state;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -363,12 +483,22 @@ impl EntityView {
         f: &EntityFrame,
         dt: f32,
         effects: &mut Effects,
+        audio: &mut Audio,
         rng: &mut Rng,
     ) {
         let pos = replicated_position(e, time, f.tick_rate, f.tuning) + offset;
-        let v = self.projectiles.entry(e.id).or_default();
+        let v = self.projectiles.entry(e.id).or_insert_with(|| {
+            if e.kind == kind::EMBER_BOMB && e.flags & projectile_flags::PARRIED == 0 {
+                audio.play(Sfx::EmberFlight, PlayParams::at(pos));
+            }
+            ProjVis {
+                start: pos,
+                ..Default::default()
+            }
+        });
         v.seen = true;
         v.position = pos;
+        v.age += dt;
         if e.flags & projectile_flags::PENDING != 0 || pos.distance(f.camera) < 1.0 {
             return;
         }
@@ -456,19 +586,18 @@ impl EntityView {
                     });
                 }
             }
-            kind::SPITTER_ORB | kind::GNAT_BOLT => {
+            kind::EMBER_BOMB => enemy_fx::ember_trail(effects, rng, pos, back),
+            kind::NEEDLE => {
+                // Hot sparks shed along the needle's line (its streak is drawn in `draw`).
                 let c = enemy_projectile_color(e.kind);
                 effects.spawn(Particle {
-                    position: pos,
-                    max_life: 0.3,
-                    size: Vec2::splat(if e.kind == kind::SPITTER_ORB {
-                        0.6
-                    } else {
-                        0.25
-                    }),
-                    end_scale: 0.2,
+                    position: pos + back * rng.range(0.5, 3.0),
+                    velocity: rng.dir() * 0.6,
+                    max_life: 0.25,
+                    size: Vec2::splat(0.12),
+                    end_scale: 0.3,
                     color: c,
-                    texture: FxTex::Glow,
+                    texture: FxTex::Spark,
                     additive: true,
                     ..Default::default()
                 });
@@ -521,6 +650,25 @@ impl EntityView {
                 }
                 let root = EnemyAnim::root(e.position + root_offset(e.kind), e.yaw);
                 lib.draw_enemy(&anim, root, &tint, draws);
+                // The aim laser (every client draws it from the replicated aim).
+                if let Some((origin, end, locked)) = v.laser {
+                    draw_beam(lib, origin, end, if locked { 0.07 } else { 0.045 }, laser_tint(locked, time), draws);
+                    lights.push(PointLight {
+                        position: origin,
+                        color: if locked { Vec3::new(2.0, 1.2, 1.0) } else { Vec3::new(1.6, 0.25, 0.15) },
+                        radius: 4.0,
+                    });
+                }
+                // The heat leaving a fresh corpse lights up the room for a moment.
+                if v.died && v.dead_for < 0.6 {
+                    let fade = 1.0 - v.dead_for / 0.6;
+                    let heat = enemy_fx::heat_color(e.kind).truncate();
+                    lights.push(PointLight {
+                        position: v.position,
+                        color: heat * 2.5 * fade,
+                        radius: 4.0 + 4.0 * enemy_kind(e.kind).height() / 3.7,
+                    });
+                }
             } else if e.kind == kind::PRISM {
                 let pos = replicated_position(e, f.render_tick, f.tick_rate, f.tuning);
                 let rot = Quat::from_rotation_y((time * 3.0) as f32 + e.id.0 as f32)
@@ -583,11 +731,24 @@ impl EntityView {
                 &tint,
                 draws,
             );
+            if e.kind == kind::NEEDLE
+                && let Some(pv) = self.projectiles.get(&e.id)
+                && vel.length_squared() > 1.0
+            {
+                // A long glowing streak back along its flight (never past where it was first
+                // seen).
+                let dir = vel.normalize();
+                let len = (pos - pv.start).dot(dir).clamp(0.0, 7.0);
+                if len > 0.3 {
+                    let c = if parried { Vec4::new(2.4, 2.3, 2.2, 0.9) } else { Vec4::new(2.6, 0.9, 0.55, 0.85) };
+                    draw_beam(lib, pos - dir * len, pos, 0.06, c, draws);
+                }
+            }
             let light = match e.kind {
                 _ if parried => Some((Vec3::new(1.5, 1.5, 1.4), 5.0)),
                 kind::ROCKET | kind::MORTAR => Some((Vec3::new(1.8, 0.9, 0.3), 5.0)),
-                kind::SPITTER_ORB => Some((Vec3::new(0.5, 1.4, 0.3), 5.0)),
-                kind::GNAT_BOLT => Some((Vec3::new(1.2, 0.3, 1.2), 3.0)),
+                kind::EMBER_BOMB => Some((Vec3::new(2.2, 1.1, 0.35), 6.5)),
+                kind::NEEDLE => Some((Vec3::new(1.6, 0.5, 0.3), 4.0)),
                 _ => None,
             };
             if let Some((color, radius)) = light {
@@ -599,6 +760,36 @@ impl EntityView {
             }
         }
     }
+}
+
+/// Colour of an aim laser: red while tracking, white-hot and pulsing once locked.
+fn laser_tint(locked: bool, time: f64) -> Vec4 {
+    if locked {
+        let pulse = 0.8 + 0.4 * ((time * 30.0).sin() as f32).abs();
+        Vec4::new(3.0 * pulse, 2.4 * pulse, 2.2 * pulse, 1.0)
+    } else {
+        Vec4::new(2.4, 0.25, 0.15, 0.9)
+    }
+}
+
+/// A glowing beam (the `AimLaser` unit beam model stretched from `a` to `b`).
+fn draw_beam(lib: &ModelLibrary, a: Vec3, b: Vec3, width: f32, color: Vec4, draws: &mut Vec<DrawItem>) {
+    let d = b - a;
+    let len = d.length();
+    if !(len > 1e-3 && a.is_finite() && b.is_finite()) {
+        return;
+    }
+    let rot = Quat::from_rotation_arc(Vec3::NEG_Z, d / len);
+    let tint = Tint {
+        glow: color,
+        ..Default::default()
+    };
+    lib.draw_model(
+        ModelId::AimLaser,
+        Mat4::from_scale_rotation_translation(Vec3::new(width, width, len), rot, a),
+        &tint,
+        draws,
+    );
 }
 
 /// One slowly drifting puff of red mist.

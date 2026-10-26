@@ -295,7 +295,7 @@ impl InGame {
             .map(|s| s.connect_addr())
     }
 
-    /// Sends a chat line (also dev commands like `/spawn husk 3`; tools and tests).
+    /// Sends a chat line (also dev commands like `/spawn gnawer 3`; tools and tests).
     pub fn send_chat(&mut self, text: &str) {
         if let Some(s) = &mut self.session {
             s.client_mut().send_chat(text);

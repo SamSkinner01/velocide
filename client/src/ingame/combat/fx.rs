@@ -14,7 +14,7 @@ use shared::sim::{Attack, PlayerId};
 use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
-use super::{Rng, attack_style};
+use super::{Rng, attack_style, enemy_fx};
 
 /// A fading tracer segment.
 #[derive(Clone, Copy, Debug)]
@@ -397,6 +397,21 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 ctx.effects.sparks(*last, Vec3::Y, 10);
             }
         }
+        // Ember bombs burst into embers rather than a fireball (enemy_fx.rs).
+        Fx::Explosion {
+            position,
+            radius_dm,
+            attack: Attack::Enemy { .. },
+            ..
+        } => {
+            let p = q(*position);
+            let r = *radius_dm as f32 / 10.0;
+            enemy_fx::ember_bomb_burst(ctx.effects, ctx.rng, p, r);
+            ctx.beams.light(p + Vec3::Y * 0.4, Vec3::new(2.6, 1.3, 0.4), r * 2.6, 0.3);
+            let d = p.distance(ctx.listener);
+            ctx.feedback.shake(shake_at(d, r * 3.0, 0.35));
+            ctx.audio.play(Sfx::EmberBurst, PlayParams::at(p));
+        }
         Fx::Explosion {
             position,
             radius_dm,
@@ -508,10 +523,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         } => {
             let p = q(*position);
             let n = q(*normal).normalize_or(Vec3::Y);
-            if *k == kind::SPITTER_ORB || *k == kind::GNAT_BOLT {
+            if *k == kind::NEEDLE || *k == kind::EMBER_BOMB {
                 let c = enemy_projectile_color(*k);
-                ctx.effects.glow(p, c, 0.9, 0.2);
-                ctx.effects.sparks(p, n, 6);
+                ctx.effects.glow(p, c, 1.1, 0.2);
+                ctx.effects.sparks(p, n, 10);
+                ctx.effects.decal(p, n, 0.12, DecalKind::Scorch);
             } else {
                 ctx.effects.sparks(p, n, 5);
                 ctx.effects.decal(p, n, 0.14, DecalKind::Scorch);
@@ -523,32 +539,47 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         }
         Fx::EnemyAttack {
             enemy,
+            attack,
             strike,
             parryable,
-            ..
         } => {
             let Some(e) = ctx.entities.iter().find(|e| e.id == *enemy) else {
                 return;
             };
-            let at = e.position + Vec3::Y * 1.2;
-            let sfx = match (e.kind, *strike) {
-                (kind::SPITTER, false) => Sfx::SpitterWindup,
-                (kind::SPITTER, true) => Sfx::SpitterFire,
-                (kind::GNAT, false) => Sfx::GnatBuzz,
-                (kind::GNAT, true) => Sfx::GnatFire,
-                (kind::BASTION, false) => Sfx::BastionTelegraph,
-                (kind::BASTION, true) => Sfx::BastionSlam,
-                (_, false) => Sfx::HuskWindup,
-                (_, true) => Sfx::HuskSwipe,
-            };
-            ctx.audio.play(sfx, PlayParams::at(at));
+            let (_, height) = super::entities::enemy_size(e.kind);
+            let lift = super::entities::enemy_kind(e.kind).root_lift();
+            let at = e.position + Vec3::Y * (lift + height * 0.6);
+            if let Some(sfx) = enemy_fx::attack_sfx(e.kind, *attack, *strike) {
+                ctx.audio.play(sfx, PlayParams::at(at));
+            }
             if !*strike {
                 let c = if *parryable {
                     Vec4::new(1.0, 0.9, 0.2, 0.9)
                 } else {
-                    Vec4::new(1.0, 0.15, 0.08, 0.8)
+                    enemy_fx::telegraph_color(e.kind)
                 };
-                ctx.effects.glow(at + Vec3::Y * 0.4, c, 0.8, 0.25);
+                ctx.effects.glow(at + Vec3::Y * 0.4, c, 1.2, 0.25);
+                return;
+            }
+            // Strikes that shake the floor.
+            let fwd = shared::input::look_dir(e.yaw, 0.0);
+            match enemy_fx::attack_name(e.kind, *attack).as_deref() {
+                Some("bash") => {
+                    // The door slams: dust and a shock ring in front of it.
+                    let p = e.position + fwd * 2.6;
+                    ctx.effects.shockwave(p, 3.0);
+                    ctx.effects.dust(p, 10, 4.0);
+                    let d = p.distance(ctx.listener);
+                    ctx.feedback.shake(shake_at(d, 10.0, 0.45));
+                }
+                Some("sweep") => {
+                    enemy_fx::sweep_arc(ctx.effects, ctx.rng, e.position, e.yaw, 6.5);
+                    let d = e.position.distance(ctx.listener);
+                    ctx.feedback.shake(shake_at(d, 10.0, 0.3));
+                }
+                Some("pounce") | Some("rush") => ctx.effects.dust(e.position, 8, 3.0),
+                Some("kick") => ctx.effects.dust(e.position + fwd * 1.0, 4, 1.5),
+                _ => {}
             }
         }
         Fx::EnemyFired { enemy, muzzle, .. } => {
@@ -557,13 +588,12 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 .entities
                 .iter()
                 .find(|e| e.id == *enemy)
-                .map_or(kind::SPITTER, |e| e.kind);
-            let c = if k == kind::GNAT {
-                enemy_projectile_color(kind::GNAT_BOLT)
-            } else {
-                enemy_projectile_color(kind::SPITTER_ORB)
-            };
-            ctx.effects.glow(p, c, 0.9, 0.15);
+                .map_or(kind::CENSER, |e| e.kind);
+            let projectile = if k == kind::HERON { kind::NEEDLE } else { kind::EMBER_BOMB };
+            let c = enemy_projectile_color(projectile);
+            ctx.effects.glow(p, c, 1.3, 0.15);
+            ctx.effects.sparks(p, Vec3::Y, 6);
+            ctx.audio.play(enemy_fx::fired_sfx(k), PlayParams::at(p));
         }
         Fx::EnemyShockwave {
             position,
@@ -581,11 +611,8 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             kind: k, position, ..
         } => {
             let feet = q(*position);
-            let (lift, size) = match *k {
-                kind::GNAT => (0.45, 1.8),
-                kind::BASTION => (1.6, 4.0),
-                _ => (1.0, 2.4),
-            };
+            let model = super::entities::enemy_kind(*k);
+            let (lift, size) = (model.root_lift() + model.height() * 0.5, model.height() * 1.2);
             let center = feet + Vec3::Y * lift;
             ctx.effects
                 .glow(center, glam::Vec4::new(1.0, 0.25, 0.12, 1.0), size, 0.35);
@@ -594,23 +621,17 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         }
         Fx::EnemyAlert { enemy } => {
             if let Some(e) = ctx.entities.iter().find(|e| e.id == *enemy) {
-                let sfx = match e.kind {
-                    kind::BASTION => Sfx::BastionStep,
-                    kind::GNAT => Sfx::GnatBuzz,
-                    _ => Sfx::HuskAlert,
-                };
-                ctx.audio
-                    .play(sfx, PlayParams::at(e.position + Vec3::Y * 1.5));
+                ctx.audio.play(
+                    enemy_fx::alert_sfx(e.kind),
+                    PlayParams::at(e.position + Vec3::Y * 1.5),
+                );
             }
         }
     }
 }
 
 pub fn enemy_projectile_color(k: u16) -> Vec4 {
-    match k {
-        kind::GNAT_BOLT => Vec4::new(1.0, 0.3, 1.0, 1.0),
-        _ => Vec4::new(0.55, 1.0, 0.25, 1.0),
-    }
+    enemy_fx::projectile_color(k)
 }
 
 /// Glass shards and a flash where a prism breaks.

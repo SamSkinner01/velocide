@@ -12,6 +12,7 @@
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
 //! `combat_update` (Fx playback, entity bookkeeping, music), `combat_draw`, `combat_hud`.
 
+pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
 pub mod hud;
@@ -253,7 +254,7 @@ fn attack_name(net: &NetClient, attack: Attack) -> String {
     attack.name().to_uppercase()
 }
 
-/// "YOU [LANCET] HUSK  HEADSHOT" style kill feed line.
+/// "YOU [LANCET] GNAWER  HEADSHOT" style kill feed line ("GNAWER [BITE] YOU").
 fn kill_line(net: &NetClient, k: &KillInfo) -> String {
     let mut s = format!(
         "{} [{}] {}",
@@ -710,6 +711,7 @@ impl InGame {
             local_owner,
             own_offset,
             camera,
+            world: net.world().map(|w| &w.collision.world),
         };
         combat
             .entities
@@ -790,6 +792,7 @@ impl InGame {
             local_owner,
             own_offset,
             camera,
+            world: net.world().map(|w| &w.collision.world),
         };
         self.combat.entities.draw(
             common.models.as_ref(),
