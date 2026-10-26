@@ -87,7 +87,9 @@ impl SnapshotBuffer {
 
     /// Drops every frame older than `tick`.
     pub fn retain_from(&mut self, tick: u32) {
-        self.frames = self.frames.split_off(&tick);
+        if self.oldest().is_some_and(|(oldest, _)| oldest < tick) {
+            self.frames = self.frames.split_off(&tick);
+        }
     }
 
     pub fn get(&self, tick: u32) -> Option<&Arc<NetFrame>> {
