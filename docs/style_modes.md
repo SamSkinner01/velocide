@@ -522,7 +522,7 @@ the Grind section).
 
 ```text
 cargo test -p shared --test style      # style math + scoring real combat in the sim (15)
-cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind, gun game (44)
+cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind, gun game (43)
 cargo test -p shared --lib difficulty grind gungame   # scaling numbers, wave plans, budgets, unlocks, heavies / bosses, the ladder
 cargo test -p server --test modes_net  # over UDP with real clients (7)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive / grind
