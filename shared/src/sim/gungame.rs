@@ -3,7 +3,8 @@
 //! [`GunGameTuning`]), then the **Fist**. Full rules: `docs/style_modes.md`.
 //!
 //! * Each player carries only their tier's build: a forced loadout
-//!   (`SimWorld::force_loadout`, the arsenal's API), kept through respawns.
+//!   (`SimWorld::force_loadout`, the arsenal's API), kept through respawns; on the Fist tier no
+//!   weapon at all (`Loadout::unarmed`).
 //! * A kill with the weapon of your tier (`KillInfo::weapon`: the weapon that fired the
 //!   killing blow, abilities included) moves you up a tier at once. Kills with anything else
 //!   (a bomb of your previous weapon still bouncing, a slam, a knock into a kill volume) don't.
@@ -74,14 +75,13 @@ pub fn tier_of(g: &GunGameTuning, tier: u8) -> Tier {
     }
 }
 
-/// The loadout of tier `tier`: its build alone. On the Fist tier the last build stays in hand
-/// (an unarmed loadout needs support from the arsenal: until then only a punch counts there).
+/// The loadout of tier `tier`: its build alone; on the Fist tier (and past it) no weapon at all
+/// ([`Loadout::unarmed`]: fists only).
 pub fn tier_loadout(g: &GunGameTuning, tier: u8) -> Loadout {
-    let build = match tier_of(g, tier) {
-        Tier::Weapon(build) => build,
-        Tier::Fist | Tier::Won => g.ladder.last().copied().unwrap_or_default(),
-    };
-    Loadout::single(build)
+    match tier_of(g, tier) {
+        Tier::Weapon(build) => Loadout::single(build),
+        Tier::Fist | Tier::Won => Loadout::unarmed(),
+    }
 }
 
 impl SimWorld {
@@ -184,6 +184,8 @@ mod tests {
         assert_eq!(tier_of(&g, fist + 1), Tier::Won);
         assert_eq!(tier_loadout(&g, 3), Loadout::single(g.ladder[3]));
         assert!(tier_loadout(&g, 3).is_valid());
-        assert_eq!(tier_loadout(&g, fist), Loadout::single(g.ladder[9]));
+        // Fists only on the Fist tier (and past it).
+        assert_eq!(tier_loadout(&g, fist), Loadout::unarmed());
+        assert_eq!(tier_loadout(&g, fist + 1), Loadout::unarmed());
     }
 }

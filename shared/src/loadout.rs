@@ -405,6 +405,19 @@ impl Loadout {
         }
     }
 
+    /// No weapon at all: fists only (gun game's Fist tier). Only a game mode can hand this
+    /// out (`SimWorld::force_loadout`); requests sanitise it into the default loadout.
+    pub fn unarmed() -> Self {
+        Self {
+            slots: [None; LOADOUT_SLOTS],
+        }
+    }
+
+    /// Carries no weapon ([`Loadout::unarmed`]).
+    pub fn is_unarmed(&self) -> bool {
+        self.first_slot().is_none()
+    }
+
     pub fn slot(&self, slot: u8) -> Option<&WeaponBuild> {
         self.slots.get(slot as usize).and_then(Option::as_ref)
     }
@@ -538,6 +551,8 @@ mod tests {
         let empty = Loadout { slots: [None; 4] };
         assert!(!empty.is_valid());
         assert_eq!(empty.sanitized(), Loadout::default());
+        assert_eq!(empty, Loadout::unarmed());
+        assert!(Loadout::unarmed().is_unarmed() && !Loadout::default().is_unarmed());
         let single = Loadout::single(WeaponKind::Cinderbox.default_build());
         assert!(single.is_valid());
         assert_eq!(single.first_slot(), Some(0));

@@ -68,6 +68,13 @@ impl SimWorld {
   bursts start afresh (`WeaponState::with_loadout`; at a spawn: `WeaponState::respawned`).
 * A forced loadout applies at once (first slot selected) and wins over requests, also at
   respawns, until `force_loadout(id, None)`.
+* **Unarmed** (`Loadout::unarmed()`, no weapon at all: gun game's Fist tier) exists only as a
+  forced loadout: `force_loadout` keeps it as it is, while requests (clients, `/loadout`) are
+  always sanitised to at least one weapon. Unarmed, `step_weapons` fires nothing but the fist
+  (and the thorn, per tuning): there is no slot to select, no primary, no ability, no charge.
+  `WeaponState::is_unarmed()` / `held() == None` say so (`build()` / `current()` fall back to
+  the default build — check first); the player entity carries the `UNARMED_WEAPON_ID`
+  sentinel (below).
 * Requests live in `SimWorld::loadout_requests`; the server carries them from one world to the
   next (`replace_world`), so a loadout chosen in the lobby is there when the match spawns
   everyone. Forced loadouts (`SimWorld::forced_loadouts`) belong to one world. Both are
@@ -223,14 +230,20 @@ bitmask of the keys below full freshness and only their values (4 B when everyth
 
 ## Replication and wire ids
 
-**Player entity `state`**: held `WeaponKind` id (bits 0–3) | selected `Ability` id (bits 4–8) |
-charge / draw level (bits 9–15, 7 bits). Always through the helpers:
+**Player entity `state`**: held `WeaponKind` id (bits 0–3; `UNARMED_WEAPON_ID` = 15: fists
+only) | selected `Ability` id (bits 4–8) | charge / draw level (bits 9–15, 7 bits). Always
+through the helpers:
 
 ```rust
 pub fn pack_player_weapon(weapon: WeaponKind, ability: Ability, charge: u8) -> u16;
+pub fn pack_player_unarmed() -> u16;
+/// Holds a weapon (false: fists only — `player_weapon` then decodes the defaults).
+pub fn player_armed(state: u16) -> bool;
 /// (held weapon, selected ability, charge / draw 0..=255); unknown ids → Quill / Brand.
 pub fn player_weapon(state: u16) -> (WeaponKind, Ability, u8);
 ```
+
+`WeaponKind` ids stay below 15 (the sentinel).
 
 The level is the bow's draw while `DRAWING`, else the Discharge / Skewer charge (or the
 Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
@@ -353,9 +366,11 @@ use, exactly the allowed headshot one-shots, and every weapon's all-body time to
 * `shared/src/tuning/balance.rs` (unit): override paths, PvE = reference / PvP no Thorns /
   idempotent, the multiplier table covers everything, profiles from RON.
 * `shared/tests/combat_loadouts.rs`: when requests apply (fresh / dead / warm-up / respawn),
-  sanitising, forced loadouts, bodiless players and leaving, `restart_level`, the replicated
-  weapon / ability / draw, every weapon and ability firing in a live world, `KillInfo::weapon`
-  for a shared ability, exact prediction with a custom loadout.
+  sanitising, forced loadouts, unarmed (forced only, kept through respawns, replicated, fists
+  only, exact prediction, no default-build kill credit), bodiless players and leaving,
+  `restart_level`, the replicated weapon / ability / draw, every weapon and ability firing in a
+  live world, `KillInfo::weapon` for a shared ability, exact prediction with a custom loadout.
+* `shared/tests/modes.rs` (`the_fist_tier_is_fists_only`): gun game's Fist tier.
 * `shared/tests/combat_arsenal.rs`: every new primary (Lancet bloom, Thresher, Riveter flight,
   Cinderbox salvo, Longwick draw, Kiln + Burn), Burn stacks / refresh / kill credit / no
   LONGSHOT, Skewer pierce and falloff, Flurry, Slug, the Flak airburst and contact burst,
