@@ -815,6 +815,10 @@ pub struct StyleTuning {
     pub freshness_min: f32,
     /// Below this the weapon / action is STALE (HUD indicator, "- STALE" in the feed).
     pub stale_threshold: f32,
+    // ---- potg (docs/potg.md) ----
+    /// LONGSHOT: a kill with a hitscan shot or an arrow from at least `longshot_distance` m.
+    pub longshot: f32,
+    pub longshot_distance: f32,
 }
 
 impl Default for StyleTuning {
@@ -848,6 +852,8 @@ impl Default for StyleTuning {
             freshness_regen: 0.02,
             freshness_min: 0.2,
             stale_threshold: 0.5,
+            longshot: 50.0,
+            longshot_distance: 40.0,
         }
     }
 }
@@ -1149,6 +1155,8 @@ impl StyleTuning {
         clamp!(self, d, 0.0, MAX_TIME; rank_grace, multikill_window);
         clamp!(self, d, 0.0, MAX_DAMAGE; close_call_health);
         clamp!(self, d, 0.0, MAX_MULT; close_call_multiplier);
+        clamp!(self, d, 0.0, MAX_POINTS; longshot);
+        clamp!(self, d, 0.0, MAX_DIST; longshot_distance);
     }
 }
 

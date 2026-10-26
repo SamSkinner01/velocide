@@ -34,6 +34,7 @@ pub mod combat;
 pub mod embers;
 pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
+pub mod highlight; // play of the game (PvP highlights): docs/potg.md
 mod hitbox;
 pub mod hitscan;
 // Game modes (death rule, checkpoints, downed/revive, deathmatch, results) and the style
@@ -60,6 +61,7 @@ pub use combat::{
 };
 pub use embers::{EmberBurst, HealSource};
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
+pub use highlight::{Highlight, HighlightRules, HighlightTracker};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
