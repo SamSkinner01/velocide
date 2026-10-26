@@ -162,6 +162,12 @@ impl Feedback {
         self.flash(palette().flash_death, 0.5);
     }
 
+    /// Faint flash when the local player heals `amount` hp (kindling).
+    pub fn heal_flash(&mut self, amount: f32) {
+        let strength = (0.08 + amount.max(0.0) / 120.0).min(0.25);
+        self.flash(palette().flash_heal, strength);
+    }
+
     /// Advances by a real frame and returns the *visual* frame time (0 during hitstop).
     pub fn update(&mut self, real_dt: f32) -> f32 {
         let real_dt = real_dt.max(0.0);

@@ -73,6 +73,8 @@ pub struct Palette {
     /// A hit blocked by spawn protection.
     pub flash_shield: Vec3,
     pub flash_death: Vec3,
+    /// Kindling heal (the standard one is a faint red, like the damage flash).
+    pub flash_heal: Vec3,
 
     // --- HUD (copied into the UI theme) --------------------------------------------------------
     pub health: Vec4,
@@ -120,6 +122,7 @@ pub const STANDARD: Palette = Palette {
     flash_parry: Vec3::new(1.0, 0.97, 0.9),
     flash_shield: Vec3::new(0.7, 0.9, 1.0),
     flash_death: Vec3::new(0.6, 0.0, 0.0),
+    flash_heal: Vec3::new(0.95, 0.15, 0.2),
     health: rgb(238, 228, 206),
     health_low: rgb(238, 38, 44),
     hard_damage: rgb(120, 16, 24),
@@ -169,6 +172,7 @@ pub const PROTANOPIA: Palette = Palette {
     flash_parry: Vec3::new(1.0, 0.97, 0.9),
     flash_shield: Vec3::new(0.7, 0.9, 1.0),
     flash_death: Vec3::new(0.5, 0.2, 0.0),
+    flash_heal: Vec3::new(1.0, 0.8, 0.2),
     health: rgb(238, 228, 206),
     health_low: rgb(255, 110, 40),
     hard_damage: rgb(150, 90, 255),
@@ -231,6 +235,7 @@ pub const TRITANOPIA: Palette = Palette {
     aim_laser: c(0.2, 0.45, 1.0),
     hostile_projectile: c(0.25, 0.75, 1.0),
     heal: c(1.0, 0.8, 0.45),
+    flash_heal: Vec3::new(1.0, 0.8, 0.45),
     hard_damage: rgb(60, 140, 200),
     health_low: rgb(255, 40, 40),
     damage: rgb(255, 40, 40),
@@ -514,7 +519,14 @@ mod tests {
     fn critical_pairs_stay_distinguishable_in_their_mode() {
         let mut failures = Vec::new();
         for p in &PALETTES {
-            for (name, a, b, path, min) in critical_pairs(p) {
+            let mut pairs = critical_pairs(p);
+            if p.mode != ColorVisionMode::Off {
+                // The standard heal flash is a faint red like the damage flash (original look);
+                // the colour-blind palettes must tell them apart.
+                let (heal, hurt) = (v3(p.flash_heal), v3(p.flash_damage));
+                pairs.push(("heal flash / damage flash", heal, hurt, Path::Direct, 20.0));
+            }
+            for (name, a, b, path, min) in pairs {
                 let d = min_delta(a, b, p.mode, path);
                 if d < min {
                     failures.push(format!("{:?} {name}: ΔE {d:.1} < {min}", p.mode));

@@ -302,7 +302,7 @@ UI theme. `player_color(id)` returns `palette().team(id)`.
 | `friendly` / `hostile` | team-mode markers | #61C7FF / #ED262B | #4CA6FF / #FF8C0D | #4CA6FF / #FF8C0D | #33D999 / #ED262B |
 | `heal` / `damage` | kindling, `+N` / `-N` popups | #FF9E38 / #EE262C | #FFCC33 / #FF6E28 | #FFD940 / #F03C1E | #FFCC73 / #FF2828 |
 | `flash_damage` | hit flash | #E60D0A | #FF4C00 | #F23300 | #E60D0A |
-| `flash_parry` / `_shield` / `_death` | other flashes | white / pale blue / dark red | same, death #803300 | same, death #803300 | same |
+| `flash_parry` / `_shield` / `_death` / `_heal` | other flashes | white / pale blue / dark red / faint red (like damage) | same, death #803300, heal gold #FFCC33 | as protan | same, heal #FFCC73 |
 | `hard_damage` | smothered capacity (hatched) | #781018 | #965AFF | #965AFF | #3C8CC8 |
 | `health_low` / `warning` | low health, DOWNED, LOCKED (`blood_bright`) | #EE262C | #FF6E28 | #F03C1E | #FF2828 |
 | `stamina` | dash pips, good news (READY, CLEARED) | #60C8FF | #60C8FF | #60C8FF | #60C8FF |

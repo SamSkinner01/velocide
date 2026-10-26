@@ -207,7 +207,7 @@ way.
 | `feedback.shake(trauma)` | adds 0..1 trauma; shake = trauma², decays at 1.4/s |
 | `feedback.hitstop(seconds)` | freezes what is *drawn* (shake, viewmodel, particles) up to 0.35 s; never the simulation or networking |
 | `feedback.set_time_scale(s)` | visual slow motion |
-| `feedback.flash(color, strength)`, `damage_flash(fraction)`, `parry_flash()`, `shield_flash()`, `death_flash()` | full-screen flash, fades in ~0.3 s; the named ones take their colour from `palette()` (`flash_damage` / `_parry` / `_shield` / `_death`), so pass `palette().…` to `flash` too |
+| `feedback.flash(color, strength)`, `damage_flash(fraction)`, `parry_flash()`, `shield_flash()`, `death_flash()`, `heal_flash(amount)` | full-screen flash, fades in ~0.3 s; the named ones take their colour from `palette()` (`flash_damage` / `_parry` / `_shield` / `_death` / `_heal`), so pass `palette().…` to `flash` too |
 | `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `blood(pos, dir, amount)`, `gibs(pos, n)`, `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
