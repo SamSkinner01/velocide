@@ -170,7 +170,11 @@ fn the_lobby_runs_the_warmup_around_every_match() {
     );
     // ...with the deathmatch balance, on the clients too (their prediction must match).
     let pvp = shared::tuning::Tuning::default().for_mode(GameMode::Deathmatch);
-    assert_eq!(n.server.tuning(), &pvp, "the warm-up runs the next mode's balance");
+    assert_eq!(
+        n.server.tuning(),
+        &pvp,
+        "the warm-up runs the next mode's balance"
+    );
     n.wait(2.0, "PvP balance on the clients", |n| {
         n.clients.iter().all(|c| c.net.tuning() == &pvp)
     });
