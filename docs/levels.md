@@ -58,8 +58,8 @@ cargo test -p shared --test levels [-- --nocapture]   # checks + bot traversal (
   Casting Floor) don't hide it. The overview always has the debug overlay: encounter triggers
   orange, checkpoints green, exit white, kill volumes red, doors red (closed) / green (open),
   player spawns cyan with facing, jump pads cyan with their ballistic arc, enemies gnawer
-  yellow / censer magenta / harrier light blue / gaoler red / heron white, grind spawns pink
-  posts with a ring, secrets yellow boxes.
+  yellow / censer magenta / harrier light blue / gaoler red / heron white / bellwether amber /
+  snuffer green / smelter rust, grind spawns pink posts with a ring, secrets yellow boxes.
 
 ## Conventions and metrics
 
@@ -479,14 +479,14 @@ checkpoint spawn, entry doors lock, exit doors open on the win).
 | 3 | The Wax Press | (-19, 14, -37.5) | 5 → 6 | **gaoler**, 3 gnawer, 2 **snuffer** | **smelter**, censer (press bed), heron, 2 harrier, 2 gnawer | | 13 |
 | 4 | The Great Wick | (-69, 11, -27.5) | 7 → 8 | 4 gnawer, 2 snuffer, 2 censer (galleries), bellwether | smelter, 2 heron (galleries), 3 harrier (over the well), 2 gnawer | gaoler, heron, 2 censer, 3 harrier, 2 snuffer, bellwether | 27 |
 
-67 Moulds single-player. **The new Moulds** (`bellwether`, `snuffer`, `smelter`, **enemies**
-area) are placed through a table in the module: until they are on main each spawns as the
-stand-in of its size and role (bellwether → censer, snuffer → gnawer, smelter → gaoler);
-`NEW_MOULDS = true` swaps them in. The escalation: gnawers, then snuffers leaping off the
-floor and censers on the gantry; harriers out of the Cistern's spray and herons across its pool,
-with the first bellwether frenzying them; the first gaoler on the Wax Press floor (38 × 38 m),
-then a smelter pouring slag between the press and the balcony; the finale round the well with
-everything, two heavies on the north floor ring.
+67 Moulds single-player, all eight of the campaign roster (`docs/enemies.md`): the Chandlery
+introduces the third roster's Moulds one per arena. The escalation: gnawers, then snuffers
+leaping off the floor and censers on the gantry; harriers out of the Cistern's spray and herons
+across its pool, with the first **bellwether** frenzying them from the north walk (34 m from
+the rally, behind its pack: round the pool to hunt it); the first gaoler on the Wax Press floor
+(38 × 38 m), then a **smelter** pouring slag lines over the open floor between the press and
+the balcony; the finale round the well with everything — a smelter and a gaoler on the north
+floor ring, bellwethers behind the pack on the far side of the well.
 
 ### Routes and movement tech
 
@@ -911,7 +911,9 @@ Chandlery) gets every campaign check below; its routes are registered in `campai
   capsule (gaoler r 1.45 × 4 m, heron 0.6 × 3.6, censer 0.7 × 2.7, gnawer 0.7 × 2.2);
   harriers in open air 4–11 m above ground with 3 m above; censers with floor at their height
   3 m out in every direction (deep ledges); gaolers with level floor 4 m out in every direction
-  (room to circle them); herons ≥ 20 m from their rally point with a clear line of sight to it.
+  (room to circle them; smelters too, they need floor to pour on); herons ≥ 20 m from their
+  rally point with a clear line of sight to it; bellwethers ≥ 14 m from it (they hang back).
+  The finale introduces nothing: every Mould in it was met earlier in the level.
 - Enemy spawns on the nav grid (every campaign, doors open): each Mould stands on a node of its
   class (footprint and headroom) and walks to its rally point (the Gaoler with its wide
   footprint), and players can walk to it; censers may sit on pad-only ledges.
