@@ -589,7 +589,7 @@ pub fn pose(a: &EnemyAnim) -> Pose {
                 side.knee = 1.4 * e;
             }
         }
-        EnemyState::Idle | EnemyState::Walk => {}
+        EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
     }
 
     // Melting: the body squashes towards the floor and spreads a little.

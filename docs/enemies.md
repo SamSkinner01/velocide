@@ -1,8 +1,10 @@
 # Enemies, navigation and arena encounters
 
-The Moulds (`docs/roster.md`): five enemy types — Gnawer, Censer, Harrier, Gaoler, Heron —
-their server-side AI, the nav grid ground enemies walk on, arena encounters (locked rooms,
-waves) and co-op scaling. Rules and default numbers come from `docs/gameplay.md` and
+The Moulds (`docs/roster.md`, `docs/expansion.md`): nine enemy types — Gnawer, Censer,
+Harrier, Gaoler, Heron, and the third roster's Bellwether, Snuffer, Smelter and the Effigy
+training dummy — their server-side AI (frenzies, latches, slag lines, elites, difficulty
+scaling), the nav grid ground enemies walk on, arena encounters (locked rooms, waves) and
+co-op scaling. Rules and default numbers come from `docs/gameplay.md` and
 `docs/roster.md` (the design contract); the damage pipeline, parry hook, projectiles and
 replication basics are in `docs/combat.md`.
 
@@ -10,19 +12,21 @@ replication basics are in `docs/combat.md`.
 
 | module | contents |
 |---|---|
-| `assets/enemies/{gnawer,censer,harrier,gaoler,heron}.ron` | the definitions (also compiled in as built-ins, `EnemyRegistry::builtin`) |
-| `shared::sim::enemy` (`mod.rs`) | `Enemy` (runtime state, incl. `aim` / `aim_locked`), damage side of the pipeline (weak points, armour, knockback + stagger, damage alerts), `spawn_enemy[_scaled]`, replication |
-| `shared::sim::enemy::def` | `EnemyDef` format: `AttackKind::{Melee, Projectile, Slam, Dive}`, lunges / pounces, lobs, `AimLaser`, `jumpable`, `parry_strike`, `parry_reach`, `ai.reposition` |
+| `assets/enemies/{gnawer,censer,harrier,gaoler,heron,bellwether,snuffer,smelter,effigy}.ron` | the definitions (also compiled in as built-ins, `EnemyRegistry::builtin`) |
+| `shared::sim::enemy` (`mod.rs`) | `Enemy` (runtime state, incl. `aim` / `aim_locked`, elite, frenzy, latch, pour line), damage side of the pipeline (weak points, armour, interrupts, knockback + stagger, damage alerts, dummies), `spawn_enemy[_scaled]`, `spawn_enemy_with` / `SpawnOptions`, `make_elite`, `fury`, replication |
+| `shared::sim::enemy::def` | `EnemyDef` format: `AttackKind::{Melee, Projectile, Slam, Dive, Toll, Pour}`, lunges / pounces, lobs, `AimLaser`, `jumpable`, `parry_strike`, `parry_reach`, `ai.reposition`, `Toll` / `Frenzy`, `Pour`, `Latch`, `Interrupt`, `Dummy`, `EliteDef` |
+| `shared::sim::enemy::special` | the toll (frenzy), the latch (cling, smother, slow, punched / dashed off), pours laying their line, interrupts, training dummies |
+| `shared::sim::enemy::hazard` | slag lines (`SlagLine`, `SimWorld::enemy_hazards`, `trace_floor`, burning, `kind::SLAG_LINE`) |
 | `shared::sim::enemy::ai` | the state machine, targeting (`is_targetable` hook), attacks (leap, dive, lob, laser), `move_enemy` (capsule collide-and-slide), push-apart, kill volumes, `frozen` handling, `SimWorld::build_nav`, `lob_velocity` |
 | `shared::sim::enemy::steer` | ground path following (`NavAgent`), edge guard, flight steering, `AiWorld` (nav grid + A* buffers + stats on `SimWorld::ai`) |
 | `shared::sim::nav` | `NavGrid`: build, agent classes (`NavClass` = footprint + headroom), `node_at`, `nearest_node`, `find_path` (A*), `walkable_line`, `smooth`, `ground_ok` |
 | `shared::sim::encounter` | encounter states (`SimWorld::encounters`), triggers, waves, co-op scaling, doors, rally teleport, reset hooks, `kind::ENCOUNTER` replication |
 | `server::combat` | routes `EncounterStarted` / `WaveStarted` / `EncounterCleared` (reliable, everyone) and `Fx::EnemySpawned` |
 | `server::commands` | dev `/spawn`, `/encounter <n>`, `/encounters`, `/needle`, `/ember`, `/killall`... |
-| `client::models::enemies` | the five rigs and their pure pose functions (`docs/models.md`) |
-| `client::ingame::combat::enemy_fx` | names / sizes / sounds per kind, the Heron's aim laser, wax-and-ember effects |
+| `client::models::enemies` | the nine rigs and their pure pose functions (`docs/models.md`), the slag strip |
+| `client::ingame::combat::enemy_fx` | names / sizes / sounds per kind, the Heron's aim laser, wax-and-ember effects, the third roster's effects (toll, frenzy, elites, latch view, slag lines) |
 | `client::ingame::encounter_hud` | banners + sounds for the encounter events, "WAVE 2/3 - 5 LEFT" readout |
-| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type + an arena encounter |
+| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type, the nine-Mould lineup, elites + an arena encounter |
 
 ## The five Moulds
 
@@ -78,6 +82,159 @@ attack's muzzle (the definition's `projectile.muzzle` at the replicated yaw: the
 is red while tracking and white-hot and pulsing once locked (plus a click, `HeronLock`). The
 needle flies exactly along the drawn laser (test: < 0.002 rad, < 2e-4 rad through the wire).
 
+## The third roster (expansion)
+
+Four more Moulds (`docs/expansion.md`, area **enemies**): a support that makes the others
+dangerous, a skitterer that grabs you, a heavy that floods the floor, and a training dummy for
+the warm-up lobby. Same conventions as above (feet origin, −Z forward, melee ranges between
+body surfaces).
+
+| | Bellwether (25) | Snuffer (26) | Smelter (27) | Effigy (28) |
+|---|---|---|---|---|
+| role | support: frenzies the others | skitterer: latches onto you | slow heavy: slag lines on the floor | training dummy (warm-up only) |
+| look | a gaunt 3 m Mould stooped over long knuckling arms, a hooded head jutting low, a timber belfry yoke on its back carrying a big bronze bell above and behind its head | 2.2 m from tail to cap on six spidery brass legs, a segmented wax body under brass shell plates; the head is a candle snuffer: a long brass handle of a neck ending in a bell-shaped cap | a 3.4 m bow-legged hulk of slag and wax under an iron shoulder yoke, a squat iron head with a furnace-mouth grate, a huge iron crucible slung in front of its belly on chains | a wax figure bound to a timber post on an iron tripod, arms lashed along a crossbar, a target sigil on its chest, a wick-knot head |
+| health | 220 | 70 | 420 | 1000 (never below 1) |
+| speed / accel | 5.5 / 30 | 12.5 / 70 | 3.6 / 20 | 0 |
+| capsule r × h | 0.7 × 3.1 | 0.7 × 1.4 | 1.1 × 3.4 | 0.5 × 2.2 |
+| nav class | narrow, 3.2 m headroom | narrow, none | wide, 3.5 m headroom | — (never moves) |
+| weak points | **bell** (0, 2.62, 0.3) r 0.6 ×2 (Core) | **wick** under the cap (0, 0.62, −1.0) r 0.32 ×2.5 (Head) | **hatch** on the crucible (0, 1.45, −1.25) r 0.45 ×2.5 (Core); head (0, 3.0, −0.35) r 0.4 ×1.5 | head (0, 1.97, −0.04) r 0.3 ×2; sigil (0, 1.35, −0.28) r 0.22 ×1.5 |
+| knockback scale | 0.5 | 1.3 | 0.15 | 0 |
+| keeps | 14–26 m, side-steps (`preferred_range`) | melee | melee (pours on the way in) | its post |
+
+| attack | wind-up (telegraph) | strike | recover / cooldown | effect |
+|---|---|---|---|---|
+| Bellwether **toll** (`AttackKind::Toll`; a target within 40 m and at least one ally within 18 m; **no line of sight needed**) | **1.6 s**: it rears up and hauls the bell back on its yoke; the bell's lip burns orange to white-hot and strobes for the last quarter; heat shimmers off it; a creaking, swelling bowed-metal hum (`BellwetherTollWindup`) | 0.3 s: the bell swings through: one deep bronze toll (`BellwetherToll`), rings racing out to 18 m | 0.8 / 6 s | every other Mould within 18 m that can be frenzied is **frenzied** for 5 s (below). Shooting the **bell** mid-wind-up for 30 damage (after its ×2: one Quill shot) **cracks** the swing: no toll, stunned 2 s, the toll goes on cooldown |
+| Bellwether **clapper** (players inside ~3 m) | 0.6 s: a fist drawn back, the body twisting away | 0.15 s | 0.6 / 1.4 s | 16 dmg, 160° arc, kb 14: shoves rushers off |
+| Snuffer **latch** (a leap from up to ~9 m centre to centre) | 0.7 s: it rears back, the cap tipped up off its blazing wick (the weak point bared), legs bunched, a quiver and a rising hiss | up to 0.6 s: a leap 14 m/s + 5 m/s up, led on the target; the first player it reaches (1.4 m) is **latched** | 0.6 / 3 s (from when it lets go) | 6 dmg on impact, then it clings (below). A dash through the leap (i-frames), spawn protection or a Snuffer already on that player: it misses |
+| Snuffer **nip** (close; what the others do while one is latched on you) | 0.45 s: the cap lifts, the neck draws back | 0.12 s | 0.4 / 0.6 s | 9 dmg, kb 5 |
+| Smelter **pour** (`AttackKind::Pour`; target 5–24 m away, feet within 1.5 m of its own level) | **1.1 s**: it plants its feet and tips the crucible over its lip, the slag brimming white-hot, drips slopping over; the **slag line is laid at once and drawn on the floor as a red telegraph strip** along where it will run | 0.6 s: the slag floods the line (`SmelterPour`) | 0.9 / 4.5 s | the line burns for 5 s: 22 dmg/s (every 0.25 s) to anyone whose feet are on it (below) |
+| Smelter **heave** (close) | 0.8 s: it twists away, hauling the crucible round on its chains (chains rattle taut) | 0.2 s | 0.8 / 1.5 s | 28 dmg, 140° arc, kb 16 + up |
+
+### Frenzy (the toll)
+
+A frenzied Mould (`Enemy::frenzy_until`, replicated `enemy_flags::FRENZIED`) acts with the
+toll's `Frenzy` multipliers on top of the difficulty scale: movement ×1.3, attack cooldowns and
+recoveries ÷1.4, damage ×1.25, projectile speed ×1.15. **Wind-ups keep their length**, so every
+attack stays exactly as readable. A new toll refreshes it. Bellwethers (anything with a toll),
+training dummies and corpses are never frenzied (two ringers would keep each other frenzied
+forever). Client: a flare and `Frenzied` when it takes, then blue-white flame tongues and
+sparks licking up the body, a pulsing light, its telegraph parts flaring (`palette().frenzy`;
+blue-white in the standard palette: the toll stokes them hotter than orange).
+
+### The latch (Snuffer)
+
+`AttackDef::latch` turns a lunge into a grab: on the first player it reaches (and may hold:
+not on dash i-frames, not spawn-protected, not already carrying a Snuffer) it deals the impact
+and enters **`AiState::Latched` (8)**: replicated `LATCHED`, `owner` = the victim, progress over
+`max_time` (6 s). Every tick it is placed on the victim's chest (0.5 m below the eye, just in
+front, facing them; no collision of its own) and it:
+
+- **smothers the wick**: 16 dmg/s in 0.25 s ticks (`Attack::Enemy { kind: 26, attack: 0 }`),
+  all of it **hard damage** (the part the pipeline doesn't already make hard is added);
+- **slows the victim** to 72 % of their speeds (a free run of 16 m in a second becomes
+  11.5 m: tested) through the movement state's predicted slow (`MoveState::slow_time` /
+  `slow_scale`, the arsenal's Pinned slow), refreshed every tick for 0.25 s, so it eases off
+  right after it lets go; a longer, stronger slow (a Pinning Arrow) wins; never a root;
+- lets go when **punched** by the victim (the `Punched` event of that tick: thrown off along the
+  punch at 11 m/s + up, stunned 1.6 s with its cap knocked open, 30 counter damage on top of the
+  punch itself), when they **dash** (shaken off backwards, stunned 1 s), when they die, go down
+  or become untargetable, after 6 s, when the world freezes, or when a **Pinning Arrow** pins
+  it (it stays rooted where it was hit, its victim free).
+
+Other players can shoot it off their friend (it dies on them like anywhere else). Only one
+Snuffer latches onto a player at a time; the others `nip`.
+
+**Prediction.** The latch state is replicated on the Snuffer (the client knows it is on you:
+`LATCHED` + `owner`). The slow lives in the victim's `MoveState` (sent in their own state), so
+their client predicts it like the Pinned slow: only the moments it takes hold and lets go are
+corrected (one round trip each).
+
+Client: a clank and a puff on latching; for the victim the Snuffer is drawn clinging to their
+chest from the camera (its replicated position trails the predicted view): the cap clamped
+along the bottom of the view, legs up the sides, soot closing in from below and a muffled
+guttering (`SnufferSmother`) every 0.55 s; everyone else sees it clamped onto that player,
+squeezing soot and sparks out from under the cap. Thrown off: a ring and skittering legs.
+
+### Slag lines (Smelter)
+
+`hazard.rs`: a pour lays its line **when the wind-up starts**: from just in front of the
+Smelter (`pour.start` beyond its surface) along the floor towards the target's feet + 0.4 s of
+their velocity, `overshoot` 4 m past them, at most 20 m: `trace_floor` samples the floor every
+0.75 m and stops at walls (knee height), ledges, and steps of more than 0.8 m. A path shorter
+than 3 m means no pour (the Smelter walks on and tries again shortly). The line is a replicated
+entity (`kind::SLAG_LINE` 140) from that moment, **ignites on the strike tick** (the end of the
+wind-up) and burns for `lifetime` 5 s: every 0.25 s each targetable player whose feet are on
+the strip (half its 1.8 m width + half their radius, horizontally, and within 0.5 m above the
+floor there) takes 5.5 (`Owner::Enemy(smelter)`, `Attack::Enemy { kind: 27, attack: 1 }`, kill
+feed SMELTER [POUR]). Jump over it, step off it during the wind-up, or dash through on i-frames.
+A pour cancelled before its strike (killed, stunned, frozen) removes its unlit line; a lit line
+burns on after its Smelter dies. Enemies never take slag damage. Clients trace the same floor
+path from the replicated start and end, draw the telegraph as a translucent strip with bright
+rims in `palette().telegraph`, then a molten strip (`fx_slag_strip`, `palette().hazard` in the
+colour-blind modes) with embers, smoke, a few lights and scorch marks left behind; the last
+second (`COOLING`) darkens and smokes.
+
+### The Effigy (training dummy)
+
+`EnemyDef::dummy`: no AI at all (never targets, never alerted, no attacks, never frenzied or
+elite), never moves (knockback 0, a mass the push-apart treats as immovable), can't die: every
+hit is reported in full (hit markers, damage numbers) but its health stops at 1; each hit makes
+it flinch (`Recover` for 0.35 s: it rocks on its post, the rope binds flash) with an
+`EffigyHit` thunk; `regen_delay` 3 s after the last hit it heals at 400/s back to full. Ember
+bursts are shed from the health it actually lost. Never placed in encounters or waves
+(`EnemyRegistry::wave_names()` leaves it out); the **lobby** area places it in the hub.
+
+### Elites
+
+Any Mould can be an elite (`Enemy::elite`, replicated `enemy_flags::ELITE`). `EnemyDef::elite`
+(defaults; the Smelter overrides health ×2.0, speed ×1.2): health and max health ×2.5 (on top of
+the spawn's health scale), attack cooldowns / recoveries ÷1.25 (wind-ups unchanged), movement
+×1.1, knockback ×0.6, its death's heat (the big ember burst) ×2. Client: the wax runs hot
+(warm body tint, hotter glows), a translucent searing shell 7 % larger, a crown of searing
+embers circling over its head and a light (`palette().elite`). Max health still fits the
+replicated 16 bits (a 3-player elite Gaoler is ~3900).
+
+### Difficulty: `SimWorld::enemy_scale` and `SimWorld::fury`
+
+`SimWorld::fury(&Enemy) -> Fury` is what every enemy acts with right now: `enemy_scale`
+(set by **modes** from difficulty × player count) × its frenzy (while frenzied) × its elite
+bonus. It is applied in every attack path:
+
+| | where |
+|---|---|
+| damage | melee arcs and lunges (`melee_hits`), slams, dives, every projectile (and so its explosion), the latch's impact and smothering, slag lines (fixed when the line is laid) |
+| aggression | `end_strike` (cooldown + recover and the recovery state) and a latch letting go; **wind-ups are never scaled** |
+| projectile speed | straight shots and the Heron's needle (and the aim laser's lead); lobs fly a flatter, faster arc at `least speed × scale` (the low solution, `lob_low_arc`), still landing on the predicted feet (tested at ×1.4) |
+| movement speed | frenzy and elites only (walking, the flyers' steering; not leaps or dives) |
+
+### Spawn API (for the game modes)
+
+```rust
+/// shared::sim::{SpawnOptions, SimWorld}
+pub struct SpawnOptions { pub health_scale: f32, pub elite: bool, pub aware: bool }
+impl SimWorld {
+    /// Spawns `name` (an `assets/enemies` stem) with a health multiplier, as an elite or not,
+    /// aware or not (wave spawns should be aware). `None`: unknown name / world full.
+    pub fn spawn_enemy_with(&mut self, name: &str, position: Vec3, yaw: f32,
+                            options: SpawnOptions) -> Option<NetId>;
+    /// Turns a living enemy into an elite (not dummies). Idempotent.
+    pub fn make_elite(&mut self, id: NetId) -> bool;
+    /// The multipliers an enemy acts with (enemy_scale × frenzy × elite).
+    pub fn fury(&self, e: &Enemy) -> Fury;
+}
+impl EnemyRegistry {
+    /// Every type that may appear in encounters / waves (all but the Effigy).
+    pub fn wave_names(&self) -> impl Iterator<Item = &str>;
+}
+```
+
+`spawn_enemy` / `spawn_enemy_scaled` are unchanged (they call `spawn_enemy_with`). The game
+modes' `SimWorld::spawn_pve_enemy` (encounters and grind, `difficulty.rs`) spawns through it
+with the difficulty's health and elite roll; dev `/spawn` uses the same difficulty health. A
+boss-grade elite is an elite with a larger `health_scale` (grind: `boss_health` ×4, then the
+elite bonus). Flyers are placed by their feet
+(the encounter code converts hover-centre spawn points; grind should too).
+
 ## AI (`ai.rs`, server only)
 
 ```text
@@ -87,7 +244,9 @@ needle flies exactly along the drawn laser (test: < 0.002 rad, < 2e-4 rad throug
                     │  ▲
    first usable     │  └── Recover (recover s) ◀── Strike (melee / leap / dive / lobs / needle) ◀── Windup (telegraph)
    attack ──────────┘          ▲ a wall / the level stops a leap or dive early ┘   parried: Stunned ──▶ Chase
+                               └── Latched (a latching leap reached someone) ──(punched / dashed: Stunned; let go: Recover)
  any state ──(killed)──▶ Dying (corpse, no hitboxes, death_time) ──▶ removed
+ Windup ──(its interrupt weak point took enough damage)──▶ Stunned (the attack on cooldown)
 ```
 
 * **Targeting** (every `retarget_interval`, or at once when the target became invalid): a player
@@ -100,10 +259,12 @@ needle flies exactly along the drawn laser (test: < 0.002 rad, < 2e-4 rad throug
   same tick (`remove_player` also clears targets/aggro).
 * **`is_targetable(player)`** (`shared::sim::enemy::is_targetable`): `!dead && !notarget`.
   **Hook for the modes**: add downed / spectating there; enemies then never target or hit them.
-* **Attack choice**: definition order = priority; needs the cooldown ready, line of sight, the
-  range band (melee: between body surfaces and vertically overlapping, a `jumpable` sweep not
-  against someone standing well above it; projectile: muzzle to chest; dive: centre to chest,
-  clear line), `min_target_speed`, and for leaps safe ground along the leap.
+* **Attack choice**: definition order = priority; needs the cooldown ready, line of sight (not
+  a toll), the range band (melee: between body surfaces and vertically overlapping, a
+  `jumpable` sweep not against someone standing well above it; projectile: muzzle to chest;
+  dive: centre to chest, clear line; toll: centre to chest and enough allies in reach; pour:
+  centre to feet on its own level), `min_target_speed`, for leaps safe ground along the leap,
+  for latches nobody else latched onto the target, and for pours room for a line.
 * **Strikes.** Melee: arc + reach (+ `jumpable`). Lunges lead the target (aim at where it will
   be when the leap reaches it); a pounce (`lunge_up`) only leaps where its whole airborne arc
   lands on safe ground (led direction, else straight, else it runs instead); a lunge whose last
@@ -199,9 +360,11 @@ spawns, 1 687 columns have stacked walkable floors and 320 walkable floors lie o
 start → exit: 0.15 ms; an arena spawn → its rally point: 2 µs.
 
 **Per-tick AI cost** (`shared/tests/enemies_perf.rs`): 4 players running and jumping around the
-Furnace Cathedral (arena 5) against **55 aware enemies of all five types** (every arena-5
-spawn, a copy of each gnawer and a heron beside each gaoler), whole `SimWorld::step` timed over
-780 ticks: dev build **avg 0.16 ms, p99 0.29 ms, max 0.62 ms**, release avg 0.14 ms, p99 0.23
+Furnace Cathedral (arena 5) against **67 aware enemies of all eight fighting types** (every
+arena-5 spawn, a copy of each gnawer, a snuffer beside every other one, a bellwether behind each
+censer, a heron and a smelter beside each gaoler), whole `SimWorld::step` timed over 780 ticks:
+dev build (this branch, parallel builds loading the machine) **avg 0.21 ms, p99 0.37 ms, max
+1.2 ms**. Before the third roster, with 55 enemies of five types: dev build **avg 0.16 ms, p99 0.29 ms, max 0.62 ms**, release avg 0.14 ms, p99 0.23
 ms, max 0.41 ms — far under the 2 ms budget (measured while parallel builds loaded the machine;
 at load ~30 on 16 cores the dev build measured avg 0.22–0.25 ms, p99 0.40–0.55 ms, with single
 preempted ticks up to ~4 ms). ~0.7 A* searches per tick (≈155 nodes each, 14 % partial, 12 %
@@ -281,10 +444,18 @@ projectiles `EMBER_BOMB` 80 and `NEEDLE` 81 (70–71 retired), `enemy_flags::{AI
 AIM_LOCKED 1 << 7}` (bits 6–14 are the enemies area's; bit 15 is `BRANDED`), exact yaw + pitch
 on aiming enemies.
 
+The expansion (protocol 8, `docs/expansion.md`): enemy kinds `BELLWETHER` 25, `SNUFFER` 26,
+`SMELTER` 27, `EFFIGY` 28 (29–31 free); `enemy_flags::{FRENZIED 1 << 8, ELITE 1 << 9, LATCHED
+1 << 10}` (bits 11–12 free; 13–14 are the arsenal's `BURNING` / `PINNED`); `AiState::Latched` =
+8 (`owner` = the victim); hazard `SLAG_LINE` 140 (`position` = start, `velocity` = end − start,
+`state` = width in cm, `aux` = ignition tick, `flags` = `slag_flags::{LIVE, COOLING}`; 141–143
+free); enemy projectile kinds 82–95 are unused (no new enemy projectiles).
+
 ## Dev commands
 
-`/spawn gnawer 4`, `/spawn censer 2`, `/spawn harrier 3`, `/spawn gaoler`, `/spawn heron`
-(8 m in front, facing you), `/enemies`, `/killall`, `/needle [dist]` (alias `/orb`: a needle
+`/spawn gnawer 4`, `/spawn censer 2`, `/spawn harrier 3`, `/spawn gaoler`, `/spawn heron`,
+`/spawn bellwether`, `/spawn snuffer 2`, `/spawn smelter`, `/spawn effigy` (8 m in front,
+facing you; add `elite` for elites: `/spawn gaoler 1 elite`), `/enemies`, `/killall`, `/needle [dist]` (alias `/orb`: a needle
 slowed to 22 m/s flies at you, parry practice), `/ember [dist]` (an ember bomb is lobbed onto
 you), `/encounter <n>` starts arena encounter *n*, `/encounters` lists their phases, `/god`,
 `/notarget` as before.
@@ -293,11 +464,12 @@ you), `/encounter <n>` starts arena encounter *n*, `/encounters` lists their pha
 
 ```text
 cargo test -p shared --test enemies_ai -- --nocapture    # behaviour per type in test arenas
+cargo test -p shared --test enemies_expansion -- --nocapture   # toll, latch, pour, Effigy, elites, scaling
 cargo test -p shared --test enemies_nav -- --nocapture   # grid on every level, classes, connectivity, lava
 cargo test -p shared --test enemies_perf -- --nocapture  # 55 enemies on the campaign, per-tick cost
 cargo test -p shared --test combat_enemy --test combat_parry --test combat_replication
 cargo test -p server --test encounter_crucible           # encounters end to end (real server + clients)
-cargo run -p client --release --example enemy_shots -- out/   # screenshots
+cargo run -p client --release --example enemy_shots -- out/   # screenshots (--third: only the third roster)
 cargo run -p client --release --example models_view -- --only gaoler   # model pose sheets
 ```
 
@@ -331,6 +503,29 @@ cargo run -p client --release --example models_view -- --only gaoler   # model p
   point separate and stay ≥ 0.75 × (r1 + r2) apart while swarming (0.99 measured); dead /
   untargetable players are dropped at once; damage alerts an idle enemy; all types are
   deterministic; a frozen world stops all attacks (Harriers hover in place).
+* **The third roster** (`enemies_expansion.rs`, plus the generic scenarios above: clapper,
+  latch, heave and pour are telegraphed and land like every other attack, every type rests on
+  the floor, all types are deterministic, a frozen world stops them): the toll winds up for
+  exactly 96 ticks, frenzies the ally in reach and not the one out of reach, not itself and not
+  another Bellwether, and the frenzy lasts 300 ticks; a lone Bellwether never tolls and keeps
+  its distance; 15 damage on the bell (×2) mid-wind-up cancels the toll (stunned, nobody
+  frenzied), two 10s add up, body hits and 20 on the bell don't; a Snuffer latches on (LATCHED,
+  `owner` = victim, on the chest), smothers 16/s all of it hard damage, follows its victim,
+  slows a run to 72 % of a free one through the predicted movement slow (gone right after a
+  dash shakes it off), is thrown off by a punch (stunned, flung along the punch, ≥ 30 damage,
+  no more smothering), shaken off by a dash, pinned off by a Pinning Arrow, lets go of the dead
+  and after 6 s,
+  and a second one never latches the same player but nips; a pour lays its line with the
+  wind-up (66 ticks before ignition, aimed through the target and past it, replicated as a
+  telegraph with its width), nothing burns before ignition, then 22/s to the player on it and
+  nothing to one beside it or in the air over it, gone after 5 s; a wall cuts the line short; a
+  Smelter killed mid-wind-up leaves no line; the Effigy never targets, attacks or moves,
+  reports hits in full, flinches, can't die (stops at 1) and heals to full 3 s after the last
+  hit, can't be an elite or frenzied, isn't in `wave_names`; elites: `spawn_enemy_with` health
+  1.5 × 2.5, `ELITE` replicated, `make_elite`, bites every 74 ticks instead of 85 with the same
+  24-tick wind-up, twice the heat; `enemy_scale` damage ×2 (bite 28), aggression ×2 (85 → 58
+  ticks between bites, same wind-up), projectile speed ×1.5 (needle 165 m/s) and lobs at ×1.4
+  (18.5 → 25.9 m/s, still landing on the target); frenzy × difficulty (bite 35 = 14 × 2 × 1.25).
 * **Nav** (`enemies_nav.rs` + unit tests): builds on every shipped level with sane counts,
   every class has room, player spawns on the grid; on the campaign every gnawer / gaoler spawn
   has a path for its own class to its arena centre and both ways to the rally point, censer
@@ -356,6 +551,14 @@ and passing beside you after a dash, a mixed crowd, its ember bursts and melting
 arena 4 of the campaign ("ARENA LOCKED", "WAVE 1/2 - 5 LEFT", the Gaoler on the island).
 
 ## Known limitations / next steps
+
+* The Bellwether tolls without line of sight (it only needs a target and an ally in reach), on
+  purpose: it is the one you have to hunt down. Its bell hitbox doesn't follow the swing (the
+  weak point is fixed on its yoke; the model keeps the bell near it).
+* Slag lines are straight (they follow the floor's height, not corners) and stop at the first
+  step they can't flow over; they don't pour down ledges.
+* A Snuffer latched onto a player rides through walls with them (no collision while latched;
+  it depenetrates when it lets go).
 
 * **No nav links for jump pads / gaps**: walkers never use pads; pad-only ledges only hold the
   ranged enemies that spawn there.

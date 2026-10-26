@@ -68,7 +68,7 @@ pub use combat::{
 };
 pub use difficulty::PveScaling;
 pub use embers::{EmberBurst, HealSource};
-pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
+pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, SpawnOptions, lob_velocity};
 pub use grind::{GrindEvent, GrindResult, GrindStatus};
 pub use gungame::{GunGameEvent, GunGameResult};
 pub use highlight::{Highlight, HighlightRules, HighlightTracker};
@@ -566,6 +566,8 @@ pub struct SimWorld {
     pub brands: BTreeMap<HitTarget, Brand>,
     /// Live ember bursts (heal pools, `embers.rs`).
     pub embers: BTreeMap<NetId, EmberBurst>,
+    /// Hazards left by enemies: the Smelter's slag lines (`enemy/hazard.rs`).
+    pub enemy_hazards: BTreeMap<NetId, enemy::SlagLine>,
     /// Burn / Pinned status effects, keyed by the target (`status.rs`).
     pub statuses: BTreeMap<HitTarget, status::Status>,
     /// Burning patches on the ground (Flare, `status.rs`).
@@ -632,6 +634,7 @@ impl SimWorld {
             thorns: BTreeMap::new(),
             brands: BTreeMap::new(),
             embers: BTreeMap::new(),
+            enemy_hazards: BTreeMap::new(),
             statuses: BTreeMap::new(),
             fire_patches: BTreeMap::new(),
             loadout_requests: BTreeMap::new(),
@@ -672,6 +675,7 @@ impl SimWorld {
             + self.projectiles.len()
             + self.thorns.len()
             + self.embers.len()
+            + self.enemy_hazards.len()
             + self.fire_patches.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
@@ -695,6 +699,7 @@ impl SimWorld {
             || self.projectiles.contains_key(&id)
             || self.thorns.contains_key(&id)
             || self.embers.contains_key(&id)
+            || self.enemy_hazards.contains_key(&id)
             || self.fire_patches.contains_key(&id)
     }
 
@@ -781,6 +786,7 @@ impl SimWorld {
         self.thorns.clear();
         self.brands.clear();
         self.embers.clear();
+        self.enemy_hazards.clear();
         self.statuses.clear();
         self.fire_patches.clear();
         self.pending_hits.clear();
@@ -1088,6 +1094,9 @@ impl SimWorld {
         }
         for b in self.embers.values() {
             frame.insert(&b.entity_state());
+        }
+        for h in self.enemy_hazards.values() {
+            frame.insert(&h.entity_state(self.tick));
         }
         for p in self.fire_patches.values() {
             frame.insert(&p.entity_state());

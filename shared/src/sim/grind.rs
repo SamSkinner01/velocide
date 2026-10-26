@@ -826,7 +826,8 @@ mod tests {
         assert!(w10.heavy && w10.boss);
         let boss = &w10.spawns[0];
         assert!(boss.boss && boss.elite && boss.enemy == "gaoler");
-        assert!(boss.health > 3.9 * w10.spawns[1].health);
+        // `boss_health` (×1.6) here; the elite's ×2.5 is applied at spawn (×4 overall).
+        assert!(boss.health > 1.55 * w10.spawns[1].health);
         assert_eq!(w10.spawns.iter().filter(|s| s.boss).count(), 1);
         assert!(!plan(11, Difficulty::Normal, 1, &roster_now).heavy);
     }

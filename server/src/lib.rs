@@ -482,8 +482,9 @@ impl Server {
     }
 
     /// Spawns `count` enemies of definition `name` spread around `position` (on the ground
-    /// below it when there is one). Returns their ids (empty if the name is unknown; fewer
-    /// than `count` at the world's enemy limit, `shared::sim::MAX_ENEMIES`).
+    /// below it when there is one), with the match's difficulty × player health scaling
+    /// (`SimWorld::pve_scaling`; none in PvP modes). Returns their ids (empty if the name is
+    /// unknown; fewer than `count` at the world's enemy limit, `shared::sim::MAX_ENEMIES`).
     pub fn spawn_enemies(
         &mut self,
         name: &str,
@@ -497,6 +498,10 @@ impl Server {
             return ids;
         }
         let n = count.clamp(1, 64);
+        let options = shared::sim::SpawnOptions {
+            health_scale: self.world.pve_scaling(&self.tuning).health,
+            ..Default::default()
+        };
         for i in 0..n {
             // A small ring so they don't spawn inside each other.
             let offset = if n == 1 {
@@ -514,7 +519,7 @@ impl Server {
             ) {
                 pos = hit.point + Vec3::Y * 0.05;
             }
-            match self.world.spawn_enemy(name, pos, yaw) {
+            match self.world.spawn_enemy_with(name, pos, yaw, options) {
                 Some(id) => ids.push(id),
                 None => break,
             }

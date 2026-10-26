@@ -7,7 +7,7 @@
 //!
 //! | command | effect |
 //! |---|---|
-//! | `/spawn <enemy> [count]` | spawns enemies 8 m in front of you (on the ground) |
+//! | `/spawn <enemy> [count] [elite]` | spawns enemies 8 m in front of you (on the ground); `elite` makes them elites |
 //! | `/enemies` | lists enemy definitions |
 //! | `/killall` | kills every enemy |
 //! | `/god` | toggles invulnerability |
@@ -33,7 +33,7 @@ use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...]";
+const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...]";
 
 /// Lower-case letters and digits only ("Triple Nock" → "triplenock").
 fn squash(s: &str) -> String {
@@ -138,13 +138,14 @@ impl Server {
             }
             "spawn" => {
                 let Some(name) = args.first() else {
-                    return "usage: /spawn <enemy> [count]".into();
+                    return "usage: /spawn <enemy> [count] [elite]".into();
                 };
                 let count = args
                     .get(1)
                     .and_then(|c| c.parse::<u32>().ok())
                     .unwrap_or(1)
                     .clamp(1, 64);
+                let elite = args.iter().skip(1).any(|a| a.eq_ignore_ascii_case("elite"));
                 let Some(p) = self.world.players.get(&player) else {
                     return "no body".into();
                 };
@@ -153,6 +154,11 @@ impl Server {
                 // Face the player.
                 let yaw = p.yaw + std::f32::consts::PI;
                 let ids = self.spawn_enemies(name, position, yaw, count);
+                if elite {
+                    for id in &ids {
+                        self.world.make_elite(*id);
+                    }
+                }
                 if self.world.enemy_defs.get(name).is_none() {
                     format!("unknown enemy '{name}' (try /enemies)")
                 } else if ids.len() < count as usize {

@@ -5,10 +5,16 @@
 //! hovering, rearing and diving (and one swatted), the Gaoler's bash wind-up / parry window /
 //! bash, its chain sweep and its rush, the Heron's aim laser tracking, locking and the needle
 //! (also dodged with a dash), a crowd, then an arena encounter on the campaign level (doors
-//! locked, a wave spawning, the HUD readout).
+//! locked, a wave spawning, the HUD readout). The third roster (docs/enemies.md): a lineup of
+//! all nine Moulds and a row of elites, the Bellwether hauling its bell back, the toll ringing
+//! out and the frenzied pack, its bell shot mid-swing; the Snuffer rearing, latched onto you
+//! (smothering the view) and punched off; the Smelter's slag line as a telegraph and burning;
+//! the Effigy flinching under fire.
 //!
 //! ```text
-//! cargo run -p client --release --example enemy_shots -- [out_dir]   # default target/enemy_shots
+//! cargo run -p client --release --example enemy_shots -- [out_dir] [--third]
+//! # default out_dir target/enemy_shots; --third: only the third roster (Bellwether, Snuffer,
+//! # Smelter, Effigy, elites)
 //! ```
 
 use std::path::PathBuf;
@@ -134,6 +140,10 @@ fn chest(e: &EntityState) -> Vec3 {
                 kind::GAOLER => 2.0,
                 kind::HERON => 2.4,
                 kind::CENSER => 1.5,
+                kind::BELLWETHER => 2.6,
+                kind::SMELTER => 1.8,
+                kind::SNUFFER => 0.6,
+                kind::EFFIGY => 1.4,
                 _ => 1.0,
             }
 }
@@ -174,6 +184,204 @@ fn striking(e: &EntityState, index: u8) -> bool {
     e.state == AiState::Strike as u16 && attack(e) == index
 }
 
+/// A dev command, paced to the server's chat rate limit (a burst of 5, then 1 per second).
+fn cmd(h: &mut Harness, game: &mut InGame, text: &str) {
+    game.send_chat(text);
+    h.frames(game, 62);
+}
+
+fn look_from(h: &mut Harness, game: &mut InGame, at: Vec3, target: Vec3) {
+    cmd(h, game, &format!("/tp {} {} {}", at.x, at.y, at.z));
+    aim_at(game, target);
+    h.frames(game, 2);
+}
+
+fn any_enemy(game: &InGame, k: u16, pred: impl Fn(&EntityState) -> bool) -> bool {
+    game.net().is_some_and(|n| {
+        n.remote_entities()
+            .iter()
+            .any(|e| e.kind == k && e.flags & enemy_flags::DYING == 0 && pred(e))
+    })
+}
+
+/// The Bellwether, Snuffer, Smelter and Effigy, and elites.
+fn third_roster(h: &mut Harness, game: &mut InGame) {
+    // Lineup: every Mould in a row (spawned 8 m in front of where we stand, facing us), then
+    // a row of elites behind them; nobody targets us while we look.
+    cmd(h, game, "/notarget");
+    let names = [
+        "gnawer",
+        "censer",
+        "harrier",
+        "gaoler",
+        "heron",
+        "bellwether",
+        "snuffer",
+        "smelter",
+        "effigy",
+    ];
+    for (i, name) in names.iter().enumerate() {
+        let x = -16.0 + 4.0 * i as f32;
+        game.controls.yaw = 0.0;
+        game.controls.pitch = 0.0;
+        cmd(h, game, &format!("/tp {x} 0 10"));
+        h.frames(game, 4);
+        cmd(h, game, &format!("/spawn {name}"));
+        h.frames(game, 2);
+    }
+    look_from(h, game, Vec3::new(0.0, 0.0, 19.0), Vec3::new(0.0, 1.2, 2.0));
+    h.frames(game, 30);
+    h.shot("third_lineup");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+    for (i, name) in ["gnawer", "gaoler", "bellwether", "snuffer", "smelter"]
+        .iter()
+        .enumerate()
+    {
+        let x = -10.0 + 5.0 * i as f32;
+        game.controls.yaw = 0.0;
+        cmd(h, game, &format!("/tp {x} 0 10"));
+        h.frames(game, 4);
+        cmd(h, game, &format!("/spawn {name} 1 elite"));
+        h.frames(game, 2);
+    }
+    look_from(h, game, Vec3::new(0.0, 0.0, 15.0), Vec3::new(0.0, 1.4, 2.0));
+    h.frames(game, 40);
+    h.shot("elites");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+    cmd(h, game, "/notarget");
+    h.frames(game, 4);
+
+    // Bellwether: it hangs back with its pack (two Censers holding their range beside it),
+    // hauls the bell back (the bell glows), tolls; the pack is frenzied. Set up unnoticed.
+    cmd(h, game, "/notarget");
+    game.controls.yaw = 0.0;
+    cmd(h, game, "/tp 0 0 10");
+    cmd(h, game, "/spawn bellwether 1");
+    cmd(h, game, "/spawn censer 2");
+    cmd(h, game, "/tp 0 0 18");
+    if let Some(b) = nearest(game, kind::BELLWETHER) {
+        aim_at(game, b.position + Vec3::Y * 2.0);
+    }
+    cmd(h, game, "/notarget");
+    let ok = h.until(game, kind::BELLWETHER, 900, |e| windup_of(e, 1) > 150);
+    println!("bellwether toll wind-up: {ok}");
+    h.shot("bellwether_toll_windup");
+    let ok = h.until(game, kind::BELLWETHER, 120, |e| striking(e, 1));
+    h.frames(game, 3);
+    println!("bellwether toll: {ok}");
+    h.shot("bellwether_toll");
+    let ok = (0..60).any(|_| {
+        h.frames(game, 1);
+        any_enemy(game, kind::CENSER, |e| e.flags & enemy_flags::FRENZIED != 0)
+    });
+    if let Some(c) = nearest(game, kind::CENSER) {
+        aim_at(game, chest(&c));
+    }
+    h.frames(game, 8);
+    println!("frenzied pack: {ok}");
+    h.shot("frenzied_pack");
+    // The next toll: shoot the bell mid-swing (it cracks, the toll is cancelled).
+    let ok = h.until(game, kind::BELLWETHER, 900, |e| windup_of(e, 1) > 60);
+    if let Some(b) = nearest(game, kind::BELLWETHER) {
+        // The bell hangs 0.3 m behind its centre line.
+        let bell = b.position + glam::Quat::from_rotation_y(b.yaw) * Vec3::new(0.0, 2.62, 0.3);
+        aim_at(game, bell);
+    }
+    h.frames(game, 1);
+    h.moving = (0.0, 0.0, Buttons::FIRE);
+    h.frames(game, 1);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    let cracked = (0..60).any(|_| {
+        h.frames(game, 1);
+        any_enemy(game, kind::BELLWETHER, |e| {
+            e.state == AiState::Stunned as u16
+        })
+    });
+    h.frames(game, 4);
+    println!("bell shot mid-swing ({ok}): cracked {cracked}");
+    h.shot("bellwether_bell_cracked");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+
+    // Snuffer: rears up (the cap lifts off its wick), leaps and latches on; punched off.
+    game.controls.yaw = 0.0;
+    cmd(h, game, "/spawn snuffer 1");
+    let ok = h.until(game, kind::SNUFFER, 600, |e| windup_of(e, 0) > 150);
+    println!("snuffer rearing: {ok}");
+    h.shot("snuffer_windup");
+    let ok = h.until(game, kind::SNUFFER, 120, |e| {
+        e.flags & enemy_flags::LATCHED != 0
+    });
+    h.frames(game, 20);
+    println!("snuffer latched: {ok}");
+    h.shot("snuffer_latched");
+    h.moving = (0.0, 0.0, Buttons::PUNCH);
+    h.frames(game, 1);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    h.frames(game, 10);
+    if let Some(s) = nearest(game, kind::SNUFFER) {
+        aim_at(game, chest(&s));
+    }
+    h.frames(game, 2);
+    println!(
+        "snuffer punched off: {}",
+        any_enemy(game, kind::SNUFFER, |e| e.state == AiState::Stunned as u16)
+    );
+    h.shot("snuffer_punched_off");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+
+    // Smelter: the pour's telegraph line, then the burning slag. It pours as soon as it sees
+    // you at range (5-24 m; closer it heaves): catch the first half of that wind-up, the line
+    // laid and glowing, not burning yet.
+    game.controls.yaw = 0.0;
+    cmd(h, game, "/tp 0 0 20");
+    game.send_chat("/spawn smelter 1");
+    let ok = h.until(game, kind::SMELTER, 300, |e| {
+        (25..120).contains(&windup_of(e, 1))
+    });
+    // Step aside to see the line from an angle.
+    h.moving = (0.0, 1.0, Buttons::NONE);
+    h.frames(game, 8);
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    if let Some(s) = nearest(game, kind::SMELTER) {
+        aim_at(game, s.position + Vec3::Y * 0.5);
+    }
+    h.frames(game, 1);
+    println!("smelter pour wind-up: {ok}");
+    h.shot("smelter_pour_telegraph");
+    let ok = h.until(game, kind::SMELTER, 120, |e| striking(e, 1));
+    h.frames(game, 20);
+    if let Some(s) = nearest(game, kind::SMELTER) {
+        aim_at(game, s.position + Vec3::Y * 0.5);
+    }
+    h.frames(game, 1);
+    println!("smelter pour: {ok}");
+    h.shot("smelter_slag_burning");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+
+    // Effigy: a few shots into it (it flinches, sprays wax; never dies).
+    game.controls.yaw = 0.0;
+    cmd(h, game, "/spawn effigy 1");
+    h.frames(game, 10);
+    if let Some(e) = nearest(game, kind::EFFIGY) {
+        aim_at(game, chest(&e));
+    }
+    for _ in 0..3 {
+        h.moving = (0.0, 0.0, Buttons::FIRE);
+        h.frames(game, 1);
+        h.moving = (0.0, 0.0, Buttons::NONE);
+        h.frames(game, 18);
+    }
+    h.frames(game, 2);
+    h.shot("effigy_hit");
+    cmd(h, game, "/killall");
+    h.frames(game, 60);
+}
+
 fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
     let mut game = InGame::start(
         &StartMode::SinglePlayer {
@@ -199,8 +407,10 @@ fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let out = std::env::args()
         .nth(1)
+        .filter(|a| !a.starts_with("--"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target/enemy_shots"));
+    let only_third = std::env::args().any(|a| a == "--third");
     std::fs::create_dir_all(&out)?;
     let renderer = Renderer::new_headless(W, H, &RetroSettings::default())?;
     let scratch = std::env::temp_dir().join("velocide-enemy-shots-settings.ron");
@@ -221,6 +431,11 @@ fn main() -> anyhow::Result<()> {
 
     // ---- Proving ground: one type at a time. ----
     let mut game = session(&mut h, shared::sim::BUILTIN_LEVEL)?;
+    if only_third {
+        third_roster(&mut h, &mut game);
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return Ok(());
+    }
 
     // Gnawers: the pack comes knuckle-running, the jaw unhinges, the bite; then the player
     // strafes and gets pounced on.
@@ -401,6 +616,8 @@ fn main() -> anyhow::Result<()> {
     println!("heron dodged: {ok}");
     h.shot("heron_dodged");
     clear(&mut h, &mut game);
+
+    third_roster(&mut h, &mut game);
 
     // A mixed crowd.
     game.send_chat("/spawn gnawer 4");
