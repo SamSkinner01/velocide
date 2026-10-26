@@ -18,6 +18,7 @@ use client::app::Common;
 use client::cli::{LaunchOptions, StartMode};
 use client::frame::{FrameBuffers, FrameIo};
 use client::ingame::InGame;
+use client::ingame::replay::{CardInfo, draw_card};
 use client::net::{ClientConfig, NetClient};
 use client::settings::Settings;
 use engine::audio::Audio;
@@ -25,7 +26,7 @@ use engine::gfx::{RetroSettings, UiDrawList};
 use engine::input::InputState;
 use engine::physics::{MASK_MOVEMENT, MASK_SHOTS};
 use engine::render::Renderer;
-use engine::ui::UiInput;
+use engine::ui::{Rect, UiInput};
 use glam::{Vec2, Vec3};
 use server::{Server, ServerConfig};
 use shared::input::{Buttons, PlayerInput, look_dir};
@@ -248,9 +249,9 @@ fn capture_potg(rig: &mut Rig, game: &mut InGame, prefix: &str) -> anyhow::Resul
     );
     let potg = game.potg().map(|p| (p.name.clone(), p.title.clone()));
     println!("{prefix}: play of the game {potg:?}");
-    rig.frames(game, 8);
+    rig.frames(game, 21);
     rig.shot(&format!("{prefix}_card_slam"));
-    rig.frames(game, 60);
+    rig.frames(game, 50);
     rig.shot(&format!("{prefix}_card"));
     anyhow::ensure!(
         rig.until(game, 200, |g| g
@@ -275,9 +276,10 @@ fn capture_potg(rig: &mut Rig, game: &mut InGame, prefix: &str) -> anyhow::Resul
     };
     rig.until(game, 600, |g| tick_of(g) >= start as f64 + 12.0);
     rig.shot(&format!("{prefix}_replay_kill"));
-    rig.until(game, 900, |g| tick_of(g) >= end as f64 + 9.0);
+    // The last shot leaves the barrel (slow motion), then the kill lands.
+    rig.until(game, 900, |g| tick_of(g) >= end as f64 + 1.0);
     rig.shot(&format!("{prefix}_replay_final"));
-    rig.until(game, 900, |g| tick_of(g) >= end as f64 + 40.0);
+    rig.until(game, 900, |g| tick_of(g) >= end as f64 + 14.0);
     rig.shot(&format!("{prefix}_replay_after"));
     anyhow::ensure!(
         rig.until(game, 1200, |g| !g.potg_active()),
@@ -365,7 +367,8 @@ fn main() -> anyhow::Result<()> {
         println!("bot {bot} at {at:.1} ({:.0} m)", at.distance(feet));
         rig.place(*bot, at);
     }
-    rig.frames(&mut game, 50);
+    // Long enough for the replay's lead-in to show them standing there.
+    rig.frames(&mut game, 150);
     for bot in &bots {
         rig.soften(*bot);
     }
@@ -453,6 +456,25 @@ fn main() -> anyhow::Result<()> {
         rig.frames(&mut game, 8);
     }
     capture_potg(&mut rig, &mut game, "potg_remote")?;
+
+    // A client that joined after the play happened gets the card alone.
+    rig.buffers.clear(UiDrawList::canvas_for_window(W, H));
+    let canvas = Rect::from_min_size(Vec2::ZERO, rig.buffers.ui.canvas_size);
+    let card = CardInfo {
+        name: "RIVET WITCH",
+        title: "LONGSHOT 87m",
+        color: client::ingame::remote_players::player_color(rival),
+        replay: false,
+    };
+    draw_card(&mut rig.buffers.ui, &rig.common.theme, canvas, &card, 2.0);
+    let scene = client::frame::SceneParams {
+        clear_color: Vec3::new(0.03, 0.01, 0.015),
+        ..Default::default()
+    };
+    if let Err(e) = rig.renderer.render(&rig.buffers.desc(&scene), None) {
+        eprintln!("render: {e:#}");
+    }
+    rig.shot("potg_card_only");
 
     println!("{} screenshots", rig.shots.len());
     Ok(())

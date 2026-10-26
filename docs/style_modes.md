@@ -80,10 +80,12 @@ going down in co-op) empties the meter to DULL (`reset_on_death`).
 | SLAM KILL | +40 | `attack == Slam` |
 | FISTED | +30 | `attack == Fist` |
 | CLOSE CALL | ×1.5 | kill while the killer's health < 30; the extra half is its own feed line |
+| LONGSHOT | +50 | a kill from ≥ `longshot_distance` (40 m, `KillInfo::distance`) with a hitscan shot or a non-explosive projectile of the killer's own (arrows); not explosions or returned projectiles (`style::is_longshot`, docs/potg.md) |
 | STALE | (info) | the gain was cut by staleness; `points` = what was lost |
 
 Suicides score nothing. Kill bonuses are awarded together (feed order: KILL/FRAG, HEADSHOT,
-AIRKILL, AIRSHOT, RETURN TO SENDER, SLAM KILL / EXPLODED, FISTED, MULTIKILL, CLOSE CALL, STALE).
+AIRKILL, AIRSHOT, RETURN TO SENDER, SLAM KILL / EXPLODED, FISTED, MULTIKILL, LONGSHOT, CLOSE CALL,
+STALE).
 
 ### Freshness
 
@@ -297,7 +299,8 @@ player) to everyone.
 `headshot` 15, `airkill` 40, `airshot` 20, `multikill` 40, `multikill_window` 0.6, `parry` 60,
 `return_to_sender` 80, `ricochet` 30, `ricochet_per_bounce` 20, `exploded` 20, `slam_kill` 40,
 `fisted` 30, `close_call_health` 30, `close_call_multiplier` 1.5, `freshness_cost` 0.12,
-`freshness_restore` 0.04, `freshness_regen` 0.02, `freshness_min` 0.2, `stale_threshold` 0.5.
+`freshness_restore` 0.04, `freshness_regen` 0.02, `freshness_min` 0.2, `stale_threshold` 0.5,
+`longshot` 50, `longshot_distance` 40.
 
 `modes` (`ModeTuning`): `sp_death_time` 1.5, `downed_time` 15, `revive_range` 2.5,
 `revive_time` 1.5, `revive_health` 40, `fall_respawn_time` 4, `wipe_respawn_time` 3,

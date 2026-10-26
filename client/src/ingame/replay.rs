@@ -1391,9 +1391,9 @@ pub fn draw_card(list: &mut UiDrawList, t: &Theme, c: Rect, card: &CardInfo, age
     } else {
         // The title: pops from scale 6 to 4 (whole scales stay crisp) with an extrusion.
         let title = "PLAY OF THE GAME";
-        let scale = if hit < 0.06 {
+        let scale = if hit < 0.08 {
             6.0
-        } else if hit < 0.12 {
+        } else if hit < 0.16 {
             5.0
         } else {
             4.0
@@ -1767,7 +1767,7 @@ mod tests {
     fn the_lead_in_starts_after_a_respawn_and_the_tail_ends_at_a_death() {
         let mut rec = Recorder::new(RATE);
         // P1 dead until 19.5 s, dead again from 24 s.
-        let dead = |t: u32| t < 19 * RATE + RATE / 2 || t >= 24 * RATE;
+        let dead = |t: u32| !(19 * RATE + RATE / 2..24 * RATE).contains(&t);
         record(&mut rec, 0, 30 * RATE, dead);
         let h = highlight(20 * RATE, 23 * RATE);
         let clip = rec.cut(&h).unwrap();
@@ -1807,6 +1807,7 @@ mod tests {
         }
         assert_eq!(rec.frame_count(), ticks(RECORD_SECS, RATE) as usize / 2 + 1);
         let bytes = rec.approx_bytes();
+        println!("20 s recording: {:.2} MB", bytes as f64 / (1 << 20) as f64);
         assert!(bytes < 4 << 20, "{bytes} bytes");
         assert!(
             bytes > 1 << 20,
