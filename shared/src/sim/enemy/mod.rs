@@ -518,8 +518,8 @@ impl SimWorld {
         event
     }
 
-    /// An enemy died: corpse (Dying state), its heat released as a big ember burst, its pending hits cancelled,
-    /// stickies on it fall off.
+    /// An enemy died: corpse (Dying state), its heat released as a big ember burst, its pending
+    /// hits cancelled, stickies on it fall off.
     pub fn on_enemy_died(&mut self, t: &Tuning, id: NetId, _kill: &KillInfo) {
         let rate = self.tick_rate;
         let Some(e) = self.enemies.get_mut(&id) else {

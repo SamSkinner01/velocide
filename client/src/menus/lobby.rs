@@ -629,7 +629,8 @@ impl LobbyScreen {
             let age = self.time - since;
             if age < NOTICE_SECS {
                 let a = ((NOTICE_SECS - age) / 0.5).clamp(0.0, 1.0) as f32;
-                let style = TextStyle::new(fade(theme.crimson_bright, a)).shadow(fade(theme.ink, a));
+                let style =
+                    TextStyle::new(fade(theme.crimson_bright, a)).shadow(fade(theme.ink, a));
                 ui.painter()
                     .text(vec2(16.0, canvas.max.y - 22.0), text, &style);
             }

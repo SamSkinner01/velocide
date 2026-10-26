@@ -870,7 +870,9 @@ mod tests {
             super::health(&mut list, &theme, rect, "WICK", health, 100.0, 30.0, 0.2);
             list.quads
                 .iter()
-                .filter(|q| q.color == theme.crimson_bright && q.texture == crate::gfx::UiTexture::Font)
+                .filter(|q| {
+                    q.color == theme.crimson_bright && q.texture == crate::gfx::UiTexture::Font
+                })
                 .count()
         };
         assert!(red_glyphs(50.0) > 0, "the -30 hard damage counter shows");

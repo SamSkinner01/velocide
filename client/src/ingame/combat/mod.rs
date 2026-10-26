@@ -4,7 +4,7 @@
 //!   flash, viewmodel kick, punch / throw animations, sounds and tracers for our own shots.
 //! * [`fx`]: tracer beams, temporary lights, and playback of the server's cosmetic `Fx` events
 //!   (remote shots, explosions, ricochets, heals, enemy telegraphs...) at their render tick.
-//! * [`entities`]: enemies, projectiles, healing bursts, thorns and brand sigils.
+//! * [`entities`]: enemies, projectiles, ember bursts, thorns and brand sigils.
 //! * [`hud`]: hit markers, damage numbers, damage direction, vignette, death screen, thorns,
 //!   cooldowns, the Discharge gauge, BRANDED.
 //!

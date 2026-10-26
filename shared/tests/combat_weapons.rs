@@ -1,7 +1,7 @@
 //! Every weapon and fire mode against target dummies: Quill / Brand / Splinter, Bellows Blast /
 //! Gust / Both Barrels, Arclash Arc / Wisp / Discharge, Tumbler bomb / Breach / Gravewell, the
 //! fist, hit assist, cover, explosions and self damage, friendly fire, dash i-frames, hard
-//! damage and healing bursts, and weapon-state prediction — on the SimWorld directly
+//! damage and ember bursts, and weapon-state prediction — on the SimWorld directly
 //! (deterministic, no networking). Network-level tests live in `server/tests/combat_net.rs`.
 //! Thorns and ricochets: `combat_ricochet.rs`.
 
@@ -866,7 +866,7 @@ fn no_friendly_fire_in_coop_but_knockback_applies() {
     a.aim(p0, head);
     let ev = a.tap(p0, Buttons::FIRE, 1);
     assert_eq!(damage_to(&ev, HitTarget::Player(p1)), 48.0, "PvP headshot x2");
-    // PvP damage spawns a healing burst the attacker can drain.
+    // PvP damage spawns an ember burst the attacker can draw in.
     assert!(!a.world.embers.is_empty());
 }
 
@@ -912,7 +912,7 @@ fn hard_damage_caps_healing_then_recovers() {
     let c = a.world.players[&p].combat;
     assert_eq!(c.health(&t.combat), 60.0);
     assert_eq!(c.effective_max(&t.combat), 86.0);
-    // A big healing burst right here: heals only up to the effective max.
+    // A big ember burst right here: heals only up to the effective max.
     a.world
         .spawn_embers(&t, Vec3::new(0.0, 1.0, 0.0), 100.0, 3.5, 0.6, true);
     let ev = a.ticks(2);
@@ -952,7 +952,7 @@ fn punch_burst_heals_the_closest_player() {
     a.aim(near, body);
     let ev = a.tap(near, Buttons::PUNCH, 3);
     assert_eq!(dmg(&ev, d), 25.0);
-    assert_eq!(a.health(near), 65.0, "closest player drains the 25 HP pool");
+    assert_eq!(a.health(near), 65.0, "closest player draws in the 25 HP pool");
     assert_eq!(a.health(far), 40.0, "the other player gets nothing");
 }
 

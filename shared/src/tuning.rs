@@ -187,7 +187,7 @@ impl Default for MovementTuning {
     }
 }
 
-/// Combat rules: player vitals, fist/parry, healing bursts, thorns, hit assist, explosions and
+/// Combat rules: player vitals, fist/parry, ember bursts, thorns, hit assist, explosions and
 /// every weapon.
 /// Damage in HP, distances in metres, speeds in m/s, times in seconds, angles in degrees
 /// (cones are *full* apertures: a 70° cone accepts ±35° off the aim). See `docs/gameplay.md`

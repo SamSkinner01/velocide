@@ -1,7 +1,7 @@
 //! Replicated entity state, quantisation and snapshot delta compression.
 //!
 //! Every replicated thing (players, doors, and later enemies, projectiles, pickups, thorns,
-//! healing bursts...) is a generic [`NetEntity`] identified by a [`NetId`]. The server builds one
+//! ember bursts...) is a generic [`NetEntity`] identified by a [`NetId`]. The server builds one
 //! [`NetFrame`] (all entities, quantised) per snapshot and encodes it for each client as a
 //! **delta** against the last frame that client acknowledged ([`encode_delta`]); the client
 //! applies it to its copy of the same baseline ([`decode_delta`]). A full snapshot is simply a

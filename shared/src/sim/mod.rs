@@ -2,7 +2,7 @@
 //!
 //! [`SimWorld`] is the whole game state the server simulates (and the client mirrors for
 //! prediction): the level and its collision world, the players (movement + combat state),
-//! enemies, projectiles, thorns, brands and healing bursts.
+//! enemies, projectiles, thorns, brands and ember bursts.
 //!
 //! One server tick ([`SimWorld::step`]) is a fixed pipeline:
 //!
@@ -15,7 +15,7 @@
 //! 2. **projectiles** (sweeps, impacts, explosions, parry-delayed impacts), then open parry
 //!    windows are re-checked against the moved projectiles.
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
-//! 4. **thorns**, **brands**, **healing bursts**, **vitals** (hard damage recovery,
+//! 4. **thorns**, **brands**, **ember bursts**, **vitals** (hard damage recovery,
 //!    respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
 //! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
@@ -615,11 +615,12 @@ impl SimWorld {
 
     /// Allocates an id for a new dynamic replicated entity. Ids count up from
     /// `NetId::DYNAMIC_START`; after the last one (2²⁴ − 1) they wrap around, skipping ids
-    /// still in use by an enemy, projectile, thorn or healing burst. `None` if no id is free:
+    /// still in use by an enemy, projectile, thorn or ember burst. `None` if no id is free:
     /// the spawn is refused.
     pub fn alloc_net_id(&mut self) -> Option<NetId> {
         let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
-        let live = self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.embers.len();
+        let live =
+            self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.embers.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);

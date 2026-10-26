@@ -10,7 +10,8 @@ use engine::assets::meshgen::MeshBuilder;
 use engine::glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::kit::{
-    self, BLACK_STEEL, MIRROR_STEEL, GUNMETAL, add, add_mirrored, block, gem, limb, rgb, spike, tube,
+    self, BLACK_STEEL, GUNMETAL, MIRROR_STEEL, add, add_mirrored, block, gem, limb, rgb, spike,
+    tube,
 };
 use super::rig::{JointDef, Pose, Shade, static_part};
 use super::{ModelId, PartSet};

@@ -4,7 +4,7 @@
 //!
 //! Everything that hurts anything goes through `apply_damage`: it applies the rules (brands,
 //! dash i-frames, spawn protection, friendly fire, self damage, armour, weak points, hard
-//! damage), knockback, healing bursts, aggro and kills, and emits [`SimEvent::Damage`] /
+//! damage), knockback, ember bursts, aggro and kills, and emits [`SimEvent::Damage`] /
 //! [`SimEvent::Killed`]. Those events are what the server turns into hit markers, damage
 //! indicators and the kill feed, and what the style system scores.
 
@@ -521,7 +521,7 @@ impl SimWorld {
         if p.combat.damage >= c.max_health {
             event.killed = true;
         }
-        // PvP: damaging another player spawns a healing burst too (players compete for it).
+        // PvP: damaging another player spawns an ember burst too (players compete for it).
         if let Owner::Player(_) = info.source
             && !is_self
             && dealt > 0.0
