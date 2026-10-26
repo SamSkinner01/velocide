@@ -519,6 +519,29 @@ fn harrier_dives_in_a_straight_line_hits_once_and_climbs_back() {
 }
 
 #[test]
+fn a_harrier_dive_is_flagged_parryable_from_start_to_end() {
+    // The client's parry cues (strobe + the accessibility "!" icon) read `PARRYABLE`; the
+    // swat works for the whole dive, so the flag must cover all of it.
+    let mut a = Arena::coop();
+    let p = a.player(0, Vec3::ZERO, 0.0);
+    god(&mut a, p);
+    let id = spawn(&mut a, "harrier", Vec3::new(0.0, 7.0, -12.0), 0.0);
+    a.world.enemies.get_mut(&id).unwrap().health = 500.0;
+    let mut log = Log::default();
+    assert!(!parryable_flag(&a, id), "not while hovering");
+    assert!(until(&mut a, id, 8 * 60, &mut log, |a| a.world.enemies[&id].state == AiState::Strike), "dived");
+    let mut ticks = 0;
+    while a.world.enemies[&id].state == AiState::Strike && ticks < 120 {
+        assert!(parryable_flag(&a, id), "dive tick {ticks} without the flag");
+        a.tick();
+        ticks += 1;
+    }
+    assert!(ticks >= 5, "a real dive ({ticks} ticks)");
+    a.ticks(2);
+    assert!(!parryable_flag(&a, id), "cleared once it pulls out");
+}
+
+#[test]
 fn swatting_a_diving_harrier_is_a_parry() {
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
