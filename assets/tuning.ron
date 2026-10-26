@@ -118,8 +118,9 @@
         slam_knockback: 12.0,
         slam_min_power_scale: 0.3,
 
-        blood: (
-            heal_fraction: 0.4,       // of damage dealt becomes a heal pool
+        // Ember bursts (kindling): every hit sheds embers the closest Shrike draws in.
+        embers: (
+            heal_fraction: 0.4,       // of damage dealt becomes the burst's heal pool
             melee_heal_fraction: 1.0, // punches and parries
             radius: 3.5,
             lifetime: 0.6,

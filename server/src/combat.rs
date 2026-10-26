@@ -216,7 +216,7 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             SimEvent::Healed {
                 player,
                 amount,
-                source: HealSource::Blood(_),
+                source: HealSource::Embers(_),
                 position,
             } => fx.push(
                 tick,

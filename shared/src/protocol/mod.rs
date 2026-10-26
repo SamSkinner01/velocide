@@ -247,7 +247,7 @@ pub enum GameEvent {
     Damaged(DamageReport),
     /// The recipient's attacks hit something (merged per target per tick). Attacker only.
     HitConfirm(HitReport),
-    /// A player or an enemy died (kill feed, gibs, death cam, style). Everyone.
+    /// A player or an enemy died (kill feed, death effects, death cam, style). Everyone.
     Killed(KillInfo),
     /// A successful parry (hitstop + white flash for the parrier, `Sfx::Parry` for all).
     /// Everyone.

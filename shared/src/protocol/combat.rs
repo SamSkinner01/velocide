@@ -116,8 +116,8 @@ pub enum Fx {
     },
     /// Another player punched (viewmodel/arm anim for remote players). Not sent to the puncher.
     Punch { player: PlayerId, hit: bool },
-    /// A blood burst healed a player: red streak from `from` to the player; heal flash if it
-    /// is you.
+    /// A player drew in an ember burst (kindling): a stream of sparks from `from` into the
+    /// player's chest lantern; heal flash if it is you.
     Heal {
         player: PlayerId,
         /// Tenths of HP.

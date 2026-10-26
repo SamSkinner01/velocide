@@ -57,6 +57,8 @@ const ELBOW: [f32; 3] = [0.27, 1.14, 0.0];
 const WRIST: [f32; 3] = [0.28, 0.89, 0.0];
 /// Centre of the chest lantern.
 const LANTERN: [f32; 3] = [0.0, 1.29, -0.185];
+/// Height of the chest lantern above the feet at scale 1 (kindling streams aim at it).
+pub const LANTERN_HEIGHT: f32 = LANTERN[1];
 /// Base of the wick flame (its pivot: the flame flickers in height around it).
 const WICK_BASE: [f32; 3] = [LANTERN[0], LANTERN[1] - 0.06, LANTERN[2]];
 /// Where the coat tails hang from (right side; the left is mirrored).

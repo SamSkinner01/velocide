@@ -358,7 +358,7 @@ impl SimWorld {
             .resize_with(self.level.encounters.len(), EncounterState::default);
     }
 
-    /// Removes an enemy right away (no death, no blood): its projectiles and pending melee
+    /// Removes an enemy right away (no death, no heat released): its projectiles and pending melee
     /// hits go with it.
     pub fn remove_enemy(&mut self, id: NetId) {
         if self.enemies.remove(&id).is_none() {

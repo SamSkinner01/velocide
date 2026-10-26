@@ -309,7 +309,7 @@ pub struct KillInfo {
     /// CLOSE CALL.
     pub killer_health: f32,
     pub killer_effective_max: f32,
-    /// Damage beyond what was needed (gib size).
+    /// Damage beyond what was needed (how violently it breaks apart).
     pub overkill: f32,
     pub tick: u32,
 }
@@ -526,7 +526,7 @@ impl SimWorld {
             && !is_self
             && dealt > 0.0
         {
-            self.spawn_blood_for_damage(t, &event);
+            self.spawn_embers_for_damage(t, &event);
         }
         event
     }

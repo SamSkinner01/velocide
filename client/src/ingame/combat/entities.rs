@@ -12,7 +12,8 @@
 //!   / lights per kind (bomb fuse sparks, Wisp crackle + hum, the stuck Gravewell's vortex and
 //!   hum, ember bombs smoke and drop embers, needles draw a long streak); `PARRIED` white-hot,
 //!   `PENDING` hidden.
-//! * **healing bursts** (128): mist while the pool lasts.
+//! * **ember bursts** (128): heal pools; glowing embers (the palette's heal colour) rising
+//!   over a smoky wisp while the pool lasts.
 //! * **thorns** (160): the glass spike flying along its path, planted tip-first in the
 //!   surface (a pulsing relay glint so it reads at a distance) or lying on the floor.
 //! * **brands**: a turning sigil over every branded enemy / player (`BRANDED` flag).
@@ -24,7 +25,7 @@ use engine::gfx::{DrawItem, PointLight};
 use engine::physics::CollisionWorld;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::protocol::{
-    EntityState, NetId, blood_flags, enemy_flags, kind, player_flags, projectile_flags,
+    EntityState, NetId, ember_flags, enemy_flags, kind, player_flags, projectile_flags,
     thorn_flags,
 };
 use shared::sim::AiState;
@@ -158,7 +159,7 @@ struct ProjVis {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct BloodVis {
+struct EmberVis {
     puff: f32,
     seen: bool,
 }
@@ -231,7 +232,7 @@ impl EntityFrame<'_> {
 pub struct EntityView {
     enemies: HashMap<NetId, EnemyVis>,
     projectiles: HashMap<NetId, ProjVis>,
-    blood: HashMap<NetId, BloodVis>,
+    embers: HashMap<NetId, EmberVis>,
     thorns: HashMap<NetId, ThornVis>,
     time: f64,
 }
@@ -244,7 +245,7 @@ impl EntityView {
     pub fn clear(&mut self) {
         self.enemies.clear();
         self.projectiles.clear();
-        self.blood.clear();
+        self.embers.clear();
         self.thorns.clear();
     }
 
@@ -320,7 +321,7 @@ impl EntityView {
         for v in self.projectiles.values_mut() {
             v.seen = false;
         }
-        for v in self.blood.values_mut() {
+        for v in self.embers.values_mut() {
             v.seen = false;
         }
         for v in self.thorns.values_mut() {
@@ -329,12 +330,12 @@ impl EntityView {
         for e in f.entities {
             if kind::is_enemy(e.kind) {
                 self.update_enemy(e, f, dt, effects, audio, rng);
-            } else if e.kind == kind::BLOOD_BURST {
-                let v = self.blood.entry(e.id).or_default();
+            } else if e.kind == kind::EMBER_BURST {
+                let v = self.embers.entry(e.id).or_default();
                 let first = !v.seen && v.puff == 0.0;
                 v.seen = true;
                 let radius = e.state as f32 / 10.0;
-                let big = e.flags & blood_flags::BIG != 0;
+                let big = e.flags & ember_flags::BIG != 0;
                 if first {
                     let n = if big {
                         9
@@ -342,14 +343,14 @@ impl EntityView {
                         (3.0 + e.health as f32 / 4.0).min(8.0) as usize
                     };
                     for _ in 0..n {
-                        blood_mist(effects, rng, e.position, radius, big);
+                        ember_puff(effects, rng, e.position, radius, big);
                     }
                     v.puff = 0.001;
                 }
                 v.puff += dt;
                 if e.health > 0 && v.puff > if big { 0.25 } else { 0.15 } {
                     v.puff = 0.001;
-                    blood_mist(effects, rng, e.position, radius, big);
+                    ember_puff(effects, rng, e.position, radius, big);
                 }
             } else if e.kind == kind::THORN {
                 let pos = replicated_position(e, f.render_tick, f.tick_rate, f.tuning);
@@ -387,7 +388,7 @@ impl EntityView {
         }
         self.enemies.retain(|_, v| v.seen);
         self.projectiles.retain(|_, v| v.seen);
-        self.blood.retain(|_, v| v.seen);
+        self.embers.retain(|_, v| v.seen);
         self.thorns.retain(|_, v| v.seen);
     }
 
@@ -945,19 +946,52 @@ fn thorn_transform(e: &EntityState, f: &EntityFrame, time: f64) -> (Quat, Vec3) 
     (along * Quat::from_rotation_z((time * 9.0) as f32), pos)
 }
 
-/// One slowly drifting puff of red mist.
-fn blood_mist(effects: &mut Effects, rng: &mut Rng, center: Vec3, radius: f32, big: bool) {
+/// One puff of a live ember burst: a few glowing embers (the palette's heal colour, so the
+/// heal reads the same in every colour-vision mode) lifting off a faint warm glow, over a
+/// wisp of grey smoke.
+fn ember_puff(effects: &mut Effects, rng: &mut Rng, center: Vec3, radius: f32, big: bool) {
+    let ember = crate::palette::palette().heal;
     let r = radius.max(0.5);
-    let p = center + rng.dir() * r * 0.35;
+    let p = center + rng.dir() * r * 0.3;
+    for _ in 0..if big { 4 } else { 3 } {
+        effects.spawn(Particle {
+            position: p + rng.dir() * r * 0.15,
+            velocity: rng.dir() * 0.7 + Vec3::Y * rng.range(0.5, 1.4),
+            gravity: -0.6,
+            drag: 1.0,
+            max_life: rng.range(0.5, 1.0),
+            size: Vec2::splat(rng.range(0.07, 0.13)),
+            end_scale: 0.4,
+            color: ember,
+            end_alpha: 0.0,
+            texture: FxTex::Spark,
+            additive: true,
+            rotation: rng.angle(),
+            spin: rng.range(-3.0, 3.0),
+            ..Default::default()
+        });
+    }
     effects.spawn(Particle {
         position: p,
-        velocity: rng.dir() * 0.6 + Vec3::Y * 0.3,
-        gravity: -0.2,
+        velocity: Vec3::Y * 0.2,
+        max_life: rng.range(0.3, 0.5),
+        size: Vec2::splat(r * rng.range(0.16, 0.24)),
+        end_scale: 1.4,
+        color: ember * Vec4::new(1.0, 1.0, 1.0, if big { 0.3 } else { 0.38 }),
+        end_alpha: 0.0,
+        texture: FxTex::Glow,
+        additive: true,
+        ..Default::default()
+    });
+    effects.spawn(Particle {
+        position: p,
+        velocity: rng.dir() * 0.4 + Vec3::Y * 0.5,
+        gravity: -0.3,
         drag: 1.0,
-        max_life: rng.range(0.5, 0.9),
-        size: Vec2::splat(r * rng.range(0.2, 0.32)),
-        end_scale: 1.8,
-        color: Vec4::new(0.6, 0.03, 0.05, if big { 0.22 } else { 0.32 }),
+        max_life: rng.range(0.6, 1.0),
+        size: Vec2::splat(r * rng.range(0.14, 0.22)),
+        end_scale: 2.0,
+        color: Vec4::new(0.34, 0.31, 0.29, if big { 0.2 } else { 0.26 }),
         end_alpha: 0.0,
         texture: FxTex::Smoke,
         rotation: rng.angle(),

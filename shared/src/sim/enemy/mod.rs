@@ -513,12 +513,12 @@ impl SimWorld {
         event.health_after = e.health.max(0.0);
         event.killed = e.health <= 0.0;
         if dealt > 0.0 {
-            self.spawn_blood_for_damage(t, &event);
+            self.spawn_embers_for_damage(t, &event);
         }
         event
     }
 
-    /// An enemy died: corpse (Dying state), death blood burst, its pending hits cancelled,
+    /// An enemy died: corpse (Dying state), its heat released as a big ember burst, its pending hits cancelled,
     /// stickies on it fall off.
     pub fn on_enemy_died(&mut self, t: &Tuning, id: NetId, _kill: &KillInfo) {
         let rate = self.tick_rate;
@@ -529,8 +529,8 @@ impl SimWorld {
         e.set_state(AiState::Dying, ticks);
         e.target = None;
         let center = e.center();
-        let (pool, radius) = (e.def.drops.blood_pool, e.def.drops.blood_radius);
-        self.spawn_blood(t, center, pool, radius, t.combat.blood.death_lifetime, true);
+        let (pool, radius) = (e.def.drops.heat, e.def.drops.heat_radius);
+        self.spawn_embers(t, center, pool, radius, t.combat.embers.death_lifetime, true);
         self.pending_hits
             .retain(|h| !matches!(h.key, super::parry::ParryKey::Melee(e, _) if e == id));
         for p in self.projectiles.values_mut() {
@@ -565,6 +565,13 @@ impl SimWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_blood_drop_names_still_parse() {
+        // Definitions written before the ember rename.
+        let d: Drops = ron::from_str("(blood_pool: 40.0, blood_radius: 5.0)").unwrap();
+        assert_eq!((d.heat, d.heat_radius), (40.0, 5.0));
+    }
 
     /// The roster contract (docs/roster.md): names, net kinds, capsule sizes, health, speed
     /// and weak points of the built-in definitions.

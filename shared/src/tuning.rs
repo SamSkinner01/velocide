@@ -258,7 +258,9 @@ pub struct CombatTuning {
     /// Damage/knockback scale of a zero-power slam (full power = 1.0).
     pub slam_min_power_scale: f32,
 
-    pub blood: BloodTuning,
+    /// Ember bursts (kindling). Old tuning files call this section `blood`.
+    #[serde(alias = "blood")]
+    pub embers: EmberTuning,
     pub hit_assist: HitAssistTuning,
     pub thorn: ThornTuning,
     pub quill: QuillTuning,
@@ -307,7 +309,7 @@ impl Default for CombatTuning {
             slam_knockback: 12.0,
             slam_min_power_scale: 0.3,
 
-            blood: BloodTuning::default(),
+            embers: EmberTuning::default(),
             hit_assist: HitAssistTuning::default(),
             thorn: ThornTuning::default(),
             quill: QuillTuning::default(),
@@ -319,10 +321,10 @@ impl Default for CombatTuning {
     }
 }
 
-/// Blood bursts: close-range healing.
+/// Ember bursts: close-range healing (kindling, `sim/embers.rs`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct BloodTuning {
+pub struct EmberTuning {
     /// Heal pool as a fraction of the damage dealt.
     pub heal_fraction: f32,
     /// Heal pool fraction for melee and parry damage.
@@ -339,7 +341,7 @@ pub struct BloodTuning {
     pub merge_window: f32,
 }
 
-impl Default for BloodTuning {
+impl Default for EmberTuning {
     fn default() -> Self {
         Self {
             heal_fraction: 0.4,
@@ -1004,7 +1006,7 @@ impl CombatTuning {
         clamp!(self, d, 0.0, 360.0; parry_cone_degrees, parry_auto_aim_degrees,
             punch_cone_degrees);
         clamp!(self, d, 0.0, MAX_SPEED; parry_max_speed, punch_knockback, slam_knockback);
-        self.blood.sanitize();
+        self.embers.sanitize();
         self.hit_assist.sanitize();
         self.thorn.sanitize();
         self.quill.sanitize();
@@ -1015,7 +1017,7 @@ impl CombatTuning {
     }
 }
 
-impl BloodTuning {
+impl EmberTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
         clamp!(self, d, 0.0, MAX_MULT; heal_fraction, melee_heal_fraction);
@@ -1312,5 +1314,13 @@ mod tests {
         let t: Tuning = ron::from_str("(movement: (jump_speed: 20.0))").unwrap();
         assert_eq!(t.movement.jump_speed, 20.0);
         assert_eq!(t.movement.gravity, MovementTuning::default().gravity);
+    }
+
+    #[test]
+    fn old_blood_section_still_loads() {
+        // Tuning files written before the ember rename call the section `blood`.
+        let t: Tuning = ron::from_str("(combat: (blood: (heal_fraction: 0.25)))").unwrap();
+        assert_eq!(t.combat.embers.heal_fraction, 0.25);
+        assert_eq!(t.combat.embers.radius, EmberTuning::default().radius);
     }
 }

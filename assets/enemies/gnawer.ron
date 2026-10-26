@@ -75,7 +75,7 @@
         retarget_interval: 0.25,
         repath_interval: 0.5,
     ),
-    drops: (blood_pool: 25.0, blood_radius: 4.5),
+    drops: (heat: 25.0, heat_radius: 4.5),
     colors: (
         body: (0.66, 0.63, 0.57),
         accent: (0.7, 0.5, 0.2),

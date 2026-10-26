@@ -649,7 +649,7 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
         (ModelId::Thorn, "THORN"),
         (ModelId::EmberBomb, "EMBER"),
         (ModelId::Needle, "NEEDLE"),
-        (ModelId::BloodCore, "CORE"),
+        (ModelId::EmberCore, "CORE"),
     ];
     let mut shot = Shot::new(look_at(
         Vec3::new(0.0, 1.4, 3.3),

@@ -118,9 +118,9 @@ pub mod kind {
     /// The Heron's needle (fast, straight, parryable).
     pub const NEEDLE: u16 = 81;
 
-    // 128..160: pickups / blood.
-    /// Heal pool: `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
-    pub const BLOOD_BURST: u16 = 128;
+    // 128..160: pickups / ember bursts.
+    /// Ember burst (heal pool): `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
+    pub const EMBER_BURST: u16 = 128;
 
     // 160..176: thorns.
     /// Thrown relay spike, replicated by trajectory like projectiles (gravity
@@ -216,8 +216,8 @@ pub mod projectile_flags {
     pub const ENEMY: u32 = 1 << 3;
 }
 
-/// Flag bits of blood bursts.
-pub mod blood_flags {
+/// Flag bits of ember bursts.
+pub mod ember_flags {
     /// Enemy death burst.
     pub const BIG: u32 = 1 << 0;
 }

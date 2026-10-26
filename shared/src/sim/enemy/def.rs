@@ -317,16 +317,19 @@ impl Default for AiDef {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Drops {
-    /// Heal pool of the death burst.
-    pub blood_pool: f32,
-    pub blood_radius: f32,
+    /// The heat it releases on death: heal pool (HP) of its big ember burst.
+    #[serde(alias = "blood_pool")]
+    pub heat: f32,
+    /// Radius (m) of that burst.
+    #[serde(alias = "blood_radius")]
+    pub heat_radius: f32,
 }
 
 impl Default for Drops {
     fn default() -> Self {
         Self {
-            blood_pool: 25.0,
-            blood_radius: 4.5,
+            heat: 25.0,
+            heat_radius: 4.5,
         }
     }
 }

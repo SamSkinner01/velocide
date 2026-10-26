@@ -29,7 +29,7 @@
 //! [`NetFrame`]; new entity types add themselves there with their own [`kind`] constant.
 
 pub mod area; // Gust, Discharge, Breach
-pub mod blood;
+pub mod embers;
 pub mod brand;
 pub mod combat;
 pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
@@ -53,7 +53,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub use blood::{BloodBurst, HealSource};
+pub use embers::{EmberBurst, HealSource};
 pub use brand::Brand;
 pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
@@ -532,7 +532,8 @@ pub struct SimWorld {
     pub thorns: BTreeMap<NetId, Thorn>,
     /// Live Quill brands, keyed by the branded target (`brand.rs`).
     pub brands: BTreeMap<HitTarget, Brand>,
-    pub blood: BTreeMap<NetId, BloodBurst>,
+    /// Live ember bursts (heal pools, `embers.rs`).
+    pub embers: BTreeMap<NetId, EmberBurst>,
     /// Parry-delayed enemy melee damage.
     pub pending_hits: Vec<parry::PendingHit>,
     /// Game-mode state: rules, stats, checkpoint, downed players, match phase (`modes.rs`).
@@ -586,7 +587,7 @@ impl SimWorld {
             projectiles: BTreeMap::new(),
             thorns: BTreeMap::new(),
             brands: BTreeMap::new(),
-            blood: BTreeMap::new(),
+            embers: BTreeMap::new(),
             pending_hits: Vec::new(),
             mode,
             style: StyleSystem::default(),
@@ -618,7 +619,7 @@ impl SimWorld {
     /// the spawn is refused.
     pub fn alloc_net_id(&mut self) -> Option<NetId> {
         let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
-        let live = self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.blood.len();
+        let live = self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.embers.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -640,7 +641,7 @@ impl SimWorld {
         self.enemies.contains_key(&id)
             || self.projectiles.contains_key(&id)
             || self.thorns.contains_key(&id)
-            || self.blood.contains_key(&id)
+            || self.embers.contains_key(&id)
     }
 
     /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
@@ -718,7 +719,7 @@ impl SimWorld {
         self.projectiles.clear();
         self.thorns.clear();
         self.brands.clear();
-        self.blood.clear();
+        self.embers.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
         self.reset_encounters();
@@ -866,7 +867,7 @@ impl SimWorld {
         // 4. Thorns, brands, healing, vitals.
         self.step_thorns(tuning);
         self.step_brands();
-        self.step_blood(tuning);
+        self.step_embers(tuning);
         self.tick_vitals(tuning);
 
         // 5. World rules, then arena encounters (triggers, waves, doors).
@@ -997,7 +998,7 @@ impl SimWorld {
         for th in self.thorns.values() {
             frame.insert(&th.entity_state());
         }
-        for b in self.blood.values() {
+        for b in self.embers.values() {
             frame.insert(&b.entity_state());
         }
         // Encounter state (HUD: wave, enemies left).
@@ -1313,14 +1314,14 @@ mod tests {
         // One live entity of every kind at the start of the dynamic range.
         let projectile = rivet(&mut w, &t).unwrap();
         let enemy = w.spawn_enemy("gnawer", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
-        let blood = w
-            .spawn_blood(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
+        let embers = w
+            .spawn_embers(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
             .unwrap();
         let prism = w
             .spawn_thorn(&t, PlayerId(9), Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO)
             .unwrap();
         assert_eq!(
-            [projectile, enemy, blood, prism].map(|id| id.0),
+            [projectile, enemy, embers, prism].map(|id| id.0),
             [start, start + 1, start + 2, start + 3]
         );
         // A very long session reaches the end of the id space ...
@@ -1334,11 +1335,11 @@ mod tests {
         let next = rivet(&mut w, &t).unwrap();
         assert_eq!(next.0, start + 5);
         assert_eq!(w.projectiles.len(), 4);
-        for id in [projectile, enemy, blood, prism, last, wrapped, next] {
+        for id in [projectile, enemy, embers, prism, last, wrapped, next] {
             assert!(id.0 >= start && id.0 < NetId::STATIC_START);
         }
         assert!(w.projectiles.contains_key(&projectile) && w.enemies.contains_key(&enemy));
-        assert!(w.blood.contains_key(&blood) && w.thorns.contains_key(&prism));
+        assert!(w.embers.contains_key(&embers) && w.thorns.contains_key(&prism));
     }
 
     #[test]

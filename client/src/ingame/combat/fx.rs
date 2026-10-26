@@ -380,7 +380,7 @@ pub struct FxCtx<'a> {
     pub entities: &'a [shared::protocol::EntityState],
     pub local: Option<PlayerId>,
     pub listener: Vec3,
-    /// Local player's chest (heal streak target).
+    /// Local player's chest lantern (kindling stream target).
     pub local_chest: Option<Vec3>,
     /// Last drawn position of thorns (for `ThornExpired`).
     pub thorn_position: &'a dyn Fn(NetId) -> Option<Vec3>,
@@ -660,7 +660,7 @@ pub fn thorn_plant(ctx: &mut FxCtx, p: Vec3) {
     ctx.audio.play(Sfx::ThornPlant, PlayParams::at(p));
 }
 
-/// Impact on a body (enemy or Shrike): sparks and a puff of ash, no blood.
+/// Impact on a body (a Mould or a Shrike): sparks and a puff of ash.
 pub fn body_impact(effects: &mut Effects, p: Vec3, dir: Vec3, amount: f32) {
     let n = (4.0 + amount * 8.0).min(16.0) as usize;
     effects.sparks(p, dir, n);
@@ -803,21 +803,21 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             let to = if Some(*player) == ctx.local {
                 ctx.local_chest
             } else {
+                // Into the chest lantern of their (scaled-up) Shrike.
+                use crate::models::shrike::{LANTERN_HEIGHT, REMOTE_SCALE};
                 ctx.entities
                     .iter()
                     .find(|e| e.id == NetId::player(*player))
-                    .map(|e| e.position + Vec3::Y * 1.0)
+                    .map(|e| e.position + Vec3::Y * LANTERN_HEIGHT * REMOTE_SCALE)
             };
             let Some(to) = to else {
                 return;
             };
-            heal_streak(ctx, from, to, *amount_tenths as f32 / 10.0);
-            if Some(*player) == ctx.local {
+            let local = Some(*player) == ctx.local;
+            heal_streak(ctx, from, to, *amount_tenths as f32 / 10.0, !local);
+            if local {
                 let amount = *amount_tenths as f32 / 10.0;
-                ctx.feedback.flash(
-                    Vec3::new(0.95, 0.15, 0.2),
-                    (0.08 + amount / 120.0).min(0.25),
-                );
+                ctx.feedback.heal_flash(amount);
                 ctx.audio.play(
                     Sfx::Heal,
                     PlayParams::default().with_volume((0.4 + amount / 30.0).min(1.0)),
@@ -1087,26 +1087,42 @@ pub fn thorn_shatter(ctx: &mut FxCtx, p: Vec3) {
     }
 }
 
-/// Glowing motes flowing from a healing burst into the healed player.
-pub fn heal_streak(ctx: &mut FxCtx, from: Vec3, to: Vec3, amount: f32) {
-    let n = (amount * 0.6).clamp(3.0, 14.0) as usize;
-    let time = 0.22;
+/// Kindling: a stream of sparks drawn out of an ember burst (`from`) into the healed Shrike's
+/// chest lantern (`to`), in the palette's heal colour. `flare` also brightens the lantern
+/// (other players; your own heal shows as the screen flash instead).
+pub fn heal_streak(ctx: &mut FxCtx, from: Vec3, to: Vec3, amount: f32, flare: bool) {
+    let color = crate::palette::palette().heal;
+    let n = (amount * 0.8).clamp(5.0, 18.0) as usize;
+    // Every spark reaches the lantern within `time` and goes out there; staggering their starts
+    // along the path draws the burst out into a stream instead of one puff.
+    let time = 0.24;
     for i in 0..n {
-        let start = from + ctx.rng.dir() * 0.4;
-        let delay = i as f32 / n as f32 * 0.1;
+        let along = i as f32 / n as f32 * 0.55;
+        let start = from.lerp(to, along) + ctx.rng.dir() * 0.45 * (1.0 - along);
+        let life = time * (1.0 - along) + 0.02;
+        let spark = i % 3 != 0;
         ctx.effects.spawn(Particle {
             position: start,
-            velocity: (to - start) / time + ctx.rng.dir() * 0.5,
-            drag: 0.0,
-            max_life: time + delay,
-            size: Vec2::splat(0.16),
-            end_scale: 0.4,
-            color: Vec4::new(1.0, 0.1, 0.12, 1.0),
-            end_alpha: 0.6,
-            texture: FxTex::Glow,
+            velocity: (to - start) / life,
+            max_life: life,
+            size: Vec2::splat(if spark { 0.11 } else { 0.2 }),
+            end_scale: if spark { 0.5 } else { 0.3 },
+            color: if spark {
+                color
+            } else {
+                color * Vec4::new(1.0, 1.0, 1.0, 0.7)
+            },
+            end_alpha: 0.8,
+            texture: if spark { FxTex::Spark } else { FxTex::Glow },
             additive: true,
+            rotation: ctx.rng.angle(),
+            spin: ctx.rng.range(-8.0, 8.0),
             ..Default::default()
         });
+    }
+    if flare {
+        ctx.effects
+            .glow(to, color * Vec4::new(1.0, 1.0, 1.0, 0.8), 0.45, 0.25);
     }
 }
 

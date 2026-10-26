@@ -10,7 +10,7 @@ use engine::assets::meshgen::MeshBuilder;
 use engine::glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
 use super::kit::{
-    self, BLACK_STEEL, CHROME, GUNMETAL, add, add_mirrored, block, gem, limb, rgb, spike, tube,
+    self, BLACK_STEEL, MIRROR_STEEL, GUNMETAL, add, add_mirrored, block, gem, limb, rgb, spike, tube,
 };
 use super::rig::{JointDef, Pose, Shade, static_part};
 use super::{ModelId, PartSet};
@@ -31,7 +31,7 @@ const AIM_LASER: [JointDef; 2] = [
     static_part("core", Shade::Glow),
     static_part("sheath", Shade::Glow),
 ];
-const BLOOD_CORE: [JointDef; 1] = [static_part("core", Shade::Glow)];
+const EMBER_CORE: [JointDef; 1] = [static_part("core", Shade::Glow)];
 const JUMP_PAD: [JointDef; 3] = [
     static_part("base", Shade::Lit),
     static_part("rim", Shade::Lit),
@@ -71,7 +71,7 @@ pub(crate) fn joints(id: ModelId) -> &'static [JointDef] {
         ModelId::EmberBomb => &EMBER_BOMB,
         ModelId::Needle => &NEEDLE,
         ModelId::AimLaser => &AIM_LASER,
-        ModelId::BloodCore => &BLOOD_CORE,
+        ModelId::EmberCore => &EMBER_CORE,
         ModelId::JumpPad => &JUMP_PAD,
         ModelId::Checkpoint => &CHECKPOINT,
         ModelId::ExitGate => &EXIT_GATE,
@@ -86,7 +86,7 @@ pub(crate) fn build(id: ModelId) -> Vec<ModelPart> {
         ModelId::EmberBomb => ember_bomb(),
         ModelId::Needle => needle(),
         ModelId::AimLaser => aim_laser(),
-        ModelId::BloodCore => blood_core(),
+        ModelId::EmberCore => ember_core(),
         ModelId::JumpPad => jump_pad(),
         ModelId::Checkpoint => checkpoint(),
         ModelId::ExitGate => exit_gate(),
@@ -95,7 +95,7 @@ pub(crate) fn build(id: ModelId) -> Vec<ModelPart> {
             // Characters, weapons and player projectiles are built by their own modules; never
             // reached through `ModelId::build`.
             log::error!("props::build called for non-prop model {other:?}");
-            blood_core()
+            ember_core()
         }
     }
 }
@@ -186,10 +186,11 @@ fn aim_laser() -> Vec<ModelPart> {
     p.finish()
 }
 
-fn blood_core() -> Vec<ModelPart> {
-    let mut p = PartSet::new(&BLOOD_CORE);
-    let red = Vec4::new(0.95, 0.12, 0.1, 1.0);
-    p.add(0, gem(Vec3::ZERO, 0.14, 1, red));
+/// A white-hot coal with charred, glowing shards around it.
+fn ember_core() -> Vec<ModelPart> {
+    let mut p = PartSet::new(&EMBER_CORE);
+    let hot = Vec4::new(1.0, 0.78, 0.4, 1.0);
+    p.add(0, gem(Vec3::ZERO, 0.14, 1, hot));
     for k in 0..8 {
         let d = Quat::from_rotation_y(k as f32 * 2.4)
             * Quat::from_rotation_z(0.4 + (k % 3) as f32 * 0.9)
@@ -201,7 +202,7 @@ fn blood_core() -> Vec<ModelPart> {
                 d * (0.22 + (k % 2) as f32 * 0.08),
                 0.04,
                 3,
-                Vec4::new(0.7, 0.05, 0.06, 1.0),
+                Vec4::new(0.9, 0.36, 0.08, 1.0),
             ),
         );
     }
@@ -336,7 +337,7 @@ fn checkpoint() -> Vec<ModelPart> {
             0.05,
             0.04,
             6,
-            CHROME,
+            MIRROR_STEEL,
         ),
     );
     p.add(

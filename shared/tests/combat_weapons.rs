@@ -122,7 +122,7 @@ fn headshot_doubles_damage() {
     assert!(dealt[0].killed, "48 >= 45");
     assert!(kills(&ev)[0].flags.contains(DamageFlags::HEADSHOT));
     // Death burst for healing.
-    assert!(a.world.blood.values().any(|b| b.big));
+    assert!(a.world.embers.values().any(|b| b.big));
 }
 
 #[test]
@@ -867,7 +867,7 @@ fn no_friendly_fire_in_coop_but_knockback_applies() {
     let ev = a.tap(p0, Buttons::FIRE, 1);
     assert_eq!(damage_to(&ev, HitTarget::Player(p1)), 48.0, "PvP headshot x2");
     // PvP damage spawns a healing burst the attacker can drain.
-    assert!(!a.world.blood.is_empty());
+    assert!(!a.world.embers.is_empty());
 }
 
 #[test]
@@ -914,7 +914,7 @@ fn hard_damage_caps_healing_then_recovers() {
     assert_eq!(c.effective_max(&t.combat), 86.0);
     // A big healing burst right here: heals only up to the effective max.
     a.world
-        .spawn_blood(&t, Vec3::new(0.0, 1.0, 0.0), 100.0, 3.5, 0.6, true);
+        .spawn_embers(&t, Vec3::new(0.0, 1.0, 0.0), 100.0, 3.5, 0.6, true);
     let ev = a.ticks(2);
     assert_eq!(a.health(p), 86.0);
     assert!(

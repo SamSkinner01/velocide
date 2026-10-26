@@ -73,8 +73,8 @@ pub enum ModelId {
     AimLaser,
     /// Thrown relay spike (also shown between the knuckles while throwing).
     Thorn,
-    /// Optional core for blood-burst effects.
-    BloodCore,
+    /// Optional glowing core for ember-burst effects (a cluster of live coals).
+    EmberCore,
     // Level props.
     JumpPad,
     Checkpoint,
@@ -103,7 +103,7 @@ impl ModelId {
         ModelId::Needle,
         ModelId::AimLaser,
         ModelId::Thorn,
-        ModelId::BloodCore,
+        ModelId::EmberCore,
         ModelId::JumpPad,
         ModelId::Checkpoint,
         ModelId::ExitGate,
@@ -137,7 +137,7 @@ impl ModelId {
             ModelId::Needle => "proj_needle.gltf",
             ModelId::AimLaser => "fx_aim_laser.gltf",
             ModelId::Thorn => "proj_thorn.gltf",
-            ModelId::BloodCore => "fx_blood_core.gltf",
+            ModelId::EmberCore => "fx_ember_core.gltf",
             ModelId::JumpPad => "prop_jump_pad.gltf",
             ModelId::Checkpoint => "prop_checkpoint.gltf",
             ModelId::ExitGate => "prop_exit_gate.gltf",

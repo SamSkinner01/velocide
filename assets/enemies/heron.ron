@@ -84,7 +84,7 @@
         repath_interval: 0.8,
         reposition: true,
     ),
-    drops: (blood_pool: 30.0, blood_radius: 4.5),
+    drops: (heat: 30.0, heat_radius: 4.5),
     colors: (
         body: (0.6, 0.58, 0.54),
         accent: (0.72, 0.55, 0.25),

@@ -23,13 +23,13 @@ pub fn grey(v: f32) -> Vec4 {
     Vec4::new(v, v, v, 1.0)
 }
 
-/// Polished chrome (multiplied with the reflection-band texture).
-pub const CHROME: Vec4 = Vec4::new(0.92, 0.94, 0.98, 1.0);
+/// Mirror-polished steel (multiplied with the reflection-band texture).
+pub const MIRROR_STEEL: Vec4 = Vec4::new(0.92, 0.94, 0.98, 1.0);
 /// Dark gunmetal for joints, grips and inner parts.
 pub const GUNMETAL: Vec4 = Vec4::new(0.30, 0.31, 0.35, 1.0);
 pub const BLACK_STEEL: Vec4 = Vec4::new(0.16, 0.16, 0.19, 1.0);
 /// Deep red lacquer.
-pub const BLOOD: Vec4 = Vec4::new(0.78, 0.06, 0.08, 1.0);
+pub const RED_LACQUER: Vec4 = Vec4::new(0.78, 0.06, 0.08, 1.0);
 pub const WHITE: Vec4 = Vec4::ONE;
 /// Glazed porcelain (Shrike masks).
 pub const PORCELAIN: Vec4 = Vec4::new(0.95, 0.93, 0.88, 1.0);
@@ -588,8 +588,8 @@ fn opaque(c: Vec3) -> Vec4 {
     c.extend(1.0)
 }
 
-/// Mirror chrome: sky / horizon / ground reflection bands with brushed streaks.
-pub fn tex_chrome() -> TextureData {
+/// Mirror-polished metal: sky / horizon / ground reflection bands with brushed streaks.
+pub fn tex_mirror() -> TextureData {
     const SEED: u32 = 701;
     let mut c = Canvas::new(32, 32);
     c.fill(|x, y, u, v| {
@@ -943,7 +943,7 @@ pub(crate) mod tests {
     #[test]
     fn textures_have_expected_sizes() {
         for t in [
-            tex_chrome(),
+            tex_mirror(),
             tex_plate(),
             tex_grime(),
             tex_skin(),
