@@ -315,6 +315,28 @@ use; dark reds that protanopes barely see (hard damage, low health) move to viol
 Tritanopes keep red-green but lose blue-yellow, so their signals go azure (seen as teal)
 against the red foundry, the parry window pale yellow-white, hard damage teal.
 
+**World art.** The standard palette keeps the art's own colours: every Mould and effect has its
+own shade of red / orange / yellow, often an HDR multiplier (`Palette::recolours_world()` is
+false; the "standard" column above is the nominal role, used by the UI). The colour-blind
+palettes replace them by role (`Palette::effect` for particles / sprites / beams,
+`Palette::light` for lights, `Palette::model_glow` → `Tint::glow_color` / `core_color` for
+model parts, see `docs/models.md`):
+
+| what | role |
+|---|---|
+| Moulds' `Glow` parts (Gnawer throat, Censer flames + embers, Harrier glare, Gaoler rim + chain, Heron lens ring), wind-up glints (`Fx::EnemyAttack`), Censer whirl embers, Gaoler sweep sparks and arc | `telegraph` |
+| any enemy with `PARRYABLE` (Gaoler bash window, the whole Harrier dive): its `Glow` parts strobe full / 55 %; the Harrier dive streak; the wind-up glint of a parryable attack | `parry_window` |
+| Moulds' `Core` parts (weak points: Gaoler grille + lantern, Censer coals, Harrier heart, Heron lens, Gnawer eyes) | `weak_point` |
+| Heron aim laser while tracking (beam, lens / end glow, light); **locked stays white-hot and wider in every palette** | `aim_laser` |
+| ember bombs and needles (model glow, needle streak, trail embers, lights, impact / muzzle glows) | `hostile_projectile` |
+| brand sigil, "Branded" glow, the HUD's BRANDED warning | `brand` |
+| deflect / parry sparks glow, parried trail | `deflected` |
+| shield (spawn protection) and death flashes (`Feedback::shield_flash` / `death_flash`) | `flash_shield`, `flash_death` |
+
+Model glows recoloured this way are drawn at their pose brightness capped at full, so the hue
+survives where the art's ×2–3 multipliers would turn it white. Heal visuals (kindling stream,
+heal flash, ember pool) are wired by the embers work, not listed here.
+
 **Tests** (`client::palette::tests`): each palette is checked *as its viewer sees it*
 (Machado 2009 simulation) with CIEDE2000: HUD pairs (health / hard damage / empty bar / low
 health, good / warning, heal / damage) ≥ 15–25, flashes ≥ 20, world pairs (telegraph / parry
