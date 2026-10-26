@@ -553,31 +553,51 @@ impl SimWorld {
             });
             if free {
                 Some(point)
+            } else if flying {
+                // Flyers hover above the point: a step sideways is enough.
+                Some(point + Vec3::new(rng.next_f32() - 0.5, 0.0, rng.next_f32() - 0.5) * 4.0)
             } else {
+                // Taken: a free spot on a ring around it, else the point anyway (the push-apart
+                // separates them).
                 let spawn = EnemySpawn {
                     enemy: enemy.to_string(),
                     position: point,
                     yaw: 0.0,
                 };
-                // Flyers are placed above the point below, so search the ground ring for them.
-                let copy = rng.below(10);
-                if flying {
-                    Some(point + Vec3::new(rng.next_f32() - 0.5, 0.0, rng.next_f32() - 0.5) * 4.0)
-                } else {
-                    self.find_copy_spot(&spawn, copy, &taken)
-                }
+                Some(
+                    self.find_copy_spot(&spawn, rng.below(10), &taken)
+                        .unwrap_or(point),
+                )
             }
         } else {
             self.grind_nav_spawn(class, r, h, &taken, &away, min_dist, &mut rng)
         };
+        // Last resort (no grind_spawns and no usable nav node): the level spawn point farthest
+        // from the players, so a wave can never get stuck waiting for a spot.
+        let ground = ground.or_else(|| {
+            self.level
+                .spawns
+                .iter()
+                .map(|s| s.position)
+                .max_by(|a, b| away(*a).total_cmp(&away(*b)))
+        });
         self.mode.grind.rng = Some(rng);
         let mut feet = ground?;
         if flying {
             let world = &self.collision.world;
-            let lift = [FLYER_SPAWN_HEIGHT, 2.5, 1.0].into_iter().find(|up| {
-                let center = feet + Vec3::Y * (up + h * 0.5);
-                !world.intersects_capsule(center, (h * 0.5 - r).max(0.0), r + 0.2, MASK_MOVEMENT)
-            })?;
+            // As high as there is room for (a low ceiling: just off the floor).
+            let lift = [FLYER_SPAWN_HEIGHT, 2.5, 1.0]
+                .into_iter()
+                .find(|up| {
+                    let center = feet + Vec3::Y * (up + h * 0.5);
+                    !world.intersects_capsule(
+                        center,
+                        (h * 0.5 - r).max(0.0),
+                        r + 0.2,
+                        MASK_MOVEMENT,
+                    )
+                })
+                .unwrap_or(0.2);
             feet.y += lift;
         }
         let nearest = players

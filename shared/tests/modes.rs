@@ -1283,3 +1283,18 @@ fn the_lobby_settings_start_a_grind_run() {
     assert!(!w.rules.friendly_fire, "co-op rules");
     assert!(w.rules.coop_enemy_scaling);
 }
+
+#[test]
+fn grind_waves_never_stall_without_spawn_points() {
+    // No grind_spawns and a nav grid with nothing usable: the Moulds come in at the level spawn
+    // farthest from the player instead of waiting forever.
+    let mut a = grind(Difficulty::Normal);
+    a.world.ai.nav = Some(Arc::new(shared::sim::nav::NavGrid::default()));
+    grind_player(&mut a, 0, Vec3::new(-40.0, 0.0, -40.0));
+    until_wave(&mut a, 1);
+    assert_eq!(a.world.mode.grind.alive.len(), 6);
+    for id in a.world.mode.grind.alive.clone() {
+        let p = a.world.enemies[&id].position;
+        assert!(p.distance(Vec3::new(40.0, 0.0, 40.0)) < 0.5, "{p}");
+    }
+}

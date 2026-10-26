@@ -296,8 +296,9 @@ cistern_nine`.
   random one of those at least `min_spawn_distance` (14 m) from every living player, else the
   farthest; Moulds that would overlap go on a ring around it, flyers 4.5 m up), else walkable nav
   nodes that can reach the player spawns (found once per run by a backwards search over the nav
-  links; never in or by lava), at least 14 m from every living player when the arena allows.
-  Grind Moulds are aware (they hunt the players).
+  links; never in or by lava), at least 14 m from every living player when the arena allows;
+  as a last resort the level spawn farthest from the players, so a wave never stalls. Grind
+  Moulds are aware (they hunt the players).
 * **Deaths**: co-op deaths are *downed* (revivable, the difficulty's downed time and revive
   health, as in the campaign). A downed player nobody revives, a kill-volume death or a solo
   death is **out** (`LifeState::Dead`, status OUT on the scoreboard) until the **next wave
@@ -471,7 +472,7 @@ the Grind section).
 
 ```text
 cargo test -p shared --test style      # style math + scoring real combat in the sim (15)
-cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind (36)
+cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind (37)
 cargo test -p shared --lib difficulty grind   # scaling numbers, wave plans, budgets, unlocks, heavies / bosses
 cargo test -p server --test modes_net  # over UDP with real clients (6)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive / grind
@@ -508,7 +509,8 @@ PLAYTHROUGH=grind cargo run -p client --example playthrough   # solo grind from 
   cap with the queue counted as left; a downed player nobody revives is out (no countdown) until
   the next wave, counts down in the breather and is back, protected, when it starts; both
   players down → Overrun → results 2.5 s later (wave 2 reached, 1 cleared, grade D, per-player
-  grades without a par time); a solo death ends the run; lobby settings start a grind run.
+  grades without a par time); a solo death ends the run; lobby settings start a grind run;
+  without any usable spawn point the wave still comes (at the farthest level spawn).
 * `modes_net.rs`: style events reach only the killer, `OwnState` carries the meter, everyone's
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
