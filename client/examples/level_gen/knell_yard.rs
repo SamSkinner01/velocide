@@ -202,8 +202,20 @@ pub(super) fn knell_yard() -> Gen {
         },
     );
 
+    // Mould gates (grind spawns): a loft gate in each quarter's wall over the pattern shed,
+    // opening onto the shed roof (y 5): Moulds come down the shed ramp, over the deck bridge
+    // or drop into the yard. (Local x 1.5 on the north wall, turned per quarter.)
+    let mould_gates = [
+        gates::Gate::new(Side::N, -H, 1.5, DECK),
+        gates::Gate::new(Side::W, -H, -1.5, DECK),
+        gates::Gate::new(Side::S, H, -1.5, DECK),
+        gates::Gate::new(Side::E, H, 1.5, DECK),
+    ];
     g.section("Outer shell (open sky, clipped at 26 m)");
-    let shell = Room::new("Yard", [-H, 0.0, -H], [H, TOP, H], WALL).bottom(BASE);
+    let mut shell = Room::new("Yard", [-H, 0.0, -H], [H, TOP, H], WALL).bottom(BASE);
+    for gate in &mould_gates {
+        shell = shell.opening(gate.opening());
+    }
     g.room(&shell);
     g.clip(
         "sky clip wall N",
@@ -217,11 +229,28 @@ pub(super) fn knell_yard() -> Gen {
     );
     g.clip("sky clip wall W", [-H - 1.0, TOP, -H], [-H, SKY, H]);
     g.clip("sky clip wall E", [H, TOP, -H], [H + 1.0, SKY, H]);
+    // (Wide enough to cover the gate chambers behind the walls too.)
     g.clip(
         "sky clip ceiling",
-        [-H - 1.0, SKY, -H - 1.0],
-        [H + 1.0, SKY + 1.0, H + 1.0],
+        [-H - 16.0, SKY, -H - 16.0],
+        [H + 16.0, SKY + 1.0, H + 16.0],
     );
+    let gate_style = gates::GateStyle {
+        wall: WALL,
+        floor: WOOD_DARK,
+        trim: BRONZE,
+        grate: GRATE,
+        glow: MELT,
+        light: L_MELT,
+    };
+    for (gate, (colour, _)) in mould_gates.iter().zip(QUARTERS) {
+        gate.build(
+            &mut g,
+            &format!("{colour} loft gate"),
+            &gate_style,
+            gates::Spawns::All,
+        );
+    }
 
     for (k, &(colour, tint)) in QUARTERS.iter().enumerate() {
         let mut q = Quarter { g: &mut g, k };

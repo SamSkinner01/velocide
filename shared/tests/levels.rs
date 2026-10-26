@@ -29,6 +29,9 @@ use glam::{IVec3, Vec2, Vec3};
 use shared::input::{Buttons, PlayerInput};
 use shared::level::{Brush, LevelCollision, LevelDef, LevelKind, Volume};
 use shared::movement::{self, MoveEnv, MoveEvents, MoveState};
+use shared::sim::EnemyRegistry;
+use shared::sim::enemy::Locomotion;
+use shared::sim::nav::{NavClass, NavGrid, NavScratch, PathResult};
 use shared::tuning::MovementTuning;
 
 const DT: f32 = 1.0 / 60.0;
@@ -40,9 +43,10 @@ const CAMPAIGNS: [&str; 2] = [CRUCIBLE, SPIRE];
 const ARENA: &str = "cistern_nine";
 const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
+const FURNACE: &str = "furnace_ring";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
-const SHIPPED: [&str; 5] = [CRUCIBLE, SPIRE, ARENA, KNELL, INGOT];
+const SHIPPED: [&str; 6] = [CRUCIBLE, SPIRE, ARENA, KNELL, INGOT, FURNACE];
 /// Test levels that aren't held to the shipping standards.
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
@@ -1769,6 +1773,44 @@ fn arena_laps() -> Vec<(&'static str, usize, Vec<Wp>, usize)> {
             ],
             3,
         ),
+        // Furnace Ring, all three rings: out of the north floor alcove, the crucible pad onto
+        // the crucible's top, jump off over the slag, the south-east floor pad onto tier 1, up
+        // the south-east ramp to the rim, round the rim (east and north sides, past the rim
+        // gates and round the wall-jump slots), drop to tier 1 and the floor, the north-west
+        // floor pad onto tier 1, along it, drop, the west crucible pad, jump off the crucible.
+        (
+            FURNACE,
+            0,
+            vec![
+                run(-5.0, 0.0, -16.0),
+                pad(0.0, 0.0, -11.2),
+                run(0.0, 10.0, -3.5),
+                run(3.5, 10.0, 0.0),
+                run(14.0, 0.0, 0.0),
+                run(13.0, 0.0, 7.0),
+                pad(8.63, 0.0, 8.63),
+                run(17.7, 7.0, 17.7),
+                run(12.0, 7.0, 26.0),
+                run(24.4, 12.8, 14.5),
+                run(29.7, 14.0, 18.4),
+                run(36.0, 14.0, 10.0),
+                run(36.0, 14.0, -12.0),
+                run(27.0, 14.0, -27.0),
+                run(10.0, 14.0, -35.0),
+                run(-10.0, 14.0, -35.0),
+                run(0.0, 7.0, -25.0),
+                run(0.0, 0.0, -16.0),
+                pad(-8.63, 0.0, -8.63),
+                run(-17.7, 7.0, -17.7),
+                run(-25.0, 7.0, 0.0),
+                run(-15.0, 0.0, 0.0),
+                pad(-11.2, 0.0, 0.0),
+                run(-3.5, 10.0, 0.0),
+                run(0.0, 10.0, -3.5),
+                run(0.0, 0.0, -15.0),
+            ],
+            4,
+        ),
     ]
 }
 
@@ -2147,6 +2189,46 @@ fn ingot_run_tech() {
     println!("ingot run: end-to-end trough slide {secs:.2} s (slowest {slowest:.1} m/s)");
 }
 
+#[test]
+fn furnace_ring_tech() {
+    let level = load(FURNACE);
+    let col = collision(&level, None);
+
+    // Wall-jump slot in the tier 2 face (north side): from tier 1 (y 7) up onto the rim (14).
+    let s = climb_shaft_to(
+        &level,
+        &col,
+        Vec3::new(4.45, 7.0, -31.0),
+        Vec3::new(5.75, 0.0, -35.0),
+        14.0,
+    );
+    assert!(
+        s.on_ground && (s.position.y - 14.0).abs() < 0.05 && s.position.z < -32.0,
+        "the slot should reach the rim, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // Dash-jump from the rim's edge across the pit onto the crucible's top (y 10), beside its
+    // flue.
+    let south = Vec3::Z;
+    let mut d = Script::new(&level, &col, Vec3::new(3.5, 14.0, -31.0));
+    for _ in 0..5 {
+        d.tick(south, Buttons::NONE);
+    }
+    d.tick(south, Buttons::DASH);
+    assert!(
+        d.tick(south, Buttons::JUMP).dash_jumped,
+        "dash-jump off the rim"
+    );
+    assert!(d.until_landed(south, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        (d.s.position.y - 10.0).abs() < 0.1 && d.s.position.z.abs() < 3.6,
+        "the dash-jump should land on the crucible's top, got {}",
+        d.s.position
+    );
+}
+
 /// Scripted input on a level: one tick at a time towards a direction with some buttons.
 struct Script<'a> {
     s: MoveState,
@@ -2327,6 +2409,258 @@ fn spire_tech_shortcuts_work() {
         "dash-jump should land on the bell's rim, got {}",
         d.s.position
     );
+}
+
+// ------------------------------------------------------------------------------------------
+// Grind spawns and PvP spawn fairness
+
+/// The nav class of an enemy definition (flyers have none).
+fn nav_class(enemy: &str) -> Option<NavClass> {
+    let def = EnemyRegistry::builtin()
+        .get(enemy)
+        .unwrap_or_else(|| panic!("no enemy '{enemy}'"));
+    match def.locomotion {
+        Locomotion::Flying { .. } => None,
+        Locomotion::Ground => Some(NavClass::for_size(def.radius, def.height)),
+    }
+}
+
+/// Whether a shot from `from` reaches `to` (nothing that stops bullets in between).
+fn sees(world: &CollisionWorld, from: Vec3, to: Vec3) -> bool {
+    let d = to - from;
+    world
+        .cast_ray(from, d.normalize_or_zero(), d.length(), MASK_SHOTS)
+        .is_none_or(|h| h.distance >= d.length() - 0.05)
+}
+
+/// Compass sector (0 N, 1 E, 2 S, 3 W) of `p` seen from `mid`.
+fn sector(mid: Vec3, p: Vec3) -> usize {
+    let (dx, dz) = (p.x - mid.x, p.z - mid.z);
+    if dz.abs() >= dx.abs() {
+        if dz < 0.0 { 0 } else { 2 }
+    } else if dx > 0.0 {
+        1
+    } else {
+        3
+    }
+}
+
+/// Every arena is a grind arena: 8-16 grind spawns, where any Mould fits (the Gaoler's
+/// footprint and headroom), on the nav grid with paths into the arena, out of sight of every
+/// player spawn and well away from them, spread over 3+ compass sectors.
+#[test]
+fn grind_spawns_are_valid() {
+    let gaoler = nav_class("gaoler").expect("ground enemy");
+    for (name, level) in arenas() {
+        let col = collision(&level, None);
+        let world = &col.world;
+        let grid = NavGrid::build(&level, world);
+        let mut scratch = NavScratch::default();
+        let mut bad = Vec::new();
+        let n = level.grind_spawns.len();
+        if !(8..=16).contains(&n) {
+            bad.push(format!("{n} grind spawns (8-16)"));
+        }
+        let (lo, hi) = level_bounds(&level);
+        let mid = (lo + hi) * 0.5;
+        let sectors: HashSet<usize> = level.grind_spawns.iter().map(|&p| sector(mid, p)).collect();
+        if sectors.len() < 3 {
+            bad.push(format!("grind spawns only in compass sectors {sectors:?}"));
+        }
+        // Player spawns on the nav grid (narrow footprint), and their nearest wide-footprint
+        // node (spawns on ledges a Gaoler can't stand on are skipped for it).
+        let player_nodes: Vec<Option<u32>> = level
+            .spawns
+            .iter()
+            .map(|s| grid.node_at(s.position, 0.6, NavClass::SMALL, &[]))
+            .collect();
+        let player_wide: Vec<Option<u32>> = level
+            .spawns
+            .iter()
+            .map(|s| grid.nearest_node(s.position, 10, gaoler, &[]))
+            .collect();
+        for (i, &p) in level.grind_spawns.iter().enumerate() {
+            let what = format!("grind spawn {i} at {p}");
+            let ground = ground_below(world, p, 0.6);
+            if !ground.is_some_and(|d| d.abs() < 0.3) {
+                bad.push(format!("{what}: no ground right below ({ground:?})"));
+            }
+            if in_kill_volume(&level, p + Vec3::Y * 0.1) {
+                bad.push(format!("{what}: in a kill volume"));
+            }
+            let (r, h) = enemy_size("gaoler");
+            let (c, hh) = capsule_at(p + Vec3::Y * 0.05, h, r);
+            if world.intersects_capsule(c, hh, r, MASK_MOVEMENT) {
+                bad.push(format!("{what}: no room for a gaoler"));
+            }
+            if let Err(q) = floor_all_around(world, p, 1.5, 0.3) {
+                bad.push(format!("{what}: no floor at {q}"));
+            }
+            for (j, o) in level.grind_spawns.iter().enumerate().skip(i + 1) {
+                if p.distance(*o) < 4.0 {
+                    bad.push(format!("{what}: crowded with grind spawn {j}"));
+                }
+            }
+            // Out of sight of every player spawn (eye to the Mould's feet, middle and head),
+            // and not right next to one.
+            for (j, s) in level.spawns.iter().enumerate() {
+                let eye = s.position + Vec3::Y * 1.6;
+                for dy in [0.3, 1.5, 3.0] {
+                    if sees(world, eye, p + Vec3::Y * dy) {
+                        bad.push(format!(
+                            "{what}: visible from player spawn {j} at {}",
+                            s.position
+                        ));
+                        break;
+                    }
+                }
+                let d = s.position.distance(p);
+                if d < 12.0 {
+                    bad.push(format!("{what}: only {d:.1} m from player spawn {j}"));
+                }
+            }
+            // Navigable: a Gaoler can stand there and walk out to a player spawn; narrow
+            // Moulds walk to at least half the player spawns, and back from at least one (the
+            // gate isn't a one-way trap; drops off ledges are one-way, so not from all).
+            let Some(node) = grid.node_at(p, 0.6, gaoler, &[]) else {
+                bad.push(format!("{what}: not on the nav grid for a gaoler"));
+                continue;
+            };
+            let wide_out = player_wide.iter().flatten().any(|&goal| {
+                matches!(
+                    grid.find_path(&mut scratch, node, goal, gaoler, &[], 200_000),
+                    PathResult::Found(_)
+                )
+            });
+            if !wide_out {
+                bad.push(format!("{what}: a gaoler can't walk to any player spawn"));
+            }
+            let small = grid
+                .node_at(p, 0.6, NavClass::SMALL, &[])
+                .expect("a wide node is a narrow one too");
+            let (mut there, mut back) = (0, 0);
+            for &goal in player_nodes.iter().flatten() {
+                let found = |r: PathResult| matches!(r, PathResult::Found(_));
+                there +=
+                    found(grid.find_path(&mut scratch, small, goal, NavClass::SMALL, &[], 200_000))
+                        as usize;
+                back +=
+                    found(grid.find_path(&mut scratch, goal, small, NavClass::SMALL, &[], 200_000))
+                        as usize;
+            }
+            if there * 2 < level.spawns.len() || back == 0 {
+                bad.push(format!(
+                    "{what}: walkers reach {there} of {} player spawns, come back from {back}",
+                    level.spawns.len()
+                ));
+            }
+        }
+        assert!(bad.is_empty(), "{name}: grind spawns:\n{}", bad.join("\n"));
+        println!("{name}: {n} grind spawns in sectors {sectors:?}");
+    }
+}
+
+/// Arenas built with the PvP spawn rule: no player spawn can see another (eye to chest).
+const FAIR_SPAWNS: [&str; 1] = [FURNACE];
+
+#[test]
+fn pvp_spawns_cannot_see_each_other() {
+    for name in FAIR_SPAWNS {
+        let level = load(name);
+        let col = collision(&level, None);
+        let mut bad = Vec::new();
+        for (i, a) in level.spawns.iter().enumerate() {
+            for (j, b) in level.spawns.iter().enumerate().skip(i + 1) {
+                let (ea, eb) = (a.position + Vec3::Y * 1.6, b.position + Vec3::Y * 1.6);
+                let (ca, cb) = (a.position + Vec3::Y * 1.1, b.position + Vec3::Y * 1.1);
+                if sees(&col.world, ea, cb) || sees(&col.world, eb, ca) {
+                    bad.push(format!(
+                        "spawn {i} {} sees spawn {j} {}",
+                        a.position, b.position
+                    ));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{name}: spawns in sight of each other:\n{}",
+            bad.join("\n")
+        );
+    }
+}
+
+/// Campaign encounter spawns are connected on the nav grid for their Mould's class (doors
+/// open): every walker reaches its arena's centre and its rally point and back. Censers may
+/// sit on pad-only ledges (they only need to be on the grid).
+#[test]
+fn campaign_enemy_spawns_are_on_connected_nav() {
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(true));
+        let grid = NavGrid::build(&level, &col.world);
+        let mut scratch = NavScratch::default();
+        let mut bad = Vec::new();
+        for (ei, e) in level.encounters.iter().enumerate() {
+            let rally = e.rally.expect("rally").position;
+            let arena = e.arena.expect("arena");
+            let centre = Vec3::new(arena.center().x, rally.y, arena.center().z);
+            let rally_node = grid
+                .node_at(rally, 0.6, NavClass::SMALL, &[])
+                .unwrap_or_else(|| panic!("{name}: encounter {} rally off the grid", ei + 1));
+            for (wi, w) in e.waves.iter().enumerate() {
+                for s in &w.spawns {
+                    let Some(class) = nav_class(&s.enemy) else {
+                        continue;
+                    };
+                    let what = format!(
+                        "encounter {} wave {} {} at {}",
+                        ei + 1,
+                        wi + 1,
+                        s.enemy,
+                        s.position
+                    );
+                    let Some(start) = grid.node_at(s.position, 0.6, class, &[]) else {
+                        bad.push(format!("{what}: not on the grid for {class:?}"));
+                        continue;
+                    };
+                    if s.enemy == "censer" {
+                        continue;
+                    }
+                    let found = |r: PathResult| matches!(r, PathResult::Found(_));
+                    let goal = grid.nearest_node(centre, 12, class, &[]);
+                    if !goal.is_some_and(|g| {
+                        found(grid.find_path(&mut scratch, start, g, class, &[], 200_000))
+                    }) {
+                        bad.push(format!("{what}: no path to the arena centre {centre}"));
+                    }
+                    let to = grid.find_path(
+                        &mut scratch,
+                        start,
+                        rally_node,
+                        NavClass::SMALL,
+                        &[],
+                        200_000,
+                    );
+                    let from = grid.find_path(
+                        &mut scratch,
+                        rally_node,
+                        start,
+                        NavClass::SMALL,
+                        &[],
+                        200_000,
+                    );
+                    if !found(to) || !found(from) {
+                        bad.push(format!("{what}: not connected to the rally point"));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{name}: enemy spawns off the nav:\n{}",
+            bad.join("\n")
+        );
+    }
 }
 
 // ------------------------------------------------------------------------------------------
