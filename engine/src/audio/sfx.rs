@@ -115,7 +115,6 @@ pub enum Sfx {
     GaolerDeath,
     /// The heat leaving a dead Mould: one big ember burst.
     EmberRelease,
-    Gib,
     EnemySpawn,
     ProjectileImpact,
     // Game
@@ -260,7 +259,6 @@ impl Sfx {
         Sfx::EnemyDeath,
         Sfx::GaolerDeath,
         Sfx::EmberRelease,
-        Sfx::Gib,
         Sfx::EnemySpawn,
         Sfx::ProjectileImpact,
         Sfx::RankUp,
@@ -386,7 +384,6 @@ impl Sfx {
             EnemyDeath => variants(info(-15.0, 5, 0.1, 0.03), 2),
             GaolerDeath => info(-11.0, 2, 0.03, 0.1),
             EmberRelease => info(-15.0, 5, 0.08, 0.03),
-            Gib => variants(info(-16.0, 5, 0.08, 0.03), 3),
             EnemySpawn => info(-16.0, 4, 0.05, 0.05),
             ProjectileImpact => variants(info(-18.0, 6, 0.1, 0.02), 2),
 
@@ -599,6 +596,23 @@ fn notes(seq: &[(f32, f32, f32)], wave: Wave, attack: f32, release: f32, cutoff:
     out
 }
 
+/// A flame guttering (the Shrike's wick): band-passed noise falling `f0 → f1` whose level dips
+/// about `flutter` times a second, each dip a random depth, fading with `decay`.
+fn gutter(rng: &mut Rng, dur: f32, f0: f32, f1: f32, flutter: f32, decay: f32) -> Vec<f32> {
+    let mut n = Rng::new(rng.next_u64());
+    let mut svf = Svf::default();
+    let (mut phase, mut depth) = (0.0f32, 0.5f32);
+    render(dur, |t, _| {
+        phase += flutter / SR;
+        if phase >= 1.0 {
+            phase -= 1.0;
+            depth = n.range(0.3, 0.95);
+        }
+        let flicker = 1.0 - depth * (std::f32::consts::PI * phase).sin();
+        svf.process(n.bipolar(), sweep(t, f0, f1, dur), 1.3, SR).band * flicker * perc(t, 0.002, decay)
+    })
+}
+
 /// Amplitude stutter: chops the signal with a square gate at `rate` Hz after `from` seconds.
 fn stutter(buf: &mut [f32], rate: f32, from: f32) {
     for (i, s) in buf.iter_mut().enumerate() {
@@ -758,9 +772,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         }
         Jump => {
             let air = whoosh(r, 0.22, 700.0, 2600.0, 1.2);
-            let servo = tone(0.15, Wave::Triangle, 280.0, 560.0, 0.12, 0.002, 0.05);
+            let lift = tone(0.15, Wave::Triangle, 280.0, 560.0, 0.12, 0.002, 0.05);
             let push = thump(0.1, 200.0, 110.0, 0.01, 0.025);
-            layer(&[(&air, 1.0, 0.0), (&servo, 0.25, 0.0), (&push, 0.5, 0.0)])
+            layer(&[(&air, 1.0, 0.0), (&lift, 0.25, 0.0), (&push, 0.5, 0.0)])
         }
         Land => {
             let thud = thump(0.2, 140.0, 50.0, 0.015, 0.055);
@@ -838,27 +852,47 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
 
         // ----- player ---------------------------------------------------------------------
         Hurt => {
+            // A hit and the wick guttering under it.
             let crunch = noise(r, 0.18, Pass::Band, 1800.0, 600.0, 0.9, 0.0005, 0.05);
-            let glitch = tone(0.16, Wave::Square, 420.0, 130.0, 0.12, 0.001, 0.05);
+            let flame = gutter(r, 0.22, 1500.0, 450.0, 30.0, 0.07);
             let hit = thump(0.12, 180.0, 80.0, 0.01, 0.03);
-            let mut b = layer(&[(&crunch, 1.0, 0.0), (&glitch, 0.45, 0.0), (&hit, 0.7, 0.0)]);
+            let mut b = layer(&[(&crunch, 1.0, 0.0), (&flame, 0.7, 0.0), (&hit, 0.7, 0.0)]);
             drive(&mut b, 3.0);
             crush(&mut b, 6, 3.0);
             b
         }
         Heal => {
-            let slurp = noise(r, 0.3, Pass::Low, 300.0, 1400.0, 6.0, 0.01, 0.1);
-            let rise = tone(0.3, Wave::Sine, 520.0, 1040.0, 0.25, 0.02, 0.12);
-            let sparkle = fm(0.25, 2093.0, 2093.0, 2.0, 1.0, 0.1, 0.001, 0.07);
-            layer(&[(&slurp, 0.8, 0.0), (&rise, 0.4, 0.0), (&sparkle, 0.25, 0.12)])
+            // Kindling: the wick drawing embers in. A breath of air pulled in and rising,
+            // crackles getting denser as the embers arrive, then the flame catching with a
+            // soft warm whoomph and a bright glint.
+            let dur = 0.4;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let inhale = render(dur, |t, _| {
+                let env = smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.21, 0.28, t));
+                bp.process(n.bipolar(), sweep(t, 450.0, 3000.0, 0.22), 1.4, SR).band * env
+            });
+            let sparks = envelope(crackle(r, 0.3, 220.0, -0.18), 0.02, 0.2);
+            let catch = noise(r, 0.3, Pass::Low, 1100.0, 280.0, 0.9, 0.005, 0.07);
+            let warmth = tone(0.3, Wave::Sine, 196.0, 262.0, 0.1, 0.01, 0.09);
+            let glint = fm(0.2, 1568.0, 1568.0, 2.0, 0.8, 0.1, 0.001, 0.05);
+            layer(&[
+                (&inhale, 1.0, 0.0),
+                (&sparks, 0.45, 0.04),
+                (&catch, 0.9, 0.22),
+                (&warmth, 0.35, 0.22),
+                (&glint, 0.18, 0.23),
+            ])
         }
         Death => {
-            let mut fall = tone(1.4, Wave::Saw, 380.0, 35.0, 1.2, 0.001, 0.5);
-            lowpass(&mut fall, 2500.0);
-            stutter(&mut fall, 18.0, 0.3);
+            // The wick snuffed: the flame gutters lower and lower over a heavy fall, then goes
+            // out with a puff.
+            let mut flame = gutter(r, 1.1, 1100.0, 160.0, 16.0, 0.45);
+            stutter(&mut flame, 18.0, 0.4);
+            let snuff = noise(r, 0.3, Pass::Low, 1600.0, 220.0, 0.8, 0.002, 0.06);
             let crunch = noise(r, 0.9, Pass::Low, 3000.0, 200.0, 0.8, 0.0005, 0.25);
             let boom = thump(1.2, 90.0, 28.0, 0.08, 0.3);
-            let mut b = layer(&[(&fall, 0.6, 0.0), (&crunch, 0.9, 0.0), (&boom, 1.0, 0.0)]);
+            let mut b = layer(&[(&flame, 0.8, 0.0), (&crunch, 0.9, 0.0), (&boom, 1.0, 0.0), (&snuff, 0.6, 0.75)]);
             drive(&mut b, 2.5);
             crush(&mut b, 8, 2.0);
             reverb(&mut b, 0.6, 0.5, 0.2, 0.5);
@@ -880,11 +914,11 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             b
         }
         Downed => {
-            let mut fall = tone(0.9, Wave::Square, 330.0, 70.0, 0.7, 0.002, 0.35);
-            lowpass(&mut fall, 2200.0);
-            stutter(&mut fall, 12.0, 0.15);
+            // The wick sinks to a low, flickering ember (not out: a teammate can revive).
+            let mut flame = gutter(r, 0.9, 900.0, 220.0, 12.0, 0.35);
+            stutter(&mut flame, 12.0, 0.15);
             let hit = thump(0.5, 120.0, 40.0, 0.03, 0.12);
-            let mut b = layer(&[(&fall, 0.7, 0.0), (&hit, 1.0, 0.0)]);
+            let mut b = layer(&[(&flame, 0.8, 0.0), (&hit, 1.0, 0.0)]);
             crush(&mut b, 7, 2.0);
             reverb(&mut b, 0.5, 0.5, 0.15, 0.3);
             b
@@ -1334,9 +1368,9 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         Headshot => {
             let a = tone(0.05, Wave::Sine, 3200.0, 3200.0, 0.01, 0.0005, 0.014);
             let b2 = tone(0.07, Wave::Sine, 4300.0, 4300.0, 0.01, 0.0005, 0.02);
-            let splat = noise(r, 0.15, Pass::Band, 1500.0, 800.0, 1.0, 0.0005, 0.03);
+            let crack = noise(r, 0.15, Pass::Band, 1500.0, 800.0, 1.0, 0.0005, 0.03);
             let thud = thump(0.12, 250.0, 120.0, 0.01, 0.03);
-            let mut b = layer(&[(&a, 0.8, 0.0), (&b2, 0.8, 0.03), (&splat, 0.6, 0.0), (&thud, 0.6, 0.0)]);
+            let mut b = layer(&[(&a, 0.8, 0.0), (&b2, 0.8, 0.03), (&crack, 0.6, 0.0), (&thud, 0.6, 0.0)]);
             crush(&mut b, 9, 1.5);
             b
         }
@@ -1706,20 +1740,6 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let embers = crackle(r, dur, 350.0, 0.35);
             layer(&[(&whoomph, 1.0, 0.0), (&rise, 0.4, 0.05), (&embers, 0.6, 0.05)])
         }
-        Gib => {
-            let mut b = Vec::new();
-            let blobs = 5 + (r.f32() * 3.0) as usize;
-            for k in 0..blobs {
-                let f0 = r.range(600.0, 2000.0);
-                let (q, decay) = (r.range(5.0, 9.0), r.range(0.025, 0.055));
-                let blob = noise(r, 0.12, Pass::Low, f0, f0 / 3.0, q, 0.001, decay);
-                let at = if k == 0 { 0.0 } else { r.range(0.0, 0.35) };
-                mix_at(&mut b, &blob, r.range(0.5, 1.0), at);
-            }
-            let thud = thump(0.2, 140.0, 60.0, 0.01, 0.05);
-            mix_at(&mut b, &thud, 0.7, 0.0);
-            b
-        }
         EnemySpawn => {
             let dur = 0.9;
             let mut n = Rng::new(r.next_u64());
@@ -1735,11 +1755,12 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             layer(&[(&swell, 0.6, 0.0), (&drone, 0.4, 0.0), (&zap, 0.6, 0.6), (&thud, 0.8, 0.6)])
         }
         ProjectileImpact => {
-            let splash_hz = r.range(1400.0, 1800.0);
-            let splash = noise(r, 0.18, Pass::Band, splash_hz, 700.0, 1.0, 0.0005, 0.04);
+            // A hot projectile hitting the level: a crack, a thud and a short sizzle.
+            let crack_hz = r.range(1400.0, 1800.0);
+            let crack = noise(r, 0.18, Pass::Band, crack_hz, 700.0, 1.0, 0.0005, 0.04);
             let thud = thump(0.15, 180.0, 70.0, 0.01, 0.04);
-            let squelch = noise(r, 0.12, Pass::Low, 1200.0, 300.0, 5.0, 0.001, 0.03);
-            layer(&[(&splash, 1.0, 0.0), (&thud, 0.7, 0.0), (&squelch, 0.4, 0.0)])
+            let sizzle = noise(r, 0.25, Pass::High, 4500.0, 3200.0, 0.7, 0.004, 0.06);
+            layer(&[(&crack, 1.0, 0.0), (&thud, 0.7, 0.0), (&sizzle, 0.35, 0.01)])
         }
 
         // ----- game -----------------------------------------------------------------------
@@ -1887,7 +1908,7 @@ mod tests {
 
     #[test]
     fn generation_is_deterministic() {
-        for &sfx in &[Sfx::Explosion, Sfx::Parry, Sfx::Gib, Sfx::Footstep] {
+        for &sfx in &[Sfx::Explosion, Sfx::Parry, Sfx::EnemyHurt, Sfx::Footstep] {
             assert_eq!(render_sfx(sfx), render_sfx(sfx));
         }
         assert_ne!(render_variant(Sfx::Footstep, 0), render_variant(Sfx::Footstep, 1));
