@@ -79,8 +79,8 @@ pub fn generate_all_sfx() -> Vec<Vec<Vec<f32>>>;        // [sfx][variant], mono 
 - **Track per mode.** Main menu and lobby use `Menu`, campaign and co-op levels use `Campaign`,
   PvP uses `Arena`, and the results screen uses `Results`.
 - **Long sounds.** `LancetCharge` (1.1 s rising whine) and `Slide` (0.6 s) are one-shots. Call
-  `stop` when the charge is released early or the slide ends. `GnatBuzz` (0.6 s) is meant to be
-  re-triggered periodically by each Gnat.
+  `stop` when the charge is released early or the slide ends. `HeronLaser` (1.3 s) is exactly
+  the Heron's aim wind-up: play it on the wind-up event, `HeronLock` when `AIM_LOCKED` appears.
 
 ## Architecture
 
@@ -189,15 +189,39 @@ its index, so generation is deterministic.
   as a combo. 2 variants, 8 voices, no minimum interval.
 - **Hit feedback.** `Hitmarker` is a crisp 2.6 kHz tick. `Headshot` is a brighter double tick
   plus a splat. `KillConfirm` is a thud plus a two-note FM ping.
-- **Enemy telegraphs.** Every attack has an unmistakable windup.
-  - `HuskWindup` is a rising formant screech (≈140→420 Hz pitch, formants 775→1530 Hz) that
-    ends as the swipe lands.
-  - `SpitterWindup` is a gurgle rising 160→450 Hz.
-  - **`BastionTelegraph`** is a two-octave rising siren (260→1040 Hz with 14 Hz tremolo) over a
-    rumble. It ends on a bright 1.57 kHz "ding" at 0.7 s, which is the cue that means "parry
-    now". It is mixed among the loudest sounds.
-- **Enemy hits and deaths.** Gory, wet sounds from resonant low-passed noise ("squelch").
-  `EnemyHurt` and `Gib` have 3 variants each, and `EnemyDeath` adds a sinking groan.
+- **Enemies (the Moulds).** Each type has its own alert bark, a wind-up cue per attack (each
+  ends as the attack lands), strike sounds, and the projectiles' flight / burst. The client
+  picks them by attack name (`client::ingame::combat::enemy_fx::attack_sfx`).
+  - Gnawer: `GnawerAlert` a chittering snarl (a jittery growl chopped into a chatter, teeth
+    clicking, 2 variants); `GnawerBiteWindup` a rising chitter (180→560 Hz) with a hiss;
+    `GnawerBite` brass teeth clacking shut; `GnawerPounceWindup` a low coiling growl with claws
+    scraping; `GnawerPounce` a whoosh and a snarl.
+  - Censer: `CenserAlert` the brazier flaring (a breathy whoomph, crackling embers, a low
+    drone); `CenserWhirl` (0.82 s) whooshes coming faster and faster (2→9 revolutions per
+    second) over a chain rattle and a brightening hiss; `CenserLob` a thump and a rising whoosh
+    per bomb; `CenserSwingWindup` / `CenserSwing` chain rattle and creak, then a whoosh and a
+    clang; `EmberFlight` a fuse crackle (played when a bomb appears); `EmberBurst` a pop, a spray
+    of sizzling embers, no big boom (2 variants).
+  - Harrier: `HarrierAlert` a carrion screech; **`HarrierShriek`** (0.72 s) a piercing shriek
+    rising 380→1100 Hz that peaks as it drops; `HarrierDive` the wind tearing past;
+    `HarrierSwat` wax crunching, a thud, flapping and a squawk.
+  - Gaoler: `GaolerAlert` a deep iron bellow through the grille with the chain shaken;
+    **`GaolerBashWindup`** (1.0 s) iron grinding up in pitch with a rumble, then **two bright
+    bell strikes at 0.65 s — the start of the parry window** — and a shimmer until the bash
+    (mixed among the loudest sounds); `GaolerBash` a cell door slammed: a huge clang over a
+    boom; `GaolerChain` (0.82 s) the chain spun up to speed (heavy links rattling faster, a
+    whirr, a hiss); `GaolerSweep`; `GaolerRushWindup` a snort through the grille, iron feet
+    scraping, a rumble; `GaolerRush` footfalls coming faster; `GaolerStep` (2 variants, played
+    on each step).
+  - Heron: `HeronAlert` two hoarse honks through a brass throat; **`HeronLaser`** (1.3 s) an
+    electric hum with a whine climbing towards the lock; **`HeronLock`** a hard mechanical click
+    and a short high double beep (dodge now); `HeronNeedle` a hard crack and a zip falling
+    away; `HeronKickWindup` a squeaky brass joint; `HeronKick`.
+- **Enemy hits and deaths.** The Moulds don't bleed: wax cracking, a hiss of heat, slag thuds,
+  sizzle. `EnemyHurt` (3 variants) is a wax snap, a thud and a puff of hiss; `EnemyDeath`
+  (2 variants, pitched by the client for the body's size) wax splitting, a slag thud and a long
+  sizzle as it melts; `GaolerDeath` the door crashing down, iron collapsing, the lantern hissing
+  out; `EmberRelease` the heat leaving: a soft whoomph and a fountain of crackling embers.
 - **Game.**
   - `RankUp` is a rising A-major arpeggio (A4–C♯5–E5–A5) whose last note holds with vibrato
     and a third on top, plus shimmer and echo: triumphant and short (1.2 s).
@@ -259,15 +283,16 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 
 | family | target (LU, 50 ms) |
 |--------|--------------------|
-| Parry, Explosion, Bastion slam | −10 |
-| Bastion telegraph, shotgun (fire / slug), Lancet beam | −11 … −12 |
+| Parry, Explosion, Gaoler bash | −10 |
+| Gaoler bash wind-up (parry cue), Gaoler death, sweep, shotgun (fire / slug), Lancet beam | −11 … −12 |
+| Harrier shriek / swat, Heron lock / needle, Gaoler chain / rush | −12 … −13 |
 | Slam impact, death | −12 |
 | Pistol, launchers, punch hit, wave/match stingers | −13 … −15 |
 | Enemy windups (telegraphs) | −14 … −15 |
 | Hurt, rank up, kill confirm, enemy attacks | −14 … −17 |
 | Riveter (rapid fire), dash, heavy landings, slam, wall jump, jump pad | −16 … −19 |
-| Hitmarker, enemy hurt, UI select/back, chat | −18 … −20 |
-| Jump, land, slide, gnat buzz, weapon/mode switch, UI move | −20 … −22 |
+| Hitmarker, enemy hurt, Gnawer bark, Gaoler steps, UI select/back, chat | −18 … −20 |
+| Jump, land, slide, ember fuse, weapon/mode switch, UI move | −20 … −22 |
 | Footsteps (constant, 4 voices) | −25 |
 
 Each track is mastered so the full mix's loudest 400 ms sits at **−21 LU** (Campaign and
@@ -275,7 +300,7 @@ Arena), −23 (Menu) or −22 (Results), with peaks at −5 dBFS or lower. In pr
 
 - Full-combat music measures about −21 LU momentary and about −17 to −18.5 LU over its loudest
   50 ms. On the same 50 ms scale, pistol shots sit about 3 LU above it, the shotgun about 6–7,
-  and the parry and Bastion telegraph about 7.
+  and the parry and the Gaoler's bash wind-up about 7.
 - The pad alone measures about −29 to −30 LU.
 
 The music stays clearly under the gameplay-critical cues even at full music volume.
@@ -295,7 +320,13 @@ Explosion                      2.12     -0.9    -15.8     -10.0     -14.2
 Parry                          2.20     -3.7    -18.0     -10.0     -10.9
 Ricochet                       0.65    -10.1    -26.0     -15.0     -20.8
 Hitmarker                      0.05     -8.4    -22.7     -20.0     -20.0
-BastionTelegraph               1.30     -9.0    -17.1     -11.0     -14.0
+GaolerBashWindup               1.24     -9.1    -19.2     -11.0     -14.6
+HarrierShriek                  0.72     -7.3    -17.5     -12.0     -14.1
+HeronLaser                     1.30     -9.5    -18.1     -15.0     -15.4
+HeronLock                      0.17     -1.1    -17.9     -12.0     -15.0
+CenserWhirl                    0.82     -4.1    -20.7     -13.0     -16.8
+EmberBurst                     0.82     -7.4    -20.3     -13.0     -17.4
+EnemyDeath                     1.41     -7.2    -20.6     -15.0     -17.4
 RankUp                         1.17     -5.0    -19.2     -14.0     -16.3
 Campaign_mix_calm             25.60    -14.0    -29.1     -27.5     -28.9
 Campaign_mix_mid              25.60    -10.3    -25.1     -20.9     -25.7

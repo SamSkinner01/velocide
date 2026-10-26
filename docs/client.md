@@ -138,7 +138,7 @@ state (encounters, enemies, pickups) reset themselves in `SimWorld::restart_leve
    per-entity animation state (walk `cycle`, hit flash) in a `HashMap<NetId, _>` and drop
    unseen ids (see `RemotePlayers::draw`). The library lives in `common.models`.
 3. Create it in `InGame::start` and call it in `InGame::draw_world` (where `lib` is already
-   in scope) with `net.remote_entities().iter().filter(|e| e.kind == kind::HUSK)`.
+   in scope) with `net.remote_entities().iter().filter(|e| e.kind == kind::GNAWER)`.
    Fast projectiles may extrapolate from `position + velocity * dt` using
    `NetClient::server_tick_estimate()`.
 4. Positional sounds for state changes go in a tracker like `audio_hooks::RemoteSounds`;
@@ -167,10 +167,10 @@ snapshot at the present (see `docs/combat.md`), everything else at the render ti
 `InGame::send_chat` / `server_addr` exist for tools.
 
 Look at it: `cargo run -p client --release --example combat_shots -- [out_dir]` plays a
-scripted single-player session (dev commands spawn husks / orbs, every weapon fires, a
+scripted single-player session (dev commands spawn gnawers / needles, every weapon fires, a
 parry, damage, death) plus a hosted game with a scripted rival client shooting at you, and
 writes PNGs (`combat_lancet`, `combat_thresher`, `combat_explosion`, `combat_overcharge_beam`,
-`combat_ricochet`, `combat_husk_windup`, `combat_parry`, `combat_hit_by_husk`,
+`combat_ricochet`, `combat_gnawer_windup`, `combat_parry`, `combat_hit_by_gnawer`,
 `combat_low_health`, `combat_death`, `combat_remote_shot`, ...) and frame-time numbers.
 
 ### React to gameplay events (damage, kills, parries...)

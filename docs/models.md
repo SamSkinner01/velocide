@@ -12,7 +12,7 @@ pivots and animated procedurally by pure, time-based pose functions.
 ```text
 cargo run -p client --example models_gen        # rebuild assets/models/*.gltf (+ read-back check)
 cargo run -p client --example models_view       # headless renders -> target/models_view/*.png
-    [-- --out DIR] [--only PREFIX]               # e.g. --only vm, --only husk, --only closeup
+    [-- --out DIR] [--only PREFIX]               # e.g. --only vm, --only gaoler, --only closeup
 cargo test -p client                            # mesh validity, glTF round trip, finite poses
 ```
 
@@ -32,11 +32,12 @@ cargo test -p client                            # mesh validity, glTF round trip
 ## Conventions
 
 - Metres, +Y up, **models face -Z**, right = +X. Characters / props: origin at the feet.
-  Gnat: origin = hover centre. Projectiles: centred, flying along -Z (orient with a look
+  Harrier: origin = hover centre (`EnemyKind::root_lift()` = 0.65 m above the replicated
+  feet). Projectiles: centred, flying along -Z (orient with a look
   rotation towards the velocity). Weapons: **grip at the origin**, barrel along -Z.
 - Colours are sRGB 0..1 (shaded in gamma space). Hues mostly come from vertex colours; the
   textures are neutral detail maps (chrome reflection bands, brushed plate, grime, veined skin,
-  bone, knurling, hazard stripes, emissive noise).
+  poured wax with drip runs, bone, knurling, hazard stripes, emissive noise).
 - Part shading (`rig::Shade`):
 
   | shade | drawn | colour |
@@ -48,8 +49,8 @@ cargo test -p client                            # mesh validity, glTF round trip
   | `TeamGlow` | **unlit** | … × `Tint::team` × `Pose::glow` (Shrike visor) |
 
   Emissive colours are not clamped before the framebuffer, so `glow` values > 1 push towards
-  white (white-hot flashes). Translucent parts have base colour alpha < 1 (Gnat wings, Spitter
-  orb shell, exit portal, Gnat bolt) and go through the renderer's translucent pass.
+  white (white-hot flashes). Translucent parts have base colour alpha < 1 (the aim laser's
+  sheath, exit portal) and go through the renderer's translucent pass.
 
 ## Runtime API (`client::models`)
 
@@ -61,9 +62,9 @@ let info: PlayerDrawInfo = lib.draw_player(&player_anim, feet_pos, &Tint::team(c
 // info.muzzle / info.muzzle_dir (world) for remote tracers & flashes, info.head for name tags
 
 // enemies
-let root = EnemyAnim::root(position, yaw);              // feet (Gnat: hover centre)
+let root = EnemyAnim::root(position + Vec3::Y * kind.root_lift(), yaw); // feet (Harrier: hover centre)
 lib.draw_enemy(&enemy_anim, root, &Tint::default(), &mut draws);
-let spit_from = lib.enemy_attack_point(&enemy_anim, root); // maw / emitters / claws / fist
+let at = lib.enemy_attack_point(&enemy_anim, root); // jaw / censer pot / beak / door or flail / lens
 
 // first-person viewmodel (view space -> FrameDesc::viewmodel, viewmodel_fov_y_degrees ~60)
 let vm: ViewmodelDrawInfo = lib.draw_viewmodel(&vm_anim, &Tint::team(color), &mut viewmodel);
@@ -128,42 +129,53 @@ camera, lower right. Each weapon exposes its muzzle (`WeaponKind::muzzle()`, mod
 
 ### `EnemyAnim`
 
-`{ kind, state, speed (m/s), cycle, strafe (-1..1, + = moving right), aim_pitch, time, seed }`;
-`EnemyAnim::new(kind)`; keep `cycle = kind.advance_cycle(cycle, speed, dt)` per enemy; `seed`
-de-synchronises idles / hovering. `EnemyState`: `Idle`, `Walk` (any state with speed > 0.2
-walks), `Windup(p)`, `Attack(p)`, `Recover(p)`, `Stunned`, `Dying(p)` — `p` is progress 0..1
-through the phase (elapsed / duration from the enemy definition; dying: ~1 s).
-`EnemyKind::from_name("husk")` maps enemy definition names.
+`{ kind, state, attack, speed (m/s), cycle, strafe (-1..1, + = moving right), aim_pitch,
+aim_locked, time, seed }`; `EnemyAnim::new(kind)`; keep `cycle = kind.advance_cycle(cycle,
+speed, dt)` per enemy; `seed` de-synchronises idles / hovering. `attack` is the definition's
+attack index (replicated `aux` bits 8–15): which telegraph and strike to pose (each enemy
+module exports its indices, e.g. `gaoler::{BASH, SWEEP, RUSH}`). `aim_pitch` aims heads (the
+Heron's laser pitch) and pitches a diving Harrier down its flight; `aim_locked` makes the
+Heron's lens flare. `EnemyState`: `Idle`, `Walk` (any state with speed > 0.2 walks),
+`Windup(p)`, `Attack(p)`, `Recover(p)`, `Stunned`, `Dying(p)` — `p` is progress 0..1 through
+the phase (elapsed / duration from the enemy definition; dying: the corpse time).
+`EnemyKind::from_name("gaoler")` maps enemy definition names.
 
 ## Telegraph conventions
 
 `Pose::glow` drives every enemy's `Glow` parts: ~0.45 calm → ramps up through `Windup` →
 strobes near its end → peak on `Attack` → fades in `Recover` → dark when `Stunned` / `Dying`.
-The client only has to pass the state; `Tint::glow` can add extra flashing.
+`Pose::core` drives the weak points: always ≥ 1.15 (they read through fog), flaring with the
+telegraph, guttering out as the corpse cools. The client only has to pass the state; `Tint::glow`
+can add extra flashing. The Moulds are grey wax-flesh, slag, brass and chain lit from inside:
+weak points are hot orange / yellow / red, telegraphs orange (Gnawer, Censer), red (Harrier,
+Heron, the Gaoler's chain) or yellow (the Gaoler's door). Deaths slump, split and melt (the
+pelvis / robe / body squashes towards the floor; heads, braziers and doors fall away).
 
-| enemy | telegraph (`Glow`) | steady emissive (`Core`) | wind-up pose |
+| enemy | telegraph (`Glow`) | steady emissive (`Core`, weak point) | wind-up poses |
 |---|---|---|---|
-| Husk | blood-red bone claws flare red-hot (strobe from 60 %) | slit eyes (flare with the claws) | both arms rise overhead, chest arches, jaw opens; attack rakes down + lunge |
-| Spitter | throat sac, back pustules, maw (acid green) | — | sac swells to 1.6× and pulses, neck rears; spit thrusts the head, sac deflates |
-| Gnat | compound eyes + emitter tips (magenta) | caged abdomen core (weak point) | abdomen curls under (presents the core); attack = three recoil kicks |
-| Bastion | visor, hump beacon, fist cuff rings + knuckle bars (yellow) | back furnace (unarmoured side) | both fists overhead; **parry window** (last 35 %, `bastion::PARRY_WINDOW_FROM` = 0.65): strobes white-hot / yellow at 18 Hz; attack = slam into the floor and hold |
+| Gnawer | throat + gums (orange) | ember eye slits | bite: the jaw unhinges (~1 rad), head rears, throat lights; snap = head drives down, jaw slams. Pounce: coils low with fists spread, quivers; airborne stretch, fists forward, jaw wide |
+| Censer | censer embers + flames over the brazier (orange) | the coal bed in the caged brazier head | volley: raises the censer overhead and whirls it faster (the chain is solved to a horizontal circle whatever the arm does); lobs lean in. Swing: twists away with the censer drawn back, then a wide sweep |
+| Harrier | eyes + the beak's edge (red) | the heart sac under the chest (flares white-hot when it rears, during the dive) | rears up (body pitched up), wings folded back, neck coiled; the dive pitches the body down its line (`aim_pitch`), wings swept, talons forward; recover beats hard; swatted: tumbling |
+| Gaoler | the door's rim (yellow; **parry window**: last 35 % of the bash wind-up, `gaoler::PARRY_WINDOW_FROM` = 0.65, white-hot / yellow strobe) and the chain (red) — the inactive one is hidden | the helm's grille, the back lantern | the door always stays upright (the forearm counter-rotates the body): bash draws it back and slams it forward; sweep crouches, arm out, chain spun low then a 300° turn with the body; rush hunkers behind the door then charges; parried: the door knocked open like a gate |
+| Heron | the ring round the lens (red; strobes white-hot once `aim_locked`) | the lens (≥ 2 while aiming) | needle: braces with the legs splayed, body low, neck forward, the head following `aim_pitch`; recoil on the shot. Kick: leans in with a leg drawn back, then stamps it forward |
 
 ## Models and parts
 
 | model | file | parts (parents in brackets) |
 |---|---|---|
 | Shrike (~1.88 m incl. crest) | `shrike.gltf` | pelvis, torso[pelvis], core[torso] *Core*, trim[torso] *Team* (pauldrons, back blades, chest V), head[torso], visor[head] *TeamGlow*, crest[head] *Team*, upper_arm_l/r[torso], forearm_l/r, hand_l/r, thigh_l/r[pelvis], shin_l/r, foot_l/r |
-| Husk (~1.9 m) | `enemy_husk.gltf` | pelvis, spine, chest, head, eyes *Core*, jaw, upper_arm_l/r, forearm_l/r, hand_l/r, claws_l/r *Glow*, thigh_l/r, shin_l/r |
-| Spitter (~1.6 m) | `enemy_spitter.gltf` | pelvis, body, pustules *Glow*, neck, head, jaw, maw *Glow*, sac[neck] *Glow* (scaled by the pose), arm_l/r, forearm_l/r, thigh_l/r, shin_l/r |
-| Gnat (~1 m span) | `enemy_gnat.gltf` | thorax, head, emitters[head] *Glow*, abdomen, core[abdomen] *Core*, wing_fl/fr/bl/br (translucent), legs |
-| Bastion (~3 m) | `enemy_bastion.gltf` | pelvis, torso, armor[torso], furnace[torso] *Core*, head, visor *Glow*, beacon[torso] *Glow*, upper_arm_l/r, forearm_l/r, fist_l/r, lamp_l/r[fist] *Glow*, thigh_l/r, shin_l/r |
+| Gnawer (2.0 m to the hump, 1.8 m long) | `enemy_gnawer.gltf` | pelvis, chest, head, jaw[head], throat[head] *Glow*, eyes[head] *Core*, upper_arm_l/r[chest], forearm_l/r, fist_l/r, thigh_l/r[pelvis], shin_l/r |
+| Censer (2.7 m incl. the flue) | `enemy_censer.gltf` | robe, torso, head (brazier cage), coals[head] *Core*, flames[head] *Glow*, arm_l/r, forearm_l/r, chain[forearm_r], censer[chain], embers[censer] *Glow* |
+| Harrier (3.05 m wingspan) | `enemy_harrier.gltf` | body, neck, head, glare[head] *Glow*, heart[body] *Core*, wing_l/r, tip_l/r[wing], legs, tail |
+| Gaoler (3.73 m) | `enemy_gaoler.gltf` | pelvis, torso, lantern[torso] *Core*, helm, grille[helm] *Core*, arm_l, forearm_l, shield[forearm_l] (the cell door), rim[shield] *Glow*, arm_r, forearm_r, chain[forearm_r], chain_glow[chain] *Glow*, flail[chain], thigh_l/r, shin_l/r |
+| Heron (3.35 m) | `enemy_heron.gltf` | body, neck, head, lens[head] *Core*, ring[head] *Glow*, thigh_l/r[body], shin_l/r |
 | Lancet | `weapon_lancet.gltf` | body, cell *Glow* |
 | Thresher | `weapon_thresher.gltf` | body, pump (slides back), glow *Glow* |
 | Riveter | `weapon_riveter.gltf` | body, barrels (rotates about the bore), drum (side magazine, rotates), glow *Glow* |
 | Cinderbox | `weapon_cinderbox.gltf` | body, stripe (hazard band), core *Glow* (side windows + maw) |
 | right arm (1st person) | `vm_arm.gltf` | forearm, hand, trim *Team* |
 | left fist (1st person) | `vm_fist.gltf` | forearm, fist, trim *Team*, knuckles *Glow* |
-| projectiles | `proj_rivet/sawblade/rocket/flak/sticky/mortar/spitter_orb/gnat_bolt/prism.gltf`, `fx_blood_core.gltf` | `body` + `glow` (rivet, rocket, flak, sticky, mortar); `blade` + `edge` (sawblade, horizontal disc: spin it about Y); `core` + `shell` (orb); `bolt` + `core`; `shard` *Core* + `rim` *Glow* (prism, ~0.5 m, stands along Y); `core` |
+| projectiles | `proj_rivet/sawblade/rocket/flak/sticky/mortar/ember_bomb/needle/prism.gltf`, `fx_blood_core.gltf`, `fx_aim_laser.gltf` | `body` + `glow` (rivet, rocket, flak, sticky, mortar); `blade` + `edge` (sawblade, horizontal disc: spin it about Y); `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `shard` *Core* + `rim` *Glow* (prism, ~0.5 m, stands along Y); `core`; `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 
 Prop poses: `door_pose(open 0..1, locked)` slides the panels apart (unit door
@@ -178,10 +190,11 @@ glTF in total (vertex data dominates: flat-shaded faces need their own vertices)
 ## Visual verification
 
 `models_view` renders (1280×720 = the game's 640×360 internal image at 2×, retro settings
-on): `lineup` / `lineup_back` (scale and silhouettes, back = Bastion furnace weak point),
+on): `lineup` / `lineup_back` (scale and silhouettes, back = the Gaoler's lantern),
 `closeup_<enemy>` (front 3/4 + back), `shrike_0..3` + `shrike_closeup` (every movement state
-in profile, team colour), `husk_1/2`, `spitter_1/2`, `gnat_1/2`, `bastion_1/2` (idle, walk,
-wind-up early / late, attack, recover, stunned, dying, dead), `vm_00..19` (each weapon rest /
+in profile, team colour), `gnawer_1/2`, `censer_1/2`, `harrier_1/2`, `gaoler_1/2/3`,
+`heron_1/2` (idle, walk, every attack's wind-up early / late and strike, recover, stunned,
+melting, dead), `vm_00..19` (each weapon rest /
 kick / alt mode, overcharge, riveter spin, switch, punch, prism throw, bob + sway),
 `projectiles`, `props`.
 
@@ -191,8 +204,10 @@ kick / alt mode, overcharge, riveter spin, switch, punch, prism throw, bob + swa
   angles. Joint pivots are checked by a test to sit on their part's geometry.
 - Pivots / hierarchy are code-defined; the glTF files carry no node hierarchy (the engine's
   writer has no node transforms), so an artist edit can change geometry but not the rig.
-- Gnat wing flaps at 23 Hz alias at 60 fps on purpose (reads as a buzz blur).
-- The Gnat `Dying` pose only drops ~0.5 m; let the corpse fall / remove it client-side.
+- The Harrier's `Dying` pose only sags; the corpse falls server-side (a dead flyer has
+  gravity).
+- The Censer's and the Gaoler's chains are rigid rods (no rope simulation): the pose solves
+  their whirl directions, the links don't sag.
 - Viewmodel arms are generic: one right arm grips every weapon (fingers don't wrap each grip
   exactly), and the left fist doubles as the prism-throwing hand.
-- Labels in `models_view` sit at floor level (hovering Gnats are labelled below themselves).
+- Labels in `models_view` sit at floor level (hovering Harriers are labelled below themselves).

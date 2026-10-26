@@ -2,7 +2,8 @@
 
 Server-authoritative combat: weapons with alt fires, lag-compensated hitscan, projectiles and
 explosions, parry with network tolerance, ricochet prisms, blood-burst healing, hard damage,
-the first enemy (Husk) and how all of it reaches clients. Rules and default numbers come from
+the enemy definitions (the Moulds, `docs/enemies.md`) and how all of it reaches clients. Rules
+and default numbers come from
 `docs/gameplay.md`; every number is in `CombatTuning` (`assets/tuning.ron`, section `combat`)
 or in `assets/enemies/*.ron`. Networking basics: `docs/network.md`.
 
@@ -25,7 +26,7 @@ for every entity kind and event (the spec for phase 2, client side).
 | `shared::protocol` | entity kinds and flag bits (`snapshot.rs`), `GameEvent` combat variants, `OwnState::combat`, `SnapshotMessage::fx`, `DamageReport`, `HitReport`, `Fx`/`FxEvent`, `QPos` (`combat.rs`) |
 | `server::combat` | routing `SimEvent`s to reliable `GameEvent`s per recipient and batched `Fx` (`FxLog`) |
 | `server::commands` | dev chat commands |
-| `assets/enemies/husk.ron` | the Husk (also compiled in as the built-in definition) |
+| `assets/enemies/*.ron` | the five enemies (also compiled in as the built-in definitions; `docs/enemies.md`) |
 
 ## Tick pipeline (`SimWorld::step`)
 
@@ -226,12 +227,14 @@ wins.
 | Flak (67) | 25 | 0.2 | 1.2 s fuse (explodes) | explode | explode | yes, owner too |
 | Sticky (68) | 20 | 0.15 | 20 s (explodes) | stick to it | stick | no |
 | Mortar (69) | 25 | 0.25 | 10 s | explode | explode | yes |
-| SpitterOrb (70) | `enemy_projectiles.orb_*` (0) | 0.35 | 6 s | direct damage (attack's) | vanish | yes |
-| GnatBolt (71) | `bolt_*` (0) | 0.15 | 3 s | direct damage | vanish | yes |
+| EmberBomb (80) | `enemy_projectiles.ember_gravity` (20) | 0.3 | 6 s | explode (r `ember_explosion_radius` 2.5, the attack's damage, kb `ember_knockback` 9) | explode | yes |
+| Needle (81) | `needle_gravity` (0) | 0.12 | 2 s | direct damage (attack's) | vanish (`ProjectileImpact`) | yes |
 
 Enemy projectiles: `SimWorld::spawn_enemy_projectile(t, kind, enemy, attack, pos, vel,
-damage)` (used by `AttackKind::Projectile` attacks; speed/damage/count/spread/lead/muzzle come
-from the enemy definition).
+damage)` (used by `AttackKind::Projectile` attacks; speed/damage/count/spread/lead/muzzle/lob
+come from the enemy definition; for explosive kinds `damage` is the explosion's). Enemy
+projectiles never hit enemies, and an ember bomb's explosion is blocked on enemies
+(`Blocked::SameTeam`, no knockback).
 
 **Parry-delayed impacts.** A parryable projectile touching a *player* freezes there
 (`PENDING`) for `parry_delay_ticks(victim)` and only then applies (direct damage or
@@ -276,12 +279,15 @@ owner: rocket jumps; teammates in co-op get knockback only). Flags `EXPLOSIVE` (
 * **Reward**: `parry_hard_damage_clear` (50 %) of hard damage cleared, healed to the effective
   max, `SimEvent::Parried(ParryEvent { player, target, position, healed, late_ticks, tick })`.
 * **Telegraphed melee hook**: an attack with `parry_window: Some(s)` publishes
-  `Enemy::parry_window = { start, end = strike tick, seq }` (entity flag `PARRYABLE` while
-  `start ≤ tick ≤ end`). A punch whose view time — or the current tick — falls in it, with the
-  enemy (rewound through its trail) within `melee_parry_range` + its radius, stuns it for the
+  `Enemy::parry_window = { start, end = strike tick, seq }` (the Gaoler's bash); one with
+  `parry_strike` publishes the whole strike instead (`end` clipped when it ends early: the
+  Harrier's dive, the Swat). Entity flag `PARRYABLE` while `start ≤ tick ≤ end`. A punch whose
+  view time — or the current tick — falls in it, with the enemy (rewound through its trail)
+  within the attack's `parry_reach` (default `melee_parry_range`) + its radius, stuns it for the
   attack's `parry_stun`, deals `parry_damage` (`Fist`, `MELEE | PARRIED`) and cancels the
-  strike's pending damage. Strikes of parryable attacks queue their damage as `PendingHit`s
-  keyed `ParryKey::Melee(enemy, seq)` with the same delay, so lagging players can parry too.
+  strike's pending damage; a parried flyer is knocked out of the air (stunned flyers fall).
+  Strikes of parryable attacks queue their damage as `PendingHit`s keyed
+  `ParryKey::Melee(enemy, seq)` with the same delay, so lagging players can parry too.
 
 ## Ricochet
 
@@ -316,7 +322,7 @@ Every field has a default. Local offsets: +X right, +Y up, −Z forward, from th
 
 | field | meaning |
 |---|---|
-| `name`, `net_kind` | display name; replicated kind (16..64, unique: Husk 16, Spitter 17, Gnat 18, Bastion 19) |
+| `name`, `net_kind` | display name; replicated kind (16..64, unique: Gnawer 20, Censer 21, Harrier 22, Gaoler 23, Heron 24; 16–19 retired) |
 | `model` | client model name |
 | `health` | base health (co-op: `× (1 + 0.5 (players − 1))`, hook `SimWorld::enemy_health_scale`) |
 | `speed`, `acceleration`, `turn_rate` | m/s, m/s², deg/s |
@@ -327,33 +333,39 @@ Every field has a default. Local offsets: +X right, +Y up, −Z forward, from th
 | `weak_points` | `[(name, kind: Head/Core, offset, radius, multiplier)]` → `HitPart::Weak(i)` |
 | `armour` | `Some((front_multiplier, front_arc, bypass: ["head"], explosions))` |
 | `attacks` | `[AttackDef]`, in priority order (below) |
-| `ai` | `sight_range, reaction_time, lose_target_time, preferred_range: Option<(min,max)>, strafe, target_stickiness, aggro_switch_fraction, retarget_interval` |
+| `ai` | `sight_range, reaction_time, lose_target_time, preferred_range: Option<(min,max)>, strafe, target_stickiness, aggro_switch_fraction, retarget_interval, repath_interval, reposition` |
 | `drops` | `(blood_pool, blood_radius)` of the death burst |
-| `colors` | `body, accent, glow, telegraph, parry` (sRGB) |
+| `colors` | `body` (wax), `accent`, `glow` (the heat: weak points, hit sprays, death bursts), `telegraph`, `parry` (sRGB) |
 | `death_time` | corpse duration (Dying state) |
 
-`AttackDef`: `name`, `kind` (`Melee` / `Projectile` / `Slam`), `range`, `min_range`, `arc`
-(melee cone), `damage`, `knockback`, `windup`, `strike`, `recover`, `cooldown`,
-`windup_move_scale`, `track_target`, `parry_window: Option<f32>` (+ `parry_stun`,
-`parry_damage`), `shockwave_radius` (Slam), `projectile: Option<(kind, speed, count,
-interval, spread, muzzle, lead)>`.
+`AttackDef`: `name`, `kind` (`Melee` / `Projectile` / `Slam` / `Dive`), `range`, `min_range`,
+`arc` (melee cone), `damage`, `knockback`, `knockback_up` (upward bias), `windup`, `strike`,
+`recover`, `cooldown`, `windup_move_scale`, `track_target`, `parry_window: Option<f32>` /
+`parry_strike` (+ `parry_stun`, `parry_damage`, `parry_reach`), `shockwave_radius` (Slam),
+`projectile: Option<(kind, speed, count, interval, spread, muzzle, lead, lob)>`, `lunge` (leap /
+dive speed), `lunge_up` (pounce), `dive_lead`, `min_target_speed`, `jumpable: Option<f32>`
+(low sweep: only targets whose feet are below that height above the attacker's), `laser:
+Option<(lock, track_rate, lead)>` (aim laser).
 
 The server loads `assets/enemies/*.ron` over the compiled-in built-ins
 (`EnemyRegistry::load_default`; `ServerConfig::enemies_dir` overrides); invalid files are
-logged and skipped. Adding the Spitter/Gnat/Bastion is a RON file each: Spitter =
-`Projectile` attack with `kind: SpitterOrb` + `preferred_range: Some((12, 25))`; Gnat =
-`Flying(4, 8)` + `Projectile` burst of 3 `GnatBolt` + `strafe`; Bastion = `armour` + `Slam`
-with `parry_window: Some(0.35)`. All four ship now; navigation, the AI per type and arena
-encounters are documented in `docs/enemies.md`.
+logged and skipped. The five Moulds are pure data on top of these: Gnawer = `Melee` bite +
+leaping `Melee` pounce (`lunge` + `lunge_up` + `min_target_speed`); Censer = `Melee` swing +
+lobbed `Projectile` burst of 3 `EmberBomb` + `preferred_range` / `strafe`; Harrier =
+`Flying(5, 10)` + `Dive` with `parry_strike`; Gaoler = `armour` + parryable `Melee` bash +
+`jumpable` 300° sweep + `lunge` rush; Heron = `Melee` kick + `Projectile` `Needle` with a
+`laser` + `reposition`. Navigation, the AI per type and arena encounters are documented in
+`docs/enemies.md`.
 
 ### AI (`ai.rs`)
 
-`Idle` → (a target is visible) `Alert` for `reaction_time` → `Chase` (straight at the target;
-ranged enemies hold their band and may strafe; stop at 60 % of melee range) → first usable
-attack (cooldown ready, in range, line of sight) → `Windup` (telegraph; turns towards the
-target if `track_target`, creeps at `windup_move_scale`) → `Strike` (melee arc / slam radius
-damage, or the projectile burst; ≥ `strike` s) → `Recover` → `Chase`. `Stunned` (parry) →
-`Chase`. `Dying` (corpse, no hitboxes) → removed after `death_time`.
+`Idle` → (a target is visible) `Alert` for `reaction_time` → `Chase` (nav grid; ranged
+enemies hold their band and may strafe; stop at 60 % of melee range) → first usable attack
+(cooldown ready, in range, line of sight) → `Windup` (telegraph; turns towards the target if
+`track_target`, or tracks its aim laser; creeps at `windup_move_scale`) → `Strike` (melee arc /
+leap / dive / slam radius damage, or the projectile burst; ≥ `strike` s, a leap or dive ends
+early on the level) → `Recover` → `Chase`. `Stunned` (parry) → `Chase`. `Dying` (corpse, no
+hitboxes) → removed after `death_time`. Details per type: `docs/enemies.md`.
 
 Targeting (every `retarget_interval`): a player who dealt ≥ `aggro_switch_fraction` of max
 health in the last 2 s; else keep the current target unless another visible one is closer
@@ -372,8 +384,8 @@ block each other (player movement must stay predictable).
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
 | `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64 (reserved)` | weapon (bits 0–3) \| mode (4–5) \| Overcharge charge 0–255 (8–15) | health (ceil) | hard (bits 0–7) \| prism charges (8–11) \| live stickies (12–15) |
-| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps) | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
-| projectiles 64..72 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
+| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (bits 6–14 enemies area, 15 `BRANDED`) | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
+| projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `BLOOD_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
 | `PRISM` 160 | thrower | **at launch tick** | – | `RESTING 1` | – | – | launch tick |
 
@@ -471,8 +483,8 @@ spawn protected; death screen.
 | thing | render / play |
 |---|---|
 | **PLAYER** entity | body/stance from `LOW_PROFILE`; weapon model from `state & 0xF` and alt mode; `CHARGING` → Lancet glow (charge in bits 8–15); `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
-| **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` (Idle, Alert: alert bark `HuskAlert`, Chase: walk/run by speed, Windup: telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + `HuskWindup`, Strike: swipe + `HuskSwipe`, Recover, Stunned: dazed, Dying: death anim/gibs); `PARRYABLE` → flash `colors.parry` (yellow); `ARMOURED` → armour plates; health bar from `health` / `aux >> 16`; hurt flash + `EnemyHurt` when `health` drops; `AIRBORNE` → flail |
-| **projectiles** | rivet: thin bolt + trail; sawblade: spinning disc (`SawBounce` on `ProjectileBounce`); rocket: smoke trail + light; flak: tumbling grenade + fuse beep; sticky: blinking charge (`STUCK` → attached, beeping); mortar: arcing shell; spitter orb / gnat bolt: glowing (parryable) with `ENEMY` tint; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
+| **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
+| **projectiles** | rivet: thin bolt + trail; sawblade: spinning disc (`SawBounce` on `ProjectileBounce`); rocket: smoke trail + light; flak: tumbling grenade + fuse beep; sticky: blinking charge (`STUCK` → attached, beeping); mortar: arcing shell; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
 | **BLOOD_BURST** | red mist cloud of `state/10` m radius, density from `health` (pool); `BIG` → gib shower + big mist; fades over its life |
 | **PRISM** | spinning mirrored shard with glints; `RESTING` → lying/hovering still; disappears on removal (shatter shown via `Ricochet`/`PrismExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
@@ -489,8 +501,9 @@ spawn protected; death screen.
 | `Fx::PrismThrown` / `PrismExpired` | remote throw anim + `PrismThrow` / small fizzle |
 | `Fx::StickiesDetonated` | remote detonator click |
 | `Fx::ProjectileBounce` / `ProjectileImpact` | sparks (+ `SawBounce`) / impact puff + `ProjectileImpact` |
-| `Fx::EnemyAttack` | `strike == false`: telegraph sound (`HuskWindup`, `SpitterWindup`, `BastionTelegraph`) + glint; `parryable` → yellow flash; `strike == true`: `HuskSwipe` / `BastionSlam` |
-| `Fx::EnemyFired` / `EnemyShockwave` / `EnemyAlert` | spit/muzzle flash (`SpitterFire`, `GnatFire`) / slam ring / `HuskAlert` bark |
+| `Fx::EnemyAttack` | `strike == false`: the attack's telegraph sound (by attack name: `GnawerBiteWindup`, `CenserWhirl`, `HarrierShriek`, `GaolerBashWindup`, `GaolerChain`, `HeronLaser`...) + glint in `colors.telegraph`; `parryable` → yellow flash; `strike == true`: its strike sound + bash dust ring / sweep arc / leap dust |
+| `Fx::Explosion` with `Attack::Enemy` | an ember bomb bursting: flash, embers, smoke ring, light, `EmberBurst` (no fireball) |
+| `Fx::EnemyFired` / `EnemyShockwave` / `EnemyAlert` | muzzle flash + `CenserLob` / `HeronNeedle` / slam ring / the type's alert bark |
 
 ## Dev commands (chat, `ServerConfig::dev_commands`)
 
@@ -503,8 +516,9 @@ commands are disabled on this server" and never broadcast. Each command costs a 
 
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
 `/god`, `/notarget`, `/give` (full health, no hard damage, prisms, cooldowns), `/kill`,
-`/hurt <hp>`, `/ff [on|off]`, `/orb [distance]` (a parryable Spitter orb flies at you: parry
-practice), `/encounter <n>`, `/encounters`, `/tp <x> <y> <z>`, `/goto <exit|start|checkpoint
+`/hurt <hp>`, `/ff [on|off]`, `/needle [distance]` (alias `/orb`: a Heron needle slowed to
+22 m/s flies at you: parry practice), `/ember [distance]` (an ember bomb is lobbed onto you),
+`/encounter <n>`, `/encounters`, `/tp <x> <y> <z>`, `/goto <exit|start|checkpoint
 n|encounter n>` (teleports: `SimWorld::teleport_player`, the client snaps like a rally),
 `/help`. On lobby servers (hosted / dedicated games) only the lobby host may use them; guests
 get "dev commands are for the host only". The reply goes to the sender only; commands are not
@@ -519,8 +533,8 @@ broadcast. Programmatic: `ServerCommand::{SpawnEnemy, KillAllEnemies, SetFriendl
 | same at ~200 ms RTT (`lag_comp_max_ms = 400`) | 4.75 m away, rewound 305 ms, **hit** |
 | parry of a 22 m/s orb, punching when the *displayed* orb is 2 m away | 0 ms: parried (2 ticks after the server impact, thanks to interpolation delay); ~100 ms RTT: parried 8 ticks late; ~200 ms RTT: parried 14 ticks late; punching 300 ms after the displayed touch: fails, 20 damage |
 | rocket jump (rocket at the feet + jump), 50 ms one-way | apex 14.6 m, self damage 23.2, 1 correction (0.35 m at the ack), no snaps, prediction == server afterwards |
-| crowded frame: 8 players, 50 husks, 150 projectiles | full 3.5 KB; delta 74 B with idle husks and flying projectiles |
-| bandwidth: 4 clients + 4 bots, 50 husks chasing, 150–240 projectiles, riveters firing | **28 KB/s per client** server→client (snapshot 844 B: 615 B entities ≈ 10 B per moving enemy, 3.4 FX); server tick 0.8 ms (dev build) |
+| crowded frame: 8 players, 50 fodder enemies, 150 projectiles | full 3.5 KB; delta 74 B with idle enemies and flying projectiles |
+| bandwidth: 4 clients + 4 bots, 50 fodder enemies chasing, 150–240 projectiles, riveters firing | **28 KB/s per client** server→client (snapshot 844 B: 615 B entities ≈ 10 B per moving enemy, 3.4 FX); server tick 0.8 ms (dev build) |
 | 2 players (`net_loopback`) | snapshot 197 B (own state 155 B of it: movement 123 + combat 32); 0 prediction corrections with one player shooting |
 | client weapon prediction (`client_combat`), 100 ms RTT, 587 inputs of firing / charging / switching / punching / prisms | 0 re-base mismatches; predicted `WeaponState` == server's |
 | client frame + render with combat effects (`combat_shots`, headless 1280×720, release) | avg 0.25 ms, p95 0.33 ms over 1638 frames |
@@ -536,8 +550,7 @@ Run: `cargo test -p shared --test combat_weapons --test combat_parry --test comb
 * Players and enemies don't collide (enemy navigation: `docs/enemies.md`).
 * Client: the predicted sticky count can be off by one for a snapshot when a sticky explodes
   server-side (re-based right after); hitscan tracers of your own pellets use client-side
-  spread (the server's spread decides damage); the Bastion / Spitter / Gnat visuals are wired
-  (models, telegraph sounds, parryable flash) but only the Husk exists server-side so far.
+  spread (the server's spread decides damage).
 * Default `net.lag_comp_max_ms` (350) compensates up to ~245 ms RTT (see above).
 * Pending (parry-delayed) hits favour the victim by up to `lag_comp_max_ms + 80 ms`.
 * Rivets that leave the level vanish silently after 2 s; sawblades only bounce off the level.

@@ -202,6 +202,29 @@ sight range 80 m.
   sight. Cooldown 3.5 s. Projectile kind `Needle`.
 - **Kick** (players inside 4 m): wind-up 0.4 s, 15 dmg, kb 16 — sends you back out.
 
+### As built (enemies area)
+Everything above ships as written (`docs/enemies.md` has the full numbers and the tests); where
+the build had to pick an interpretation:
+
+- Ranges in the RON files are between body surfaces for melee and centre to chest for
+  projectiles / dives; the "inside N m" distances above are centre to centre and come out as
+  written (Gnawer pounce 3–9 m, Censer swing 3 m, Gaoler sweep 7 m and rush 8–20 m, Heron kick
+  4 m). The Censer's volley also has a 4 m (surface) minimum so it swings rather than lobbing
+  onto its own feet.
+- **Shield Bash** reach is 2.4 m from the shield's surface (~4.1 m from the Gaoler's centre to a
+  player's), not 3.2 m: at 3.2 m it hit players standing beyond the 4.5 m parry radius, where they
+  could not parry it. The parry radius is the attack's `parry_reach` (3.2 m + the 1.3 m radius =
+  4.5 m from its centre).
+- **Pounce**: the strike lasts up to 0.7 s (the leap, then a run on landing), aims at where the
+  target will be, and never leaps where its airborne arc would land in lava or off a ledge (it
+  runs in instead).
+- **Volley**: the arc is the least-speed one onto the predicted feet (45° + half the elevation),
+  capped at 26 m/s; the three bombs fan 0°, −8°, +8°.
+- **Swat**: the whole dive is the parry window (punch within 3 m + its radius of the Harrier's
+  centre); the counter deals 50 (2× the 25 punch) on top of the punch itself, stun 2 s.
+- **Aim laser**: enemy flags `AIMING` (bit 6) and `AIM_LOCKED` (bit 7); while aiming the yaw and
+  pitch are replicated exactly and are the laser's direction.
+
 ## Hit assist (forgiving hitboxes)
 
 Shots should feel generous; being shot should feel fair.
