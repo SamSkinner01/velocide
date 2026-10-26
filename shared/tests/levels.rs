@@ -45,9 +45,12 @@ const ARENA: &str = "cistern_nine";
 const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
 const FURNACE: &str = "furnace_ring";
+const TALLOW: &str = "tallow_works";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
-const SHIPPED: [&str; 7] = [CRUCIBLE, SPIRE, DROWNED, ARENA, KNELL, INGOT, FURNACE];
+const SHIPPED: [&str; 8] = [
+    CRUCIBLE, SPIRE, DROWNED, ARENA, KNELL, INGOT, FURNACE, TALLOW,
+];
 /// Test levels that aren't held to the shipping standards.
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
@@ -1923,6 +1926,45 @@ fn arena_laps() -> Vec<(&'static str, usize, Vec<Wp>, usize)> {
             ],
             3,
         ),
+        // Tallow Works, every layer: from the west loft down the north belt to the floor, the
+        // east boiler pad onto the boiler's top, round the flue, off it, the west boiler pad
+        // back up, off it to the north, up the belt to the loft, drop into the wall-jump shaft,
+        // along the floor to the north-east corner, up the mezzanine ramp and along the
+        // mezzanine, its pad back onto the loft. (The skimmers' pads are checked by
+        // `jump_pads_land_on_higher_ground`.)
+        (
+            TALLOW,
+            0,
+            vec![
+                run(-25.0, 12.0, -14.0),
+                run(0.0, 3.0, -14.0),
+                run(8.0, 0.0, -14.0),
+                run(10.5, 0.0, -9.0),
+                pad(12.0, 0.0, -3.5),
+                run(3.5, 9.0, -3.5),
+                run(3.5, 9.0, 3.5),
+                run(-3.5, 9.0, 3.5),
+                run(-9.0, 0.0, 6.5),
+                pad(-12.0, 0.0, 3.5),
+                run(-3.5, 9.0, 3.5),
+                run(-3.5, 9.0, -3.5),
+                run(0.0, 0.0, -9.0),
+                run(10.0, 0.0, -14.0),
+                run(0.0, 3.0, -14.0),
+                run(-25.0, 12.0, -14.0),
+                run(-28.0, 12.0, -14.5),
+                run(-28.0, 0.0, -17.25),
+                run(-18.0, 0.0, -17.25),
+                run(20.0, 0.0, -17.5),
+                run(29.0, 0.0, -19.0),
+                run(29.0, 0.0, -23.5),
+                run(14.0, 6.0, -23.5),
+                run(-17.0, 6.0, -22.5),
+                pad(-20.0, 6.0, -22.5),
+                run(-28.0, 12.0, -9.0),
+            ],
+            3,
+        ),
         // Furnace Ring, all three rings: out of the north floor alcove, the crucible pad onto
         // the crucible's top, jump off over the slag, the south-east floor pad onto tier 1, up
         // the south-east ramp to the rim, round the rim (east and north sides, past the rim
@@ -2435,6 +2477,56 @@ fn drowned_chandlery_tech() {
 }
 
 #[test]
+fn tallow_works_tech() {
+    let level = load(TALLOW);
+    let col = collision(&level, None);
+
+    // Wall-jump shaft between the mezzanine's solid end and the press house, from the floor
+    // onto the mezzanine (6 m).
+    let s = climb_shaft_to(
+        &level,
+        &col,
+        Vec3::new(-28.0, 0.0, -18.55),
+        Vec3::new(-28.0, 0.0, -22.5),
+        6.0,
+    );
+    assert!(
+        s.on_ground && (s.position.y - 6.0).abs() < 0.05 && s.position.z < -19.2,
+        "the shaft should reach the mezzanine, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // The belt is a slide: from the loft down to the floor it builds well past slide speed.
+    let mut b = Script::new(&level, &col, Vec3::new(-25.5, 12.0, -14.0));
+    let mut top_speed: f32 = 0.0;
+    for tick in 0..300 {
+        b.tick(
+            Vec3::X,
+            if tick > 3 {
+                Buttons::CROUCH
+            } else {
+                Buttons::NONE
+            },
+        );
+        top_speed = top_speed.max(b.s.horizontal_speed());
+        if b.s.position.x > 12.0 {
+            break;
+        }
+    }
+    assert!(
+        b.s.position.x > 12.0 && b.s.position.y.abs() < 0.1,
+        "slid down the belt onto the floor: {}",
+        b.s.position
+    );
+    assert!(
+        top_speed > 33.0,
+        "the belt slide built only {top_speed:.1} m/s"
+    );
+    println!("tallow works: belt slide {top_speed:.1} m/s");
+}
+
+#[test]
 fn furnace_ring_tech() {
     let level = load(FURNACE);
     let col = collision(&level, None);
@@ -2806,7 +2898,7 @@ fn grind_spawns_are_valid() {
 }
 
 /// Arenas built with the PvP spawn rule: no player spawn can see another (eye to chest).
-const FAIR_SPAWNS: [&str; 1] = [FURNACE];
+const FAIR_SPAWNS: [&str; 2] = [FURNACE, TALLOW];
 
 #[test]
 fn pvp_spawns_cannot_see_each_other() {

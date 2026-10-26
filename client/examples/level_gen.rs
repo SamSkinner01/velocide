@@ -10,6 +10,8 @@
 //!   (`level_gen/furnace_ring.rs`).
 //! - `drowned_chandlery.ron` — "The Drowned Chandlery", the third co-op campaign level (4 arenas,
 //!   `level_gen/drowned_chandlery.rs`).
+//! - `tallow_works.ron` — "Tallow Works", the roofed, vertical PvP / grind arena
+//!   (`level_gen/tallow_works.rs`).
 //!
 //! Every arena has Mould gates for grind mode (`level_gen/gates.rs`).
 //!
@@ -47,6 +49,8 @@ mod ingot_run;
 mod knell_yard;
 #[path = "level_gen/spire.rs"]
 mod spire;
+#[path = "level_gen/tallow_works.rs"]
+mod tallow_works;
 
 // ------------------------------------------------------------------------------------------
 // Builder
@@ -2652,6 +2656,11 @@ fn main() -> anyhow::Result<()> {
             "furnace_ring.ron",
             furnace_ring::furnace_ring(),
             "Furnace Ring — round tiered arena for grind and PvP (1-4 grind, 4-8 PvP). See docs/levels.md.\nGenerator module: client/examples/level_gen/furnace_ring.rs.",
+        ),
+        (
+            "tallow_works.ron",
+            tallow_works::tallow_works(),
+            "Tallow Works — roofed, vertical arena for PvP (2-8 players) and grind. See docs/levels.md.\nGenerator module: client/examples/level_gen/tallow_works.rs.",
         ),
         (
             "drowned_chandlery.ron",
