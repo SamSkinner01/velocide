@@ -24,6 +24,7 @@ use shared::lobby::GameMode;
 use shared::sim::style::rank_name;
 use shared::sim::{EndReason, Grade, MatchResults, PlayerId, PlayerResult};
 
+use crate::ingame::cues;
 use crate::ingame::remote_players::player_color;
 use crate::ingame::style_hud::rank_text_color;
 
@@ -468,10 +469,13 @@ impl ResultsScreen {
                 },
             );
             let col = player_color(p.player);
-            draw::fill(
+            cues::player_swatch(
                 list,
-                Rect::new(vec2(row.min.x + 6.0, y), vec2(row.min.x + 10.0, y + 13.0)),
+                vec2(row.min.x + 6.0, y),
+                vec2(4.0, 13.0),
+                p.player.0 as usize,
                 fade(col, a),
+                fade(t.ink, 0.9 * a),
             );
             let xs = |x: f32| row.min.x + x * w / 600.0;
             let name = engine::ui::text::truncate(&p.name.to_uppercase(), 150.0, 1.0);
@@ -703,10 +707,13 @@ impl ResultsScreen {
             &format!("{}", place + 1),
             &TextStyle::new(fade(place_col, a)),
         );
-        draw::fill(
+        cues::player_swatch(
             list,
-            Rect::new(vec2(x0 + 22.0, y), vec2(x0 + 26.0, y + 7.0)),
+            vec2(x0 + 22.0, y),
+            vec2(4.0, 7.0),
+            p.player.0 as usize,
             fade(player_color(p.player), a),
+            fade(t.ink, 0.9 * a),
         );
         let name = engine::ui::text::truncate(&p.name.to_uppercase(), 220.0, 1.0);
         list.text(vec2(x0 + 30.0, y), &name, &TextStyle::new(fade(t.bone, a)));

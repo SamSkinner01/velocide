@@ -57,7 +57,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         title: shared::GAME_NAME.to_string(),
         width: w,
         height: h,
-        retro: launch.settings.retro.clone(),
+        retro: launch.settings.render_settings(),
     };
     if let Ok(mut slot) = LAUNCH.lock() {
         *slot = Some(launch);
@@ -132,7 +132,7 @@ impl Common {
         audio: Audio,
         launch: LaunchOptions,
     ) -> Self {
-        Self {
+        let mut common = Self {
             name_override: launch.name.clone(),
             debug_overlay: launch.debug_overlay,
             settings,
@@ -145,7 +145,26 @@ impl Common {
             launch,
             stats: FrameStats::default(),
             models: None,
-        }
+        };
+        common.apply_accessibility();
+        common
+    }
+
+    /// Follows the accessibility settings: the process-wide palette (`palette::palette()`)
+    /// and the UI theme's HUD colours.
+    pub fn apply_accessibility(&mut self) {
+        let a = &self.settings.accessibility;
+        let mode = a.color_vision.mode;
+        crate::palette::set_accessibility(mode, a.shape_cues_on());
+        self.theme = crate::palette::Palette::for_mode(mode).theme();
+    }
+
+    /// Applies everything visual: the renderer's settings (retro options + colour-vision
+    /// correction), the palette and the theme. Tools driving screens headless call this when
+    /// `settings_changed` is set; the app also applies audio and fullscreen.
+    pub fn apply_display_settings(&mut self, renderer: &mut Renderer) {
+        renderer.apply_settings(&self.settings.render_settings());
+        self.apply_accessibility();
     }
 
     /// Loads the model library once (missing files are generated in memory; a failure only
@@ -310,8 +329,8 @@ impl VelocideApp {
     }
 
     fn apply_settings(&mut self, ctx: &mut EngineContext) {
+        self.common.apply_display_settings(&mut ctx.renderer);
         let s = &self.common.settings;
-        ctx.renderer.apply_settings(&s.retro);
         let (m, sfx, music) = s.mixer_volumes();
         self.common.audio.set_volumes(m, sfx, music);
         if s.fullscreen != ctx.is_fullscreen() {

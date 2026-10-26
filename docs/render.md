@@ -12,7 +12,7 @@ Each frame runs these passes:
 |---|------|--------|----------|
 | 1 | **scene** | internal-res colour (`Rgba8Unorm`) + depth (`Depth32Float`, reverse-Z) | opaque meshes (alpha-tested, sorted by texture) → decals (depth-biased) → translucent meshes (`tint.a < 1`, back to front) → alpha sprites (back to front) → additive sprites → debug lines |
 | 2 | **viewmodel** | same colour, depth **cleared** | `FrameDesc::viewmodel` items with their own FOV (`viewmodel_fov_y_degrees`, near 0.01 m), so the weapon never clips into walls |
-| 3 | **post** | internal-res `Rgba8Unorm` | screen flash blend, colour depth reduction (`color_bits`), 4x4 Bayer dithering |
+| 3 | **post** | internal-res `Rgba8Unorm` | colour-vision correction (if on), screen flash blend, colour depth reduction (`color_bits`), 4x4 Bayer dithering |
 | 4 | **output** | swapchain / headless image | nearest-neighbour upscale (`textureLoad`, so no filtering at all), then the UI quads at window resolution |
 | 5 | overlay | swapchain | `OverlayPainter::paint` (egui) if given |
 
@@ -47,6 +47,61 @@ multipliers. Colour quantisation therefore happens in gamma space (a 5-bit chann
 15-bit framebuffer). The swapchain is chosen non-sRGB when available; if only an sRGB format
 exists, the output pass linearises before writing so colours look identical. `surface_format()`
 reports the format overlay painters render into.
+
+### Colour-vision correction (accessibility)
+
+Settings > ACCESSIBILITY > COLOUR MODE (Off / Protanopia / Deuteranopia / Tritanopia) and
+FILTER STRENGTH (0–100 %). The game copies the choice into `RetroSettings::color_vision`
+(`engine::color_vision::ColorVision`; not serialised with the retro options, the client keeps
+it in its `accessibility` settings section) and calls `apply_settings`; it applies live.
+
+**Model** (`engine::color_vision`, plain math, no wgpu):
+
+- Simulation: Machado, Oliveira & Fernandes 2009, severity 1.0 (dichromacy), one 3x3 matrix
+  per deficiency on **linear** RGB. Rows sum to 1, so white and greys are unchanged.
+- Correction ("daltonisation", Fidaner et al. 2005 style error redistribution): the
+  information the viewer loses, `e = c − S c`, is spread back by a per-deficiency matrix `D`
+  into channels they still see: `c' = c + s · D e`, i.e. one matrix
+  `M = I + s · D (I − S)` (`s` = strength). Greys have no error and never change.
+
+  | mode | `D` (rows) | effect |
+  |---|---|---|
+  | protan | `[0 0 0; 0.4 1 0; −0.4 0 0]` | reds gain green (lighter, orange), greens gain blue |
+  | deutan | `[0.4 0.4 0; 0 0 0; −0.4 0.7 0]` | greens gain blue (teal), reds stay red but warmer |
+  | tritan | `[0 0 −1; 0 −0.7 0.4; 0 0 0]` | blue-yellow error moves into red-green |
+
+  The `D`s were picked by a search over 40 000 random colour pairs that differ for normal
+  vision but look alike to the dichromat. Of such pairs (CIEDE2000 ≥ 15 normally, < 6 for the
+  dichromat) the full correction moves roughly 9 in 10 (protan), 8 in 10 (deutan) and 7 in 10
+  (tritan) to ≥ 8 apart, and merges < 2 % of pairs the viewer could already tell apart; unlike
+  Fidaner's original spread it doesn't darken reds for protanopes
+  (`color_vision::tests::correction_separates_confused_pairs` keeps this honest).
+- Colour difference: CIEDE2000 on CIELAB (D65), checked against Sharma et al.'s test data.
+
+**Where:** `post.wgsl` linearises the scene colour (the scene is gamma space), applies `M`
+(three `vec4` rows in the `Post` uniform, `params.z` = on), re-encodes, **then** mixes the screen
+flash and quantises / dithers. So the retro dither and colour depth are untouched, Off /
+strength 0 costs nothing (the branch is skipped) and the flash colour is shown exactly as
+picked. `color_vision::correct()` is the same transform on the CPU (the GPU test
+`gpu_colour_vision_correction_matches_cpu` checks they agree within one 8-bit step).
+
+**UI and HUD are not filtered.** They are drawn after the post pass at window resolution, and
+instead switch to a colour-blind-safe palette (`client::palette`, see `docs/ui.md`) whose
+colours are chosen and tested for each deficiency as the viewer sees them. Filtering them too
+would push those hand-picked colours around a second time. World colours that come from that
+palette (team trims, telegraph glows, lasers) do go through the filter; the palette tests check
+them after the correction at strength 0, 0.5 and 1.
+
+**Seeing it:** `cargo run -p client --release --example a11y_shots -- out/` renders the
+accessibility page, the lobby, a co-op scene with name tags, the scoreboard, an enemy in its
+parry window and the HUD after a hit / heal in all four modes, plus `*_compare.png` strips:
+standard look | standard look as that viewer sees it | corrected look as that viewer sees it.
+
+**Limits:** the correction is a global recolour, so the warm foundry shifts too (for protan /
+deutan its red-browns turn a stronger yellow, which is what lifts reds off greys for them; the
+strength slider tones it down). Machado's tritan model is the least accurate of the three.
+Anomalous trichromats (the majority) are served by the same dichromat matrices at a lower
+strength. Overlays painted by `OverlayPainter` (egui) are not corrected.
 
 ### Depth
 
@@ -171,8 +226,9 @@ Windowed keys: click grabs the mouse, WASD/Space/Ctrl/Shift fly, Esc releases; 1
 3 dither, 4 colour bits, 5 fog, 6 point lights, 7 internal res, 8 vsync, 9 snap strength,
 0 stress, F2 capture to `captures/`, F5 reload shaders, F11 fullscreen.
 
-GPU tests in `render::tests` (pixel-exact quad/clear colour/flash, colour quantisation, broken
-shader reload) skip themselves when no adapter is available.
+GPU tests in `render::tests` (pixel-exact quad/clear colour/flash, colour quantisation,
+colour-vision correction vs the CPU path, broken shader reload) skip themselves when no adapter
+is available.
 
 ## Known limitations
 

@@ -4,9 +4,11 @@
 //! - [`time`]: fixed-timestep accumulator
 //! - [`physics`]: static collision world with swept-capsule / ray queries (parry3d)
 //! - [`hotreload`]: file watcher used for `tuning.ron` and shader reloads
+//! - [`color_vision`]: colour-vision deficiency simulation / correction and CIEDE2000
 //!
 //! Behind the `client` feature: windowing, input, rendering, audio, assets and UI.
 
+pub mod color_vision;
 pub mod hotreload;
 pub mod physics;
 pub mod time;

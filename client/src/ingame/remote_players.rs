@@ -20,20 +20,12 @@ use crate::models::{ModelLibrary, PlayerAnim, Tint};
 use engine::gfx::DrawItem;
 
 /// Distinct colours per player slot (sRGB), used for the Shrike's team trim, visor, name tags,
-/// chat names and the scoreboard.
-pub const PLAYER_COLORS: [Vec4; 8] = [
-    Vec4::new(0.93, 0.15, 0.17, 1.0),
-    Vec4::new(0.38, 0.78, 1.0, 1.0),
-    Vec4::new(1.0, 0.72, 0.2, 1.0),
-    Vec4::new(0.55, 1.0, 0.45, 1.0),
-    Vec4::new(0.85, 0.4, 1.0, 1.0),
-    Vec4::new(1.0, 0.5, 0.75, 1.0),
-    Vec4::new(0.35, 1.0, 0.9, 1.0),
-    Vec4::new(1.0, 1.0, 0.55, 1.0),
-];
+/// chat names and the scoreboard: the standard palette's (`palette::STANDARD.team`).
+pub const PLAYER_COLORS: [Vec4; 8] = crate::palette::STANDARD.team;
 
+/// The colour of a player slot in the active colour-vision palette (`palette::palette()`).
 pub fn player_color(id: PlayerId) -> Vec4 {
-    PLAYER_COLORS[id.0 as usize % PLAYER_COLORS.len()]
+    crate::palette::palette().team(id.0 as usize)
 }
 
 /// Name-tag anchor without a model (above the capsule).

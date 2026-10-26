@@ -29,6 +29,7 @@ pub mod audio_hooks;
 pub mod camera;
 pub mod chat;
 pub mod combat;
+pub mod cues; // accessibility: player marker shapes, parry icon (palette::shape_cues)
 pub mod debug;
 pub mod effects;
 pub mod encounter_hud; // arena encounter banners / sounds / readout (docs/enemies.md)
@@ -69,6 +70,7 @@ use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, resolve_address,
 };
+use crate::palette;
 use crate::settings::Settings;
 use camera::{CameraFrame, CameraRig};
 use chat::{Chat, ChatResult};
@@ -875,12 +877,28 @@ impl InGame {
                             position: pos,
                             name: net.player_name(id).unwrap_or("?"),
                             color: player_color(id),
+                            marker: palette::shape_cues()
+                                .then(|| palette::marker_shape(id.0 as usize)),
                             occluded: world
                                 .is_some_and(|w| w.line_blocked(cam.position, pos, MASK_SHOTS)),
                         })
                     })
                     .collect();
                 hud::draw_name_tags(list, &common.theme, &self.last_camera, &tags);
+                // Accessibility: a parry icon over enemies in their parryable window.
+                if palette::shape_cues() {
+                    let defs = net.world().map(|w| &w.enemy_defs);
+                    let height = |k: u16| defs.and_then(|d| d.by_kind(k)).map(|d| d.height);
+                    cues::parry_icons(
+                        list,
+                        &cam,
+                        net.remote_entities(),
+                        &height,
+                        palette::palette(),
+                        common.theme.ink,
+                        now,
+                    );
+                }
             }
             self.draw_hud(
                 common,

@@ -109,6 +109,7 @@ impl InGame {
             .values()
             .map(|p| {
                 let mut row = ScoreRow::new(&p.name, player_color(p.id), columns.len());
+                row.slot = Some(p.id.0 as usize);
                 row.is_local = Some(p.id) == local;
                 row.is_host = lobby.is_some_and(|l| l.is_host(p.id));
                 row.ping_ms = if single || p.bot {
