@@ -363,7 +363,7 @@ impl InGame {
         match ev {
             GameEvent::Damaged(r) => {
                 if r.blocked == Some(Blocked::Invulnerable) {
-                    self.feedback.flash(Vec3::new(0.7, 0.9, 1.0), 0.12);
+                    self.feedback.shield_flash();
                     return;
                 }
                 if r.amount <= 0.0 {
@@ -469,7 +469,7 @@ impl InGame {
                     // "ARENA LOCKED" / "CHECKPOINT" would sit on top of "YOU DIED".
                     self.hud.clear_banner();
                     common.audio.play_2d(Sfx::Death);
-                    self.feedback.flash(Vec3::new(0.6, 0.0, 0.0), 0.5);
+                    self.feedback.death_flash();
                 }
             }
             GameEvent::Parried(p) => {
@@ -488,8 +488,9 @@ impl InGame {
                 } else {
                     common.audio.play_at(Sfx::Parry, p.position);
                 }
-                self.effects
-                    .glow(p.position, Vec4::new(1.0, 1.0, 0.95, 1.0), 2.2, 0.2);
+                let pal = crate::palette::palette();
+                let glow = pal.effect(Vec4::new(1.0, 1.0, 0.95, 1.0), pal.deflected, 1.0);
+                self.effects.glow(p.position, glow, 2.2, 0.2);
                 self.effects.sparks(p.position, Vec3::Y, 16);
             }
             GameEvent::Respawned {

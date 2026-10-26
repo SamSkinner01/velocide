@@ -18,6 +18,7 @@ use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
 use super::{Rng, attack_style, enemy_fx};
 use crate::models::WeaponKind;
+use crate::palette::palette;
 
 /// A fading tracer segment.
 #[derive(Clone, Copy, Debug)]
@@ -73,8 +74,14 @@ const MAX_TEMP_LIGHTS: usize = 8;
 /// Segments of a ring.
 const RING_SEGMENTS: usize = 28;
 
-/// Brand sigil colour.
+/// Brand sigil colour (standard palette).
 pub const BRAND_COLOR: Vec4 = Vec4::new(2.2, 0.35, 0.6, 0.95);
+
+/// Brand sigil colour in the player's colour-vision palette (`palette().brand`).
+pub fn brand_color() -> Vec4 {
+    let p = palette();
+    p.effect(BRAND_COLOR, p.brand, 1.6)
+}
 /// Arclash arc colour (zaps, chains, the Discharge nova).
 pub const ARC_COLOR: Vec4 = Vec4::new(1.2, 1.7, 2.4, 0.95);
 
@@ -915,13 +922,15 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
         }
         Fx::Branded { position } => {
             let p = q(*position);
-            ctx.effects.glow(p, BRAND_COLOR, 1.4, 0.3);
+            ctx.effects.glow(p, brand_color(), 1.4, 0.3);
             ctx.effects.sparks(p, Vec3::Y, 8);
             ctx.audio.play(Sfx::Branded, PlayParams::at(p));
         }
         Fx::Deflected { position, .. } => {
             let p = q(*position);
-            ctx.effects.glow(p, Vec4::new(1.0, 1.0, 0.95, 1.0), 1.2, 0.15);
+            let pal = palette();
+            let c = pal.effect(Vec4::new(1.0, 1.0, 0.95, 1.0), pal.deflected, 1.0);
+            ctx.effects.glow(p, c, 1.2, 0.15);
             ctx.effects.sparks(p, Vec3::Y, 12);
             ctx.audio.play(Sfx::Deflect, PlayParams::at(p));
         }
@@ -981,10 +990,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 ctx.audio.play(sfx, PlayParams::at(at));
             }
             if !*strike {
+                let pal = palette();
                 let c = if *parryable {
-                    Vec4::new(1.0, 0.9, 0.2, 0.9)
+                    pal.effect(Vec4::new(1.0, 0.9, 0.2, 0.9), pal.parry_window, 1.0)
                 } else {
-                    enemy_fx::telegraph_color(e.kind)
+                    pal.effect(enemy_fx::telegraph_color(e.kind), pal.telegraph, 1.0)
                 };
                 ctx.effects.glow(at + Vec3::Y * 0.4, c, 1.2, 0.25);
                 return;
