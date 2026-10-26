@@ -1,0 +1,99 @@
+// Smelter: the slow heavy (docs/enemies.md). A 3.4 m bow-legged Mould of slag and wax with a
+// furnace-mouth face, hauling a huge iron crucible slung in front of its belly on chains from a
+// shoulder yoke. The crucible's riveted pour hatch, glowing with molten slag, is the weak point.
+//
+// * Pour (target 5-24 m away, on its level): it plants its feet and tips the crucible
+//   (1.1 s: the hatch blazes, slag hisses) while a glowing line is drawn along the floor towards
+//   where you are heading; then the slag floods down that line and burns for 5 s (22 damage per
+//   second to anyone standing in it). Step off the line during the wind-up, jump over it, or
+//   dash through it on i-frames. It stops at walls and ledges.
+// * Swing (close): it heaves the crucible round on its chains.
+//
+// Format: shared/src/sim/enemy/def.rs (EnemyDef), every field documented in docs/combat.md and
+// docs/enemies.md. Units: metres, m/s, seconds, degrees. Local offsets: +X right, +Y up,
+// -Z forward, from the feet. This file is also compiled into the game as the built-in Smelter.
+(
+    name: "Smelter",
+    net_kind: 27,
+    model: "smelter",
+    health: 420.0,
+    speed: 3.6,
+    acceleration: 20.0,
+    turn_rate: 130.0,
+    radius: 1.1,
+    height: 3.4,
+    // The head (with the furnace mouth) sits on top of the body hitbox.
+    body_top: Some(2.7),
+    eye_height: 2.95,
+    step_height: 0.45,
+    locomotion: Ground,
+    knockback_scale: 0.15,
+    weak_points: [
+        (name: "hatch", kind: Core, offset: (0.0, 1.45, -1.25), radius: 0.45, multiplier: 2.5),
+        (name: "head", kind: Head, offset: (0.0, 3.0, -0.35), radius: 0.4, multiplier: 1.5),
+    ],
+    armour: None,
+    attacks: [
+        (
+            name: "swing",
+            kind: Melee,
+            range: 2.2,
+            arc: 140.0,
+            damage: 28.0,
+            knockback: 16.0,
+            knockback_up: 0.5,
+            windup: 0.8,
+            strike: 0.2,
+            recover: 0.8,
+            cooldown: 1.5,
+            windup_move_scale: 0.0,
+            track_target: true,
+        ),
+        // Damage per second to a player standing in the burning line.
+        (
+            name: "pour",
+            kind: Pour,
+            range: 24.0,
+            min_range: 5.0,
+            damage: 22.0,
+            knockback: 0.0,
+            windup: 1.1,
+            strike: 0.6,
+            recover: 0.9,
+            cooldown: 4.5,
+            windup_move_scale: 0.0,
+            track_target: false,
+            pour: Some((
+                start: 0.6,
+                length: 20.0,
+                overshoot: 4.0,
+                lead: 0.4,
+                width: 1.8,
+                lifetime: 5.0,
+                interval: 0.25,
+            )),
+        ),
+    ],
+    ai: (
+        sight_range: 60.0,
+        reaction_time: 0.6,
+        lose_target_time: 6.0,
+        preferred_range: None,
+        strafe: false,
+        target_stickiness: 0.7,
+        aggro_switch_fraction: 0.15,
+        retarget_interval: 0.4,
+        repath_interval: 0.8,
+    ),
+    drops: (heat: 55.0, heat_radius: 6.0),
+    colors: (
+        body: (0.4, 0.37, 0.35),
+        accent: (0.55, 0.42, 0.25),
+        glow: (1.0, 0.55, 0.12),
+        telegraph: (1.0, 0.42, 0.05),
+        parry: (1.0, 0.9, 0.1),
+    ),
+    death_time: 1.4,
+    // Elite Smelters are already slow and huge: a little less health, a little more speed.
+    elite: (health: 2.0, aggression: 1.25, speed: 1.2, knockback: 0.6, heat: 2.0),
+)

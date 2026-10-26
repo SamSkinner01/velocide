@@ -146,6 +146,26 @@ pub fn lob_velocity(from: Vec3, to: Vec3, g: f32, max_speed: f32) -> (Vec3, f32)
     (v, x / (speed * theta.cos()).max(1e-3))
 }
 
+/// The low (flat) arc from `from` onto `to` under gravity `g` at exactly `speed`: (velocity,
+/// flight time), or `None` when `speed` can't reach it.
+fn lob_low_arc(from: Vec3, to: Vec3, g: f32, speed: f32) -> Option<(Vec3, f32)> {
+    let d = to - from;
+    let flat = horizontal(d);
+    let x = flat.length();
+    if g <= 1e-3 || x < 1e-3 || speed <= 1e-3 {
+        return None;
+    }
+    let v2 = speed * speed;
+    let disc = v2 * v2 - g * (g * x * x + 2.0 * d.y * v2);
+    if disc < 0.0 {
+        return None;
+    }
+    let theta = ((v2 - disc.sqrt()) / (g * x)).atan();
+    let fwd = flat / x;
+    let v = fwd * (speed * theta.cos()) + Vec3::Y * (speed * theta.sin());
+    Some((v, x / (speed * theta.cos()).max(1e-3)))
+}
+
 /// Yaw offset (radians) of shot `i` of `count` fanned evenly across `spread` degrees: the
 /// first one straight, then alternating left and right.
 fn fan_offset(i: u32, count: u32, spread: f32) -> f32 {
@@ -201,6 +221,8 @@ impl SimWorld {
 
     /// Runs every enemy's AI and movement for one tick.
     pub(crate) fn step_enemies(&mut self, t: &Tuning) {
+        // Slag lines burn on (and expire) whether or not their Smelters are still around.
+        self.step_enemy_hazards(t);
         if self.enemies.is_empty() {
             return;
         }
@@ -247,6 +269,8 @@ impl SimWorld {
                 self.events.push(SimEvent::EnemyRemoved { id });
             }
         }
+        // Punches that threw a latched Snuffer off land now that it is back in the world.
+        self.apply_pending_throws(t);
         self.push_enemies_apart(cx.nav.as_deref());
         self.enemy_world_rules(t);
         self.ai.end_tick(cx);
@@ -265,6 +289,9 @@ impl SimWorld {
         for e in self.enemies.values_mut() {
             if e.is_alive() && (e.state != AiState::Idle || e.target.is_some()) {
                 e.target = None;
+                // A latched Snuffer lets go; an unpoured line just burns out (harmlessly).
+                e.latched = None;
+                e.pour_line = None;
                 e.nav.reset();
                 e.set_state(AiState::Idle, 0);
             }
@@ -303,6 +330,17 @@ impl SimWorld {
         if e.state == AiState::Dying {
             move_enemy(&self.collision.world, e, Vec3::ZERO, dt, gravity);
             return e.state_ticks < e.state_len;
+        }
+        // Training dummies have no AI: they flinch, heal and stand there.
+        if e.is_dummy() {
+            self.step_dummy(e);
+            move_enemy(&self.collision.world, e, Vec3::ZERO, dt, gravity);
+            return true;
+        }
+        // Clinging to a victim (no targeting, no movement of its own); once it lets go it
+        // falls through to the normal tick in its new state.
+        if e.state == AiState::Latched && self.step_latched(t, e) {
+            return true;
         }
 
         // Getting hurt by someone while unaware: that's the target now.
@@ -393,10 +431,22 @@ impl SimWorld {
                 None => e.set_state(AiState::Idle, 0),
                 Some(tp) => {
                     face = Some(tp.position);
-                    if let Some(i) = self.choose_attack(e, &tp, cx) {
+                    let mut chosen = self.choose_attack(e, &tp, cx);
+                    // A pour lays its line now; no room for one here: try again shortly.
+                    if let Some(i) = chosen
+                        && let Some(pour) = def.attacks.get(i).and_then(|a| a.pour.clone())
+                        && !self.begin_pour(e, i, &pour, tp.position, tp.velocity)
+                    {
+                        if let Some(cd) = e.cooldowns.get_mut(i) {
+                            *cd = secs_to_ticks(0.5, rate, 1) as u32;
+                        }
+                        chosen = None;
+                    }
+                    if let Some(i) = chosen {
                         self.begin_windup(e, i, &tp);
-                        if e.aiming() {
-                            // The body follows the laser from its first frame.
+                        if e.aiming() || e.pour_line.is_some() {
+                            // The body follows the laser from its first frame; a pour faces
+                            // its line.
                             face = None;
                         }
                     } else {
@@ -456,7 +506,14 @@ impl SimWorld {
                     e.set_state(AiState::Chase, 0);
                 }
             }
-            AiState::Dying => {}
+            // (Handled above; a latch that just took hold is placed on its victim.)
+            AiState::Dying | AiState::Latched => {}
+        }
+        if e.pour_line.is_some() {
+            self.settle_pour(e);
+        }
+        if e.state == AiState::Latched {
+            return true;
         }
         // Lunges and dives keep their momentum through the strike.
         let mut momentum = None;
@@ -527,8 +584,10 @@ impl SimWorld {
             e.set_state(AiState::Recover, secs_to_ticks(0.5, rate, 1) as u32);
             return;
         };
+        // Difficulty, frenzy and elites shorten cooldowns and recoveries (never wind-ups).
+        let aggression = self.fury(e).aggression;
         if let Some(cd) = e.cooldowns.get_mut(e.attack) {
-            *cd = secs_to_ticks(a.cooldown + a.recover, rate, 0) as u32;
+            *cd = secs_to_ticks((a.cooldown + a.recover) / aggression, rate, 0) as u32;
         }
         if a.parry_strike
             && let Some(w) = &mut e.parry_window
@@ -542,7 +601,10 @@ impl SimWorld {
             e.strafe_sign = -e.strafe_sign;
             e.strafe_flip_in = 90;
         }
-        e.set_state(AiState::Recover, secs_to_ticks(a.recover, rate, 1) as u32);
+        e.set_state(
+            AiState::Recover,
+            secs_to_ticks(a.recover / aggression, rate, 1) as u32,
+        );
     }
 
     /// Laser wind-up: the aim follows the target at `track_rate` until the last `lock`
@@ -563,7 +625,8 @@ impl SimWorld {
         let muzzle = Self::muzzle(e, a);
         let goal = match target {
             Some(tp) if e.has_los => {
-                let speed = a.projectile.as_ref().map_or(100.0, |p| p.speed.max(1.0));
+                let speed = a.projectile.as_ref().map_or(100.0, |p| p.speed.max(1.0))
+                    * self.fury(e).projectile_speed;
                 let flight = tp.chest.distance(muzzle) / speed;
                 tp.chest + horizontal(tp.velocity) * (flight * laser.lead)
             }
@@ -638,16 +701,17 @@ impl SimWorld {
         }
     }
 
-    /// First usable attack (definition order = priority) against `tp`.
+    /// First usable attack (definition order = priority) against `tp`. Everything but a toll
+    /// needs line of sight.
     fn choose_attack(&self, e: &Enemy, tp: &PlayerView, cx: &NavCtx) -> Option<usize> {
-        if !e.has_los {
-            return None;
-        }
         let world = &self.collision.world;
         let feet = e.feet();
         let speed = horizontal(tp.velocity).length();
         e.def.attacks.iter().enumerate().find_map(|(i, a)| {
             if e.cooldowns.get(i).copied().unwrap_or(0) > 0 || speed < a.min_target_speed {
+                return None;
+            }
+            if !e.has_los && a.kind != AttackKind::Toll {
                 return None;
             }
             let ok = match a.kind {
@@ -660,6 +724,10 @@ impl SimWorld {
                     let reachable = a.jumpable.is_none_or(|h| tp.position.y < feet.y + h + 0.6);
                     let far_enough = a.min_range <= 0.0 || surface >= a.min_range;
                     let mut ok = surface <= a.range && far_enough && vertical && reachable;
+                    // One latch per victim: the others nip instead.
+                    if ok && a.latch.is_some() && self.carries_latch(tp.id) {
+                        ok = false;
+                    }
                     if ok && a.lunge > 0.0 {
                         // Don't leap into lava or off a ledge.
                         let dir = to.normalize_or_zero();
@@ -688,6 +756,18 @@ impl SimWorld {
                         && d >= a.min_range
                         && !world.line_blocked(center, tp.chest, MASK_SHOTS)
                 }
+                AttackKind::Toll => a.toll.as_ref().is_some_and(|toll| {
+                    tp.chest.distance(e.center()) <= a.range
+                        && self.toll_allies(e, toll.radius) >= toll.allies.max(1) as usize
+                }),
+                AttackKind::Pour => {
+                    // A target on its own level (slag flows along the floor).
+                    let d = horizontal(tp.position - feet).length();
+                    a.pour.is_some()
+                        && d <= a.range
+                        && d >= a.min_range
+                        && (tp.position.y - feet.y).abs() < 1.5
+                }
             };
             ok.then_some(i)
         })
@@ -705,6 +785,8 @@ impl SimWorld {
     ) -> (Vec3, f32) {
         let def = e.def.clone();
         let rate = self.tick_rate;
+        // Frenzied and elite enemies move faster.
+        let scale = scale * self.fury(e).speed;
         if let Locomotion::Flying { .. } = def.locomotion {
             let v = steer::fly_velocity(&self.collision.world, e, tp, self.tick, scale);
             return (v, MAX_DROP);
@@ -797,6 +879,7 @@ impl SimWorld {
         e.attack_seq = e.attack_seq.wrapping_add(1);
         e.shots_fired = 0;
         e.lunge_hits.clear();
+        e.interrupt_damage = 0.0;
         e.set_state(AiState::Windup, len);
         // A laser starts right on the target.
         e.aim_locked = false;
@@ -835,6 +918,7 @@ impl SimWorld {
         let half_arc = (a.arc * 0.5).to_radians();
         let fwd = e.forward();
         let feet = e.feet();
+        let damage = a.damage * self.fury(e).damage;
         let mut hits = Vec::new();
         // A lunge's `range` is how far it leaps from; it rakes what is right in front.
         let reach = if a.lunge > 0.0 { LUNGE_REACH } else { a.range };
@@ -864,7 +948,7 @@ impl SimWorld {
             }
             let dir = to.normalize_or(fwd);
             let kb = (dir + Vec3::Y * a.knockback_up).normalize_or(Vec3::Y) * a.knockback;
-            let info = DamageInfo::new(a.damage, Owner::Enemy(e.id), attack)
+            let info = DamageInfo::new(damage, Owner::Enemy(e.id), attack)
                 .at(p.chest, dir)
                 .knockback(kb)
                 .flags(DamageFlags::MELEE);
@@ -950,7 +1034,12 @@ impl SimWorld {
                 e.velocity = e.aim * a.lunge;
             }
             AttackKind::Melee => hits = self.melee_hits(e, a, attack, players, &[]),
+            // The bell rings: every ally in reach is frenzied.
+            AttackKind::Toll => self.toll(e, a),
+            // The line laid at the wind-up ignites on its own this tick; it is committed now.
+            AttackKind::Pour => e.pour_line = None,
             AttackKind::Slam => {
+                let damage = a.damage * self.fury(e).damage;
                 let center = e.feet() + e.forward() * (e.radius() + 0.5);
                 for p in players.iter().filter(|p| p.targetable) {
                     let to = p.position - center;
@@ -961,7 +1050,7 @@ impl SimWorld {
                     let frac = 1.0 - 0.5 * (d / a.shockwave_radius.max(0.1));
                     let dir = horizontal(to).normalize_or(e.forward());
                     let kb = (dir + Vec3::Y * 0.8).normalize_or(Vec3::Y) * (a.knockback * frac);
-                    let info = DamageInfo::new(a.damage * frac, source, attack)
+                    let info = DamageInfo::new(damage * frac, source, attack)
                         .at(p.chest, dir)
                         .knockback(kb)
                         .flags(DamageFlags::SLAM);
@@ -1030,6 +1119,16 @@ impl SimWorld {
         };
         let hits = self.melee_hits(e, a, attack, players, &e.lunge_hits);
         e.lunge_hits.extend(hits.iter().map(|h| h.0));
+        if let Some(latch) = &a.latch {
+            // A latching leap clings to the first player it may hold instead of raking them
+            // (a dash through it, i-frames, spawn protection or a Snuffer already on them: it
+            // just misses).
+            let reached: Vec<PlayerId> = hits.iter().map(|h| h.0).collect();
+            if let Some(victim) = self.latch_victim(&reached) {
+                self.latch_onto(t, e, a, latch, victim);
+            }
+            return;
+        }
         self.deal_hits(t, e, a.parry_window.is_some(), hits);
     }
 
@@ -1044,6 +1143,7 @@ impl SimWorld {
             attack: e.attack.min(255) as u8,
         };
         let center = e.center();
+        let damage = a.damage * self.fury(e).damage;
         let mut hits = Vec::new();
         for p in players
             .iter()
@@ -1057,7 +1157,7 @@ impl SimWorld {
             }
             let flat = horizontal(e.aim).normalize_or(e.forward());
             let kb = (flat + Vec3::Y * a.knockback_up).normalize_or(Vec3::Y) * a.knockback;
-            let info = DamageInfo::new(a.damage, Owner::Enemy(e.id), attack)
+            let info = DamageInfo::new(damage, Owner::Enemy(e.id), attack)
                 .at(closest, e.aim)
                 .knockback(kb)
                 .flags(DamageFlags::MELEE);
@@ -1094,12 +1194,16 @@ impl SimWorld {
         let Some(pa) = &a.projectile else {
             return;
         };
+        let fury = self.fury(e);
+        let speed = pa.speed * fury.projectile_speed;
         let muzzle = e.local_to_world(pa.muzzle);
         let velocity = if a.laser.is_some() {
             // Along the (locked) laser.
-            e.aim * pa.speed
+            e.aim * speed
         } else if pa.lob {
             // A ballistic arc onto the target's predicted feet, fanned across the spread.
+            // Faster projectiles (difficulty, frenzy) fly a flatter arc at that much more than
+            // the least speed.
             let g = pa.kind.gravity(&t.combat);
             let feet = match target {
                 Some(tp) => tp.position,
@@ -1109,7 +1213,13 @@ impl SimWorld {
             let mut goal = feet + Vec3::Y * 0.3;
             let mut v = Vec3::ZERO;
             for _ in 0..3 {
-                let (vel, time) = lob_velocity(muzzle, goal, g, pa.speed);
+                let (mut vel, mut time) = lob_velocity(muzzle, goal, g, pa.speed);
+                if fury.projectile_speed > 1.0
+                    && let Some(fast) =
+                        lob_low_arc(muzzle, goal, g, vel.length() * fury.projectile_speed)
+                {
+                    (vel, time) = fast;
+                }
                 v = vel;
                 goal = feet + Vec3::Y * 0.3 + lead * time;
             }
@@ -1117,7 +1227,7 @@ impl SimWorld {
         } else {
             let aim_point = match target {
                 Some(tp) => {
-                    let time = tp.chest.distance(muzzle) / pa.speed.max(1.0);
+                    let time = tp.chest.distance(muzzle) / speed.max(1.0);
                     tp.chest + tp.velocity * (time * pa.lead)
                 }
                 None => muzzle + e.forward() * 10.0,
@@ -1127,13 +1237,14 @@ impl SimWorld {
                 let mut rng = SpreadRng::new(self.tick, PlayerId(0), e.id.0 ^ e.shots_fired);
                 dir = spread_dir(dir, pa.spread, &mut rng);
             }
-            dir * pa.speed
+            dir * speed
         };
         let attack = Attack::Enemy {
             kind: def.net_kind,
             attack: idx.min(255) as u8,
         };
-        self.spawn_enemy_projectile(t, pa.kind, e.id, attack, muzzle, velocity, a.damage);
+        let damage = a.damage * fury.damage;
+        self.spawn_enemy_projectile(t, pa.kind, e.id, attack, muzzle, velocity, damage);
         e.shots_fired += 1;
         self.events.push(SimEvent::EnemyFired {
             id: e.id,

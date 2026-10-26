@@ -59,7 +59,7 @@ pub use combat::{
     PlayerCombat,
 };
 pub use embers::{EmberBurst, HealSource};
-pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
+pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, SpawnOptions, lob_velocity};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
@@ -537,6 +537,8 @@ pub struct SimWorld {
     pub brands: BTreeMap<HitTarget, Brand>,
     /// Live ember bursts (heal pools, `embers.rs`).
     pub embers: BTreeMap<NetId, EmberBurst>,
+    /// Hazards left by enemies: the Smelter's slag lines (`enemy/hazard.rs`).
+    pub enemy_hazards: BTreeMap<NetId, enemy::SlagLine>,
     /// Parry-delayed enemy melee damage.
     pub pending_hits: Vec<parry::PendingHit>,
     /// Game-mode state: rules, stats, checkpoint, downed players, match phase (`modes.rs`).
@@ -592,6 +594,7 @@ impl SimWorld {
             thorns: BTreeMap::new(),
             brands: BTreeMap::new(),
             embers: BTreeMap::new(),
+            enemy_hazards: BTreeMap::new(),
             pending_hits: Vec::new(),
             mode,
             style: StyleSystem::default(),
@@ -623,8 +626,11 @@ impl SimWorld {
     /// the spawn is refused.
     pub fn alloc_net_id(&mut self) -> Option<NetId> {
         let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
-        let live =
-            self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.embers.len();
+        let live = self.enemies.len()
+            + self.projectiles.len()
+            + self.thorns.len()
+            + self.embers.len()
+            + self.enemy_hazards.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -647,6 +653,7 @@ impl SimWorld {
             || self.projectiles.contains_key(&id)
             || self.thorns.contains_key(&id)
             || self.embers.contains_key(&id)
+            || self.enemy_hazards.contains_key(&id)
     }
 
     /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
@@ -726,6 +733,7 @@ impl SimWorld {
         self.thorns.clear();
         self.brands.clear();
         self.embers.clear();
+        self.enemy_hazards.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
         self.reset_encounters();
@@ -1013,6 +1021,9 @@ impl SimWorld {
         }
         for b in self.embers.values() {
             frame.insert(&b.entity_state());
+        }
+        for h in self.enemy_hazards.values() {
+            frame.insert(&h.entity_state(self.tick));
         }
         // Encounter state (HUD: wave, enemies left).
         self.replicate_encounters(frame);

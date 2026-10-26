@@ -239,6 +239,35 @@ fn every_attack_of_every_type_is_telegraphed_before_it_hurts() {
             secs: 6.0,
             run: None,
         },
+        // The third roster (the toll does no damage: `enemies_expansion.rs`).
+        Scenario {
+            def: "bellwether",
+            attack: "clapper",
+            enemy: Vec3::new(0.0, 0.0, -2.8),
+            secs: 3.0,
+            run: None,
+        },
+        Scenario {
+            def: "snuffer",
+            attack: "latch",
+            enemy: Vec3::new(0.0, 0.0, -9.0),
+            secs: 3.0,
+            run: None,
+        },
+        Scenario {
+            def: "smelter",
+            attack: "swing",
+            enemy: Vec3::new(0.0, 0.0, -3.2),
+            secs: 4.0,
+            run: None,
+        },
+        Scenario {
+            def: "smelter",
+            attack: "pour",
+            enemy: Vec3::new(0.0, 0.0, -14.0),
+            secs: 4.0,
+            run: None,
+        },
     ];
     for s in scenarios {
         let mut a = Arena::coop();
@@ -1247,7 +1276,16 @@ fn every_type_rests_on_the_floor_wherever_it_spawns() {
     // exactly on the floor at z -3.4: it fell through the level.
     let mut a = Arena::coop();
     let mut bad = Vec::new();
-    for name in ["gnawer", "censer", "gaoler", "heron"] {
+    for name in [
+        "gnawer",
+        "censer",
+        "gaoler",
+        "heron",
+        "bellwether",
+        "snuffer",
+        "smelter",
+        "effigy",
+    ] {
         for i in 0..40 {
             let at = if i == 0 {
                 Vec3::new(0.0, 0.0, -3.4)
@@ -1566,7 +1604,16 @@ fn all_enemy_types_are_deterministic() {
         let p = a.player(0, Vec3::new(-8.0, 0.0, 20.0), 0.0);
         god(&mut a, p);
         let roster = [
-            "gnawer", "censer", "harrier", "gaoler", "heron", "gnawer", "harrier",
+            "gnawer",
+            "censer",
+            "harrier",
+            "gaoler",
+            "heron",
+            "gnawer",
+            "harrier",
+            "bellwether",
+            "snuffer",
+            "smelter",
         ];
         for (i, name) in roster.iter().enumerate() {
             let y = if *name == "harrier" { 6.0 } else { 0.0 };
@@ -1583,7 +1630,16 @@ fn all_enemy_types_are_deterministic() {
             .world
             .enemies
             .values()
-            .map(|e| (e.position, e.velocity, e.state, e.health, e.aim))
+            .map(|e| {
+                (
+                    e.position,
+                    e.velocity,
+                    e.state,
+                    e.health,
+                    e.aim,
+                    e.frenzy_until,
+                )
+            })
             .collect();
         let p: Vec<_> = a
             .world
@@ -1591,7 +1647,13 @@ fn all_enemy_types_are_deterministic() {
             .values()
             .map(|p| (p.position, p.velocity))
             .collect();
-        (v, p, a.events.len())
+        let h: Vec<_> = a
+            .world
+            .enemy_hazards
+            .values()
+            .map(|h| (h.points.clone(), h.ignite_tick))
+            .collect();
+        (v, p, h, a.events.len())
     };
     assert_eq!(run(), run());
 }
@@ -1601,14 +1663,23 @@ fn frozen_world_stops_enemies() {
     // Results screen: `SimWorld::frozen` — nobody attacks, nobody thinks.
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
-    let ids: Vec<NetId> = ["gnawer", "censer", "gaoler", "heron", "harrier"]
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            let y = if *n == "harrier" { 6.0 } else { 0.0 };
-            spawn(&mut a, n, Vec3::new(-8.0 + 4.0 * i as f32, y, -10.0), 0.0)
-        })
-        .collect();
+    let ids: Vec<NetId> = [
+        "gnawer",
+        "censer",
+        "gaoler",
+        "heron",
+        "harrier",
+        "bellwether",
+        "snuffer",
+        "smelter",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, n)| {
+        let y = if *n == "harrier" { 6.0 } else { 0.0 };
+        spawn(&mut a, n, Vec3::new(-14.0 + 4.0 * i as f32, y, -10.0), 0.0)
+    })
+    .collect();
     a.ticks(50);
     assert!(ids.iter().any(|id| a.world.enemies[id].target == Some(p)));
     a.world.frozen = true;

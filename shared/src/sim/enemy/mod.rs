@@ -1,22 +1,28 @@
 //! Server-run enemies: data-driven definitions ([`EnemyDef`], `assets/enemies/*.ron`), the
-//! runtime [`Enemy`], damage (weak points, armour, knockback, aggro), death and replication.
-//! The AI state machine lives in `ai.rs`, navigation / flight steering in `steer.rs` (on top of
-//! `sim::nav`). Overview: `docs/enemies.md`.
+//! runtime [`Enemy`], damage (weak points, armour, knockback, aggro, interrupts), elites and
+//! frenzies, death and replication. The AI state machine lives in `ai.rs`, navigation / flight
+//! steering in `steer.rs` (on top of `sim::nav`), the latch / toll / pour / training-dummy
+//! behaviours of the third roster in `special.rs`, slag lines in `hazard.rs`. Overview:
+//! `docs/enemies.md`.
 //!
 //! Replicated as entity `kind = def.net_kind` (Gnawer 20, Censer 21, Harrier 22, Gaoler 23,
-//! Heron 24; docs/roster.md): `owner` = target player id (`OWNER_NONE` without a target),
-//! `position` = feet (bottom of the collision capsule; a Harrier's hover centre is half its
-//! height above), `velocity`, `yaw` (+ `pitch` and exact yaw while `AIMING` a laser),
-//! `flags` = [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16, `health` =
-//! current health (rounded up), `aux` = state progress (bits 0–7, 0..255 through timed states)
-//! | attack index (bits 8–15) | max health (bits 16–31).
+//! Heron 24, Bellwether 25, Snuffer 26, Smelter 27, Effigy 28; docs/enemies.md): `owner` =
+//! target player id (`OWNER_NONE` without a target; a latched Snuffer's victim), `position` =
+//! feet (bottom of the collision capsule; a Harrier's hover centre is half its height above),
+//! `velocity`, `yaw` (+ `pitch` and exact yaw while `AIMING` a laser), `flags` =
+//! [`crate::protocol::enemy_flags`], `state` = [`AiState`] as u16, `health` = current health
+//! (rounded up), `aux` = state progress (bits 0–7, 0..255 through timed states) | attack index
+//! (bits 8–15) | max health (bits 16–31).
 
 mod ai;
 mod def;
+mod hazard;
+mod special;
 mod steer;
 
 pub use ai::{is_targetable, lob_velocity};
 pub use def::*;
+pub use hazard::SlagLine;
 pub use steer::{AiStats, AiWorld, NavAgent, PathMode};
 
 use std::sync::Arc;
@@ -56,6 +62,41 @@ impl Default for EnemyScale {
     }
 }
 
+/// How to spawn an enemy ([`SimWorld::spawn_enemy_with`]): the API the game modes use for
+/// waves (grind, encounters).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpawnOptions {
+    /// Health multiplier (difficulty, co-op scaling, boss waves). The elite bonus
+    /// (`EnemyDef::elite.health`) multiplies on top.
+    pub health_scale: f32,
+    /// Spawn as an elite (`EnemyDef::elite`; replicated `enemy_flags::ELITE`).
+    pub elite: bool,
+    /// Knows where the players are (arena / wave spawns: never idles, never loses its target).
+    pub aware: bool,
+}
+
+impl Default for SpawnOptions {
+    fn default() -> Self {
+        Self {
+            health_scale: 1.0,
+            elite: false,
+            aware: false,
+        }
+    }
+}
+
+/// The multipliers an enemy acts with right now: `SimWorld::enemy_scale` (difficulty) ×
+/// its frenzy (while frenzied) × its elite bonus. Wind-ups are never scaled.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fury {
+    pub damage: f32,
+    /// Cooldowns and recoveries are divided by this.
+    pub aggression: f32,
+    pub projectile_speed: f32,
+    /// Walking / flying speed.
+    pub speed: f32,
+}
+
 /// AI / animation state (replicated in the entity's `state`; values are protocol).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AiState {
@@ -75,6 +116,9 @@ pub enum AiState {
     Stunned = 6,
     /// Dead; the corpse stays for `death_time` (no hitboxes), then the entity is removed.
     Dying = 7,
+    /// Clinging to a player (a Snuffer's latch; `owner` = the victim, progress over the
+    /// latch's `max_time`).
+    Latched = 8,
 }
 
 impl AiState {
@@ -88,6 +132,7 @@ impl AiState {
             5 => AiState::Recover,
             6 => AiState::Stunned,
             7 => AiState::Dying,
+            8 => AiState::Latched,
             _ => return None,
         })
     }
@@ -166,6 +211,23 @@ pub struct Enemy {
     pub aim: Vec3,
     /// The aim laser stopped tracking (the last moments of the wind-up).
     pub aim_locked: bool,
+
+    // ---- the third roster: elites, frenzy, latch, pour, dummies (docs/enemies.md) ----
+    /// Spawned as an elite (`EnemyDef::elite`).
+    pub elite: bool,
+    /// Frenzied by a toll until this tick (exclusive; 0 = never), with these multipliers.
+    pub frenzy_until: u32,
+    pub frenzy: Frenzy,
+    /// Damage taken on the current wind-up's interrupt weak point.
+    pub interrupt_damage: f32,
+    /// The player a latch attack clings to (`AiState::Latched`).
+    pub latched: Option<PlayerId>,
+    /// Ticks until the latch's next damage tick.
+    pub latch_tick_in: u16,
+    /// Tick of the last damage taken (training dummies regenerate after a pause).
+    pub last_hurt_tick: u32,
+    /// The slag line of the pour being wound up (removed if the pour never happens).
+    pub pour_line: Option<NetId>,
 }
 
 impl Enemy {
@@ -216,7 +278,33 @@ impl Enemy {
             strafe_flip_in: 0,
             aim: look_dir(yaw, 0.0),
             aim_locked: false,
+            elite: false,
+            frenzy_until: 0,
+            frenzy: Frenzy::default(),
+            interrupt_damage: 0.0,
+            latched: None,
+            latch_tick_in: 0,
+            last_hurt_tick: 0,
+            pour_line: None,
         }
+    }
+
+    /// Frenzied by a toll at `tick`.
+    pub fn frenzied(&self, tick: u32) -> bool {
+        tick < self.frenzy_until && self.is_alive()
+    }
+
+    /// A training dummy (never targets, attacks, moves or dies).
+    pub fn is_dummy(&self) -> bool {
+        self.def.dummy.is_some()
+    }
+
+    /// Can be frenzied by a toll: a living fighter that doesn't toll itself (two ringers
+    /// would keep each other frenzied forever) and isn't a dummy.
+    pub fn frenzies(&self) -> bool {
+        self.is_alive()
+            && !self.is_dummy()
+            && !self.def.attacks.iter().any(|a| a.kind == AttackKind::Toll)
     }
 
     pub fn is_flying(&self) -> bool {
@@ -250,8 +338,11 @@ impl Enemy {
         NavClass::for_size(self.def.radius, self.def.height)
     }
 
-    /// Relative weight when enemies push each other apart.
+    /// Relative weight when enemies push each other apart (a training dummy doesn't budge).
     pub fn mass(&self) -> f32 {
+        if self.is_dummy() {
+            return 1e6;
+        }
         self.def.radius * self.def.radius * self.def.height.max(0.1)
     }
 
@@ -357,6 +448,15 @@ impl Enemy {
         if self.state == AiState::Stunned {
             flags |= enemy_flags::STUNNED;
         }
+        if self.frenzied(tick) {
+            flags |= enemy_flags::FRENZIED;
+        }
+        if self.elite {
+            flags |= enemy_flags::ELITE;
+        }
+        if self.state == AiState::Latched {
+            flags |= enemy_flags::LATCHED;
+        }
         if !self.is_alive() {
             flags |= enemy_flags::DYING;
         }
@@ -393,7 +493,10 @@ impl Enemy {
         EntityState {
             id: self.id,
             kind: self.def.net_kind,
-            owner: self.target.map_or(OWNER_NONE, |p| p.0 as u16),
+            owner: self
+                .latched
+                .or(self.target)
+                .map_or(OWNER_NONE, |p| p.0 as u16),
             position: self.position,
             velocity,
             yaw,
@@ -433,6 +536,27 @@ impl SimWorld {
         yaw: f32,
         health_scale: f32,
     ) -> Option<NetId> {
+        self.spawn_enemy_with(
+            name,
+            position,
+            yaw,
+            SpawnOptions {
+                health_scale,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Spawns an enemy with explicit [`SpawnOptions`] (health scale, elite, aware): the game
+    /// modes' spawn call. `yaw` in radians. `None` if the name is unknown or the world is full
+    /// ([`super::MAX_ENEMIES`]).
+    pub fn spawn_enemy_with(
+        &mut self,
+        name: &str,
+        position: Vec3,
+        yaw: f32,
+        options: SpawnOptions,
+    ) -> Option<NetId> {
         let def = self.enemy_defs.get(name)?;
         if self.enemies.len() >= super::MAX_ENEMIES {
             log::warn!(
@@ -442,13 +566,61 @@ impl SimWorld {
             return None;
         }
         let id = self.alloc_net_id()?;
-        let health = def.health * health_scale.max(0.01);
-        let enemy = Enemy::new(id, def, position, yaw, health, self.tick);
+        let health = def.health * options.health_scale.max(0.01);
+        let mut enemy = Enemy::new(id, def, position, yaw, health, self.tick);
+        enemy.aware = options.aware;
         let kind = enemy.net_kind();
         self.enemies.insert(id, enemy);
+        if options.elite {
+            self.make_elite(id);
+        }
         self.events
             .push(SimEvent::EnemySpawned { id, kind, position });
         Some(id)
+    }
+
+    /// Turns a living enemy into an elite (health and max health × `EnemyDef::elite.health`,
+    /// faster attacks, replicated `ELITE`). Training dummies can't be elites. Returns whether
+    /// it is one now.
+    pub fn make_elite(&mut self, id: NetId) -> bool {
+        let Some(e) = self.enemies.get_mut(&id) else {
+            return false;
+        };
+        if e.elite {
+            return true;
+        }
+        if !e.is_alive() || e.is_dummy() {
+            return false;
+        }
+        let bonus = e.def.elite.health.max(0.01);
+        e.elite = true;
+        e.max_health *= bonus;
+        e.health *= bonus;
+        true
+    }
+
+    /// The multipliers enemy `e` acts with now ([`Fury`]).
+    pub fn fury(&self, e: &Enemy) -> Fury {
+        let s = self.enemy_scale;
+        let mut f = Fury {
+            damage: s.damage.max(0.0),
+            aggression: s.aggression.max(0.05),
+            projectile_speed: s.projectile_speed.max(0.05),
+            speed: 1.0,
+        };
+        if e.frenzied(self.tick) {
+            let z = e.frenzy;
+            f.damage *= z.damage.max(0.0);
+            f.aggression *= z.aggression.max(0.05);
+            f.projectile_speed *= z.projectile_speed.max(0.05);
+            f.speed *= z.speed.max(0.05);
+        }
+        if e.elite {
+            let x = e.def.elite;
+            f.aggression *= x.aggression.max(0.05);
+            f.speed *= x.speed.max(0.05);
+        }
+        f
     }
 
     /// Enemy side of the damage pipeline.
@@ -511,10 +683,43 @@ impl SimWorld {
                 event.info.flags.insert(DamageFlags::ARMOURED);
             }
         }
-        let dealt = amount.min(e.health.max(0.0));
-        e.health -= amount;
+        e.last_hurt_tick = tick;
+        // Health actually lost (embers are shed from that).
+        let lost;
+        let dealt = if e.is_dummy() {
+            // A training dummy shows every hit in full but never drops below 1 (and flinches).
+            lost = amount.min((e.health - 1.0).max(0.0));
+            e.health = (e.health - amount).max(1.0);
+            if amount > 0.0 {
+                let ticks = super::combat::secs_to_ticks(special::DUMMY_FLINCH, self.tick_rate, 1);
+                e.set_state(AiState::Recover, ticks as u32);
+            }
+            amount
+        } else {
+            let dealt = amount.min(e.health.max(0.0));
+            lost = dealt;
+            e.health -= amount;
+            dealt
+        };
+        // Hitting the interrupt weak point hard enough mid-wind-up cancels the attack (the
+        // Bellwether's bell).
+        if e.state == AiState::Windup
+            && e.health > 0.0
+            && let Some(int) = def.attacks.get(e.attack).and_then(|a| a.interrupt.as_ref())
+            && let HitPart::Weak(i) = info.part
+            && def
+                .weak_points
+                .get(i as usize)
+                .is_some_and(|w| w.name == int.weak_point)
+        {
+            e.interrupt_damage += amount;
+            if e.interrupt_damage >= int.damage {
+                special::interrupt(e, int, self.tick_rate);
+            }
+        }
         if info.knockback.length_squared() > 0.0 {
-            let kb = info.knockback * def.knockback_scale;
+            let elite = if e.elite { def.elite.knockback } else { 1.0 };
+            let kb = info.knockback * def.knockback_scale * elite;
             e.velocity += kb;
             if e.velocity.y > 0.5 {
                 e.on_ground = false;
@@ -541,8 +746,12 @@ impl SimWorld {
         event.dealt = dealt;
         event.health_after = e.health.max(0.0);
         event.killed = e.health <= 0.0;
-        if dealt > 0.0 {
-            self.spawn_embers_for_damage(t, &event);
+        if lost > 0.0 {
+            let shed = DamageEvent {
+                dealt: lost,
+                ..event
+            };
+            self.spawn_embers_for_damage(t, &shed);
         }
         event
     }
@@ -557,8 +766,15 @@ impl SimWorld {
         let ticks = super::combat::secs_to_ticks(e.def.death_time, rate, 1) as u32;
         e.set_state(AiState::Dying, ticks);
         e.target = None;
+        // A latched Snuffer drops off its victim; a pour that never happened leaves no line.
+        e.latched = None;
+        let line = e.pour_line.take();
         let center = e.center();
-        let (pool, radius) = (e.def.drops.heat, e.def.drops.heat_radius);
+        let heat = if e.elite { e.def.elite.heat } else { 1.0 };
+        let (pool, radius) = (e.def.drops.heat * heat, e.def.drops.heat_radius);
+        if let Some(line) = line {
+            self.drop_unlit_line(line);
+        }
         self.spawn_embers(
             t,
             center,
@@ -578,9 +794,11 @@ impl SimWorld {
         }
     }
 
-    /// Removes every enemy (dev `/killall` uses [`SimWorld::kill_enemy`] instead).
+    /// Removes every enemy and the hazards they left (dev `/killall` uses
+    /// [`SimWorld::kill_enemy`] instead).
     pub fn clear_enemies(&mut self) {
         self.enemies.clear();
+        self.enemy_hazards.clear();
     }
 
     /// Kills an enemy through the damage pipeline (dev commands).
@@ -615,7 +833,7 @@ mod tests {
     fn builtin_roster_matches_the_contract() {
         use crate::protocol::kind;
         let r = EnemyRegistry::builtin();
-        assert_eq!(r.len(), 5, "{:?}", r.names().collect::<Vec<_>>());
+        assert_eq!(r.len(), 9, "{:?}", r.names().collect::<Vec<_>>());
         // (file, name, kind, radius, height, health, speed, weak points (name, offset, r, x)).
         type Weak = (&'static str, [f32; 3], f32, f32);
         type Row = (
@@ -628,7 +846,7 @@ mod tests {
             f32,
             &'static [Weak],
         );
-        let table: [Row; 5] = [
+        let table: [Row; 9] = [
             (
                 "gnawer",
                 "Gnawer",
@@ -682,6 +900,53 @@ mod tests {
                 7.0,
                 &[("head", [0.0, 3.12, -0.4], 0.35, 2.5)],
             ),
+            // The third roster (docs/enemies.md).
+            (
+                "bellwether",
+                "Bellwether",
+                kind::BELLWETHER,
+                0.7,
+                3.1,
+                220.0,
+                5.5,
+                &[("bell", [0.0, 2.62, 0.3], 0.6, 2.0)],
+            ),
+            (
+                "snuffer",
+                "Snuffer",
+                kind::SNUFFER,
+                0.7,
+                1.4,
+                70.0,
+                12.5,
+                &[("wick", [0.0, 0.62, -1.0], 0.32, 2.5)],
+            ),
+            (
+                "smelter",
+                "Smelter",
+                kind::SMELTER,
+                1.1,
+                3.4,
+                420.0,
+                3.6,
+                &[
+                    ("hatch", [0.0, 1.45, -1.25], 0.45, 2.5),
+                    ("head", [0.0, 3.0, -0.35], 0.4, 1.5),
+                ],
+            ),
+            (
+                "effigy",
+                "Effigy",
+                kind::EFFIGY,
+                0.5,
+                2.2,
+                1000.0,
+                0.0,
+                &[
+                    ("head", [0.0, 1.97, -0.04], 0.3, 2.0),
+                    ("sigil", [0.0, 1.35, -0.28], 0.22, 1.5),
+                ],
+            ),
         ];
         for (file, name, net_kind, radius, height, health, speed, weak) in table {
             let d = r.get(file).unwrap_or_else(|| panic!("{file} is built in"));
@@ -699,7 +964,8 @@ mod tests {
                 assert_eq!(w.offset, Vec3::from(*off), "{name} {wn}");
                 assert_eq!((w.radius, w.multiplier), (*wr, *mult), "{name} {wn}");
             }
-            assert!(!d.attacks.is_empty());
+            // Only the training dummy has no attacks.
+            assert_eq!(d.attacks.is_empty(), d.dummy.is_some(), "{name}");
             for a in &d.attacks {
                 assert!(a.windup > 0.0, "{name} {}: every attack telegraphs", a.name);
             }
@@ -713,6 +979,22 @@ mod tests {
         let gaoler = r.get("gaoler").unwrap();
         let armour = gaoler.armour.as_ref().unwrap();
         assert_eq!((armour.front_multiplier, armour.front_arc), (0.15, 120.0));
+        // The specials parse with their parameters; the dummy is never in waves.
+        let bell = r.get("bellwether").unwrap();
+        let toll = bell
+            .attacks
+            .iter()
+            .find(|a| a.kind == AttackKind::Toll)
+            .unwrap();
+        assert!(toll.toll.is_some() && toll.interrupt.is_some());
+        assert!(r.get("snuffer").unwrap().attacks[0].latch.is_some());
+        let smelter = r.get("smelter").unwrap();
+        assert!(smelter.attacks.iter().any(|a| a.pour.is_some()));
+        assert_eq!(smelter.elite.health, 2.0);
+        assert_eq!(gaoler.elite, EliteDef::default());
+        let waves: Vec<&str> = r.wave_names().collect();
+        assert_eq!(waves.len(), 8);
+        assert!(!waves.contains(&"effigy"));
     }
 
     #[test]

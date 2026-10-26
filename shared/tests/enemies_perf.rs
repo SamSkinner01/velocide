@@ -33,18 +33,28 @@ fn fifty_enemies_on_the_campaign_level() {
         p.combat.god = true;
     }
     // Every spawn of arena 5's four waves, plus a copy of each gnawer 1.5 m to the side and a
-    // heron (the campaign has none yet) 4 m beside each gaoler.
+    // heron (the campaign has none yet) 4 m beside each gaoler; the third roster: a snuffer
+    // beside every other gnawer, a bellwether behind each censer, a smelter beside each gaoler.
     let enc = &level.encounters[4];
     let mut n = 0;
     let mut kinds = std::collections::BTreeSet::new();
+    let mut gnawers = 0;
     for wave in &enc.waves {
         for s in &wave.spawns {
             let mut spots = vec![(s.enemy.as_str(), s.position)];
             if s.enemy == "gnawer" {
                 spots.push(("gnawer", s.position + Vec3::new(1.5, 0.0, 0.0)));
+                gnawers += 1;
+                if gnawers % 2 == 0 {
+                    spots.push(("snuffer", s.position + Vec3::new(-1.5, 0.0, 0.0)));
+                }
+            }
+            if s.enemy == "censer" {
+                spots.push(("bellwether", s.position + Vec3::new(0.0, 0.0, 2.0)));
             }
             if s.enemy == "gaoler" {
                 spots.push(("heron", s.position + Vec3::new(4.0, 0.0, 0.0)));
+                spots.push(("smelter", s.position + Vec3::new(-4.0, 0.0, 0.0)));
             }
             for (name, p) in spots {
                 if let Some(id) = world.spawn_enemy(name, p, s.yaw.to_radians()) {
@@ -56,7 +66,7 @@ fn fifty_enemies_on_the_campaign_level() {
         }
     }
     assert!(n >= 48, "{n} enemies");
-    assert_eq!(kinds.len(), 5, "every type: {kinds:?}");
+    assert_eq!(kinds.len(), 8, "every type: {kinds:?}");
 
     let mut times = Vec::new();
     for tick in 0..900u32 {

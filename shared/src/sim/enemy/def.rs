@@ -37,6 +37,22 @@ const BUILTIN: &[(&str, &str)] = &[
         "heron",
         include_str!("../../../../assets/enemies/heron.ron"),
     ),
+    (
+        "bellwether",
+        include_str!("../../../../assets/enemies/bellwether.ron"),
+    ),
+    (
+        "snuffer",
+        include_str!("../../../../assets/enemies/snuffer.ron"),
+    ),
+    (
+        "smelter",
+        include_str!("../../../../assets/enemies/smelter.ron"),
+    ),
+    (
+        "effigy",
+        include_str!("../../../../assets/enemies/effigy.ron"),
+    ),
 ];
 
 /// How an enemy moves.
@@ -124,6 +140,209 @@ pub enum AttackKind {
     /// `dive_lead` s of lead), raking every player it passes within reach once; hitting the
     /// level ends it early. Recover climbs back towards hover height.
     Dive,
+    /// Support (the Bellwether's toll): no damage; at the strike every other Mould within
+    /// `toll.radius` is frenzied (`toll`). Chosen without line of sight, only when at least
+    /// `toll.allies` allies are in reach and the target is within `range` (centre to chest).
+    Toll,
+    /// Pours a line of molten slag along the ground towards the target (the Smelter, `pour`):
+    /// the line is laid (and replicated, glowing) when the wind-up starts, aimed and fixed
+    /// then, and only burns from the strike on. `range` / `min_range`: centre to the target's
+    /// feet.
+    Pour,
+}
+
+/// A frenzy (the Bellwether's toll): multipliers on the frenzied enemy's behaviour, on top of
+/// `SimWorld::enemy_scale` and the elite bonus. Wind-ups keep their length (readable).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Frenzy {
+    /// Movement speed (walking, flying; not leaps or dives).
+    pub speed: f32,
+    /// Attack cooldowns and recoveries are divided by this.
+    pub aggression: f32,
+    /// Damage dealt.
+    pub damage: f32,
+    /// Projectile speed.
+    pub projectile_speed: f32,
+}
+
+impl Default for Frenzy {
+    fn default() -> Self {
+        Self {
+            speed: 1.3,
+            aggression: 1.4,
+            damage: 1.25,
+            projectile_speed: 1.15,
+        }
+    }
+}
+
+/// `AttackKind::Toll` parameters.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Toll {
+    /// Allies within this distance of the ringer (centre to centre) are frenzied.
+    pub radius: f32,
+    /// Seconds the frenzy lasts.
+    pub duration: f32,
+    /// Only rings with at least this many allies (that it could frenzy) in reach.
+    pub allies: u32,
+    pub frenzy: Frenzy,
+}
+
+impl Default for Toll {
+    fn default() -> Self {
+        Self {
+            radius: 18.0,
+            duration: 5.0,
+            allies: 1,
+            frenzy: Frenzy::default(),
+        }
+    }
+}
+
+/// `AttackKind::Pour` parameters: a straight line of slag on the ground from just in front of
+/// the pourer towards (and past) the target. The attack's `damage` is damage per second to a
+/// player standing in it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pour {
+    /// The line starts this far beyond the pourer's body surface.
+    pub start: f32,
+    /// Longest line (m).
+    pub length: f32,
+    /// How far past the target's (predicted) feet it runs.
+    pub overshoot: f32,
+    /// Lead on the target's horizontal velocity (seconds).
+    pub lead: f32,
+    /// Full width of the burning strip.
+    pub width: f32,
+    /// Seconds it burns after igniting.
+    pub lifetime: f32,
+    /// Seconds between damage ticks.
+    pub interval: f32,
+}
+
+impl Default for Pour {
+    fn default() -> Self {
+        Self {
+            start: 0.8,
+            length: 20.0,
+            overshoot: 4.0,
+            lead: 0.4,
+            width: 1.8,
+            lifetime: 5.0,
+            interval: 0.25,
+        }
+    }
+}
+
+/// A leap that **latches** onto the first player it reaches instead of raking (the Snuffer):
+/// it clings to them (`AiState::Latched`), smothering the wick until it is punched or dashed
+/// off, its victim dies or `max_time` runs out. The attack's `damage` is the impact on latching.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Latch {
+    /// Damage per second while latched; all of it is hard damage (smothered).
+    pub damage: f32,
+    /// Seconds between damage ticks.
+    pub interval: f32,
+    /// Lets go after this long.
+    pub max_time: f32,
+    /// The victim's horizontal speed is held to this fraction of `movement.ground_speed`
+    /// while latched (server-side, between movement steps; a modest slow, not a root).
+    pub slow: f32,
+    /// A punch from the victim throws it off: counter damage and stun.
+    pub punch_damage: f32,
+    pub punch_stun: f32,
+    /// A dash shakes it off: stun.
+    pub shake_stun: f32,
+}
+
+impl Default for Latch {
+    fn default() -> Self {
+        Self {
+            damage: 16.0,
+            interval: 0.25,
+            max_time: 6.0,
+            slow: 0.6,
+            punch_damage: 30.0,
+            punch_stun: 1.6,
+            shake_stun: 1.0,
+        }
+    }
+}
+
+/// Damage to a weak point during the wind-up cancels the attack and staggers the enemy (the
+/// Bellwether's bell mid-swing).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Interrupt {
+    /// Weak point (by name) that must be hit.
+    pub weak_point: String,
+    /// Damage (after the weak point multiplier) it takes during one wind-up.
+    pub damage: f32,
+    /// Stun (seconds).
+    pub stun: f32,
+}
+
+impl Default for Interrupt {
+    fn default() -> Self {
+        Self {
+            weak_point: "head".into(),
+            damage: 20.0,
+            stun: 1.5,
+        }
+    }
+}
+
+/// A training dummy (the Effigy): never targets, never attacks, never moves, can't be killed
+/// (its health stops at 1) and heals back to full once nobody has hurt it for a while. Never
+/// placed in encounters or waves ([`EnemyRegistry::wave_names`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Dummy {
+    /// Seconds without damage before it regenerates.
+    pub regen_delay: f32,
+    /// Health per second while regenerating.
+    pub regen_rate: f32,
+}
+
+impl Default for Dummy {
+    fn default() -> Self {
+        Self {
+            regen_delay: 3.0,
+            regen_rate: 400.0,
+        }
+    }
+}
+
+/// What an elite of this type gets (any Mould can spawn as an elite, `SpawnOptions::elite`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EliteDef {
+    /// Health multiplier (on top of the spawn's health scale).
+    pub health: f32,
+    /// Attack cooldowns and recoveries are divided by this (wind-ups unchanged).
+    pub aggression: f32,
+    /// Movement speed multiplier.
+    pub speed: f32,
+    /// Knockback multiplier (sturdier).
+    pub knockback: f32,
+    /// Heat (the death ember burst's heal pool) multiplier.
+    pub heat: f32,
+}
+
+impl Default for EliteDef {
+    fn default() -> Self {
+        Self {
+            health: 2.5,
+            aggression: 1.25,
+            speed: 1.1,
+            knockback: 0.6,
+            heat: 2.0,
+        }
+    }
 }
 
 /// Projectile parameters of a ranged attack.
@@ -248,6 +467,14 @@ pub struct AttackDef {
     pub jumpable: Option<f32>,
     /// Aim laser during the wind-up (projectile attacks).
     pub laser: Option<AimLaser>,
+    /// `Toll`: who is frenzied, for how long.
+    pub toll: Option<Toll>,
+    /// `Pour`: the slag line.
+    pub pour: Option<Pour>,
+    /// A lunge that latches onto its victim instead of raking (`lunge` > 0).
+    pub latch: Option<Latch>,
+    /// Hitting this weak point hard enough during the wind-up cancels the attack.
+    pub interrupt: Option<Interrupt>,
 }
 
 impl Default for AttackDef {
@@ -280,6 +507,10 @@ impl Default for AttackDef {
             min_target_speed: 0.0,
             jumpable: None,
             laser: None,
+            toll: None,
+            pour: None,
+            latch: None,
+            interrupt: None,
         }
     }
 }
@@ -412,6 +643,10 @@ pub struct EnemyDef {
     pub colors: EnemyColors,
     /// Seconds the corpse stays (Dying state) before it is removed.
     pub death_time: f32,
+    /// A training dummy (the Effigy): see [`Dummy`].
+    pub dummy: Option<Dummy>,
+    /// What an elite of this type gets.
+    pub elite: EliteDef,
 }
 
 impl Default for EnemyDef {
@@ -438,6 +673,8 @@ impl Default for EnemyDef {
             drops: Drops::default(),
             colors: EnemyColors::default(),
             death_time: 0.6,
+            dummy: None,
+            elite: EliteDef::default(),
         }
     }
 }
@@ -522,6 +759,15 @@ impl EnemyRegistry {
 
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.defs.keys().map(String::as_str)
+    }
+
+    /// Names of the types that may appear in encounters and waves: everything but training
+    /// dummies (the Effigy).
+    pub fn wave_names(&self) -> impl Iterator<Item = &str> {
+        self.defs
+            .iter()
+            .filter(|(_, d)| d.dummy.is_none())
+            .map(|(n, _)| n.as_str())
     }
 
     pub fn len(&self) -> usize {
