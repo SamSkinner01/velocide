@@ -171,9 +171,16 @@ its index, so generation is deterministic.
   - `Slam` is a falling whoosh and dive tone.
   - `JumpPad` is a sproingy rising sine with a wide whoosh.
 - **Player.**
-  - `Hurt` is a distorted, 6-bit-crushed "damage glitch".
-  - `Heal` is a resonant slurp with a rising chirp and sparkle.
-  - `Death` and `Downed` are stuttering power-downs.
+  The player sounds follow the wick (`docs/premise.md`): a Shrike is a flame behind a mask, not
+  a machine, and nothing about it is wet.
+  - `Hurt` is a crunchy hit with the wick guttering under it (band-passed noise whose level
+    flickers ~30 times a second, the `gutter` building block), crushed to 6 bits.
+  - `Heal` is *kindling*: the wick drawing embers in. A breath of air pulled in and rising
+    (band-passed noise sweeping 450 Hz → 3 kHz), crackles thickening as the embers arrive, then
+    the flame catching at ~0.22 s (a warm low whoomph, a soft 196 → 262 Hz tone and a bright FM
+    glint), timed to the spark stream reaching the lantern.
+  - `Death` is the wick snuffed: a long gutter sinking 1.1 kHz → 160 Hz and stuttering over a
+    heavy fall and boom, ending in a low puff. `Downed` is the wick sinking to a low flicker.
   - `Respawn` and `Revive` are rising swells and arpeggios.
   - `NoStamina` is a dull double buzz.
 - **Weapons.** Each weapon has its own material, so the four read apart instantly: the
@@ -257,6 +264,9 @@ its index, so generation is deterministic.
   (2 variants, pitched by the client for the body's size) wax splitting, a slag thud and a long
   sizzle as it melts; `GaolerDeath` the door crashing down, iron collapsing, the lantern hissing
   out; `EmberRelease` the heat leaving: a soft whoomph and a fountain of crackling embers.
+  `ProjectileImpact` (a needle or ember bomb hitting the level) is a crack, a thud and a short
+  sizzle. There is no gore sound (the old `Gib` is gone; removing it re-seeded the sounds after
+  it in `Sfx::ALL`, which only changes their random detail).
 - **Game.**
   - `RankUp` is a rising A-major arpeggio (A4–C♯5–E5–A5) whose last note holds with vibrato
     and a third on top, plus shimmer and echo: triumphant and short (1.2 s).

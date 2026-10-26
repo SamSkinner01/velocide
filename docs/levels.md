@@ -77,6 +77,11 @@ behind grilles (furnaces, gutters, lanterns) is decoration and is never reachabl
 molten bronze and Ingot Run's slag use the same material and contract. Every level has a kill
 volume under the whole world. (The `lava` material is the Foundry's molten slag or bronze.)
 
+Wax uses two materials: `wax` (poured ivory wax with drip runs: drapes, sheets, candles,
+effigies, the Spire's wax runs) and `waxstone` (set wax poured in layers, with pour lines and
+hairline cracks: the Crucible's pillars, ribs and columns). Level files written before the
+re-theme say `flesh` / `bone`; those names still load as `wax` / `waxstone`.
+
 ## Crucible of Veins (campaign)
 
 A slag foundry built like a cathedral, cut through ore veins: brick halls, wax colonnades and

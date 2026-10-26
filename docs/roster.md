@@ -117,8 +117,9 @@ first wall, floor or ceiling it hits, quivering, a lit relay you placed on purpo
   shows thorn pips where the prism pips were.
 
 ### Unchanged
-Fist / parry rules, blood-burst healing, hard damage, explosion falloff and self-damage, the
-damage pipeline, freshness (per weapon / mode / action), the style ranks.
+Fist / parry rules, close-range healing (now ember bursts, `docs/premise.md`), hard damage,
+explosion falloff and self-damage, the damage pipeline, freshness (per weapon / mode / action),
+the style ranks.
 
 ### Implementation notes (weapons, as built)
 Details the contract left open, and the few places where the build adds to it:

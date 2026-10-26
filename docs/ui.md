@@ -84,18 +84,18 @@ list.text_in(rect, "CENTRED", &TextStyle::new(theme.bone).centered()); // v-cent
 
 ## Theme
 
-`Theme::default()` is blood / bone / black. Colours are **sRGB-encoded** `Vec4`s (built with
+`Theme::default()` is crimson / bone / black. Colours are **sRGB-encoded** `Vec4`s (built with
 `theme::rgb(r, g, b)` / `rgba`).
 
 | field | use |
 |---|---|
-| `blood` `#A8121C` | accent: title bars, selected tabs, slider fill, active fire mode |
+| `crimson` `#A8121C` | accent: title bars, selected tabs, slider fill, active fire mode |
 | `crimson_bright` `#EE262C` | focus bar, `>` marker, text cursor, warnings |
 | `crimson_dark` `#46080C` | pressed buttons, title bar backing, coloured shadows |
 | `bone` `#EEE4CE` / `bone_dim` `#AA9C88` / `ash` `#665A54` | primary / secondary / disabled text |
 | `ink`, `panel` (86% alpha), `panel_edge`, `widget`, `widget_hover`, `focus_bg`, `shadow` | surfaces |
 | `health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty` | HUD |
-| `rank_colors[8]` | DULL ash grey, CRUDE brass, FERAL orange, VICIOUS hot orange, MERCILESS arterial red, GRISLY magenta, SANGUINE blood (throbs), VELOCIDE white-hot (flickers red) |
+| `rank_colors[8]` | DULL ash grey, CRUDE brass, FERAL orange, VICIOUS hot orange, MERCILESS hot red, GRISLY magenta, SEARING red-hot (throbs), VELOCIDE white-hot (flickers red) |
 
 Metrics: `row_height` 14, `spacing` 3, `padding` 12, `title_height` 15, `label_fraction` 0.46
 (label column width in label + control rows), `blink_period` 0.8 s.
@@ -105,7 +105,7 @@ colours (`health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty`, `cri
 `rank_colors`) for the player's colour-vision mode; the standard palette gives exactly the
 default theme. See [Accessibility](#accessibility-colour-blind-palette-and-shape-cues).
 
-Look: translucent near-black panels with a 1-unit edge and bone corner brackets; a blood title
+Look: translucent near-black panels with a 1-unit edge and bone corner brackets; a crimson title
 slab with a stepped 45° cut and trailing slashes; focused rows get a translucent red band, a
 2-unit red bar and an animated `>` (it nudges and blinks red/bone) while the label slides
 right to make room. Buttons get bevel lines and, when focused, a red fill with corner brackets.
@@ -137,7 +137,7 @@ let ui_input = UiInput {
 };
 
 // 1. HUD first (plain functions, no Ui needed) ...
-hud::health(&mut ui_list, &theme, health_rect, "BLOOD", hp, 100.0, hard, ctx.time);
+hud::health(&mut ui_list, &theme, health_rect, "WICK", hp, 100.0, hard, ctx.time);
 // 2. ... then menus on top.
 if menu_open {
     let mut ui = Ui::new(&mut ui_list, &mut ui_state, &ui_input, &theme);
@@ -254,8 +254,8 @@ ui_state.finish_capture(); }`. If the capturing widget stops being drawn, the ca
 Plain functions drawing into the list. Pass `ctx.time` for animations.
 
 ```rust
-hud::health(list, theme, rect, "BLOOD", hp, max_hp, hard_damage, time); // big number + 10-hp segments,
-                                                                          // hatched hard-damage tail, low-hp blink
+hud::health(list, theme, rect, "WICK", hp, max_hp, hard_damage, time); // big number + 10-hp segments,
+                                                                         // hatched hard-damage tail, low-hp blink
 hud::segmented_bar(list, rect, value, max, hard, segments, &BarStyle::health(theme)); // the generic bar
 hud::pips(list, theme, pos, vec2(14.0, 5.0), 4.0, charges /* e.g. 2.4 */, 3);       // slanted stamina pips
 let label_x = pos.x + hud::pips_width(vec2(14.0, 5.0), 4.0, 3) + 6.0;

@@ -5,16 +5,18 @@ here belongs in `assets/tuning.ron` (`CombatTuning` and friends) or in the enemy
 can be hot-reloaded; the values below are the defaults. All gameplay is resolved on the server.
 
 ## Player
-- **Health** 100. **Hard damage**: 35 % of every hit also becomes hard damage, which lowers the
-  player's *effective max health* (`max - hard`). Hard damage starts recovering 1.5 s after the
-  last hit at 25 HP/s. Healing can never exceed the effective max. The HUD shows the hard damage
-  segment in a different colour at the end of the health bar.
-- **Close-range healing (blood bursts)**: every damage instance dealt to an enemy (or, in PvP, to
-  another player) spawns a *blood burst* at the hit point: heal pool = 40 % of the damage
-  (melee/parry: 100 %), radius 3.5 m, lifetime 0.6 s. Each tick, the closest living player inside
-  the radius drains the pool (whoever is closest gets it, so players compete in PvP). An enemy
-  death spawns a big burst (pool 25, radius 4.5 m). Bursts are replicated entities so clients
-  draw the red mist and the heal flash.
+- **Health** 100: the Shrike's *wick*, the flame in its chest lantern (HUD label `WICK`;
+  `docs/premise.md`). **Hard damage** (*smother*): 35 % of every hit also smothers the wick,
+  which lowers the player's *effective max health* (`max - hard`). It starts rekindling 1.5 s
+  after the last hit at 25 HP/s. Healing can never exceed the effective max. The HUD shows the
+  hard damage segment in a different colour (and hatched) at the end of the health bar.
+- **Close-range healing (ember bursts, *kindling*)**: every damage instance dealt to an enemy
+  (or, in PvP, to another player) sheds an *ember burst* at the hit point: heal pool = 40 % of
+  the damage (melee/parry: 100 %), radius 3.5 m, lifetime 0.6 s. Each tick, the closest living
+  player inside the radius draws the embers in (whoever is closest gets them, so players compete
+  in PvP; a Shrike can't draw back the embers its own wick shed). An enemy death releases its
+  heat as a big burst (pool 25, radius 4.5 m). Bursts are replicated entities so clients draw
+  the embers, the stream of sparks into the healed Shrike's lantern and the heal flash.
 - **Dash i-frames**: no damage while `MoveState::is_invulnerable()`.
 - **Self damage**: own explosions deal 35 % damage to self (and full knockback — blast jumps).
   No friendly fire in co-op (knockback from teammates' explosions still applies).
@@ -75,8 +77,8 @@ lag-compensation history keeps the plain shapes.
 - **The Swat**: punching a diving Harrier (its whole dive is the window, within 3 m + its
   radius) is a parry too: heal + PARRY, it is stunned 2 s and knocked out of the air, 50 damage
   (2× the fist) on top of the punch.
-- **Reward**: heal to effective max (+ clears 50 % of hard damage), +PARRY style, client hitstop
-  0.12 s and a white screen flash.
+- **Reward**: the wick *flares*: heal to effective max (+ clears 50 % of hard damage), +PARRY
+  style, client hitstop 0.12 s and a white screen flash.
 - Players' own projectiles (bombs, wisps, gravewells) are **not** parryable — no punchable
   grenades. In PvP the counter is the Bellows **Gust**, which turns any hostile projectile
   around (kills with it are RETURN TO SENDER too, scored under the Gust).
@@ -131,7 +133,7 @@ players are valid targets. Details and measurements: `docs/enemies.md`.
   rank); the meter decays continuously (4/s at DULL rising to 30/s at VELOCIDE). Falling below
   zero drops a rank. Rank changes produce events (rank-up stinger).
 - Ranks: DULL (grey), CRUDE (blue), FERAL (green), VICIOUS (yellow), MERCILESS (orange),
-  GRISLY (red), SANGUINE (crimson), VELOCIDE (white, flashing).
+  GRISLY (red), SEARING (red-hot), VELOCIDE (white, flashing).
 - Bonuses: KILL 30 · HEADSHOT +15 · AIRKILL (killer airborne) +40 · AIRSHOT (target airborne)
   +20 · MULTIKILL (n kills within 0.6 s) +40×(n−1) · PARRY 60 · DEFLECT (a Gust turned a
   hostile projectile around) 30 · RETURN TO SENDER (kill with a parried / deflected projectile)

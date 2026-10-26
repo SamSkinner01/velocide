@@ -157,9 +157,11 @@ Uncaptured wgpu errors are logged (`log::error!`) instead of panicking.
 ## Assets
 
 - `assets::procedural`: `material_texture(name)` for concrete, brick, metal, rust, grate (alpha
-  holes), flesh, bone, lava, tile (32 px), wood, hazard (32 px), glass (translucent, 32 px), dirt,
-  panel (128 px); unknown names give a magenta checker. `sprite_texture(SpriteTex::…)` for
-  MuzzleFlash, Blood, BloodSplat (decal), Spark, Smoke, Glow, Ring, Shard, Gib, Scorch. All built
+  holes), wax (poured, drip runs), waxstone (set wax, pour lines), lava, tile (32 px), wood,
+  hazard (32 px), glass (translucent, 32 px), dirt, panel (128 px); unknown names give a magenta
+  checker, and the pre-premise names `flesh` / `bone` still map to wax / waxstone
+  (`MATERIAL_ALIASES`). `sprite_texture(SpriteTex::…)` for MuzzleFlash, WaxDrops, WaxSplat
+  (decal), Spark, Smoke, Glow, Ring, Shard, Lump (wax / slag), Scorch. All built
   from a seeded integer hash, periodic so they tile, and identical on every machine. The noise
   helpers (`hash`, `value_noise`, `fbm`, `cellular`, `ramp`, `Canvas`) are public.
 - `assets::meshgen`: `MeshBuilder` (`vertex`, `quad`, `add_box(&BoxDesc)`, `append(mesh, Mat4)`,

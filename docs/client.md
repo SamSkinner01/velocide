@@ -171,13 +171,15 @@ snapshot at the present (see `docs/combat.md`), everything else at the render ti
 
 Look at it: `cargo run -p client --release --example combat_shots -- [out_dir]` plays a
 scripted single-player session (dev commands spawn enemies / needles, every weapon mode fires,
-thorns, a gust deflection, a parry, damage, death) plus a hosted game with a scripted rival
-client shooting at you, and writes PNGs (`combat_quill`, `combat_brand_sigil`,
-`combat_splinter_burst`, `combat_bellows`, `combat_gust`, `combat_both_barrels`, `combat_arc`,
-`combat_arc_chain`, `combat_wisp`, `combat_discharge_nova`, `combat_bomb_flight`,
-`combat_explosion`, `combat_breach`, `combat_gravewell_pull`, `combat_gravewell_implode`,
-`combat_thorn_planted`, `combat_ricochet`, `combat_deflect`, `combat_parry`,
-`combat_low_health`, `combat_death`, ...) and frame-time numbers.
+thorns, a gust deflection, a parry, damage, kindling, death) plus a hosted game with a scripted
+rival client shooting at you, and writes PNGs (`combat_quill`, `combat_brand_sigil`,
+`combat_splinter_burst`, `combat_bellows`, `combat_gust`, `combat_both_barrels`,
+`combat_heat_release`, `combat_arc`, `combat_arc_chain`, `combat_wisp`,
+`combat_discharge_nova`, `combat_bomb_flight`, `combat_explosion`, `combat_breach`,
+`combat_gravewell_pull`, `combat_gravewell_implode`, `combat_thorn_planted`,
+`combat_ricochet`, `combat_deflect`, `combat_parry`, `combat_low_health`, `combat_kindling`
+(punching a Mould at low health: the spark stream into your lantern), `combat_death`, ...) and
+frame-time numbers.
 
 ### React to gameplay events (damage, kills, parries...)
 
@@ -212,7 +214,7 @@ way.
 | `feedback.hitstop(seconds)` | freezes what is *drawn* (shake, viewmodel, particles) up to 0.35 s; never the simulation or networking |
 | `feedback.set_time_scale(s)` | visual slow motion |
 | `feedback.flash(color, strength)`, `damage_flash(fraction)`, `parry_flash()`, `shield_flash()`, `death_flash()`, `heal_flash(amount)` | full-screen flash, fades in ~0.3 s; the named ones take their colour from `palette()` (`flash_damage` / `_parry` / `_shield` / `_death` / `_heal`), so pass `palette().…` to `flash` too |
-| `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `blood(pos, dir, amount)`, `gibs(pos, n)`, `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
+| `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `wax_spray(pos, dir, amount)` (molten wax; landed drops set as wax splats), `lumps(pos, n)` (wax / slag lumps + embers), `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
 | `viewmodel.fire(kick)`, `punch()`, `throw_thorn()`, `set_charge(c)`, `turn_drum()` | first-person weapon animation |
@@ -370,7 +372,7 @@ velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-af
 - `client_combat`: client weapon prediction == server weapon state (0 mismatches at 100 ms
   RTT), own combat state follows damage, Fx arrive exactly once.
 - unit tests: camera dip / slide eye height, feedback (hitstop, toggles, trauma decay),
-  effects (decal ring, particle cap, blood splats), tuning file rewriting, UI repeat.
+  effects (decal ring, particle cap, wax splats), tuning file rewriting, UI repeat.
 
 Measured: 2 bot clients on a dedicated server with `--netsim 100,20,2` (≈210 ms RTT, ±20 ms
 jitter, 2 % loss each way): 0 prediction corrections over 20 s of running, jumping, dashing,

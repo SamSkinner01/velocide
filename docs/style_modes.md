@@ -56,9 +56,9 @@ going down in co-op) empties the meter to DULL (`reset_on_death`).
 | 1 | CRUDE | tarnished brass | — |
 | 2 | FERAL | orange | — |
 | 3 | VICIOUS | hot orange-red | — |
-| 4 | MERCILESS | arterial red | music at full intensity from here |
-| 5 | GRISLY | bruised magenta | — |
-| 6 | SANGUINE | bright blood | slow throb |
+| 4 | MERCILESS | hot red | music at full intensity from here |
+| 5 | GRISLY | magenta | — |
+| 6 | SEARING | red-hot | slow throb |
 | 7 | VELOCIDE | white-hot | flickers red, speed streaks stream off the name |
 
 (The theme's palette replaces the placeholder colour list in `docs/gameplay.md`.)
@@ -180,7 +180,7 @@ Every respawn: full health, no hard damage, fresh weapons (selection kept), spaw
   victim loses nothing (only uncredited self-kills / world deaths cost a frag).
 * Respawn after `combat.respawn_delay` (2 s) at the level spawn whose nearest living opponent is
   farthest away; `combat.spawn_protection` (1.5 s) blocks damage (`Blocked::SpawnProtection`).
-* Friendly fire is PvP (all players are enemies; `CombatRules::pvp`), self damage on. Blood-burst
+* Friendly fire is PvP (all players are enemies; `CombatRules::pvp`), self damage on. Ember-burst
   healing competition comes from combat.
 * `frag_limit` reached (frags ≥ limit) or `time_limit_secs` elapsed → match over. Standings: frags,
   then fewer deaths, then style. The HUD shows frags / limit, the place (1ST / TIED / 2ND…) and the
@@ -228,7 +228,7 @@ then the lobby's choices in one row: RESTART / MAIN MENU solo, CONTINUE TO LOBBY
 for the host, WAITING FOR THE HOST + LEAVE GAME otherwise, with the auto-return countdown).
 Enter / Esc / click skips the reveal; the buttons appear when it's done.
 
-* **Solo campaign**: LEVEL COMPLETE title sliding in with a blood extrusion; TIME (vs par), KILLS
+* **Solo campaign**: LEVEL COMPLETE title sliding in with a crimson extrusion; TIME (vs par), KILLS
   (of the level, %), STYLE (best rank), DAMAGE TAKEN (deaths) slide in one by one, numbers count up
   and each grade is *stamped* (pop, white flash, `KillConfirm`); then the big RANK letter slams in
   (`RankUp`) with its word (SUPREME / ADEPT / BRUTAL / CLUMSY / DULL). S grades get a pulsing
@@ -339,7 +339,7 @@ cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD 
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
   teammate (both clients see DOWNED, Reviving, Revived); the campaign exit sends graded results.
-* `style_shots`: the style meter at DULL / FERAL / MERCILESS (STALE) / SANGUINE (grouped
+* `style_shots`: the style meter at DULL / FERAL / MERCILESS (STALE) / SEARING (grouped
   multikill feed) / VELOCIDE, the rank-up banner, CHECKPOINT, the deathmatch HUD and Tab
   scoreboard, solo / perfect / co-op / deathmatch results mid-reveal and finished, and a real
   two-client co-op revive (teammate marker with the prompt, the downed panel, both progress bars,

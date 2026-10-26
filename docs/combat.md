@@ -2,11 +2,12 @@
 
 Server-authoritative combat: weapons with alt fires, lag-compensated hitscan with hit assist,
 projectiles and explosions, area attacks, parry with network tolerance, thorn ricochets,
-brands, healing bursts, hard damage, the enemy definitions (the Moulds, `docs/enemies.md`) and
-how all of it reaches clients. The arsenal itself (names, silhouettes, behaviour, net kinds) is
-specified in `docs/roster.md`. Rules and default numbers come from
-`docs/gameplay.md`; every number is in `CombatTuning` (`assets/tuning.ron`, section `combat`)
-or in `assets/enemies/*.ron`. Networking basics: `docs/network.md`.
+brands, ember bursts (healing), hard damage, the enemy definitions (the Moulds,
+`docs/enemies.md`) and how all of it reaches clients. The arsenal itself (names, silhouettes,
+behaviour, net kinds) is specified in `docs/roster.md`; the fiction in `docs/premise.md`.
+Rules and default numbers come from `docs/gameplay.md`; every number is in `CombatTuning`
+(`assets/tuning.ron`, section `combat`) or in `assets/enemies/*.ron`. Networking basics:
+`docs/network.md`.
 
 The last section is the **client presentation contract**: what the client must draw and play
 for every entity kind and event (the spec for phase 2, client side).
@@ -15,14 +16,14 @@ for every entity kind and event (the spec for phase 2, client side).
 
 | module | contents |
 |---|---|
-| `shared::sim` (`mod.rs`) | `SimWorld` (players, enemies, projectiles, thorns, brands, blood, pending hits, rules), the tick pipeline, `SimEvent`, `ShotEvent`, `neutral_input`, replication, hitboxes |
+| `shared::sim` (`mod.rs`) | `SimWorld` (players, enemies, projectiles, thorns, brands, ember bursts, pending hits, rules), the tick pipeline, `SimEvent`, `ShotEvent`, `neutral_input`, replication, hitboxes |
 | `shared::sim::combat` | `Owner`, `Attack`, `DamageFlags`, `DamageInfo`, `DamageEvent`, `Blocked`, `KillInfo`, `PlayerCombat`, `CombatRules`, **the damage pipeline** (`SimWorld::apply_damage`), death/respawn rule, vitals |
 | `shared::sim::weapons` | `Weapon`, `WeaponState`, `FireIntent`, **`step_weapons`** (predictable), `SimWorld::resolve_intent` (what each mode does) |
 | `shared::sim::hitscan` | `ShotSpec`, `ShotView`, `Impact`, lag-compensated traces, hit assist (`hit_pads`), thorn ricochets, Splinter bursts, Arclash chains |
 | `shared::sim::area` | Bellows Gust (cone + deflection), Arclash Discharge (nova), Tumbler Breach |
 | `shared::sim::projectiles` | `ProjectileKind`, `Projectile`, `Explosive`, projectile step, bomb bounces, Gravewell pull, Wisp zaps, explosions, `replicated_position` (client helper) |
 | `shared::sim::parry` | punch, parry checks, deflection (`redirect_projectile`, shared with the Gust), auto-aim, parry-delayed damage, melee parry hook |
-| `shared::sim::thorn` / `brand` / `blood` | thrown thorns (plant, drop, lie), brands (side table), healing bursts |
+| `shared::sim::thorn` / `brand` / `embers` | thrown thorns (plant, drop, lie), brands (side table), ember bursts (close-range healing) |
 | `shared::sim::hitbox` | `HitShape`, `Hitbox`, `HitPads` (hit assist: padded rays, sweeps, distances) |
 | `shared::sim::trail` | short per-tick position history (rewinding non-hitbox things: projectiles, thorns, enemies) |
 | `shared::sim::enemy` | `EnemyDef` (RON format) + `EnemyRegistry`, `Enemy`, `AiState`, damage/death; `ai.rs`: state machine, targeting, attacks, movement |
@@ -44,8 +45,8 @@ for every entity kind and event (the spec for phase 2, client side).
    against the moved projectiles.
 3. **Enemies**: targeting, AI, attacks, movement; then due **pending enemy hits** apply.
 4. **Thorns** (fly, plant, hit and drop, lie, expire), **brands** (expire, drop with their
-   target), **healing bursts**, **vitals** (hard damage recovery, spawn protection, respawn
-   timers).
+   target), **ember bursts** (healing), **vitals** (hard damage recovery, spawn protection,
+   respawn timers).
 5. **World rules**: below the kill floor → put back at a spawn immediately (safety net);
    inside a kill volume → `kill_player(…, Attack::World)` (dies, respawns by the rule).
 6. Returns every `SimEvent` of the tick.
@@ -136,16 +137,16 @@ protection → `SpawnProtection`, dash i-frames (`MoveState::is_invulnerable`) �
 counts *or* is explosive (blast jumps through i-frames, teammates' explosions in co-op).
 Counted hits: `damage += amount`, `hard += amount × hard_damage_fraction` (capped at
 `damage`), `hard_delay` reset, last attacker recorded; `damage ≥ max_health` → killed. In PvP
-a counted hit spawns a blood burst the victim can't drain.
+a counted hit sheds an ember burst the victim can't draw back in.
 
 **Enemies**: enemy-sourced damage → `Blocked::SameTeam`. Weak point `Weak(i)` (non-explosive)
 → `× weak_points[i].multiplier`, flags `WEAK_POINT` (+ `HEADSHOT` for `kind: Head`). Armour:
 damage arriving from the front arc (`-dir` within `front_arc/2` of the facing) `×
 front_multiplier` unless the weak point is in `bypass` (explosions too if `explosions`),
 flag `ARMOURED`. Knockback `× knockback_scale` into the enemy's velocity (airborne if it has
-an upward component). Aggro bookkeeping. Blood burst (`heal_fraction` of damage dealt,
+an upward component). Aggro bookkeeping. Ember burst (`heal_fraction` of damage dealt,
 `melee_heal_fraction` for punches/parry counters). `health ≤ 0` → killed. (Hurt-flash and
-death effects on the client are sparks / ash, not gore, for Shrikes.)
+death effects on the client: molten wax and sparks for the Moulds, sparks and ash for Shrikes.)
 
 Emits `SimEvent::Damage(DamageEvent { target, info, dealt, hard, health_after, killed,
 blocked, tick })` (also for blocked hits, not for `NoTarget`) and, on a kill,
@@ -160,7 +161,7 @@ pub struct KillInfo {
     victim_airborne: bool,        // AIRSHOT
     parried_projectile: bool,     // RETURN TO SENDER (flags also carry RETURNED when it hit its original owner)
     killer_health: f32, killer_effective_max: f32,   // CLOSE CALL
-    overkill: f32,                // gib size
+    overkill: f32,                // how violently it breaks apart
     tick: u32,                    // MULTIKILL timing
 }
 ```
@@ -344,12 +345,13 @@ chains prefer branded targets; the damage pipeline multiplies damage to them.
 
 ## Healing, hard damage, i-frames
 
-* Blood bursts: see `blood.rs` docs. A damage instance dealt *by a player* to an enemy (or
-  another player) spawns/merges a burst at the hit point; each tick the closest living player
-  within the radius who is below their effective max drains it (the PvP victim can't drain
-  their own). Enemy death → big burst (25 HP, r 4.5, 1 s).
-* Hard damage: 35 % of each hit; caps healing at `max − hard`; recovers at 25/s after 1.5 s
-  without damage. Parries clear half.
+* Ember bursts (*kindling*, `docs/premise.md`): see `embers.rs` docs. A damage instance dealt
+  *by a player* to an enemy (or another player) sheds (or merges into) a burst of embers at the
+  hit point; each tick the closest living player within the radius who is below their effective
+  max draws it in (the PvP victim can't draw back their own). Enemy death → its heat released
+  as a big burst (25 HP, r 4.5, 1 s). Tuning section `combat.embers` (old files: `blood`).
+* Hard damage (*smother*): 35 % of each hit smothers the wick, capping healing at
+  `max − hard`; it rekindles at 25/s after 1.5 s without damage. Parries clear half.
 * Dash i-frames: `MoveState::is_invulnerable()` blocks damage (`Blocked::Invulnerable`;
   explosive knockback still applies).
 * Slam shockwave: on landing, everything hostile within `movement.slam_shockwave_radius`
@@ -376,7 +378,7 @@ Every field has a default. Local offsets: +X right, +Y up, −Z forward, from th
 | `armour` | `Some((front_multiplier, front_arc, bypass: ["head"], explosions))` |
 | `attacks` | `[AttackDef]`, in priority order (below) |
 | `ai` | `sight_range, reaction_time, lose_target_time, preferred_range: Option<(min,max)>, strafe, target_stickiness, aggro_switch_fraction, retarget_interval, repath_interval, reposition` |
-| `drops` | `(blood_pool, blood_radius)` of the death burst |
+| `drops` | `(heat, heat_radius)`: heal pool and radius of the death burst (old files: `blood_pool`, `blood_radius`) |
 | `colors` | `body` (wax), `accent`, `glow` (the heat: weak points, hit sprays, death bursts), `telegraph`, `parry` (sRGB) |
 | `death_time` | corpse duration (Dying state) |
 
@@ -428,7 +430,7 @@ block each other (player movement must stay predictable).
 | `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BRANDED 1<<15` | weapon (bits 0–3) \| mode (4–5) \| Discharge charge 0–255 (8–15) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
 | enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–14 enemies area), `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
-| `BLOOD_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
+| `EMBER_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
 | `THORN` 160 | thrower | **at launch tick**; while `PLANTED`: where it sits / its orientation (unit) | – | `PLANTED 1, LYING 2, DROPPING 4` | – | – | launch tick |
 
 **Trajectory replication** (projectiles, thorns): `pos(t) = p0 + v0·Δ − ½·g·Δ²·ŷ`,
@@ -538,11 +540,11 @@ spawn protected; death screen.
 | **PLAYER** entity | drawn 10 % larger than life (visual only); body/stance from `LOW_PROFILE`; weapon model from `state & 0xF` and alt mode; `CHARGING` → Arclash capacitor glow + crackling arcs (charge in bits 8–15); `BRANDED` → turning brand sigil above the head; `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
 | **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; `BRANDED` → turning brand sigil (a diamond and a point-down triangle, camera-facing) above it; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
 | **projectiles** | bomb: tumbling studded ball, fuse sparks and a flickering fuse band (`BombBounce` on `ProjectileBounce`); gravewell: canister with a green light, `STUCK` → claws down, vortex of motes drawn in from the pull radius, `GravewellHum` once; wisp: spinning ball of lightning, crackling arcs, violet light, `WispHum` every 0.45 s; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
-| **BLOOD_BURST** | red mist cloud of `state/10` m radius, density from `health` (pool); `BIG` → gib shower + big mist; fades over its life |
+| **EMBER_BURST** | glowing embers (`palette().heal`) rising off a faint glow over a wisp of smoke, `state/10` m radius, burst size from `health` (pool), re-puffing while the pool lasts; `BIG` → the same, looser (the heat release itself is drawn by the dying enemy) |
 | **THORN** | flying: the glass spike along its path; `DROPPING`: tumbling; `PLANTED`: tip-first in the surface along `velocity` (quivers after landing), drawn ×1.5 with a steady halo and a pulse ring so the relay reads at a distance; `LYING`: flat on the floor; disappears on removal (shatter via `Ricochet` / `ThornExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
 | `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
-| `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; gibs come from the enemy entity entering `Dying` (also `EnemyDeath`/`Gib` sounds) |
+| `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
 | `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
 | `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers (jagged arcs for `Arc`) from the shooter's muzzle to each end, impact sparks/decals at the ends; `Gust` → the air puff along the muzzle direction |
@@ -554,7 +556,7 @@ spawn protected; death screen.
 | `Fx::Discharge` | remote nova: rings rushing out along the floor, arcs, `DischargeRelease` |
 | `Fx::ThornThrown` / `ThornPlanted` / `ThornExpired` | remote throw anim + `ThornThrow` / glass chips + `ThornPlant` / crumble + `ThornShatter` |
 | `Fx::Punch` | remote arm swing, `Punch`/`PunchHit` |
-| `Fx::Heal` | red streak from `from` to the player; for you: green-ish heal flash + `Heal` |
+| `Fx::Heal` | kindling: a stream of sparks (`palette().heal`) from `from` into the player's chest lantern (others: the lantern flares); for you: `Feedback::heal_flash` + `Heal` (an ember inhale and crackle) |
 | `Fx::SlamShockwave` | ground ring of `radius_dm`, dust, `SlamImpact` |
 | `Fx::ProjectileBounce` / `ProjectileImpact` | sparks (+ `BombBounce`) / impact puff + `ProjectileImpact` |
 | `Fx::EnemyAttack` | `strike == false`: the attack's telegraph sound (by attack name: `GnawerBiteWindup`, `CenserWhirl`, `HarrierShriek`, `GaolerBashWindup`, `GaolerChain`, `HeronLaser`...) + glint in `colors.telegraph`; `parryable` → yellow flash; `strike == true`: its strike sound + bash dust ring / sweep arc / leap dust |

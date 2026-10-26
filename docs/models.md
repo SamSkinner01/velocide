@@ -95,7 +95,7 @@ pure: `shrike::pose(&PlayerAnim)`, `enemies::pose(&EnemyAnim)`,
 `props::{door_pose, checkpoint_pose, jump_pad_pose, exit_gate_pose}`.
 
 `Tint { body, team, glow, glow_color, core_color }`: `body` multiplies everything (hit flash
-> 1, fade-out alpha < 1), `team` is the player colour (`DEFAULT_TEAM_COLOR` = blood red), `glow`
+> 1, fade-out alpha < 1), `team` is the player colour (`DEFAULT_TEAM_COLOR` = deep red), `glow`
 lets the client flash telegraph parts on top of what the pose already does. `glow_color` /
 `core_color` (default `None`) *replace* the colours of `Glow` / `Core` parts with a palette role
 (the colour-blind palettes: `palette().model_glow(palette().telegraph)`, `weak_point`,
@@ -189,7 +189,7 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | right arm (1st person) | `vm_arm.gltf` | forearm (cloth wraps), hand (glove), trim *Team* (cord round the bracer), bracer (brass) |
 | left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
-| enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_blood_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core`; `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
+| enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 
 Prop poses: `door_pose(open 0..1, locked)` slides the panels apart (unit door
