@@ -407,7 +407,7 @@ impl InGame {
                 };
                 self.combat.hud.hit_marker(kind, now);
                 let color = match kind {
-                    MarkerKind::Head | MarkerKind::Kill => theme.blood_bright,
+                    MarkerKind::Head | MarkerKind::Kill => theme.crimson_bright,
                     MarkerKind::Armour => theme.ash,
                     MarkerKind::Body => theme.bone,
                 };
@@ -443,7 +443,7 @@ impl InGame {
                 let me_dead = k.victim.player() == local && local.is_some();
                 if involves_player {
                     let color = if mine || me_dead {
-                        theme.blood_bright
+                        theme.crimson_bright
                     } else {
                         theme.bone_dim
                     };

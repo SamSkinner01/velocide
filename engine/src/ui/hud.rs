@@ -181,7 +181,7 @@ pub fn health(
     let low = health < max * 0.3;
     let flash = low && (time * 4.0).fract() < 0.5;
     let num_color = if flash {
-        theme.blood_bright
+        theme.crimson_bright
     } else {
         theme.bone
     };
@@ -206,7 +206,7 @@ pub fn health(
     } else {
         String::new()
     };
-    let hard_style = TextStyle::new(theme.blood_bright)
+    let hard_style = TextStyle::new(theme.crimson_bright)
         .right()
         .outline(fade(theme.ink, 0.9));
     draw_text(
@@ -248,8 +248,8 @@ pub fn weapon(
         let r = Rect::new(Vec2::new(x - w, y), Vec2::new(x, y + chip_h));
         if i == active_mode {
             fill(list, r.expand(1.0), fade(theme.ink, 0.85));
-            fill(list, r, theme.blood);
-            draw::hline(list, r.min.x, r.max.x, r.max.y - 1.0, theme.blood_bright);
+            fill(list, r, theme.crimson);
+            draw::hline(list, r.min.x, r.max.x, r.max.y - 1.0, theme.crimson_bright);
             draw_text(
                 list,
                 Vec2::new(r.min.x + 4.0, r.min.y + 2.0),
@@ -280,7 +280,7 @@ pub fn weapon(
         Vec2::new(r.min.x - bw - 5.0, name_y + 3.0),
         Vec2::new(r.min.x - 5.0, name_y + 14.0),
     );
-    fill(list, b, theme.blood);
+    fill(list, b, theme.crimson);
     draw_text(
         list,
         Vec2::new(b.min.x + 3.0, b.min.y + 2.0),
@@ -311,7 +311,7 @@ pub fn style_meter(
         color = if (time * 12.0).fract() < 0.5 {
             color
         } else {
-            theme.blood_bright
+            theme.crimson_bright
         };
     }
     let scale = 2.0;
@@ -699,7 +699,7 @@ pub fn chat_box(
 ) {
     if open {
         fill(list, rect, fade(theme.ink, 0.6));
-        draw::hline(list, rect.min.x, rect.max.x, rect.min.y, theme.blood);
+        draw::hline(list, rect.min.x, rect.max.x, rect.min.y, theme.crimson);
     }
     let inner = rect.shrink2(Vec2::new(3.0, 2.0));
     let mut y = inner.max.y;
@@ -782,7 +782,7 @@ pub fn ping_color(theme: &Theme, ping_ms: f32) -> Vec4 {
     } else if ping_ms < 150.0 {
         theme.rank_color(1)
     } else {
-        theme.blood_bright
+        theme.crimson_bright
     }
 }
 
@@ -826,10 +826,10 @@ mod tests {
         let theme = Theme::default();
         let canvas = Vec2::new(640.0, 360.0);
         let mut feed = TextFeed::new(6, 4.0);
-        feed.push("YOU [TUMBLER] HUSK", Vec4::ONE, 0.0);
+        feed.push("YOU [TUMBLER] GNAWER", Vec4::ONE, 0.0);
         for k in 1..5 {
             // Merged repeats re-trigger the slide-in.
-            feed.push("YOU [TUMBLER] HUSK", Vec4::ONE, k as f64 * 0.01);
+            feed.push("YOU [TUMBLER] GNAWER", Vec4::ONE, k as f64 * 0.01);
         }
         feed.push("X".repeat(200), Vec4::ONE, 0.05);
         // Every moment of the slide-in, right-aligned 10 units from the edge (the kill feed).
@@ -867,10 +867,10 @@ mod tests {
         let red_glyphs = |health: f32| {
             let mut list = UiDrawList::new(Vec2::new(640.0, 360.0));
             // 30 hard damage; at t = 0.2 a low-health number isn't in its red blink phase.
-            super::health(&mut list, &theme, rect, "BLOOD", health, 100.0, 30.0, 0.2);
+            super::health(&mut list, &theme, rect, "WICK", health, 100.0, 30.0, 0.2);
             list.quads
                 .iter()
-                .filter(|q| q.color == theme.blood_bright && q.texture == crate::gfx::UiTexture::Font)
+                .filter(|q| q.color == theme.crimson_bright && q.texture == crate::gfx::UiTexture::Font)
                 .count()
         };
         assert!(red_glyphs(50.0) > 0, "the -30 hard damage counter shows");

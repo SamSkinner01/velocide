@@ -22,7 +22,7 @@ use crate::settings::Settings;
 
 /// Everything the HUD shows this frame.
 pub struct HudInfo<'a> {
-    /// Label over the health bar: "BLOOD", or "DEAD" / "DOWNED".
+    /// Label over the health bar: "WICK" (the flame in the chest lantern), or "DEAD" / "DOWNED".
     pub health_label: &'a str,
     pub health: f32,
     pub max_health: f32,
@@ -289,7 +289,7 @@ impl Hud {
         );
         let label_x = 14.0 + hud::pips_width(pip, 4.0, info.stamina_max) + 6.0;
         let dash_color = if info.stamina < 1.0 {
-            t.blood_bright
+            t.crimson_bright
         } else {
             t.bone_dim
         };
@@ -303,7 +303,7 @@ impl Hud {
         if s.show_speed {
             let speed = info.speed;
             let hot = ((speed - 16.0) / 32.0).clamp(0.0, 1.0);
-            let color = mix(t.bone, t.blood_bright, hot);
+            let color = mix(t.bone, t.crimson_bright, hot);
             let num = format!("{}", speed.round() as i32);
             let style = TextStyle::new(color).scale(2.0).centered().outline(outline);
             let base_y = c.max.y - 30.0;

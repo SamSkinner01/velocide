@@ -45,7 +45,7 @@ pub const RANK_NAMES: [&str; RANK_COUNT] = [
     "VICIOUS",
     "MERCILESS",
     "GRISLY",
-    "SANGUINE",
+    "SEARING",
     "VELOCIDE",
 ];
 

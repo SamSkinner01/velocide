@@ -578,7 +578,7 @@ impl<'a> Ui<'a> {
             fill(
                 self.list,
                 Rect::new(rect.min, Vec2::new(rect.min.x + 2.0, rect.max.y)),
-                t.blood_bright,
+                t.crimson_bright,
             );
         } else if resp.hovered {
             fill(self.list, rect, fade(t.widget_hover, 0.6));
@@ -591,7 +591,7 @@ impl<'a> Ui<'a> {
         let time = self.input.time;
         let nudge = if (time * 5.0).fract() < 0.5 { 0.0 } else { 1.0 };
         let color = if t.blink(time) {
-            t.blood_bright
+            t.crimson_bright
         } else {
             t.bone
         };
@@ -709,7 +709,7 @@ impl<'a> Ui<'a> {
         self.text_in(rect.shrink2(Vec2::new(4.0, 0.0)), value, &style);
     }
 
-    /// Section heading: a blood-red tab, the text, and a rule to the right.
+    /// Section heading: a crimson tab, the text, and a rule to the right.
     pub fn heading(&mut self, text: &str) {
         let t = self.theme;
         let rect = self.allocate(t.row_height);
@@ -717,7 +717,7 @@ impl<'a> Ui<'a> {
         fill(
             self.list,
             Rect::from_min_size(Vec2::new(rect.min.x, y), Vec2::new(3.0, CAP_HEIGHT)),
-            t.blood_bright,
+            t.crimson_bright,
         );
         let style = TextStyle::new(t.bone).shadow(t.shadow);
         let r = draw_text(self.list, Vec2::new(rect.min.x + 6.0, y), text, &style);
@@ -727,10 +727,10 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Big title text (scale 2) with a blood shadow.
+    /// Big title text (scale 2) with a crimson shadow.
     pub fn title(&mut self, text: &str) {
         let t = self.theme;
-        let style = TextStyle::new(t.bone).scale(2.0).shadow(t.blood);
+        let style = TextStyle::new(t.bone).scale(2.0).shadow(t.crimson);
         self.text(text, &style);
     }
 
@@ -740,7 +740,7 @@ impl<'a> Ui<'a> {
         let rect = self.allocate(3.0);
         let y = rect.min.y + 1.0;
         draw::hline(self.list, rect.min.x, rect.max.x, y, t.panel_edge);
-        draw::hline(self.list, rect.min.x, rect.min.x + 8.0, y, t.blood);
+        draw::hline(self.list, rect.min.x, rect.min.x + 8.0, y, t.crimson);
     }
 
     // ------------------------------------------------------------------ buttons
@@ -767,9 +767,9 @@ impl<'a> Ui<'a> {
         let bg = if !self.enabled {
             fade(t.widget, 0.5)
         } else if down {
-            t.blood_dark
+            t.crimson_dark
         } else if resp.focused {
-            t.blood
+            t.crimson
         } else if resp.hovered {
             t.widget_hover
         } else {
@@ -802,7 +802,7 @@ impl<'a> Ui<'a> {
         };
         let mut style = TextStyle::new(color).centered();
         if resp.focused {
-            style = style.shadow(t.blood_dark);
+            style = style.shadow(t.crimson_dark);
         }
         let text_rect = rect.translate(Vec2::new(0.0, if down { 1.0 } else { 0.0 }));
         self.text_in(text_rect, text, &style);
@@ -828,12 +828,12 @@ impl<'a> Ui<'a> {
                 self.list,
                 slab,
                 true,
-                if resp.held { t.blood_dark } else { t.blood },
+                if resp.held { t.crimson_dark } else { t.crimson },
             );
             fill(
                 self.list,
                 Rect::new(rect.min, Vec2::new(rect.min.x + 3.0, rect.max.y)),
-                t.blood_bright,
+                t.crimson_bright,
             );
             // Speed streaks trailing the slab.
             let x0 = slab.max.x + 4.0;
@@ -845,7 +845,7 @@ impl<'a> Ui<'a> {
                     x0 + phase,
                     x0 + phase + len,
                     y,
-                    fade(t.blood_bright, 0.7),
+                    fade(t.crimson_bright, 0.7),
                 );
             }
         } else if resp.hovered {
@@ -865,7 +865,7 @@ impl<'a> Ui<'a> {
             t.bone_dim
         };
         let style = TextStyle::new(color).scale(scale).shadow(if resp.focused {
-            t.blood_dark
+            t.crimson_dark
         } else {
             t.shadow
         });
@@ -882,7 +882,7 @@ impl<'a> Ui<'a> {
         let rect = self.allocate(t.row_height);
         let resp = self.interact(id, rect, true);
         if selected {
-            fill(self.list, rect, fade(t.blood, 0.55));
+            fill(self.list, rect, fade(t.crimson, 0.55));
         }
         self.draw_focus(rect, &resp);
         let color = if selected && self.enabled {
@@ -929,7 +929,7 @@ impl<'a> Ui<'a> {
         border(self.list, box_rect, 1.0, mix(edge, t.bone, flash));
         if *value {
             let inner = if self.enabled {
-                mix(t.blood_bright, t.bone, flash)
+                mix(t.crimson_bright, t.bone, flash)
             } else {
                 t.ash
             };
@@ -1021,9 +1021,9 @@ impl<'a> Ui<'a> {
         let fill_color = if !self.enabled {
             t.ash
         } else if resp.focused {
-            t.blood_bright
+            t.crimson_bright
         } else {
-            t.blood
+            t.crimson
         };
         let hx = (track.min.x + track.width() * frac).round();
         fill(
@@ -1093,9 +1093,9 @@ impl<'a> Ui<'a> {
         let arrow_color = if !self.enabled {
             t.ash
         } else if resp.focused {
-            mix(t.blood_bright, t.bone, flash)
+            mix(t.crimson_bright, t.bone, flash)
         } else {
-            t.blood
+            t.crimson
         };
         let y = (control.center().y - CAP_HEIGHT * 0.5).round();
         let push = flash.round();
@@ -1212,7 +1212,7 @@ impl<'a> Ui<'a> {
         }
         // Field body.
         fill(self.list, field, fade(t.ink, 0.92));
-        let edge = if resp.focused { t.blood_bright } else { t.ash };
+        let edge = if resp.focused { t.crimson_bright } else { t.ash };
         border(
             self.list,
             field,
@@ -1225,7 +1225,7 @@ impl<'a> Ui<'a> {
                 field.min.x,
                 field.max.x,
                 field.max.y - 2.0,
-                t.blood_bright,
+                t.crimson_bright,
             );
         }
         let shown: String = chars.iter().skip(scroll).take(visible).collect();
@@ -1244,7 +1244,7 @@ impl<'a> Ui<'a> {
                     field.min + Vec2::splat(1.0),
                     Vec2::new(field.min.x + 2.0, field.max.y - 1.0),
                 ),
-                t.blood_bright,
+                t.crimson_bright,
             );
         }
         if resp.focused {
@@ -1257,7 +1257,7 @@ impl<'a> Ui<'a> {
                         Vec2::new(cx, y - 1.0),
                         Vec2::new(cx + 1.0, y + CAP_HEIGHT + 1.0),
                     ),
-                    t.blood_bright,
+                    t.crimson_bright,
                 );
             }
         }
@@ -1291,8 +1291,8 @@ impl<'a> Ui<'a> {
         let time = self.input.time;
         if capturing {
             let on = t.blink(time);
-            fill(self.list, control, if on { t.blood } else { t.blood_dark });
-            border(self.list, control, 1.0, t.blood_bright);
+            fill(self.list, control, if on { t.crimson } else { t.crimson_dark });
+            border(self.list, control, 1.0, t.crimson_bright);
             let style = TextStyle::new(t.bone).centered();
             self.text_in(control, "PRESS A KEY", &style);
         } else {
@@ -1366,9 +1366,9 @@ impl<'a> Ui<'a> {
                     r,
                     true,
                     if resp.focused {
-                        t.blood_bright
+                        t.crimson_bright
                     } else {
-                        t.blood
+                        t.crimson
                     },
                 );
             } else {
@@ -1388,7 +1388,7 @@ impl<'a> Ui<'a> {
             let shown = text::truncate(label, r.width() - 10.0, 1.0);
             let mut style = TextStyle::new(color).centered();
             if is_sel {
-                style = style.shadow(t.blood_dark);
+                style = style.shadow(t.crimson_dark);
             }
             self.text_in(r.translate(Vec2::new(-2.0, 0.0)), &shown, &style);
         }
@@ -1396,15 +1396,15 @@ impl<'a> Ui<'a> {
             self.list,
             Rect::new(Vec2::new(rect.min.x, rect.max.y - 2.0), rect.max),
             if resp.focused {
-                t.blood_bright
+                t.crimson_bright
             } else {
-                t.blood
+                t.crimson
             },
         );
         if resp.focused {
             let y = (rect.min.y + (rect.height() - 2.0 - CAP_HEIGHT) * 0.5).round();
             let color = if t.blink(self.input.time) {
-                t.blood_bright
+                t.crimson_bright
             } else {
                 t.bone
             };
@@ -1567,7 +1567,7 @@ impl<'a> Ui<'a> {
             );
             fill(self.list, track, fade(t.widget, 0.9));
             let thumb_color = if bar.held {
-                t.blood_bright
+                t.crimson_bright
             } else if bar.hovered {
                 t.bone
             } else {
@@ -1581,7 +1581,7 @@ impl<'a> Ui<'a> {
                 Vec2::new(view.min.x, view.max.y - 1.0),
                 Vec2::new(view.max.x, view.max.y + 1.0),
             );
-            fill(self.list, marker, fade(t.blood_bright, 0.8));
+            fill(self.list, marker, fade(t.crimson_bright, 0.8));
         }
         st.offset = new_offset;
         st.at_bottom = new_offset >= st.max_offset() - 0.5;
@@ -1719,17 +1719,17 @@ fn draw_panel_frame(list: &mut UiDrawList, rect: Rect, title: &str, t: &Theme) {
         fill(
             list,
             Rect::new(rect.min, Vec2::new(rect.max.x, rect.min.y + 2.0)),
-            t.blood,
+            t.crimson,
         );
     } else {
         let bar = Rect::new(rect.min, Vec2::new(rect.max.x, rect.min.y + t.title_height));
-        fill(list, bar, t.blood_dark);
+        fill(list, bar, t.crimson_dark);
         let tw = line_width(title, 1.0);
         let slab = Rect::new(
             bar.min,
             Vec2::new(bar.min.x + tw + 22.0 + bar.height(), bar.max.y),
         );
-        slanted(list, slab, true, t.blood);
+        slanted(list, slab, true, t.crimson);
         // Three fading slashes after the slab, three at the far right.
         let h = bar.height() - 6.0;
         for i in 0..3 {
@@ -1740,7 +1740,7 @@ fn draw_panel_frame(list: &mut UiDrawList, rect: Rect, title: &str, t: &Theme) {
                 bar.min.y + 3.0,
                 3.0,
                 h,
-                fade(t.blood, 0.7 - i as f32 * 0.2),
+                fade(t.crimson, 0.7 - i as f32 * 0.2),
             );
             let xr = bar.max.x - 30.0 + i as f32 * 7.0;
             draw::parallelogram(
@@ -1749,12 +1749,12 @@ fn draw_panel_frame(list: &mut UiDrawList, rect: Rect, title: &str, t: &Theme) {
                 bar.min.y + 3.0,
                 3.0,
                 h,
-                fade(t.blood, 0.3 + i as f32 * 0.2),
+                fade(t.crimson, 0.3 + i as f32 * 0.2),
             );
         }
-        draw::hline(list, rect.min.x, rect.max.x, bar.max.y, t.blood);
+        draw::hline(list, rect.min.x, rect.max.x, bar.max.y, t.crimson);
         let y = (bar.min.y + (bar.height() - CAP_HEIGHT) * 0.5).round();
-        let style = TextStyle::new(t.bone).shadow(t.blood_dark);
+        let style = TextStyle::new(t.bone).shadow(t.crimson_dark);
         draw_text(list, Vec2::new(bar.min.x + 8.0, y), title, &style);
     }
     draw::corner_brackets(list, rect.expand(2.0), 7.0, 1.0, fade(t.bone_dim, 0.8));

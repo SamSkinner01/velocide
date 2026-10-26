@@ -18,7 +18,7 @@
 //! 7. **Audio**: listener follows the camera, remote player sounds, music intensity.
 //!
 //! Gameplay agents extend this by handling their events in `on_net_event` (e.g. a
-//! `GameEvent::Damaged` → `self.feedback.damage_flash(..)`, `self.effects.blood(..)`), drawing
+//! `GameEvent::Damaged` → `self.feedback.damage_flash(..)`, `self.effects.sparks(..)`), drawing
 //! their entity kinds in `draw_world`, and adding HUD fields in `draw_hud`. See docs/client.md.
 //!
 //! Multiplayer sessions come from the lobby screen ([`InGame::from_handoff`]) and go back to
@@ -418,7 +418,7 @@ impl InGame {
                 if self.restart_pending {
                     self.restart_pending = false;
                     self.effects.clear();
-                    self.hud.banner("RESTART", t.blood_bright, now);
+                    self.hud.banner("RESTART", t.crimson_bright, now);
                 }
                 self.spawned = true;
                 common.audio.play_2d(Sfx::Respawn);
@@ -464,7 +464,7 @@ impl InGame {
                 return self.on_lobby_changed(phase, previous, common, now);
             }
             NetEvent::Notice { text } => {
-                self.chat.system(&text.to_uppercase(), t.blood_bright, now);
+                self.chat.system(&text.to_uppercase(), t.crimson_bright, now);
             }
             // Combat events (damage, hit confirms, kills, parries): `combat` module.
             NetEvent::Game(ev) => self.combat_game_event(ev, common),
@@ -839,7 +839,7 @@ impl InGame {
             return None;
         }
         if in_game && self.time - self.last_snapshot_time > STALL_WARNING_SECS {
-            return Some(("CONNECTION PROBLEM".into(), t.blood_bright));
+            return Some(("CONNECTION PROBLEM".into(), t.crimson_bright));
         }
         if self.restart_pending {
             return Some(("RESTARTING".into(), t.bone));
@@ -1065,7 +1065,7 @@ impl InGame {
         } else if net.own_combat().is_some_and(|c| c.combat.dead) {
             "DEAD"
         } else {
-            "BLOOD"
+            "WICK"
         };
         let info = HudInfo {
             health_label,

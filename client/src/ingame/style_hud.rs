@@ -238,7 +238,7 @@ impl StyleHud {
                 vec2(rect.min.x, rect.min.y - 2.0),
                 vec2(rect.max.x, rect.min.y + 17.0),
             );
-            let fc = if up { t.bone } else { t.blood_bright };
+            let fc = if up { t.bone } else { t.crimson_bright };
             draw::slanted(list, band, true, fade(fc, 0.55 * flash));
         }
         if rank >= TOP_RANK {
@@ -249,7 +249,7 @@ impl StyleHud {
                 let y = (rect.min.y + 1.0 + i as f32 * 3.5).round();
                 let x1 = name_left - phase * 46.0;
                 let len = 8.0 + (i % 3) as f32 * 7.0;
-                let col = if i % 2 == 0 { t.bone } else { t.blood_bright };
+                let col = if i % 2 == 0 { t.bone } else { t.crimson_bright };
                 draw::hline(list, x1 - len, x1, y, fade(col, 0.8 * (1.0 - phase)));
             }
         }
@@ -278,7 +278,7 @@ impl StyleHud {
             let fill = ((f - tuning.freshness_min) / (1.0 - tuning.freshness_min).max(1e-3))
                 .clamp(0.0, 1.0);
             let col = if f < tuning.stale_threshold {
-                t.blood_bright
+                t.crimson_bright
             } else {
                 mix(t.bone_dim, t.bone, fill)
             };
@@ -291,7 +291,7 @@ impl StyleHud {
         if let Some(key) = stale {
             // Its own line under the pips (the rank pips sit on the right of the pip row).
             let blink = (now * 3.0).fract() < 0.65;
-            let col = if blink { t.blood_bright } else { t.ash };
+            let col = if blink { t.crimson_bright } else { t.ash };
             let label = format!("STALE {}", key.label());
             list.text(
                 vec2(rect.max.x, pip_y + 6.0),
@@ -332,7 +332,7 @@ impl StyleHud {
 pub fn rank_text_color(t: &Theme, rank: u8, time: f64) -> Vec4 {
     let c = t.rank_color(rank as usize);
     if rank >= TOP_RANK && (time * 8.0).fract() < 0.5 {
-        t.blood_bright
+        t.crimson_bright
     } else {
         c
     }

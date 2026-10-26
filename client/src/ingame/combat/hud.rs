@@ -156,7 +156,7 @@ impl CombatHud {
         if !info.dead && low < 0.4 {
             let k = ((0.4 - low) / 0.25).clamp(0.0, 1.0);
             let pulse = 0.75 + 0.25 * ((now * 5.0).sin() as f32);
-            vignette(list, c, t.blood, 0.75 * (0.35 + 0.65 * k) * pulse);
+            vignette(list, c, t.crimson, 0.75 * (0.35 + 0.65 * k) * pulse);
         }
 
         // Damage direction indicators.
@@ -169,7 +169,7 @@ impl CombatHud {
             let x = ind.from.dot(right);
             let y = ind.from.dot(fwd);
             let angle = x.atan2(y); // 0 = straight ahead, + = to the right
-            arc_chevron(list, center, angle, 44.0, fade(t.blood_bright, alpha));
+            arc_chevron(list, center, angle, 44.0, fade(t.crimson_bright, alpha));
         }
 
         // Hit markers.
@@ -191,9 +191,9 @@ impl CombatHud {
             let alpha = 1.0 - age * age;
             let (color, r0, len, thick) = match m.kind {
                 MarkerKind::Body => (t.bone, 5.0, 5.0, 1.0),
-                MarkerKind::Head => (t.blood_bright, 5.0, 7.0, 2.0),
+                MarkerKind::Head => (t.crimson_bright, 5.0, 7.0, 2.0),
                 MarkerKind::Armour => (t.ash, 5.0, 4.0, 1.0),
-                MarkerKind::Kill => (t.blood_bright, 6.0 + 3.0 * age, 9.0, 2.0),
+                MarkerKind::Kill => (t.crimson_bright, 6.0 + 3.0 * age, 9.0, 2.0),
             };
             marker(
                 list,
@@ -234,7 +234,7 @@ impl CombatHud {
         let alt_total = (weapon.alt_cooldown(w.mode, info.tuning) * rate).max(1.0);
         let bars = [
             (w.primary_cooldown[wi] as f32 / prim_total, t.bone_dim),
-            (w.alt_cooldown[wi] as f32 / alt_total, t.blood_bright),
+            (w.alt_cooldown[wi] as f32 / alt_total, t.crimson_bright),
         ];
         for (i, (frac, color)) in bars.iter().enumerate() {
             if *frac <= 0.0 || *frac > 1.5 {
@@ -336,8 +336,8 @@ impl CombatHud {
             let since = *self.died_at.get_or_insert(now);
             let k = ((now - since) / 0.6).min(1.0) as f32;
             list.fill(c, fade(Vec4::new(0.12, 0.0, 0.01, 1.0), 0.55 * k));
-            vignette(list, c, t.blood_dark, 0.7 * k);
-            let title = TextStyle::new(fade(t.blood_bright, k))
+            vignette(list, c, t.crimson_dark, 0.7 * k);
+            let title = TextStyle::new(fade(t.crimson_bright, k))
                 .scale(4.0)
                 .centered()
                 .outline(outline);

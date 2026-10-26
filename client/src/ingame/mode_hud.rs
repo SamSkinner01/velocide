@@ -155,7 +155,7 @@ impl ModeHud {
                     audio.play(Sfx::Downed, PlayParams::default().with_volume(0.5));
                     hud.event(
                         format!("{} IS DOWN", name_of(players, *player)),
-                        t.blood_bright,
+                        t.crimson_bright,
                         now,
                     );
                 }
@@ -190,7 +190,7 @@ impl ModeHud {
                 self.downed.clear();
                 self.reviving.clear();
                 self.wipe = Some(*respawn_tick);
-                hud.banner("TEAM WIPED", t.blood_bright, now);
+                hud.banner("TEAM WIPED", t.crimson_bright, now);
                 audio.play_2d(Sfx::Death);
             }
             ModeEvent::ExitCountdown { player, end_tick } => {
@@ -298,7 +298,7 @@ impl ModeHud {
                 );
             }
             let urgent = left < 3.5 && (info.time * 4.0).fract() < 0.5;
-            let col = if urgent { t.blood_bright } else { t.bone };
+            let col = if urgent { t.crimson_bright } else { t.bone };
             let y = 46.0;
             list.text(
                 vec2(c.center().x, y),
@@ -365,7 +365,7 @@ impl ModeHud {
                         Some(s) => format!("DOWN {:.0}", s.ceil()),
                         None => "DOWN".into(),
                     },
-                    t.blood_bright,
+                    t.crimson_bright,
                 ),
                 LifeState::Dead => ("DEAD".into(), t.ash),
             };
@@ -399,7 +399,7 @@ impl ModeHud {
         draw::fill(
             list,
             Rect::new(slab.min, vec2(slab.min.x + 2.0, slab.max.y)),
-            t.blood,
+            t.crimson,
         );
         list.text(
             vec2(18.0, 10.0),
@@ -446,7 +446,7 @@ impl ModeHud {
             let elapsed = (now - board.start_tick as f64) / info.tick_rate.max(1) as f64;
             let left = (board.rules.time_limit_secs as f64 - elapsed).max(0.0);
             let col = if left < 30.0 && (info.time * 2.0).fract() < 0.5 {
-                t.blood_bright
+                t.crimson_bright
             } else {
                 t.bone_dim
             };
@@ -485,7 +485,7 @@ impl ModeHud {
                 .map_or(f32::INFINITY, |l| l.distance(e.position));
             let pulse = ((info.time * 5.0).sin() as f32 * 0.5 + 0.5) * 0.5 + 0.5;
             // Cross marker.
-            let col = mix(t.blood_bright, t.bone, 0.3 * pulse);
+            let col = mix(t.crimson_bright, t.bone, 0.3 * pulse);
             draw::fill(
                 list,
                 Rect::from_center_size(p, vec2(9.0, 3.0)).expand(1.0),
@@ -572,13 +572,13 @@ impl ModeHud {
                 panel.min.x + 10.0,
                 panel.max.x,
                 panel.min.y,
-                t.blood_bright,
+                t.crimson_bright,
             );
             let blink = (info.time * 1.5).fract() < 0.75;
             list.text(
                 vec2(c.center().x, y),
                 "YOU ARE DOWN",
-                &TextStyle::new(if blink { t.blood_bright } else { t.blood })
+                &TextStyle::new(if blink { t.crimson_bright } else { t.crimson })
                     .scale(2.0)
                     .centered()
                     .outline(outline),
@@ -784,7 +784,7 @@ impl InGame {
             let text = match c.title {
                 "FRAGS" => {
                     if e.frags < 0 {
-                        row.cell_colors[i] = Some(theme.blood_bright);
+                        row.cell_colors[i] = Some(theme.crimson_bright);
                     }
                     e.frags.to_string()
                 }

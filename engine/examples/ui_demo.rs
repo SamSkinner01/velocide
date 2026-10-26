@@ -333,10 +333,10 @@ mod demo {
             let list = ui.painter();
             // Title block.
             let title_pos = vec2(40.0, 44.0);
-            // Solid blood extrusion (stacked copies), then the outlined title on top.
+            // Solid crimson extrusion (stacked copies), then the outlined title on top.
             for k in (1..=4).rev() {
                 let o = k as f32 * 3.0;
-                let shade = draw::mix(t.blood, t.blood_dark, k as f32 / 4.0);
+                let shade = draw::mix(t.crimson, t.crimson_dark, k as f32 / 4.0);
                 list.text(
                     title_pos + vec2(o, o),
                     "VELOCIDE",
@@ -350,17 +350,17 @@ mod demo {
                 list,
                 Rect::new(vec2(r.min.x, y), vec2(r.max.x + 40.0, y + 4.0)),
                 true,
-                t.blood,
+                t.crimson,
             );
             draw::hline(
                 list,
                 r.min.x,
                 r.max.x + 120.0,
                 y + 6.0,
-                fade(t.blood_bright, 0.6),
+                fade(t.crimson_bright, 0.6),
             );
             let tag = TextStyle::new(t.bone_dim).scale(1.0).shadow(t.shadow);
-            list.text(vec2(r.min.x, y + 12.0), "CHROME. BLOOD. VELOCITY.", &tag);
+            list.text(vec2(r.min.x, y + 12.0), "WAX. WICK. VELOCITY.", &tag);
 
             ui.area(Rect::new(vec2(40.0, 140.0), vec2(300.0, 340.0)), |ui| {
                 ui.default_focus();
@@ -444,7 +444,7 @@ mod demo {
                             } else if name == "rivet_witch" {
                                 t.stamina
                             } else {
-                                t.blood_bright
+                                t.crimson_bright
                             };
                             ui.chat_line(name, color, msg);
                         }
@@ -537,7 +537,7 @@ mod demo {
             Align::Center,
             "WAVE",
             "3/5",
-            t.blood_bright,
+            t.crimson_bright,
         );
         hud::readout(
             &mut list,
@@ -559,7 +559,7 @@ mod demo {
         );
         let mut kills = TextFeed::new(4, 4.0);
         kills.push("rivet_witch  >  GNAWER", t.bone, now - 3.0);
-        kills.push("GRAVEL_SHRIKE  >  GAOLER", t.blood_bright, now - 1.5);
+        kills.push("GRAVEL_SHRIKE  >  GAOLER", t.crimson_bright, now - 1.5);
         kills.push("HOLLOWPOINT  >  HARRIER", t.bone, now - 0.2);
         kills.newest_on_top = false;
         kills.draw(
@@ -578,7 +578,7 @@ mod demo {
         for (txt, color, age) in [
             ("- REPEAT", t.ash, 2.9),
             ("+ RICOCHET", t.bone_dim, 2.4),
-            ("+ AIRSHOT", t.blood_bright, 1.6),
+            ("+ AIRSHOT", t.crimson_bright, 1.6),
             ("+ PARRY", t.bone_dim, 1.0),
             ("+ PARRY", t.bone_dim, 0.9),
             ("+ FRESH WEAPON", t.bone_dim, 0.4),
@@ -625,7 +625,7 @@ mod demo {
             },
             ChatLine {
                 name: "Mx. Ossuary".into(),
-                name_color: t.blood_bright,
+                name_color: t.crimson_bright,
                 text: "gaoler on the left, parry the bash when the door glows".into(),
                 time: now - 1.0,
             },
@@ -640,7 +640,7 @@ mod demo {
             8.0,
         );
         let health_rect = Rect::new(vec2(14.0, c.max.y - 48.0), vec2(200.0, c.max.y - 22.0));
-        hud::health(&mut list, t, health_rect, "BLOOD", 64.0, 100.0, 22.0, now);
+        hud::health(&mut list, t, health_rect, "WICK", 64.0, 100.0, 22.0, now);
         let pip = vec2(14.0, 5.0);
         hud::pips(&mut list, t, vec2(14.0, c.max.y - 15.0), pip, 4.0, 2.4, 3);
         let stam = TextStyle::new(t.bone_dim).outline(fade(t.ink, 0.9));
@@ -671,7 +671,7 @@ mod demo {
         let t = theme;
         let mut list = UiDrawList::new(canvas);
         let mut y = 10.0;
-        let head = TextStyle::new(t.blood_bright);
+        let head = TextStyle::new(t.crimson_bright);
         let body = TextStyle::new(t.bone);
         list.text(
             vec2(10.0, y),
@@ -717,7 +717,7 @@ mod demo {
         list.text(
             vec2(x, y),
             "SHADOW",
-            &TextStyle::new(t.bone).scale(2.0).shadow(t.blood),
+            &TextStyle::new(t.bone).scale(2.0).shadow(t.crimson),
         );
         list.text(
             vec2(x + 90.0, y),
@@ -727,10 +727,10 @@ mod demo {
         list.text(
             vec2(x + 186.0, y),
             "BOTH",
-            &TextStyle::new(t.blood_bright)
+            &TextStyle::new(t.crimson_bright)
                 .scale(2.0)
                 .outline(t.ink)
-                .shadow(t.blood_dark),
+                .shadow(t.crimson_dark),
         );
         list.text(
             vec2(x + 250.0, y),
@@ -740,29 +740,29 @@ mod demo {
         list.text(
             vec2(x + 250.0, y + 10.0),
             "+ AIRSHOT",
-            &TextStyle::new(t.blood_bright).outline(t.ink),
+            &TextStyle::new(t.crimson_bright).outline(t.ink),
         );
         // Wrapping + alignment boxes on the right.
         let bx = 446.0;
         let box_w = 184.0;
         let by = 10.0;
-        let para = "Word wrap: Shrikes are chrome-plated, blood-fuelled machines. Momentum is mercy; standing still is a slow death. Supercalifragilisticexpialidocious-breaks-too.";
+        let para = "Word wrap: Shrikes are masked hunters whose life is a wick burning in a chest lantern. Momentum is mercy; standing still is a slow death. Supercalifragilisticexpialidocious-breaks-too.";
         list.fill(
             Rect::new(vec2(bx - 3.0, by - 3.0), vec2(bx + box_w + 3.0, by + 74.0)),
-            fade(t.blood_dark, 0.6),
+            fade(t.crimson_dark, 0.6),
         );
         list.text_wrapped(vec2(bx, by), para, box_w, &TextStyle::new(t.bone_dim));
         let ay = by + 82.0;
         list.fill(
             Rect::new(vec2(bx - 3.0, ay - 3.0), vec2(bx + box_w + 3.0, ay + 34.0)),
-            fade(t.blood_dark, 0.6),
+            fade(t.crimson_dark, 0.6),
         );
         draw::hline(
             &mut list,
             bx + box_w * 0.5,
             bx + box_w * 0.5 + 1.0,
             ay - 3.0,
-            t.blood_bright,
+            t.crimson_bright,
         );
         list.text(vec2(bx, ay), "LEFT", &TextStyle::new(t.bone));
         list.text(
@@ -794,7 +794,7 @@ mod demo {
                 p + vec2(0.0, 7.0),
                 vec2(font::GLYPH_W, font::GLYPH_H) * scale,
             );
-            list.fill(glyph, fade(t.blood_dark, 0.8));
+            list.fill(glyph, fade(t.crimson_dark, 0.8));
             // Baseline marker.
             let base = glyph.min.y + font::CAP_HEIGHT * scale;
             draw::hline(
@@ -802,7 +802,7 @@ mod demo {
                 glyph.min.x,
                 glyph.max.x,
                 base,
-                fade(t.blood_bright, 0.5),
+                fade(t.crimson_bright, 0.5),
             );
             text::draw_glyph(&mut list, glyph.min, c, scale, t.bone);
             let label = if c == ' ' {

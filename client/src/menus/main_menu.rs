@@ -183,7 +183,7 @@ impl MainMenu {
                     theme,
                     vec2(32.0, 34.0),
                     5.0,
-                    "CHROME. BLOOD. VELOCITY.",
+                    "WAX. WICK. VELOCITY.",
                 );
                 let modal = self.message.is_some();
                 let in_page = self.page != Page::Root;

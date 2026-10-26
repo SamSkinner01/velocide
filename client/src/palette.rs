@@ -83,8 +83,8 @@ pub struct Palette {
     pub hard_damage: Vec4,
     pub stamina: Vec4,
     pub stamina_empty: Vec4,
-    /// Warnings and bad news: low health, DOWNED, LOCKED (the theme's `blood_bright`). Good news
-    /// (READY, CLEARED, CHECKPOINT) uses `stamina`.
+    /// Warnings and bad news: low health, DOWNED, LOCKED (the theme's `crimson_bright`).
+    /// Good news (READY, CLEARED, CHECKPOINT) uses `stamina`.
     pub warning: Vec4,
     /// Style ranks, DULL .. VELOCIDE.
     pub ranks: [Vec4; 8],
@@ -309,7 +309,7 @@ impl Palette {
         theme.hard_damage = self.hard_damage;
         theme.stamina = self.stamina;
         theme.stamina_empty = self.stamina_empty;
-        theme.blood_bright = self.warning;
+        theme.crimson_bright = self.warning;
         theme.rank_colors = self.ranks;
     }
 }

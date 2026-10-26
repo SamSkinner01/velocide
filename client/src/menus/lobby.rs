@@ -513,7 +513,7 @@ impl LobbyScreen {
         ui.painter().text(
             vec2(canvas.max.x - 12.0, 22.0),
             "LOBBY",
-            &TextStyle::new(theme.blood_bright)
+            &TextStyle::new(theme.crimson_bright)
                 .scale(2.0)
                 .right()
                 .shadow(theme.shadow),
@@ -554,15 +554,15 @@ impl LobbyScreen {
             );
             let p = ui.painter();
             draw::fill(p, band, fade(theme.ink, 0.82));
-            draw::hline(p, band.min.x, band.max.x, band.min.y, theme.blood);
-            draw::hline(p, band.min.x, band.max.x, band.max.y - 1.0, theme.blood);
+            draw::hline(p, band.min.x, band.max.x, band.min.y, theme.crimson);
+            draw::hline(p, band.min.x, band.max.x, band.max.y - 1.0, theme.crimson);
             p.text(
                 vec2(c.x, band.min.y + 8.0),
                 "MATCH STARTING",
                 &TextStyle::new(theme.bone)
                     .scale(2.0)
                     .centered()
-                    .shadow(theme.blood_dark),
+                    .shadow(theme.crimson_dark),
             );
             hud::banner(
                 p,
@@ -571,7 +571,7 @@ impl LobbyScreen {
                 &format!("{secs}"),
                 (self.time - since).min(0.9),
                 1.0,
-                theme.blood_bright,
+                theme.crimson_bright,
             );
             p.text(
                 vec2(c.x, band.max.y - 14.0),
@@ -629,7 +629,7 @@ impl LobbyScreen {
             let age = self.time - since;
             if age < NOTICE_SECS {
                 let a = ((NOTICE_SECS - age) / 0.5).clamp(0.0, 1.0) as f32;
-                let style = TextStyle::new(fade(theme.blood_bright, a)).shadow(fade(theme.ink, a));
+                let style = TextStyle::new(fade(theme.crimson_bright, a)).shadow(fade(theme.ink, a));
                 ui.painter()
                     .text(vec2(16.0, canvas.max.y - 22.0), text, &style);
             }
@@ -782,7 +782,7 @@ impl LobbyScreen {
                     draw::fill(
                         ui.painter(),
                         Rect::new(row.min - vec2(3.0, 2.0), row.max + vec2(3.0, 1.0)),
-                        fade(t.blood, 0.35),
+                        fade(t.crimson, 0.35),
                     );
                 }
                 let color = shared_color(p.color);
@@ -830,7 +830,7 @@ impl LobbyScreen {
                     let id = ui.id(&format!("kick##{}", p.id.0));
                     let resp = ui.interact(id, kick, false);
                     let c = if resp.hovered {
-                        t.blood_bright
+                        t.crimson_bright
                     } else {
                         fade(t.ash, 0.7)
                     };

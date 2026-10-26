@@ -17,16 +17,16 @@ pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Vec4 {
     )
 }
 
-/// Palette and layout metrics. The default is VELOCIDE's blood / bone / black look.
+/// Palette and layout metrics. The default is VELOCIDE's crimson / bone / black look.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     // --- palette ---
-    /// Primary accent: dried-blood red.
-    pub blood: Vec4,
-    /// Bright arterial red for focus, highlights and warnings.
-    pub blood_bright: Vec4,
-    /// Very dark red for pressed states, inactive fills, shadows with colour.
-    pub blood_dark: Vec4,
+    /// Primary accent: deep kiln crimson.
+    pub crimson: Vec4,
+    /// Bright crimson for focus, highlights and warnings.
+    pub crimson_bright: Vec4,
+    /// Very dark crimson for pressed states, inactive fills, shadows with colour.
+    pub crimson_dark: Vec4,
     /// Main text colour: bone white.
     pub bone: Vec4,
     /// Secondary text (labels, values not in focus).
@@ -76,9 +76,9 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            blood: rgb(168, 18, 28),
-            blood_bright: rgb(238, 38, 44),
-            blood_dark: rgb(70, 8, 12),
+            crimson: rgb(168, 18, 28),
+            crimson_bright: rgb(238, 38, 44),
+            crimson_dark: rgb(70, 8, 12),
             bone: rgb(238, 228, 206),
             bone_dim: rgb(170, 156, 136),
             ash: rgb(102, 90, 84),
@@ -108,9 +108,9 @@ impl Default for Theme {
                 rgb(190, 160, 96),  // CRUDE: tarnished brass
                 rgb(232, 132, 40),  // FERAL: orange
                 rgb(255, 84, 32),   // VICIOUS: hot orange-red
-                rgb(238, 26, 44),   // MERCILESS: arterial red
-                rgb(210, 32, 120),  // GRISLY: bruised magenta
-                rgb(255, 60, 60),   // SANGUINE: bright blood (pulses in the HUD)
+                rgb(238, 26, 44),   // MERCILESS: hot red
+                rgb(210, 32, 120),  // GRISLY: magenta
+                rgb(255, 60, 60),   // SEARING: red-hot (pulses in the HUD)
                 rgb(255, 244, 214), // VELOCIDE: white-hot
             ],
         }

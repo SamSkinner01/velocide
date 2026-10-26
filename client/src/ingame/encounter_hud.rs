@@ -16,7 +16,7 @@ use super::hud::Hud;
 pub fn on_event(event: &GameEvent, hud: &mut Hud, audio: &mut Audio, t: &Theme, now: f64) -> bool {
     match event {
         GameEvent::EncounterStarted { .. } => {
-            hud.banner("ARENA LOCKED", t.blood_bright, now);
+            hud.banner("ARENA LOCKED", t.crimson_bright, now);
             audio.play_2d(Sfx::DoorLock);
         }
         GameEvent::WaveStarted { wave, waves, .. } => {
@@ -54,7 +54,7 @@ pub fn draw(list: &mut UiDrawList, t: &Theme, entities: &[EntityState]) {
     let Some(text) = readout(entities) else {
         return;
     };
-    let style = TextStyle::new(t.blood_bright)
+    let style = TextStyle::new(t.crimson_bright)
         .centered()
         .outline(fade(t.ink, 0.9));
     list.text(vec2(list.canvas_size.x * 0.5, 40.0), &text, &style);

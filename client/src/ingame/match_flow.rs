@@ -60,7 +60,7 @@ impl InGame {
                     self.resume();
                     self.chat.close();
                     self.hud
-                        .banner("MATCH OVER", common.theme.blood_bright, now);
+                        .banner("MATCH OVER", common.theme.crimson_bright, now);
                     common.audio.play_2d(Sfx::UiSelect);
                 }
                 None

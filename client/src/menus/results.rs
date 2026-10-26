@@ -60,7 +60,7 @@ pub fn grade_color(t: &Theme, g: Grade, time: f64) -> Vec4 {
     match g {
         Grade::S => {
             if (time * 7.0).fract() < 0.18 {
-                t.blood_bright
+                t.crimson_bright
             } else {
                 t.rank_color(7)
             }
@@ -303,7 +303,7 @@ impl ResultsScreen {
             draw::fill(
                 list,
                 Rect::new(row.min, vec2(row.min.x + 2.0, row.max.y)),
-                fade(t.blood, a),
+                fade(t.crimson, a),
             );
             list.text(
                 vec2(row.min.x + 12.0, y + 5.0),
@@ -463,7 +463,7 @@ impl ResultsScreen {
                 row,
                 true,
                 if local {
-                    fade(t.blood, 0.35 * a)
+                    fade(t.crimson, 0.35 * a)
                 } else {
                     fade(t.ink, 0.5 * a)
                 },
@@ -488,7 +488,7 @@ impl ResultsScreen {
                 list.text(
                     vec2(row.min.x + 16.0, y + 10.0),
                     "LEFT BEHIND",
-                    &TextStyle::new(fade(t.blood_bright, a * 0.8)),
+                    &TextStyle::new(fade(t.crimson_bright, a * 0.8)),
                 );
             }
             let num = TextStyle::new(fade(t.bone, a)).right();
@@ -690,7 +690,7 @@ impl ResultsScreen {
         let local = Some(p.player) == self.local;
         let row = Rect::new(vec2(x0, y - 3.0), vec2(x0 + w, y + 12.0));
         let bg = if local {
-            fade(t.blood, 0.4 * a)
+            fade(t.crimson, 0.4 * a)
         } else if place == 0 {
             fade(t.bone, 0.08 * a)
         } else {
@@ -720,7 +720,7 @@ impl ResultsScreen {
         let xs = |x: f32| x0 + x * w / 520.0;
         let num = |c: Vec4| TextStyle::new(fade(c, a)).right();
         let frag_col = if p.stats.frags < 0 {
-            t.blood_bright
+            t.crimson_bright
         } else {
             t.bone
         };
@@ -757,7 +757,7 @@ fn grade_word(g: Grade) -> &'static str {
     }
 }
 
-/// Darkened game with a blood vignette and slow scanlines.
+/// Darkened game with a crimson vignette and slow scanlines.
 fn backdrop(list: &mut UiDrawList, t: &Theme, c: Rect, age: f64) {
     let a = (age / 0.25).clamp(0.0, 1.0) as f32;
     list.fill(c, fade(t.ink, 0.72 * a));
@@ -772,14 +772,14 @@ fn backdrop(list: &mut UiDrawList, t: &Theme, c: Rect, age: f64) {
                 vec2(c.min.x + wband * i as f32, c.min.y),
                 vec2(c.min.x + wband * (i + 1) as f32, c.max.y),
             ),
-            fade(t.blood_dark, k),
+            fade(t.crimson_dark, k),
         );
         list.fill(
             Rect::new(
                 vec2(c.max.x - wband * (i + 1) as f32, c.min.y),
                 vec2(c.max.x - wband * i as f32, c.max.y),
             ),
-            fade(t.blood_dark, k),
+            fade(t.crimson_dark, k),
         );
     }
     let mut y = c.min.y + ((age * 6.0) % 3.0) as f32;
@@ -789,7 +789,7 @@ fn backdrop(list: &mut UiDrawList, t: &Theme, c: Rect, age: f64) {
     }
 }
 
-/// Big title with a blood extrusion, sliding in, and a subtitle under a slanted rule.
+/// Big title with a crimson extrusion, sliding in, and a subtitle under a slanted rule.
 fn title_block(
     list: &mut UiDrawList,
     t: &Theme,
@@ -808,7 +808,7 @@ fn title_block(
         list.text(
             vec2(x + o, y + o),
             title,
-            &TextStyle::new(fade(mix(t.blood, t.blood_dark, k as f32 / 5.0), p)).scale(scale),
+            &TextStyle::new(fade(mix(t.crimson, t.crimson_dark, k as f32 / 5.0), p)).scale(scale),
         );
     }
     list.text(
@@ -823,7 +823,7 @@ fn title_block(
         list,
         Rect::new(vec2(x - 10.0, ry), vec2(x + w * p + 30.0, ry + 3.0)),
         true,
-        fade(t.blood, p),
+        fade(t.crimson, p),
     );
     // Speed streaks off the left end.
     for i in 0..3 {
@@ -833,7 +833,7 @@ fn title_block(
             x - 24.0 - len - (1.0 - p) * 80.0,
             x - 24.0,
             y + 6.0 + i as f32 * 7.0,
-            fade(t.blood_bright, 0.5 * p),
+            fade(t.crimson_bright, 0.5 * p),
         );
     }
     list.text(

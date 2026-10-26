@@ -132,11 +132,11 @@ pub fn draw_in(list: &mut UiDrawList, t: &Theme, rect: Rect, table: &ScoreTable)
     draw::border(list, rect, 1.0, t.panel_edge);
     draw::corner_brackets(list, rect.expand(2.0), 8.0, 1.0, t.bone_dim);
     let title_bar = Rect::new(rect.min, vec2(rect.max.x, rect.min.y + 15.0));
-    draw::slanted(list, title_bar, true, t.blood);
+    draw::slanted(list, title_bar, true, t.crimson);
     list.text_in(
         title_bar.shrink2(vec2(8.0, 0.0)),
         table.title,
-        &TextStyle::new(t.bone).shadow(t.blood_dark),
+        &TextStyle::new(t.bone).shadow(t.crimson_dark),
     );
     let head = TextStyle::new(t.ash);
     let y0 = rect.min.y + 22.0;
@@ -175,7 +175,7 @@ pub fn draw_in(list: &mut UiDrawList, t: &Theme, rect: Rect, table: &ScoreTable)
                     vec2(rect.min.x + 6.0, y - 2.0),
                     vec2(rect.max.x - 6.0, y + 10.0),
                 ),
-                fade(t.blood, 0.35),
+                fade(t.crimson, 0.35),
             );
         }
         match r.slot {
@@ -207,7 +207,7 @@ pub fn draw_in(list: &mut UiDrawList, t: &Theme, rect: Rect, table: &ScoreTable)
         };
         list.text(vec2(x_ping, y), &ping, &TextStyle::new(color).right());
         let status_color = match r.status.as_str() {
-            "DOWNED" => t.blood_bright,
+            "DOWNED" => t.crimson_bright,
             "DEAD" => t.ash,
             _ => t.bone_dim,
         };
