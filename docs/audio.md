@@ -161,7 +161,7 @@ its index, so generation is deterministic.
 
 - **UI.** Tiny square-wave blips. `UiMove` is crushed to 6 bits, `UiSelect` is a rising fifth
   with a short echo, `UiBack` a falling fourth, and `ChatMessage` a two-note FM bell.
-- **Movement.** The Shrikes are chrome machines, so every footstep and landing carries a small
+- **Movement.** The Shrikes wear brass-buckled harness and hobnailed boots, so every footstep and landing carries a small
   metallic tick on top of a thud.
   - `Footstep` has 4 variants.
   - `HeavyLand` and `SlamImpact` stack a sub thump, a crunchy low-passed noise burst, an

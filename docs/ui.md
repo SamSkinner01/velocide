@@ -254,7 +254,7 @@ hud::health(list, theme, rect, "BLOOD", hp, max_hp, hard_damage, time); // big n
 hud::segmented_bar(list, rect, value, max, hard, segments, &BarStyle::health(theme)); // the generic bar
 hud::pips(list, theme, pos, vec2(14.0, 5.0), 4.0, charges /* e.g. 2.4 */, 3);       // slanted stamina pips
 let label_x = pos.x + hud::pips_width(vec2(14.0, 5.0), 4.0, 3) + 6.0;
-hud::weapon(list, theme, bottom_right, 2, "THRESHER", &["SPREAD", "SLUG", "FLAK"], active_mode);
+hud::weapon(list, theme, bottom_right, 2, "BELLOWS", &["GUST", "BOTH BARRELS"], active_mode);
 hud::style_meter(list, theme, rect, rank_index, "MERCILESS", fraction, time); // rank colour + meter + rank ticks
 hud::meter(list, theme, rect, label, label_scale, fraction, color, Align::Right); // generic
 hud::banner(list, theme, center, "MERCILESS", age, 1.6, theme.rank_color(4)) -> bool; // pop 8x -> 4x, fades out

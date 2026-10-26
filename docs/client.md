@@ -26,9 +26,9 @@ the debug overlay.
 | `ingame::camera` | `CameraRig`: eye height, FOV kick, view roll, landing dip, stair smoothing, shake |
 | `ingame::feedback` | `Feedback`: screen shake (trauma), hitstop / visual time scale, screen flashes |
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
-| `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / throw, Riveter spin, plus landing dip / slide tilt / dash pull-back |
+| `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / thorn throw, Tumbler drum turn, Discharge charge, plus landing dip / slide tilt / dash pull-back |
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
-| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, blood bursts, prisms), `hud` (hit markers, damage numbers, direction, vignette, death screen, prisms / stickies / cooldowns) |
+| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / Discharge gauge / BRANDED) |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags |
 | `ingame::chat`, `ingame::scoreboard`, `ingame::pause` | chat log + input, Tab scoreboard (pings, pluggable score columns), pause menu (host: return to lobby) |
@@ -127,14 +127,14 @@ state (encounters, enemies, pickups) reset themselves in `SimWorld::restart_leve
 
 ## Extending the client
 
-### Draw a new replicated entity kind (enemies, projectiles, pickups, prisms)
+### Draw a new replicated entity kind (enemies, projectiles, pickups, thorns)
 
 1. The simulation adds a `kind` constant and replicates it (see `docs/network.md`).
 2. Add a module next to `ingame/remote_players.rs` (e.g. `ingame/enemies.rs`) with a
    `draw(&mut self, lib: Option<&ModelLibrary>, entities: impl Iterator<Item = &EntityState>,
    dt, out: &mut Vec<DrawItem>)` that builds the model's animation input from the entity
    (`EnemyAnim { kind, state, speed, cycle, .. }`, `lib.draw_enemy(&anim, EnemyAnim::root(pos,
-   yaw), &Tint::default(), out)`; projectiles: `lib.draw_model(ModelId::Rocket, ..)`). Keep
+   yaw), &Tint::default(), out)`; projectiles: `lib.draw_model(ModelId::Bomb, ..)`). Keep
    per-entity animation state (walk `cycle`, hit flash) in a `HashMap<NetId, _>` and drop
    unseen ids (see `RemotePlayers::draw`). The library lives in `common.models`.
 3. Create it in `InGame::start` and call it in `InGame::draw_world` (where `lib` is already
@@ -147,11 +147,12 @@ state (encounters, enemies, pickups) reset themselves in `SimWorld::restart_leve
 Players: `RemotePlayers::draw` builds a `PlayerAnim` per remote player from the replicated
 entity (`player_flags::{ON_GROUND, SLIDING, DASHING, SLAMMING, WALL_CLING}`, held weapon in
 `state`, wall normal in `aux`) plus the client-kept walk `cycle`, and draws the Shrike with
-`Tint::team(player_color(id))`; name tags hang above the drawn head. Combat drives the
+`Tint::team(player_color(id))`, 10 % larger than life (`shrike::REMOTE_SCALE`, visual only);
+name tags hang above the drawn head. Combat drives the
 third-person shot recoil / punch / downed / dead through `self.remote.visual_mut(id)`
 (`firing = 1.0`, `punching = 0.01`, ...); `visual(id).muzzle` gives the world-space muzzle for
-tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `throw_prism()`,
-`set_charge(c)`, `spinning = true` (Riveter); `viewmodel.last_draw()` has the view-space muzzle
+tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `throw_thorn()`,
+`set_charge(c)` (Discharge), `turn_drum()` (Tumbler); `viewmodel.last_draw()` has the view-space muzzle
 / fist (transform by the camera for world tracers).
 
 ### Combat presentation (`ingame::combat`)
@@ -167,11 +168,14 @@ snapshot at the present (see `docs/combat.md`), everything else at the render ti
 `InGame::send_chat` / `server_addr` exist for tools.
 
 Look at it: `cargo run -p client --release --example combat_shots -- [out_dir]` plays a
-scripted single-player session (dev commands spawn husks / orbs, every weapon fires, a
-parry, damage, death) plus a hosted game with a scripted rival client shooting at you, and
-writes PNGs (`combat_lancet`, `combat_thresher`, `combat_explosion`, `combat_overcharge_beam`,
-`combat_ricochet`, `combat_husk_windup`, `combat_parry`, `combat_hit_by_husk`,
-`combat_low_health`, `combat_death`, `combat_remote_shot`, ...) and frame-time numbers.
+scripted single-player session (dev commands spawn enemies / orbs, every weapon mode fires,
+thorns, a gust deflection, a parry, damage, death) plus a hosted game with a scripted rival
+client shooting at you, and writes PNGs (`combat_quill`, `combat_brand_sigil`,
+`combat_splinter_burst`, `combat_bellows`, `combat_gust`, `combat_both_barrels`, `combat_arc`,
+`combat_arc_chain`, `combat_wisp`, `combat_discharge_nova`, `combat_bomb_flight`,
+`combat_explosion`, `combat_breach`, `combat_gravewell_pull`, `combat_gravewell_implode`,
+`combat_thorn_planted`, `combat_ricochet`, `combat_deflect`, `combat_parry`,
+`combat_low_health`, `combat_death`, ...) and frame-time numbers.
 
 ### React to gameplay events (damage, kills, parries...)
 
@@ -209,7 +213,7 @@ way.
 | `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `blood(pos, dir, amount)`, `gibs(pos, n)`, `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
-| `viewmodel.fire(kick)`, `punch()`, `throw_prism()`, `set_charge(c)` | first-person weapon animation |
+| `viewmodel.fire(kick)`, `punch()`, `throw_thorn()`, `set_charge(c)`, `turn_drum()` | first-person weapon animation |
 
 All of it respects the player's `screen_shake` / `screen_flashes` / `hitstop` toggles.
 Particles are capped at 2048 (oldest replaced); colliding particles cost one ray per frame.
@@ -251,7 +255,7 @@ Music intensity: set it every frame from game state in `InGame::frame` (step 7).
 | dash | L Shift | LB |
 | fire / alt fire | Mouse 1 / Mouse 2 | RT / LT |
 | punch / parry | F | RB |
-| throw prism | Q | Y |
+| throw thorn | Q | Y |
 | use / revive | E | X |
 | weapons 1–4 | 1 2 3 4 (same key again = cycle alt mode) | — |
 | next / prev weapon | wheel down / up | d-pad right / left |
@@ -264,7 +268,7 @@ Music intensity: set it every frame from game state in `InGame::frame` (step 7).
 
 Every action can hold several bindings; the rebinding UI keeps one keyboard/mouse and one
 gamepad binding per action (binding a key removes it from other actions). `PlayerInput::weapon`
-is the 0-based slot (`WEAPONS[0]` = Lancet), `weapon_mode` the alt mode 0..2 of that weapon.
+is the 0-based slot (`WEAPONS[0]` = Quill), `weapon_mode` the alt mode 0..2 of that weapon.
 
 Menu navigation: arrows / d-pad / left stick move focus (with hold-repeat), Enter / A
 activates, Esc / B goes back, PageUp/PageDown / shoulders scroll.

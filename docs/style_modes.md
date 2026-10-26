@@ -87,14 +87,18 @@ AIRKILL, AIRSHOT, RETURN TO SENDER, SLAM KILL / EXPLODED, FISTED, MULTIKILL, CLO
 
 ### Freshness
 
-Every weapon fire mode plus the fist, the slam and parries is a `StyleKey` (15 keys) with a
+Every weapon fire mode plus the fist, the slam, parries and thorns is a `StyleKey` (16 keys:
+Quill, Brand, Splinter, Bellows, Gust, Both Barrels, Arclash, Wisp, Discharge, Tumbler, Breach,
+Gravewell, Fist, Slam, Parry, Thorn) with a
 freshness in `[freshness_min, 1]` (0.2..1). A scoring use returns the key's freshness as the
 multiplier for that award, then costs it `freshness_cost` (0.12) and restores every other key by
 `freshness_restore` (0.04); everything regenerates `freshness_regen` (0.02/s). Several uses of
-the same key in one tick are charged once (one rocket killing three is one use). Below
+the same key in one tick are charged once (one bomb killing three is one use). Below
 `stale_threshold` (0.5) a key is **STALE**: the HUD shows "STALE <KEY>" under the meter when the
 held weapon's primary or selected alt mode is stale, and gains with it add "- STALE" to the feed.
-A kill with a parried projectile scores under `Parry`, ricochets under the shot's weapon mode.
+A kill with a parried projectile scores under `Parry` (one turned around by a Gust under
+`Gust`), ricochets under the shot's weapon mode. A Gust deflection itself scores DEFLECT (30)
+under `Gust`.
 
 ### Replication
 
@@ -315,7 +319,7 @@ cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD 
   points, decay rates, rank up / grace / rank down with refill / DULL floor / VELOCIDE cap,
   freshness cost / same-tick charge / floor / restore / regen, staleness cuts gains and reports
   STALE, close call ×1.5, rank-up events, the multikill sliding window; in the sim: a headshot
-  kill (KILL + HEADSHOT, view, stats), a rocket through three husks (3 × KILL + EXPLODED, 2 ×
+  kill (KILL + HEADSHOT, view, stats), a bomb into three enemies (3 × KILL + EXPLODED, 2 ×
   MULTIKILL, one freshness charge, two ranks), a parry, a ricochet kill, death empties the
   meter; `assets/tuning.ron` spells out every style / modes value equal to the defaults.
 * `modes.rs`: checkpoints set the respawn point and only move forward; solo death → 1.5 s → last

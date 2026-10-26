@@ -120,6 +120,30 @@ first wall, floor or ceiling it hits, quivering, a lit relay you placed on purpo
 Fist / parry rules, blood-burst healing, hard damage, explosion falloff and self-damage, the
 damage pipeline, freshness (per weapon / mode / action), the style ranks.
 
+### Implementation notes (weapons, as built)
+Details the contract left open, and the few places where the build adds to it:
+
+- **Players' projectiles are not parryable** (no punchable grenades); the **Gust** turns any
+  hostile projectile around, opponents' bombs / wisps included. A deflected projectile's attack
+  becomes `Gust` (kill feed, freshness) and it carries `PARRIED`, so a kill with it is also
+  RETURN TO SENDER. A Gust hit is always a body hit (no weak-point bonus). A deflected bomb
+  explodes on its first contact.
+- **Wisp** and **Gravewell** pass through targets in flight (the Wisp zaps them; the Gravewell
+  only sticks to the level). A Gravewell that never lands implodes after 5 s; its implosion has
+  a light 6 m/s knockback. Pulled enemies are kept staggered so their steering doesn't fight
+  the pull (enemy velocity / `stagger` only; no enemy code changed).
+- **Thorn**: a thorn that never lands fizzles after 3 s; one that hits a target lives 8 s from
+  the hit. Replication adds `LYING` (bit 1) and `DROPPING` (bit 2) to `PLANTED` (bit 0); while
+  planted, `velocity` carries its orientation (unit). Splinters, pellets and zaps don't
+  ricochet; only the Quill's main shot does.
+- **Discharge** deals its full charge-scaled damage everywhere inside the radius (no falloff).
+- **Brands** don't multiply world / dev damage.
+- **Hit assist**: rays test the plain shapes first and the padded ones only on a miss (padding
+  never turns a headshot into a body hit); an explosion never pads its own owner.
+- **Style**: freshness gains a `Thorn` key (16 keys) and **DEFLECT** scores 30.
+- **Flags**: `DamageFlags` bit 10 `PIERCED` became `CHAINED` (Arc chain jumps), bit 15 is
+  `BRANDED`. Player `aux` bits 12–15 (old live stickies) are unused.
+
 ## Enemies
 
 All five are server-run with the existing state machine (idle → alert → chase → wind-up →
