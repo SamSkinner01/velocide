@@ -131,8 +131,20 @@ pub(super) fn ingot_run() -> Gen {
         },
     );
 
+    // Mould gates (grind spawns): two in the north wall of each half, under the gantry and
+    // under the end walkway. (The end walls have no room: the tapping-floor corners only
+    // connect to the rest through 2 m gaps a Gaoler can't pass.)
+    let mould_gates = [
+        ("NW gate", gates::Gate::new(Side::N, -HZ, -39.5, 0.0)),
+        ("N gate west", gates::Gate::new(Side::N, -HZ, -13.5, 0.0)),
+        ("N gate east", gates::Gate::new(Side::N, -HZ, 13.5, 0.0)),
+        ("NE gate", gates::Gate::new(Side::N, -HZ, 39.5, 0.0)),
+    ];
     g.section("Outer shell (open sky, clipped at 30 m)");
-    let shell = Room::new("Casting line", [-HX, 0.0, -HZ], [HX, TOP, HZ], WALL).bottom(BASE);
+    let mut shell = Room::new("Casting line", [-HX, 0.0, -HZ], [HX, TOP, HZ], WALL).bottom(BASE);
+    for (_, gate) in &mould_gates {
+        shell = shell.opening(gate.opening());
+    }
     g.room(&shell);
     g.clip(
         "sky clip wall N",
@@ -146,11 +158,23 @@ pub(super) fn ingot_run() -> Gen {
     );
     g.clip("sky clip wall W", [-HX - 1.0, TOP, -HZ], [-HX, SKY, HZ]);
     g.clip("sky clip wall E", [HX, TOP, -HZ], [HX + 1.0, SKY, HZ]);
+    // (Wide enough to cover the gate chambers behind the walls too.)
     g.clip(
         "sky clip ceiling",
-        [-HX - 1.0, SKY, -HZ - 1.0],
-        [HX + 1.0, SKY + 1.0, HZ + 1.0],
+        [-HX - 6.0, SKY, -HZ - 16.0],
+        [HX + 6.0, SKY + 1.0, HZ + 1.0],
     );
+    let gate_style = gates::GateStyle {
+        wall: WALL,
+        floor: FLOOR,
+        trim: HAZARD,
+        grate: GRATE,
+        glow: SLAG,
+        light: L_SLAG,
+    };
+    for (name, gate) in &mould_gates {
+        gate.build(&mut g, name, &gate_style, gates::Spawns::All);
+    }
 
     g.section("Slag channel, pour bridge, south duct, crane and ladle (centre)");
     g.bx(

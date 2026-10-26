@@ -15,11 +15,35 @@
         light_color: (0.82, 0.8, 0.76),
         music: "arena",
     ),
-    // 122 brushes
+    // 198 brushes
     brushes: [
         // ==== Outer shell (open sky, clipped at 30 m) ====
         // Casting line wall N 
-        (min: (-49.0, -5.0, -21.0), max: (49.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        (min: (-49.0, -5.0, -21.0), max: (-42.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N sill
+        (min: (-42.0, -5.0, -21.0), max: (-37.0, 0.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N lintel
+        (min: (-42.0, 5.0, -21.0), max: (-37.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N 
+        (min: (-37.0, -5.0, -21.0), max: (-16.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N sill
+        (min: (-16.0, -5.0, -21.0), max: (-11.0, 0.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N lintel
+        (min: (-16.0, 5.0, -21.0), max: (-11.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N 
+        (min: (-11.0, -5.0, -21.0), max: (11.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N sill
+        (min: (11.0, -5.0, -21.0), max: (16.0, 0.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N lintel
+        (min: (11.0, 5.0, -21.0), max: (16.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N 
+        (min: (16.0, -5.0, -21.0), max: (37.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N sill
+        (min: (37.0, -5.0, -21.0), max: (42.0, 0.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N lintel
+        (min: (37.0, 5.0, -21.0), max: (42.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // Casting line wall N 
+        (min: (42.0, -5.0, -21.0), max: (49.0, 14.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
         // Casting line wall S 
         (min: (-49.0, -5.0, 20.0), max: (49.0, 14.0, 21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
         // Casting line wall W 
@@ -35,7 +59,139 @@
         // sky clip wall E
         (min: (48.0, 14.0, -20.0), max: (49.0, 30.0, 20.0), material: "concrete", tint: (1.0, 1.0, 1.0), clip_only: true),
         // sky clip ceiling
-        (min: (-49.0, 30.0, -21.0), max: (49.0, 31.0, 21.0), material: "concrete", tint: (1.0, 1.0, 1.0), clip_only: true),
+        (min: (-54.0, 30.0, -36.0), max: (54.0, 31.0, 21.0), material: "concrete", tint: (1.0, 1.0, 1.0), clip_only: true),
+        // ==== NW gate (Mould gate: grind spawns) ====
+        // NW gate floor
+        (min: (-51.5, -1.0, -33.0), max: (-27.5, 0.0, -21.0), material: "concrete", tint: (0.7, 0.72, 0.74)),
+        // NW gate ceiling
+        (min: (-52.5, 6.0, -34.0), max: (-26.5, 7.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate back wall
+        (min: (-52.5, -1.0, -34.0), max: (-26.5, 6.0, -33.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate end wall
+        (min: (-52.5, -1.0, -33.0), max: (-51.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate end wall
+        (min: (-27.5, -1.0, -33.0), max: (-26.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate front wall
+        (min: (-52.5, -1.0, -21.0), max: (-42.0, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate front wall
+        (min: (-37.0, -1.0, -21.0), max: (-26.5, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate baffle (hides the chamber from the arena)
+        (min: (-46.5, 0.0, -28.0), max: (-32.5, 6.0, -26.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NW gate baffle glow
+        (min: (-41.1, 1.0, -25.98), max: (-37.9, 3.6, -25.9), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // NW gate baffle grate
+        (min: (-41.3, 0.8, -25.9), max: (-37.7, 3.8, -25.7), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // NW gate pour spout glow
+        (min: (-40.7, 1.0, -32.95), max: (-38.3, 4.0, -32.85), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // NW gate pour spout grate
+        (min: (-40.9, 0.8, -32.85), max: (-38.1, 4.2, -32.6), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // NW gate jamb
+        (min: (-42.6, 0.0, -20.0), max: (-42.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NW gate jamb
+        (min: (-37.0, 0.0, -20.0), max: (-36.4, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NW gate lintel
+        (min: (-42.0, 5.0, -20.0), max: (-37.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NW gate raised portcullis
+        (min: (-42.0, 4.5, -20.7), max: (-37.0, 5.0, -20.3), material: "grate", tint: (0.72, 0.78, 0.86), no_collide: true),
+        // ==== N gate west (Mould gate: grind spawns) ====
+        // N gate west floor
+        (min: (-25.5, -1.0, -33.0), max: (-1.5, 0.0, -21.0), material: "concrete", tint: (0.7, 0.72, 0.74)),
+        // N gate west ceiling
+        (min: (-26.5, 6.0, -34.0), max: (-0.5, 7.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west back wall
+        (min: (-26.5, -1.0, -34.0), max: (-0.5, 6.0, -33.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west end wall
+        (min: (-26.5, -1.0, -33.0), max: (-25.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west end wall
+        (min: (-1.5, -1.0, -33.0), max: (-0.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west front wall
+        (min: (-26.5, -1.0, -21.0), max: (-16.0, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west front wall
+        (min: (-11.0, -1.0, -21.0), max: (-0.5, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west baffle (hides the chamber from the arena)
+        (min: (-20.5, 0.0, -28.0), max: (-6.5, 6.0, -26.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate west baffle glow
+        (min: (-15.1, 1.0, -25.98), max: (-11.9, 3.6, -25.9), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // N gate west baffle grate
+        (min: (-15.3, 0.8, -25.9), max: (-11.7, 3.8, -25.7), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // N gate west pour spout glow
+        (min: (-14.7, 1.0, -32.95), max: (-12.3, 4.0, -32.85), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // N gate west pour spout grate
+        (min: (-14.9, 0.8, -32.85), max: (-12.1, 4.2, -32.6), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // N gate west jamb
+        (min: (-16.6, 0.0, -20.0), max: (-16.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate west jamb
+        (min: (-11.0, 0.0, -20.0), max: (-10.4, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate west lintel
+        (min: (-16.0, 5.0, -20.0), max: (-11.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate west raised portcullis
+        (min: (-16.0, 4.5, -20.7), max: (-11.0, 5.0, -20.3), material: "grate", tint: (0.72, 0.78, 0.86), no_collide: true),
+        // ==== N gate east (Mould gate: grind spawns) ====
+        // N gate east floor
+        (min: (1.5, -1.0, -33.0), max: (25.5, 0.0, -21.0), material: "concrete", tint: (0.7, 0.72, 0.74)),
+        // N gate east ceiling
+        (min: (0.5, 6.0, -34.0), max: (26.5, 7.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east back wall
+        (min: (0.5, -1.0, -34.0), max: (26.5, 6.0, -33.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east end wall
+        (min: (0.5, -1.0, -33.0), max: (1.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east end wall
+        (min: (25.5, -1.0, -33.0), max: (26.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east front wall
+        (min: (0.5, -1.0, -21.0), max: (11.0, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east front wall
+        (min: (16.0, -1.0, -21.0), max: (26.5, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east baffle (hides the chamber from the arena)
+        (min: (6.5, 0.0, -28.0), max: (20.5, 6.0, -26.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // N gate east baffle glow
+        (min: (11.9, 1.0, -25.98), max: (15.1, 3.6, -25.9), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // N gate east baffle grate
+        (min: (11.7, 0.8, -25.9), max: (15.3, 3.8, -25.7), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // N gate east pour spout glow
+        (min: (12.3, 1.0, -32.95), max: (14.7, 4.0, -32.85), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // N gate east pour spout grate
+        (min: (12.1, 0.8, -32.85), max: (14.9, 4.2, -32.6), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // N gate east jamb
+        (min: (10.4, 0.0, -20.0), max: (11.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate east jamb
+        (min: (16.0, 0.0, -20.0), max: (16.6, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate east lintel
+        (min: (11.0, 5.0, -20.0), max: (16.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // N gate east raised portcullis
+        (min: (11.0, 4.5, -20.7), max: (16.0, 5.0, -20.3), material: "grate", tint: (0.72, 0.78, 0.86), no_collide: true),
+        // ==== NE gate (Mould gate: grind spawns) ====
+        // NE gate floor
+        (min: (27.5, -1.0, -33.0), max: (51.5, 0.0, -21.0), material: "concrete", tint: (0.7, 0.72, 0.74)),
+        // NE gate ceiling
+        (min: (26.5, 6.0, -34.0), max: (52.5, 7.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate back wall
+        (min: (26.5, -1.0, -34.0), max: (52.5, 6.0, -33.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate end wall
+        (min: (26.5, -1.0, -33.0), max: (27.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate end wall
+        (min: (51.5, -1.0, -33.0), max: (52.5, 6.0, -21.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate front wall
+        (min: (26.5, -1.0, -21.0), max: (37.0, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate front wall
+        (min: (42.0, -1.0, -21.0), max: (52.5, 7.0, -20.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate baffle (hides the chamber from the arena)
+        (min: (32.5, 0.0, -28.0), max: (46.5, 6.0, -26.0), material: "concrete", tint: (0.62, 0.66, 0.72)),
+        // NE gate baffle glow
+        (min: (37.9, 1.0, -25.98), max: (41.1, 3.6, -25.9), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // NE gate baffle grate
+        (min: (37.7, 0.8, -25.9), max: (41.3, 3.8, -25.7), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // NE gate pour spout glow
+        (min: (38.3, 1.0, -32.95), max: (40.7, 4.0, -32.85), material: "lava", tint: (1.0, 0.72, 0.55), no_collide: true),
+        // NE gate pour spout grate
+        (min: (38.1, 0.8, -32.85), max: (40.9, 4.2, -32.6), material: "grate", tint: (0.72, 0.78, 0.86)),
+        // NE gate jamb
+        (min: (36.4, 0.0, -20.0), max: (37.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NE gate jamb
+        (min: (42.0, 0.0, -20.0), max: (42.6, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NE gate lintel
+        (min: (37.0, 5.0, -20.0), max: (42.0, 5.6, -19.7), material: "hazard", tint: (1.0, 0.86, 0.45)),
+        // NE gate raised portcullis
+        (min: (37.0, 4.5, -20.7), max: (42.0, 5.0, -20.3), material: "grate", tint: (0.72, 0.78, 0.86), no_collide: true),
         // ==== Slag channel, pour bridge, south duct, crane and ladle (centre) ====
         // slag channel bed
         (min: (-4.0, -5.0, -20.0), max: (4.0, -4.0, 20.0), material: "metal", tint: (0.4, 0.44, 0.5)),
@@ -268,6 +424,14 @@
         (min: (-44.0, 9.5, 19.9), max: (-35.0, 12.5, 20.0), material: "panel", tint: (0.56, 0.62, 0.7)),
     ],
     lights: [
+        (position: (-39.5, 3.0, -31.5), color: (1.35, 0.55, 0.2), radius: 12.0), // NW gate pour spout
+        (position: (-39.5, 4.0, -22.5), color: (0.81000006, 0.33, 0.120000005), radius: 7.0), // NW gate mouth
+        (position: (-13.5, 3.0, -31.5), color: (1.35, 0.55, 0.2), radius: 12.0), // N gate west pour spout
+        (position: (-13.5, 4.0, -22.5), color: (0.81000006, 0.33, 0.120000005), radius: 7.0), // N gate west mouth
+        (position: (13.5, 3.0, -31.5), color: (1.35, 0.55, 0.2), radius: 12.0), // N gate east pour spout
+        (position: (13.5, 4.0, -22.5), color: (0.81000006, 0.33, 0.120000005), radius: 7.0), // N gate east mouth
+        (position: (39.5, 3.0, -31.5), color: (1.35, 0.55, 0.2), radius: 12.0), // NE gate pour spout
+        (position: (39.5, 4.0, -22.5), color: (0.81000006, 0.33, 0.120000005), radius: 7.0), // NE gate mouth
         (position: (0.0, -1.5, -12.0), color: (1.35, 0.55, 0.2), radius: 10.0), // slag channel N
         (position: (0.0, -1.0, 0.0), color: (1.35, 0.55, 0.2), radius: 10.0), // slag under the bridge
         (position: (0.0, -1.5, 10.0), color: (1.35, 0.55, 0.2), radius: 10.0), // slag channel S
@@ -320,4 +484,18 @@
         (min: (-1000.0, -200.0, -1000.0), max: (1000.0, -30.0, 1000.0)), // below the world
     ],
     props: [],
+    grind_spawns: [
+        (-49.0, 0.0, -30.5), // NW gate
+        (-39.5, 0.0, -30.5), // NW gate
+        (-30.0, 0.0, -30.5), // NW gate
+        (-23.0, 0.0, -30.5), // N gate west
+        (-13.5, 0.0, -30.5), // N gate west
+        (-4.0, 0.0, -30.5), // N gate west
+        (4.0, 0.0, -30.5), // N gate east
+        (13.5, 0.0, -30.5), // N gate east
+        (23.0, 0.0, -30.5), // N gate east
+        (30.0, 0.0, -30.5), // NE gate
+        (39.5, 0.0, -30.5), // NE gate
+        (49.0, 0.0, -30.5), // NE gate
+    ],
 )

@@ -7,6 +7,10 @@
 //! - player, checkpoint and enemy spawns stand on ground and don't overlap geometry (with the
 //!   roster's sizes), harriers hover in open air, censers sit on deep ledges, gaolers have
 //!   room to be circled, herons have long sightlines;
+//! - campaign Moulds can walk to their rally point on the nav grid (with their own footprint);
+//! - every arena's grind spawns: room for any Mould, on the nav grid, out of sight of and away
+//!   from the player spawns, spread round the arena; the newer arenas' PvP spawns can't see
+//!   each other;
 //! - jump pads land somewhere solid;
 //! - no z-fighting (coplanar overlapping faces of different materials);
 //! - sealing: a flood fill through free space with every door closed never leaves the level
@@ -15,9 +19,9 @@
 //! - traversability: waypoint-following bots driven through the real movement code
 //!   (`shared::movement::step`) walk the whole critical path of every campaign level from
 //!   every spawn and every checkpoint to the exit with doors open, using only running,
-//!   jumping, sliding and pads; plus each level's alternate routes and scripted tech; every
-//!   arena has a full lap through its ramps, pads, tunnels and catwalks, and scripted checks
-//!   for its movement-tech spots (wall-jump shafts, slide routes).
+//!   jumping, sliding and pads; plus each level's alternate routes (which find its secrets)
+//!   and scripted tech; every arena has a full lap through its ramps, pads, tunnels and
+//!   catwalks, and scripted checks for its movement-tech spots (wall-jump shafts, slides).
 //!
 //! `cargo test -p shared --test levels -- --nocapture` prints route times (par suggestions).
 
@@ -29,20 +33,29 @@ use glam::{IVec3, Vec2, Vec3};
 use shared::input::{Buttons, PlayerInput};
 use shared::level::{Brush, LevelCollision, LevelDef, LevelKind, Volume};
 use shared::movement::{self, MoveEnv, MoveEvents, MoveState};
+use shared::sim::EnemyRegistry;
+use shared::sim::enemy::Locomotion;
+use shared::sim::nav::{NavClass, NavGrid, NavScratch, PathResult};
 use shared::tuning::MovementTuning;
 
 const DT: f32 = 1.0 / 60.0;
 const CRUCIBLE: &str = "crucible_of_veins";
 const SPIRE: &str = "spire_of_wicks";
+const DROWNED: &str = "drowned_chandlery";
 /// Every shipped `Campaign` level: each gets the structure, spawn, sealing and bot checks
 /// (its routes live in [`campaign_route`] / [`alternate_routes`]).
-const CAMPAIGNS: [&str; 2] = [CRUCIBLE, SPIRE];
+const CAMPAIGNS: [&str; 3] = [CRUCIBLE, SPIRE, DROWNED];
 const ARENA: &str = "cistern_nine";
 const KNELL: &str = "knell_yard";
 const INGOT: &str = "ingot_run";
+const FURNACE: &str = "furnace_ring";
+const TALLOW: &str = "tallow_works";
+const WICKMARKET: &str = "wickmarket";
 /// Levels that must exist. Every level in `assets/levels/` except the playgrounds is held to
 /// the shipping checks (see [`shipped`]).
-const SHIPPED: [&str; 5] = [CRUCIBLE, SPIRE, ARENA, KNELL, INGOT];
+const SHIPPED: [&str; 8] = [
+    CRUCIBLE, SPIRE, DROWNED, ARENA, KNELL, INGOT, FURNACE, TALLOW,
+];
 /// Test levels that aren't held to the shipping standards.
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
@@ -1126,6 +1139,9 @@ impl<'a> Bot<'a> {
         if let Some(x) = level.exit {
             marks.push(("exit".into(), x));
         }
+        for (i, v) in level.secrets.iter().enumerate() {
+            marks.push((format!("secret {}", i + 1), *v));
+        }
         let mut bot = Self {
             level,
             s: MoveState::spawn(start),
@@ -1293,8 +1309,73 @@ fn campaign_route(name: &str) -> Vec<Vec<Wp>> {
     match name {
         CRUCIBLE => crucible_route(),
         SPIRE => spire_route(),
+        DROWNED => drowned_route(),
         _ => panic!("{name}: every campaign level needs a bot route in levels.rs"),
     }
+}
+
+/// The Drowned Chandlery: two plain jumps over deep water (the Culvert's sluice, the Spool
+/// Walk's break), a hop over the Pipe Gallery's valve box and one over the Wax Press's drowned
+/// floor past a wax floe; ramps everywhere else.
+fn drowned_route() -> Vec<Vec<Wp>> {
+    vec![
+        // Loading Dock -> Culvert (jump the sluice) -> Dipping Hall vestibule.
+        vec![
+            run(0.0, 0.0, 66.0),
+            run(0.0, 0.0, 57.0),
+            run(0.0, 0.0, 48.0),
+            run(0.0, 0.0, 41.0),
+        ],
+        // Dipping Hall: east ramp to the gantry, exit door -> Spool Walk (jump the break) ->
+        // Cistern vestibule.
+        vec![
+            run(20.0, 0.0, 38.0),
+            run(20.0, 0.0, 31.0),
+            run(20.0, 4.0, 15.0),
+            run(16.5, 4.0, 12.0),
+            run(16.5, 4.0, 5.0),
+            run(16.5, 4.0, -8.0),
+            run(16.5, 4.0, -16.0),
+        ],
+        // Cistern: east ramp, landing, north gallery, west gallery, exit -> Pipe Gallery (hop
+        // the valve box) -> Wax Press balcony.
+        vec![
+            run(26.0, 4.0, -18.0),
+            run(31.5, 4.0, -15.0),
+            run(31.5, 14.0, -43.0),
+            run(26.0, 14.0, -50.0),
+            run(0.0, 14.0, -50.0),
+            run(0.0, 14.0, -37.5),
+            run(-6.0, 14.0, -36.0),
+            run(-14.0, 14.0, -36.0),
+            run(-19.0, 14.0, -37.5),
+        ],
+        // Wax Press: down the balcony ramp, west across the floor, jump the drowned floor past
+        // the floe, exit door -> Wick Passage -> Great Wick vestibule.
+        vec![
+            run(-20.5, 14.0, -33.0),
+            run(-31.0, 11.0, -33.0),
+            run(-33.0, 11.0, -29.0),
+            run(-40.5, 11.0, -27.5),
+            run(-51.5, 11.0, -27.5),
+            run(-57.0, 11.0, -27.5),
+            run(-63.0, 11.0, -27.5),
+            run(-69.0, 11.0, -27.5),
+        ],
+        // Great Wick: round the east floor to the south ramp, up to the west gallery, the
+        // north gallery, exit door -> C5 -> the Wick Terrace.
+        vec![
+            run(-70.0, 11.0, -15.0),
+            run(-76.0, 11.4, -9.0),
+            run(-103.0, 21.0, -9.0),
+            run(-106.5, 21.0, -12.0),
+            run(-106.5, 21.0, -46.5),
+            run(-88.5, 21.0, -46.5),
+            run(-88.5, 21.0, -55.0),
+            run(-88.5, 21.0, -68.0),
+            run(-88.5, 21.3, -75.5),
+        ],
+    ]
 }
 
 /// Spire of Wicks: no tech needed (one jump over the fallen bell's crown, ramps all the way).
@@ -1483,6 +1564,7 @@ fn alternate_routes(name: &str, level: &LevelDef) -> Vec<(&'static str, Vec3, Ve
     match name {
         CRUCIBLE => crucible_alternate_routes(level),
         SPIRE => spire_alternate_routes(level),
+        DROWNED => drowned_alternate_routes(level),
         _ => panic!("{name}: every campaign level needs alternate routes in levels.rs"),
     }
 }
@@ -1494,13 +1576,93 @@ fn campaign_alternate_routes_are_traversable() {
         let col = collision(&level, Some(true));
         let routes = alternate_routes(name, &level);
         assert!(routes.len() >= 4, "{name}: alternate routes");
+        // Every secret is found by one of them (and never on the critical path: the bots
+        // there must enter exactly the checkpoints, encounters and the exit).
+        let mut found = HashSet::new();
         for (route, start, wps) in routes {
             let mut bot = Bot::new(&level, &col, start);
             bot.follow(&wps, 12.0)
                 .unwrap_or_else(|e| panic!("{name}: {route}: {e}"));
             println!("{name}: alternate route '{route}': {:.1} s", bot.seconds());
+            found.extend(bot.entered.into_iter().filter(|l| l.starts_with("secret")));
+        }
+        for i in 1..=level.secrets.len() {
+            assert!(
+                found.contains(&format!("secret {i}")),
+                "{name}: no route finds secret {i}"
+            );
         }
     }
+}
+
+fn drowned_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
+    vec![
+        (
+            "Dipping Hall pad onto the gantry",
+            level.checkpoints[0].spawn.position,
+            vec![
+                run(5.5, 0.0, 33.0),
+                run(5.5, 0.0, 24.0),
+                pad(0.0, 0.0, 23.0),
+                run(0.0, 4.0, 13.0),
+                run(16.5, 4.0, 12.0),
+            ],
+        ),
+        (
+            "Cistern pad onto the west gallery",
+            level.checkpoints[1].spawn.position,
+            vec![
+                run(10.0, 4.0, -18.0),
+                run(0.5, 4.0, -21.0),
+                pad(0.2, 4.0, -24.8),
+                run(0.0, 14.0, -37.5),
+            ],
+        ),
+        (
+            "slide under the Pipe Gallery's pipes",
+            Vec3::new(-5.5, 14.0, -39.0),
+            vec![slide(-14.0, 14.0, -39.0), run(-19.0, 14.0, -38.0)],
+        ),
+        (
+            "Wax Press: drop off the balcony, pad onto the press bed",
+            level.checkpoints[2].spawn.position,
+            vec![
+                run(-23.0, 11.0, -43.0),
+                run(-31.0, 11.0, -43.0),
+                pad(-34.0, 11.0, -38.0),
+                run(-34.0, 15.0, -48.0),
+            ],
+        ),
+        (
+            "Great Wick: floor pad onto the north gallery",
+            level.checkpoints[3].spawn.position,
+            vec![
+                pad(-78.0, 11.0, -38.0),
+                run(-82.0, 21.0, -47.0),
+                run(-88.5, 21.0, -46.5),
+            ],
+        ),
+        (
+            "secret 1: hop onto the barge and into its cabin",
+            level.spawns[0].position,
+            vec![
+                run(-4.5, 0.0, 74.5),
+                run(-7.5, 0.0, 74.5),
+                run(-10.0, 0.0, 74.5),
+                run(-9.6, 0.0, 76.4),
+            ],
+        ),
+        (
+            "secret 2: the floe pad onto the top of the Great Wick",
+            level.checkpoints[3].spawn.position,
+            vec![
+                run(-70.0, 11.0, -15.0),
+                run(-94.0, 11.0, -13.5),
+                pad(-94.36, 11.2, -21.64),
+                run(-90.5, 38.0, -25.5),
+            ],
+        ),
+    ]
 }
 
 fn spire_alternate_routes(level: &LevelDef) -> Vec<(&'static str, Vec3, Vec<Wp>)> {
@@ -1768,6 +1930,113 @@ fn arena_laps() -> Vec<(&'static str, usize, Vec<Wp>, usize)> {
                 run(17.0, 3.0, 5.5),
             ],
             3,
+        ),
+        // Tallow Works, every layer: from the west loft down the north belt to the floor, the
+        // east boiler pad onto the boiler's top, round the flue, off it, the west boiler pad
+        // back up, off it to the north, up the belt to the loft, drop into the wall-jump shaft,
+        // along the floor to the north-east corner, up the mezzanine ramp and along the
+        // mezzanine, its pad back onto the loft. (The skimmers' pads are checked by
+        // `jump_pads_land_on_higher_ground`.)
+        (
+            TALLOW,
+            0,
+            vec![
+                run(-25.0, 12.0, -14.0),
+                run(0.0, 3.0, -14.0),
+                run(8.0, 0.0, -14.0),
+                run(10.5, 0.0, -9.0),
+                pad(12.0, 0.0, -3.5),
+                run(3.5, 9.0, -3.5),
+                run(3.5, 9.0, 3.5),
+                run(-3.5, 9.0, 3.5),
+                run(-9.0, 0.0, 6.5),
+                pad(-12.0, 0.0, 3.5),
+                run(-3.5, 9.0, 3.5),
+                run(-3.5, 9.0, -3.5),
+                run(0.0, 0.0, -9.0),
+                run(10.0, 0.0, -14.0),
+                run(0.0, 3.0, -14.0),
+                run(-25.0, 12.0, -14.0),
+                run(-28.0, 12.0, -14.5),
+                run(-28.0, 0.0, -17.25),
+                run(-18.0, 0.0, -17.25),
+                run(20.0, 0.0, -17.5),
+                run(29.0, 0.0, -19.0),
+                run(29.0, 0.0, -23.5),
+                run(14.0, 6.0, -23.5),
+                run(-17.0, 6.0, -22.5),
+                pad(-20.0, 6.0, -22.5),
+                run(-28.0, 12.0, -9.0),
+            ],
+            3,
+        ),
+        // Wickmarket: out of the east candle shop across the market, up the east guild stair to
+        // the guild walk, along it past both kiosks, down the west stair, onto the gallows dais
+        // and its pad up onto the beam, off it, the east pad back up onto the guild walk.
+        (
+            WICKMARKET,
+            0,
+            vec![
+                run(33.0, 0.0, -18.0),
+                run(22.0, 0.0, -19.5),
+                run(20.5, 0.0, -23.5),
+                run(36.0, 7.0, -23.5),
+                run(34.0, 7.0, -28.0),
+                run(20.0, 7.0, -27.5),
+                run(-20.0, 7.0, -27.5),
+                run(-34.0, 7.0, -27.5),
+                run(-36.0, 7.0, -23.5),
+                run(-20.0, 0.0, -23.5),
+                run(-8.0, 0.0, -12.0),
+                run(-3.0, 0.45, -6.0),
+                pad(-3.0, 0.9, 3.0),
+                run(-3.0, 14.2, 0.0),
+                run(0.0, 14.2, 0.0),
+                run(0.0, 0.0, -9.0),
+                run(6.0, 0.0, -14.0),
+                pad(8.0, 0.0, -19.0),
+                run(8.0, 7.0, -31.0),
+                run(16.0, 7.0, -30.0),
+            ],
+            2,
+        ),
+        // Furnace Ring, all three rings: out of the north floor alcove, the crucible pad onto
+        // the crucible's top, jump off over the slag, the south-east floor pad onto tier 1, up
+        // the south-east ramp to the rim, round the rim (east and north sides, past the rim
+        // gates and round the wall-jump slots), drop to tier 1 and the floor, the north-west
+        // floor pad onto tier 1, along it, drop, the west crucible pad, jump off the crucible.
+        (
+            FURNACE,
+            0,
+            vec![
+                run(-5.0, 0.0, -16.0),
+                pad(0.0, 0.0, -11.2),
+                run(0.0, 10.0, -3.5),
+                run(3.5, 10.0, 0.0),
+                run(14.0, 0.0, 0.0),
+                run(13.0, 0.0, 7.0),
+                pad(8.63, 0.0, 8.63),
+                run(17.7, 7.0, 17.7),
+                run(12.0, 7.0, 26.0),
+                run(24.4, 12.8, 14.5),
+                run(29.7, 14.0, 18.4),
+                run(36.0, 14.0, 10.0),
+                run(36.0, 14.0, -12.0),
+                run(27.0, 14.0, -27.0),
+                run(10.0, 14.0, -35.0),
+                run(-10.0, 14.0, -35.0),
+                run(0.0, 7.0, -25.0),
+                run(0.0, 0.0, -16.0),
+                pad(-8.63, 0.0, -8.63),
+                run(-17.7, 7.0, -17.7),
+                run(-25.0, 7.0, 0.0),
+                run(-15.0, 0.0, 0.0),
+                pad(-11.2, 0.0, 0.0),
+                run(-3.5, 10.0, 0.0),
+                run(0.0, 10.0, -3.5),
+                run(0.0, 0.0, -15.0),
+            ],
+            4,
         ),
     ]
 }
@@ -2147,6 +2416,254 @@ fn ingot_run_tech() {
     println!("ingot run: end-to-end trough slide {secs:.2} s (slowest {slowest:.1} m/s)");
 }
 
+#[test]
+fn drowned_chandlery_tech() {
+    let level = load(DROWNED);
+    let col = collision(&level, Some(true));
+    let (east, west, north) = (Vec3::X, Vec3::NEG_X, Vec3::NEG_Z);
+
+    // The Cistern: dash-jump across the pool from the west walk to the east walk (a shortcut
+    // to the east ramp; the pool snuffs a short jump).
+    let mut d = Script::new(&level, &col, Vec3::new(3.0, 4.0, -33.0));
+    for _ in 0..5 {
+        d.tick(east, Buttons::NONE);
+    }
+    d.tick(east, Buttons::DASH);
+    assert!(
+        d.tick(east, Buttons::JUMP).dash_jumped,
+        "dash-jump off the west walk"
+    );
+    assert!(d.until_landed(east, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        d.s.position.x > 24.0 && (d.s.position.y - 4.0).abs() < 0.2,
+        "the dash-jump should clear the pool, landed at {}",
+        d.s.position
+    );
+
+    // The Wax Press: jump, slam, bounce off the floor onto the press bed (4 m up).
+    let mut b = Script::new(&level, &col, Vec3::new(-31.0, 11.0, -41.0));
+    for _ in 0..5 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    b.tick(Vec3::ZERO, Buttons::JUMP);
+    while b.s.velocity.y > 0.0 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    assert!(
+        b.tick(Vec3::ZERO, Buttons::CROUCH).slam_started,
+        "slam from the jump's apex"
+    );
+    assert!(
+        (0..60).any(|_| b.tick(Vec3::ZERO, Buttons::JUMP).slam_bounced),
+        "slam bounce off the floor"
+    );
+    let mut landed = false;
+    for _ in 0..120 {
+        let dir = if b.s.position.y > 15.3 {
+            north
+        } else {
+            Vec3::ZERO
+        };
+        if b.tick(dir, Buttons::NONE).landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (b.s.position.y - 15.0).abs() < 0.05 && b.s.position.z < -44.0,
+        "the slam bounce should land on the press bed, got {}",
+        b.s.position
+    );
+
+    // The Wax Press: a running jump onto a wax floe, braking in the air over it.
+    let mut f = Script::new(&level, &col, Vec3::new(-39.5, 11.0, -47.0));
+    let mut jumped = false;
+    let mut landed = false;
+    for _ in 0..240 {
+        let x = f.s.position.x;
+        let (dir, buttons) = if !jumped {
+            (
+                west,
+                if x < -41.8 {
+                    Buttons::JUMP
+                } else {
+                    Buttons::NONE
+                },
+            )
+        } else if x > -44.0 {
+            (west, Buttons::NONE)
+        } else if f.s.velocity.x < -0.5 {
+            (east, Buttons::NONE)
+        } else {
+            (Vec3::ZERO, Buttons::NONE)
+        };
+        let ev = f.tick(dir, buttons);
+        jumped |= ev.jumped;
+        if jumped && ev.landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (f.s.position.y - 11.2).abs() < 0.05 && f.s.position.x < -44.6,
+        "the hop should land on the floe, got {}",
+        f.s.position
+    );
+}
+
+#[test]
+fn wickmarket_tech() {
+    let level = load(WICKMARKET);
+    let col = collision(&level, None);
+
+    // Slam bounce from the cobbles onto a stall's awning (3.6 m).
+    let mut b = Script::new(&level, &col, Vec3::new(15.8, 0.0, -18.0));
+    for _ in 0..5 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    b.tick(Vec3::ZERO, Buttons::JUMP);
+    while b.s.velocity.y > 0.0 {
+        b.tick(Vec3::ZERO, Buttons::NONE);
+    }
+    assert!(
+        b.tick(Vec3::ZERO, Buttons::CROUCH).slam_started,
+        "slam from the jump's apex"
+    );
+    assert!(
+        (0..60).any(|_| b.tick(Vec3::ZERO, Buttons::JUMP).slam_bounced),
+        "slam bounce off the cobbles"
+    );
+    let mut landed = false;
+    for _ in 0..120 {
+        // Steer over the awning once above it, then brake.
+        let dir = if b.s.position.y > 3.9 && b.s.position.x > 12.8 {
+            Vec3::NEG_X
+        } else if b.s.velocity.x < -0.5 {
+            Vec3::X
+        } else {
+            Vec3::ZERO
+        };
+        if b.tick(dir, Buttons::NONE).landed.is_some() {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed && (b.s.position.y - 3.6).abs() < 0.05,
+        "the slam bounce should land on the awning, got {}",
+        b.s.position
+    );
+
+    // Dash-jump from the gallows' beam over the market onto the guild walk (31 m north,
+    // 7 m down, over the parapet).
+    let north = Vec3::NEG_Z;
+    let mut d = Script::new(&level, &col, Vec3::new(-2.0, 14.2, 0.0));
+    for _ in 0..3 {
+        d.tick(north, Buttons::NONE);
+    }
+    d.tick(north, Buttons::DASH);
+    assert!(
+        d.tick(north, Buttons::JUMP).dash_jumped,
+        "dash-jump off the beam"
+    );
+    assert!(d.until_landed(north, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        (d.s.position.y - 7.0).abs() < 0.05 && d.s.position.z < -26.0,
+        "the dash-jump should land on the guild walk, got {}",
+        d.s.position
+    );
+}
+
+#[test]
+fn tallow_works_tech() {
+    let level = load(TALLOW);
+    let col = collision(&level, None);
+
+    // Wall-jump shaft between the mezzanine's solid end and the press house, from the floor
+    // onto the mezzanine (6 m).
+    let s = climb_shaft_to(
+        &level,
+        &col,
+        Vec3::new(-28.0, 0.0, -18.55),
+        Vec3::new(-28.0, 0.0, -22.5),
+        6.0,
+    );
+    assert!(
+        s.on_ground && (s.position.y - 6.0).abs() < 0.05 && s.position.z < -19.2,
+        "the shaft should reach the mezzanine, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // The belt is a slide: from the loft down to the floor it builds well past slide speed.
+    let mut b = Script::new(&level, &col, Vec3::new(-25.5, 12.0, -14.0));
+    let mut top_speed: f32 = 0.0;
+    for tick in 0..300 {
+        b.tick(
+            Vec3::X,
+            if tick > 3 {
+                Buttons::CROUCH
+            } else {
+                Buttons::NONE
+            },
+        );
+        top_speed = top_speed.max(b.s.horizontal_speed());
+        if b.s.position.x > 12.0 {
+            break;
+        }
+    }
+    assert!(
+        b.s.position.x > 12.0 && b.s.position.y.abs() < 0.1,
+        "slid down the belt onto the floor: {}",
+        b.s.position
+    );
+    assert!(
+        top_speed > 33.0,
+        "the belt slide built only {top_speed:.1} m/s"
+    );
+    println!("tallow works: belt slide {top_speed:.1} m/s");
+}
+
+#[test]
+fn furnace_ring_tech() {
+    let level = load(FURNACE);
+    let col = collision(&level, None);
+
+    // Wall-jump slot in the tier 2 face (north side): from tier 1 (y 7) up onto the rim (14).
+    let s = climb_shaft_to(
+        &level,
+        &col,
+        Vec3::new(4.45, 7.0, -31.0),
+        Vec3::new(5.75, 0.0, -35.0),
+        14.0,
+    );
+    assert!(
+        s.on_ground && (s.position.y - 14.0).abs() < 0.05 && s.position.z < -32.0,
+        "the slot should reach the rim, got {} (wall jumps used {})",
+        s.position,
+        s.wall_jumps_used
+    );
+
+    // Dash-jump from the rim's edge across the pit onto the crucible's top (y 10), beside its
+    // flue.
+    let south = Vec3::Z;
+    let mut d = Script::new(&level, &col, Vec3::new(3.5, 14.0, -31.0));
+    for _ in 0..5 {
+        d.tick(south, Buttons::NONE);
+    }
+    d.tick(south, Buttons::DASH);
+    assert!(
+        d.tick(south, Buttons::JUMP).dash_jumped,
+        "dash-jump off the rim"
+    );
+    assert!(d.until_landed(south, Buttons::NONE, 120), "lands somewhere");
+    assert!(
+        (d.s.position.y - 10.0).abs() < 0.1 && d.s.position.z.abs() < 3.6,
+        "the dash-jump should land on the crucible's top, got {}",
+        d.s.position
+    );
+}
+
 /// Scripted input on a level: one tick at a time towards a direction with some buttons.
 struct Script<'a> {
     s: MoveState,
@@ -2327,6 +2844,252 @@ fn spire_tech_shortcuts_work() {
         "dash-jump should land on the bell's rim, got {}",
         d.s.position
     );
+}
+
+// ------------------------------------------------------------------------------------------
+// Grind spawns and PvP spawn fairness
+
+/// The nav class of an enemy definition (flyers have none).
+fn nav_class(enemy: &str) -> Option<NavClass> {
+    let def = EnemyRegistry::builtin()
+        .get(enemy)
+        .unwrap_or_else(|| panic!("no enemy '{enemy}'"));
+    match def.locomotion {
+        Locomotion::Flying { .. } => None,
+        Locomotion::Ground => Some(NavClass::for_size(def.radius, def.height)),
+    }
+}
+
+/// Whether a shot from `from` reaches `to` (nothing that stops bullets in between).
+fn sees(world: &CollisionWorld, from: Vec3, to: Vec3) -> bool {
+    let d = to - from;
+    world
+        .cast_ray(from, d.normalize_or_zero(), d.length(), MASK_SHOTS)
+        .is_none_or(|h| h.distance >= d.length() - 0.05)
+}
+
+/// Compass sector (0 N, 1 E, 2 S, 3 W) of `p` seen from `mid`.
+fn sector(mid: Vec3, p: Vec3) -> usize {
+    let (dx, dz) = (p.x - mid.x, p.z - mid.z);
+    if dz.abs() >= dx.abs() {
+        if dz < 0.0 { 0 } else { 2 }
+    } else if dx > 0.0 {
+        1
+    } else {
+        3
+    }
+}
+
+/// Every arena is a grind arena: 8-16 grind spawns, where any Mould fits (the Gaoler's
+/// footprint and headroom), on the nav grid with paths into the arena, out of sight of every
+/// player spawn and well away from them, spread over 3+ compass sectors.
+#[test]
+fn grind_spawns_are_valid() {
+    let gaoler = nav_class("gaoler").expect("ground enemy");
+    for (name, level) in arenas() {
+        let col = collision(&level, None);
+        let world = &col.world;
+        let grid = NavGrid::build(&level, world);
+        let mut scratch = NavScratch::default();
+        let mut bad = Vec::new();
+        let n = level.grind_spawns.len();
+        if !(8..=16).contains(&n) {
+            bad.push(format!("{n} grind spawns (8-16)"));
+        }
+        let (lo, hi) = level_bounds(&level);
+        let mid = (lo + hi) * 0.5;
+        let sectors: HashSet<usize> = level.grind_spawns.iter().map(|&p| sector(mid, p)).collect();
+        if sectors.len() < 3 {
+            bad.push(format!("grind spawns only in compass sectors {sectors:?}"));
+        }
+        // Player spawns on the nav grid (narrow footprint), and their nearest wide-footprint
+        // node (spawns on ledges a Gaoler can't stand on are skipped for it).
+        let player_nodes: Vec<Option<u32>> = level
+            .spawns
+            .iter()
+            .map(|s| grid.node_at(s.position, 0.6, NavClass::SMALL, &[]))
+            .collect();
+        let player_wide: Vec<Option<u32>> = level
+            .spawns
+            .iter()
+            .map(|s| grid.nearest_node(s.position, 10, gaoler, &[]))
+            .collect();
+        for (i, &p) in level.grind_spawns.iter().enumerate() {
+            let what = format!("grind spawn {i} at {p}");
+            let ground = ground_below(world, p, 0.6);
+            if !ground.is_some_and(|d| d.abs() < 0.3) {
+                bad.push(format!("{what}: no ground right below ({ground:?})"));
+            }
+            if in_kill_volume(&level, p + Vec3::Y * 0.1) {
+                bad.push(format!("{what}: in a kill volume"));
+            }
+            let (r, h) = enemy_size("gaoler");
+            let (c, hh) = capsule_at(p + Vec3::Y * 0.05, h, r);
+            if world.intersects_capsule(c, hh, r, MASK_MOVEMENT) {
+                bad.push(format!("{what}: no room for a gaoler"));
+            }
+            if let Err(q) = floor_all_around(world, p, 1.5, 0.3) {
+                bad.push(format!("{what}: no floor at {q}"));
+            }
+            for (j, o) in level.grind_spawns.iter().enumerate().skip(i + 1) {
+                if p.distance(*o) < 4.0 {
+                    bad.push(format!("{what}: crowded with grind spawn {j}"));
+                }
+            }
+            // Out of sight of every player spawn (eye to the Mould's feet, middle and head),
+            // and not right next to one.
+            for (j, s) in level.spawns.iter().enumerate() {
+                let eye = s.position + Vec3::Y * 1.6;
+                for dy in [0.3, 1.5, 3.0] {
+                    if sees(world, eye, p + Vec3::Y * dy) {
+                        bad.push(format!(
+                            "{what}: visible from player spawn {j} at {}",
+                            s.position
+                        ));
+                        break;
+                    }
+                }
+                let d = s.position.distance(p);
+                if d < 12.0 {
+                    bad.push(format!("{what}: only {d:.1} m from player spawn {j}"));
+                }
+            }
+            // Navigable: a Gaoler can stand there and walk out to a player spawn; narrow
+            // Moulds walk to at least half the player spawns, and back from at least one (the
+            // gate isn't a one-way trap; drops off ledges are one-way, so not from all).
+            let Some(node) = grid.node_at(p, 0.6, gaoler, &[]) else {
+                bad.push(format!("{what}: not on the nav grid for a gaoler"));
+                continue;
+            };
+            let wide_out = player_wide.iter().flatten().any(|&goal| {
+                matches!(
+                    grid.find_path(&mut scratch, node, goal, gaoler, &[], 200_000),
+                    PathResult::Found(_)
+                )
+            });
+            if !wide_out {
+                bad.push(format!("{what}: a gaoler can't walk to any player spawn"));
+            }
+            let small = grid
+                .node_at(p, 0.6, NavClass::SMALL, &[])
+                .expect("a wide node is a narrow one too");
+            let (mut there, mut back) = (0, 0);
+            for &goal in player_nodes.iter().flatten() {
+                let found = |r: PathResult| matches!(r, PathResult::Found(_));
+                there +=
+                    found(grid.find_path(&mut scratch, small, goal, NavClass::SMALL, &[], 200_000))
+                        as usize;
+                back +=
+                    found(grid.find_path(&mut scratch, goal, small, NavClass::SMALL, &[], 200_000))
+                        as usize;
+            }
+            if there * 2 < level.spawns.len() || back == 0 {
+                bad.push(format!(
+                    "{what}: walkers reach {there} of {} player spawns, come back from {back}",
+                    level.spawns.len()
+                ));
+            }
+        }
+        assert!(bad.is_empty(), "{name}: grind spawns:\n{}", bad.join("\n"));
+        println!("{name}: {n} grind spawns in sectors {sectors:?}");
+    }
+}
+
+/// Arenas built with the PvP spawn rule: no player spawn can see another (eye to chest).
+const FAIR_SPAWNS: [&str; 3] = [FURNACE, TALLOW, WICKMARKET];
+
+#[test]
+fn pvp_spawns_cannot_see_each_other() {
+    for name in FAIR_SPAWNS {
+        let level = load(name);
+        let col = collision(&level, None);
+        let mut bad = Vec::new();
+        for (i, a) in level.spawns.iter().enumerate() {
+            for (j, b) in level.spawns.iter().enumerate().skip(i + 1) {
+                let (ea, eb) = (a.position + Vec3::Y * 1.6, b.position + Vec3::Y * 1.6);
+                let (ca, cb) = (a.position + Vec3::Y * 1.1, b.position + Vec3::Y * 1.1);
+                if sees(&col.world, ea, cb) || sees(&col.world, eb, ca) {
+                    bad.push(format!(
+                        "spawn {i} {} sees spawn {j} {}",
+                        a.position, b.position
+                    ));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{name}: spawns in sight of each other:\n{}",
+            bad.join("\n")
+        );
+    }
+}
+
+/// Campaign encounter spawns are connected on the nav grid for their Mould's class (doors
+/// open): every walker can walk to its rally point (the Gaoler with its wide footprint, to the
+/// nearest spot by the rally it fits) and players can walk to it. Censers may sit on pad-only
+/// ledges (they only need to be on the grid).
+#[test]
+fn campaign_enemy_spawns_are_on_connected_nav() {
+    for name in CAMPAIGNS {
+        let level = load(name);
+        let col = collision(&level, Some(true));
+        let grid = NavGrid::build(&level, &col.world);
+        let mut scratch = NavScratch::default();
+        let mut bad = Vec::new();
+        for (ei, e) in level.encounters.iter().enumerate() {
+            let rally = e.rally.expect("rally").position;
+            let rally_node = grid
+                .node_at(rally, 0.6, NavClass::SMALL, &[])
+                .unwrap_or_else(|| panic!("{name}: encounter {} rally off the grid", ei + 1));
+            for (wi, w) in e.waves.iter().enumerate() {
+                for s in &w.spawns {
+                    let Some(class) = nav_class(&s.enemy) else {
+                        continue;
+                    };
+                    let what = format!(
+                        "encounter {} wave {} {} at {}",
+                        ei + 1,
+                        wi + 1,
+                        s.enemy,
+                        s.position
+                    );
+                    let Some(start) = grid.node_at(s.position, 0.6, class, &[]) else {
+                        bad.push(format!("{what}: not on the grid for {class:?}"));
+                        continue;
+                    };
+                    if s.enemy == "censer" {
+                        continue;
+                    }
+                    let found = |r: PathResult| matches!(r, PathResult::Found(_));
+                    let goal = grid.nearest_node(rally, 8, class, &[]);
+                    let to = goal.is_some_and(|goal| {
+                        found(grid.find_path(&mut scratch, start, goal, class, &[], 200_000))
+                    });
+                    let small = grid
+                        .node_at(s.position, 0.6, NavClass::SMALL, &[])
+                        .expect("a node for a class is a narrow node too");
+                    let from = found(grid.find_path(
+                        &mut scratch,
+                        rally_node,
+                        small,
+                        NavClass::SMALL,
+                        &[],
+                        200_000,
+                    ));
+                    if !to || !from {
+                        bad.push(format!(
+                            "{what}: can't walk to the rally point ({to}) or be reached from it ({from})"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{name}: enemy spawns off the nav:\n{}",
+            bad.join("\n")
+        );
+    }
 }
 
 // ------------------------------------------------------------------------------------------
