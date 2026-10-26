@@ -132,23 +132,26 @@ fn weapon_prediction_matches_the_server() {
     assert!(
         c.intents
             .iter()
-            .any(|i| matches!(i, FireIntent::Primary(_)))
+            .any(|i| matches!(i, FireIntent::Primary { .. }))
     );
     assert!(
         c.intents
             .iter()
-            .any(|i| matches!(i, FireIntent::Alt { .. }))
+            .any(|i| matches!(i, FireIntent::Ability { .. }))
     );
     assert!(c.intents.iter().any(|i| matches!(i, FireIntent::Punch)));
+    // An arena runs the PvP balance profile: no Thorns, and the client predicts none either
+    // (it got the effective tuning). Thorn prediction itself: shared/tests/combat_weapons.rs.
+    assert_eq!(c.net.tuning().combat.thorn.charges, 0);
     assert!(
-        c.intents
+        !c.intents
             .iter()
             .any(|i| matches!(i, FireIntent::ThrowThorn))
     );
     assert!(
         c.intents
             .iter()
-            .any(|i| matches!(i, FireIntent::Alt { charge, .. } if *charge > 0.0)),
+            .any(|i| matches!(i, FireIntent::Ability { charge, .. } if *charge > 0.0)),
         "a charged Discharge"
     );
 }

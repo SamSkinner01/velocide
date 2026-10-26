@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use glam::Vec3;
 use glam::Vec4;
 use shared::input::look_dir;
-use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags};
+use shared::protocol::{EntityState, NetId, dequantize_yaw, player_flags, player_weapon};
 use shared::sim::PlayerId;
 
 use crate::models::shrike::REMOTE_SCALE;
@@ -71,7 +71,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
         downed: v.downed,
         dead: v.dead,
         time,
-        weapon: (e.state & 0xF) as u8,
+        weapon: player_weapon(e.state).0.id(),
         cycle: v.cycle,
     }
 }

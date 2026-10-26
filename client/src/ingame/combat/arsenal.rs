@@ -18,7 +18,7 @@ use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+use shared::loadout::{Ability, WeaponKind};
 use shared::protocol::{EntityState, NetId};
 
 use super::super::InGame;
@@ -32,26 +32,11 @@ use crate::models::{ModelId, ModelLibrary, Tint, ability_color};
 // The held build
 
 impl InGame {
-    /// The loadout the local player carries right now. Until the simulation carries loadouts
-    /// (`OwnState`'s weapon state), that is the fixed default four on slots 1–4.
-    pub(crate) fn carried_loadout(&self) -> Loadout {
-        Loadout::default()
-    }
-
-    /// The build in the selected slot (an empty slot shows the first weapon carried).
-    pub(crate) fn held_build(&self) -> WeaponBuild {
-        let loadout = self.carried_loadout();
-        loadout
-            .slot(self.controls.weapons.current)
-            .or_else(|| loadout.builds().next())
-            .copied()
-            .unwrap_or_default()
-    }
-
-    /// The held weapon and its selected ability.
+    /// The held weapon and its selected ability (the predicted weapon state, which the server's
+    /// `OwnState` re-bases).
     pub(crate) fn held_weapon(&self) -> (WeaponKind, Ability) {
-        let build = self.held_build();
-        (build.weapon, build.ability(self.controls.weapons.mode()))
+        let state = self.combat.predictor.state();
+        (state.current(), state.ability())
     }
 
     /// Stages an arsenal visual client-side (tools and screenshots; see [`ArsenalPreview`]).

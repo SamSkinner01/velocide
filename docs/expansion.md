@@ -138,6 +138,15 @@ Bow abilities change the *next release* rather than firing on their own: pressin
 arms them (HUD shows it); the following primary release uses it. **arsenal** may adjust this if
 it plays badly, documenting why.
 
+As built (milestone 1, details in `docs/arsenal.md`): pressing `ALT_FIRE` again disarms; the
+cooldown starts at the release. A request also applies at once to a body that hasn't processed
+an input yet (a player joining mid-match sends `SetLoadout` a moment after spawning). Requests
+live in `SimWorld::loadout_requests` (the server carries them into every new world), forced
+loadouts in `SimWorld::forced_loadouts`; the warm-up flag is `SimWorld::warmup` (**lobby** sets
+it). An ability is one `Attack` on every weapon, so `Attack::weapon()` is `None` for abilities
+several weapons can carry: **`KillInfo::weapon`** (new field) names the weapon that fired the
+killing blow — use it for the kill feed's weapon and gun-game tiers.
+
 ### Balance per mode (**arsenal**)
 
 `assets/tuning.ron` keeps the weapons' base numbers in `combat` and gains a `balance` section
@@ -146,7 +155,10 @@ each a per-weapon and per-ability set of multipliers (damage, fire interval / co
 radius, knockback, self-damage...) plus absolute overrides where a multiplier can't express it.
 `Tuning::for_mode(GameMode) -> Tuning` returns the effective tuning; the server runs a match
 with it and sends **that** to clients (`ServerMessage::Tuning`), so prediction always matches.
-Hot reload recomputes it. The PvE profile starts at 1.0 everywhere (today's campaign feel is
+Hot reload recomputes it. (As built: the server recomputes it from the world's
+`match_settings.mode` in `replace_world` and on reloads; whoever switches the running world's
+mode without a new world calls `Server::update_effective_tuning`. Overrides are field paths
+inside `combat`, e.g. `"thorn.charges": 0`.) The PvE profile starts at 1.0 everywhere (today's campaign feel is
 the reference); the PvP profile is tuned for time-to-kill and counterplay between players (time
 to kill in the 0.8–1.6 s band for a skilled player at the weapon's range; one-shots only from
 full-draw bow headshots, Slug/Skewer headshots at full charge). Document the reasoning in
