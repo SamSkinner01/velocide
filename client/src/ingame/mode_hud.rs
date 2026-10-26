@@ -883,14 +883,14 @@ impl InGame {
             return;
         };
         let tuning = net.tuning();
-        let weapons = &self.controls.weapons;
+        let weapons = *self.combat.predictor.state();
         self.style.draw(
             list,
             &common.theme,
             net.own_style(),
             &tuning.style,
-            weapons.current,
-            weapons.mode(),
+            weapons.build(),
+            weapons.mode,
             Some(&mut common.audio),
             now,
             dt,

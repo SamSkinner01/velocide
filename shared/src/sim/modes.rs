@@ -38,7 +38,7 @@ use super::combat::{
 use super::encounter::EncounterPhase;
 use super::grind::{GrindEvent, GrindResult, GrindState, GrindStatus};
 use super::style::{StyleBonus, StyleEvent};
-use super::{HitTarget, PlayerId, SimEvent, SimWorld, WeaponState};
+use super::{HitTarget, PlayerId, SimEvent, SimWorld};
 use crate::input::Buttons;
 use crate::level::{LevelDef, SpawnPoint};
 use crate::lobby::{
@@ -817,6 +817,7 @@ impl SimWorld {
     pub(crate) fn place_at_spawn(&mut self, t: &Tuning, id: PlayerId) {
         let spawn = self.mode_spawn_point(id);
         let rate = self.tick_rate;
+        let loadout = self.spawn_loadout(id);
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
@@ -827,7 +828,7 @@ impl SimWorld {
         p.combat = PlayerCombat {
             god,
             protection: secs_to_ticks(t.combat.spawn_protection, rate, 0),
-            weapons: WeaponState::fresh(p.combat.weapons.weapon, p.combat.weapons.mode),
+            weapons: p.combat.weapons.respawned(loadout),
             ..Default::default()
         };
         let m = self.mode.player(id);

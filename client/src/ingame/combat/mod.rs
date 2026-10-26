@@ -24,7 +24,7 @@ use engine::physics::MASK_SHOTS;
 use engine::render::Renderer;
 use glam::{Vec3, Vec4};
 use shared::input::look_dir;
-use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags};
+use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags, player_weapon};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
 
 use crate::models::WeaponKind;
@@ -585,7 +585,7 @@ impl InGame {
             });
             for intent in &shot.intents {
                 match intent {
-                    FireIntent::Primary(_) | FireIntent::Alt { .. } => {
+                    FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
                         };
@@ -596,7 +596,7 @@ impl InGame {
                             viewmodel.turn_drum();
                         }
                         let charge = match intent {
-                            FireIntent::Alt { charge, .. } => *charge,
+                            FireIntent::Ability { charge, .. } => *charge,
                             _ => 1.0,
                         };
                         feedback.shake(
@@ -764,9 +764,13 @@ impl InGame {
         for e in entities.iter().filter(|e| e.kind == kind::PLAYER) {
             let vis = remote.visual_mut(e.id);
             vis.dead = e.flags & player_flags::DEAD != 0;
-            if e.flags & player_flags::CHARGING != 0 && vis.muzzle != Vec3::ZERO {
-                // Arclash Discharge charging: the capacitor crackles brighter.
-                let c = (e.state >> 8) as f32 / 255.0;
+            let (_, ability, level) = player_weapon(e.state);
+            if e.flags & player_flags::CHARGING != 0
+                && ability == shared::sim::Ability::Discharge
+                && vis.muzzle != Vec3::ZERO
+            {
+                // Discharge charging: the capacitor crackles brighter.
+                let c = level as f32 / 255.0;
                 effects.glow(
                     vis.muzzle,
                     Vec4::new(0.55, 0.8, 1.0, 0.5 + 0.5 * c),

@@ -167,6 +167,7 @@
             splinter_cone_degrees: 40.0,
             splinter_range: 18.0,
             splinter_shard_damage: 9.0,
+            ability_power: 1.0,     // abilities on it vs on their home weapon (docs/arsenal.md)
         ),
         // 2: twin-barrel blast cannon. Alt A Gust, alt B Both Barrels.
         bellows: (
@@ -186,9 +187,11 @@
             deflect_speed_multiplier: 1.25, // hostile projectiles caught in the gust
             deflect_damage_multiplier: 1.5,
             both_pellets: 24,
+            both_pellet_damage: 8.0,
             both_cone_degrees: 5.0,
             both_recoil: 9.0,
             both_cooldown: 1.4,
+            ability_power: 1.0,
         ),
         // 3: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
         arclash: (
@@ -216,6 +219,7 @@
             discharge_min_knockback: 12.0,
             discharge_max_knockback: 24.0,
             discharge_cooldown: 2.0,
+            ability_power: 1.0,
         ),
         // 4: bouncing-bomb launcher. Alt A Breach, alt B Gravewell.
         tumbler: (
@@ -248,6 +252,171 @@
             gravewell_damage: 80.0,
             gravewell_knockback: 6.0,
             gravewell_cooldown: 3.0,
+            ability_power: 1.0,
+        ),
+        // ---- expansion arsenal (docs/arsenal.md) ----
+        // Needle pistol (hitscan, Precision). Spamming it blooms the spread.
+        lancet: (
+            damage: 14.0,
+            interval: 0.15,
+            bloom_per_shot: 0.25,  // heat per shot (s), drains in real time ...
+            bloom_max: 0.6,        // ... up to this ...
+            bloom_degrees: 3.0,    // ... spread at full heat (sustained fire settles at 75 %)
+            ability_power: 1.0,
+        ),
+        // Drum-fed auto-scattergun (Scatter), automatic while held.
+        thresher: (
+            pellets: 7,
+            pellet_damage: 7.0,
+            cone_degrees: 11.0,
+            pellet_range: 45.0,
+            interval: 0.42,
+            pellet_knockback: 1.5,
+            ability_power: 1.0,
+        ),
+        // Pneumatic rivet driver (Rapid): fast hot rivets with light gravity.
+        riveter: (
+            damage: 7.0,
+            interval: 0.09,        // 5 ticks at 60 Hz: 12 rivets/s
+            rivet_speed: 90.0,
+            rivet_gravity: 6.0,
+            rivet_radius: 0.06,
+            rivet_lifetime: 1.5,
+            spread_degrees: 1.2,
+            ability_power: 1.0,
+        ),
+        // Box launcher (Explosive): one pull = a salvo of cinder rockets.
+        cinderbox: (
+            rockets: 3,
+            salvo_gap: 0.08,
+            interval: 1.3,
+            rocket_speed: 42.0,
+            rocket_radius: 0.15,
+            rocket_lifetime: 2.5,
+            spread_degrees: 2.5,
+            explosion_radius: 2.6,
+            damage: 32.0,
+            knockback: 14.0,
+            ability_power: 1.0,
+        ),
+        // Recurve bow (Draw): hold to draw, release; speed and damage grow with the draw.
+        longwick: (
+            draw_time: 0.75,
+            interval: 0.25,        // after a release
+            min_speed: 45.0,
+            max_speed: 120.0,
+            min_damage: 22.0,
+            max_damage: 105.0,
+            arrow_gravity: 14.0,
+            arrow_radius: 0.05,
+            arrow_lifetime: 4.0,
+            ability_power: 1.0,
+        ),
+        // Ember sprayer (Rapid): a short cone that sets targets alight.
+        kiln: (
+            range: 13.0,
+            cone_degrees: 16.0,
+            interval: 0.08,        // 5 ticks at 60 Hz
+            damage: 3.0,
+            ability_power: 1.0,
+        ),
+        // Abilities (pools per class: docs/arsenal.md).
+        skewer: (
+            charge_time: 0.8,
+            min_damage: 30.0,
+            max_damage: 90.0,
+            pierce: 3,             // targets passed through ...
+            pierce_falloff: 0.8,   // ... x0.8 each
+            cooldown: 1.4,
+        ),
+        flurry: (
+            shots: 3,
+            gap: 0.06,
+            damage_scale: 0.8,     // of the weapon's primary damage
+            spread_degrees: 1.0,
+            cooldown: 1.6,
+        ),
+        slug: (
+            damage: 55.0,
+            knockback: 6.0,
+            cooldown: 1.2,
+        ),
+        flak: (
+            shell_speed: 45.0,
+            shell_radius: 0.12,
+            burst_distance: 14.0,  // or on contact
+            pellets: 10,
+            pellet_damage: 9.0,
+            ring_degrees: 25.0,
+            pellet_range: 14.0,
+            cooldown: 1.8,
+        ),
+        volley: (
+            shots: 10,
+            cone_degrees: 6.0,
+            damage_scale: 1.0,     // of the weapon's primary damage
+            cooldown: 2.2,
+        ),
+        flare: (
+            speed: 22.0,
+            angle_degrees: 10.0,
+            gravity: 16.0,
+            projectile_radius: 0.12,
+            flight_time: 4.0,
+            patch_radius: 3.0,
+            patch_time: 4.0,
+            burn_scale: 1.0,
+            cooldown: 3.0,
+        ),
+        limpet: (
+            speed: 24.0,
+            gravity: 16.0,
+            projectile_radius: 0.12,
+            max_live: 3,
+            fuse: 20.0,
+            explosion_radius: 3.5,
+            damage: 50.0,
+            knockback: 14.0,
+            cooldown: 0.4,
+        ),
+        mortar: (
+            speed: 26.0,
+            angle_degrees: 35.0,   // above the aim
+            gravity: 20.0,
+            projectile_radius: 0.2,
+            flight_time: 6.0,
+            explosion_radius: 6.0,
+            damage: 85.0,
+            knockback: 26.0,
+            cooldown: 3.0,
+        ),
+        triple_nock: (
+            arrows: 3,
+            fan_degrees: 7.0,
+            damage_scale: 1.0,     // of a plain arrow at the same draw
+            min_draw: 0.3,
+            cooldown: 1.4,
+        ),
+        pinning_arrow: (
+            enemy_time: 1.4,
+            heavy_time: 0.6,
+            heavy_health: 300.0,   // base health from which an enemy counts as heavy
+            player_time: 1.0,
+            player_slow: 0.5,
+            damage_scale: 1.0,
+            cooldown: 2.5,
+        ),
+        ember_arrow: (
+            explosion_radius: 3.0,
+            damage: 30.0,
+            knockback: 8.0,
+            cooldown: 3.0,
+        ),
+        // Burn status (Kiln, Flare patches, Ember Arrow).
+        burn: (
+            dps: 4.0,              // per stack
+            max_stacks: 3,
+            duration: 3.0,         // refreshed by every new stack
         ),
         // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
         enemy_projectiles: (
@@ -372,5 +541,24 @@
             (enemy: "gaoler", cost: 6.0, from_wave: 8, weight: 2.0, heavy: true),
             (enemy: "smelter", cost: 6.0, from_wave: 12, weight: 2.0, heavy: true),
         ],
+    ),
+    // Balance per mode (docs/arsenal.md). `combat` above is the reference; a profile scales
+    // it per weapon (primary) and per ability -- `(damage, interval, radius, knockback,
+    // speed)`, 1.0 if left out -- then sets absolute `overrides` by field path inside
+    // `combat`. `pve`: campaign, grind. `pvp`: deathmatch, gun game. The server sends clients
+    // the effective tuning of the match.
+    balance: (
+        pve: (
+            weapons: {},
+            abilities: {},
+            overrides: {},
+        ),
+        pvp: (
+            weapons: {},
+            abilities: {},
+            overrides: {
+                "thorn.charges": 0.0, // no Thorns in PvP: THROW does nothing
+            },
+        ),
     ),
 )

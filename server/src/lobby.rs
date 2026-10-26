@@ -613,6 +613,8 @@ impl Server {
     fn replace_world(&mut self, mut world: SimWorld, settings: MatchSettings) {
         world.tick = self.world.tick;
         world.enemy_defs = std::mem::take(&mut self.world.enemy_defs);
+        // Loadouts chosen so far go along (docs/arsenal.md).
+        world.loadout_requests = std::mem::take(&mut self.world.loadout_requests);
         // Enemy navigation: reuse the nav grid for the same level, else build it now rather
         // than on the first enemy tick (docs/enemies.md).
         match self.world.ai.nav.take() {
@@ -623,6 +625,8 @@ impl Server {
         }
         world.apply_match_settings(settings);
         self.world = world;
+        // The new mode's balance profile (docs/arsenal.md).
+        self.update_effective_tuning();
         self.fx.prune(self.world.tick);
         self.lagcomp = LagCompHistory::new(self.config.tick_rate, LAG_COMP_HISTORY_MS);
         for conn in self.clients.values_mut() {

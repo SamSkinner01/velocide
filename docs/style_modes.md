@@ -109,8 +109,9 @@ under `Gust`.
 
 * `GameEvent::Style(StyleEvent)` — reliable, **owner only**: `Bonus { player, bonus, points,
   count }` (count = multikill size / ricochet bounces) and `Rank { player, rank, up }`.
-* `OwnState::style: StyleView` — every snapshot, 18 bytes: rank, meter fill 0..255, freshness per
-  key 0..255. `NetClient::own_style()`.
+* `OwnState::style: StyleView` — every snapshot: rank, meter fill 0..255, freshness per key
+  0..255 (sent as a bitmask of the keys below full freshness and their values: 4 bytes while
+  everything is fresh, `docs/arsenal.md`). `NetClient::own_style()`.
 * Everyone sees ranks through the scoreboard (`ScoreEntry::rank`, `best_rank`, `style`).
 
 ## Game modes
