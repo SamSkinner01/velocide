@@ -2,8 +2,12 @@
 //! scoring and the network protocol. Everything here must be deterministic given the same
 //! inputs and starting state, because clients run the same code for prediction.
 
+/// Character customisation (plain data; the client draws it).
+pub mod cosmetics;
 pub mod input;
 pub mod level;
+/// Loadouts and weapon builds (plain data; `sim::weapons` makes them fire).
+pub mod loadout;
 /// Lobby / match flow model (game mode, match settings, lobby state and messages).
 pub mod lobby;
 pub mod movement;

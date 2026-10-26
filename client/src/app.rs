@@ -215,7 +215,9 @@ impl Common {
     pub fn game_music(kind: shared::level::LevelKind) -> MusicTrack {
         match kind {
             shared::level::LevelKind::Arena => MusicTrack::Arena,
-            shared::level::LevelKind::Campaign => MusicTrack::Campaign,
+            shared::level::LevelKind::Campaign | shared::level::LevelKind::Hub => {
+                MusicTrack::Campaign
+            }
         }
     }
 }

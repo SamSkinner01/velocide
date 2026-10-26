@@ -236,8 +236,8 @@ impl ModeHud {
                 self.downed.clear();
                 self.reviving.clear();
                 audio.play_2d(match results.rules.kind {
-                    GameMode::Campaign => Sfx::LevelComplete,
-                    GameMode::Deathmatch => Sfx::MatchEnd,
+                    GameMode::Campaign | GameMode::Grind => Sfx::LevelComplete,
+                    GameMode::Deathmatch | GameMode::GunGame => Sfx::MatchEnd,
                 });
                 audio.set_music(MusicTrack::Results);
                 self.results = Some(ResultsScreen::new((**results).clone(), local, now));
@@ -277,8 +277,10 @@ impl ModeHud {
         }
 
         match board.rules.kind {
-            GameMode::Deathmatch => self.draw_deathmatch(list, t, info, board, c),
-            GameMode::Campaign => {
+            GameMode::Deathmatch | GameMode::GunGame => {
+                self.draw_deathmatch(list, t, info, board, c)
+            }
+            GameMode::Campaign | GameMode::Grind => {
                 if board.rows.len() > 1 {
                     self.draw_team(list, t, info, board, &secs_until);
                 }

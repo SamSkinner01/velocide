@@ -59,7 +59,7 @@ pub use combat::{
     PlayerCombat,
 };
 pub use embers::{EmberBurst, HealSource};
-pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, lob_velocity};
+pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
@@ -73,7 +73,7 @@ pub use weapons::{FireIntent, Weapon, WeaponState, step_weapons};
 
 use crate::input::PlayerInput;
 use crate::level::{Brush, Door, JumpPad, LevelCollision, LevelDef, LevelKind, SpawnPoint, Volume};
-use crate::lobby::{GameMode, MatchSettings};
+use crate::lobby::MatchSettings;
 use crate::movement::{self, MoveEnv, MoveEvents, MoveState, SlamLanded};
 use crate::protocol::{EntityState, NetFrame, NetId, door_flags, kind, player_flags};
 use crate::tuning::{MovementTuning, Tuning};
@@ -526,6 +526,8 @@ pub struct SimWorld {
     /// Game-mode combat rules (PvP friendly fire, co-op scaling). From the level kind; the
     /// server applies the lobby's match settings on top.
     pub rules: CombatRules,
+    /// Difficulty scaling of enemy behaviour (damage, aggression), set by the game mode.
+    pub enemy_scale: enemy::EnemyScale,
     /// Enemy definitions (built-ins; the server loads `assets/enemies/`).
     pub enemy_defs: EnemyRegistry,
     pub enemies: BTreeMap<NetId, Enemy>,
@@ -570,7 +572,7 @@ impl SimWorld {
         };
         let rules = match level.kind {
             LevelKind::Arena => CombatRules::pvp(),
-            LevelKind::Campaign => CombatRules::coop(),
+            LevelKind::Campaign | LevelKind::Hub => CombatRules::coop(),
         };
         let mode = ModeState::new(ModeRules::for_level(&level));
         Self {
@@ -583,6 +585,7 @@ impl SimWorld {
             match_settings: MatchSettings::default(),
             frozen: false,
             rules,
+            enemy_scale: enemy::EnemyScale::default(),
             enemy_defs: EnemyRegistry::builtin(),
             enemies: BTreeMap::new(),
             projectiles: BTreeMap::new(),
@@ -701,12 +704,13 @@ impl SimWorld {
     /// deathmatch is PvP, co-op scales enemies and hurts teammates only with
     /// `friendly_fire`. Called by the server on every new match world.
     pub fn apply_match_settings(&mut self, settings: MatchSettings) {
-        self.rules = match settings.mode {
-            GameMode::Deathmatch => CombatRules::pvp(),
-            GameMode::Campaign => CombatRules {
+        self.rules = if settings.mode.is_pvp() {
+            CombatRules::pvp()
+        } else {
+            CombatRules {
                 friendly_fire: settings.friendly_fire,
                 ..CombatRules::coop()
-            },
+            }
         };
         // Game-mode rules (frag / time limits) start afresh with the settings (modes.rs).
         self.mode = ModeState::new(ModeRules::from_settings(&settings));

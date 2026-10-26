@@ -46,16 +46,28 @@ pub enum GameMode {
     Campaign,
     /// PvP free-for-all on an arena, up to 8 players.
     Deathmatch,
+    /// PvP free-for-all on an arena: every kill moves you to the next weapon of a fixed
+    /// ladder; a kill with the last one wins (`docs/expansion.md`).
+    GunGame,
+    /// Co-op (1–4 players) endless waves on an arena until everyone is down.
+    Grind,
 }
 
 impl GameMode {
-    pub const ALL: [GameMode; 2] = [GameMode::Campaign, GameMode::Deathmatch];
+    pub const ALL: [GameMode; 4] = [
+        GameMode::Campaign,
+        GameMode::Deathmatch,
+        GameMode::GunGame,
+        GameMode::Grind,
+    ];
 
     /// Menu / scoreboard name.
     pub fn title(self) -> &'static str {
         match self {
             GameMode::Campaign => "CO-OP CAMPAIGN",
             GameMode::Deathmatch => "DEATHMATCH",
+            GameMode::GunGame => "GUN GAME",
+            GameMode::Grind => "GRIND",
         }
     }
 
@@ -64,14 +76,19 @@ impl GameMode {
         match self {
             GameMode::Campaign => "campaign",
             GameMode::Deathmatch => "deathmatch",
+            GameMode::GunGame => "gungame",
+            GameMode::Grind => "grind",
         }
     }
 
-    /// Parses an id ("campaign", "coop", "deathmatch", "dm"...), case-insensitive.
+    /// Parses an id ("campaign", "coop", "deathmatch", "dm", "gungame", "grind"...),
+    /// case-insensitive.
     pub fn parse(text: &str) -> Option<GameMode> {
         match text.trim().to_ascii_lowercase().as_str() {
             "campaign" | "coop" | "co-op" | "c" => Some(GameMode::Campaign),
             "deathmatch" | "dm" | "pvp" | "d" => Some(GameMode::Deathmatch),
+            "gungame" | "gun-game" | "gun_game" | "gg" => Some(GameMode::GunGame),
+            "grind" | "endless" | "horde" | "waves" => Some(GameMode::Grind),
             _ => None,
         }
     }
@@ -80,14 +97,14 @@ impl GameMode {
     pub fn level_kind(self) -> LevelKind {
         match self {
             GameMode::Campaign => LevelKind::Campaign,
-            GameMode::Deathmatch => LevelKind::Arena,
+            GameMode::Deathmatch | GameMode::GunGame | GameMode::Grind => LevelKind::Arena,
         }
     }
 
     /// The natural mode for a level kind.
     pub fn for_level_kind(kind: LevelKind) -> GameMode {
         match kind {
-            LevelKind::Campaign => GameMode::Campaign,
+            LevelKind::Campaign | LevelKind::Hub => GameMode::Campaign,
             LevelKind::Arena => GameMode::Deathmatch,
         }
     }
@@ -95,9 +112,19 @@ impl GameMode {
     /// Player cap of the mode.
     pub fn max_players(self) -> u8 {
         match self {
-            GameMode::Campaign => MAX_COOP_PLAYERS,
-            GameMode::Deathmatch => MAX_PLAYERS,
+            GameMode::Campaign | GameMode::Grind => MAX_COOP_PLAYERS,
+            GameMode::Deathmatch | GameMode::GunGame => MAX_PLAYERS,
         }
+    }
+
+    /// Players fight each other (PvP balance, no Thorns, play of the game).
+    pub fn is_pvp(self) -> bool {
+        matches!(self, GameMode::Deathmatch | GameMode::GunGame)
+    }
+
+    /// Players fight the Moulds together (PvE balance, difficulty applies).
+    pub fn is_pve(self) -> bool {
+        !self.is_pvp()
     }
 
     /// Whether `level` can be played in this mode: its kind matches, or it is a sandbox level
@@ -113,7 +140,62 @@ impl GameMode {
 
     /// Friendly fire is a choice (co-op).
     pub fn has_friendly_fire(self) -> bool {
-        self == GameMode::Campaign
+        self.is_pve()
+    }
+
+    /// The difficulty setting applies.
+    pub fn has_difficulty(self) -> bool {
+        self.is_pve()
+    }
+}
+
+/// PvE difficulty (campaign co-op and grind). Scales the Moulds' health, damage and
+/// aggression, on top of the scaling for the number of players (`docs/expansion.md`).
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub enum Difficulty {
+    Easy,
+    #[default]
+    Normal,
+    Hard,
+    Brutal,
+    /// For full squads that want to be punished.
+    Inferno,
+}
+
+impl Difficulty {
+    pub const ALL: [Difficulty; 5] = [
+        Difficulty::Easy,
+        Difficulty::Normal,
+        Difficulty::Hard,
+        Difficulty::Brutal,
+        Difficulty::Inferno,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "EASY",
+            Difficulty::Normal => "NORMAL",
+            Difficulty::Hard => "HARD",
+            Difficulty::Brutal => "BRUTAL",
+            Difficulty::Inferno => "INFERNO",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "easy",
+            Difficulty::Normal => "normal",
+            Difficulty::Hard => "hard",
+            Difficulty::Brutal => "brutal",
+            Difficulty::Inferno => "inferno",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Difficulty> {
+        let t = text.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|d| d.id() == t)
     }
 }
 
@@ -194,6 +276,8 @@ pub struct MatchSettings {
     pub time_limit_secs: u32,
     /// Co-op: players' weapons hurt teammates (knockback always applies).
     pub friendly_fire: bool,
+    /// PvE modes: how hard the Moulds are.
+    pub difficulty: Difficulty,
 }
 
 impl Default for MatchSettings {
@@ -205,6 +289,7 @@ impl Default for MatchSettings {
             frag_limit: DEFAULT_FRAG_LIMIT,
             time_limit_secs: DEFAULT_TIME_LIMIT_SECS,
             friendly_fire: false,
+            difficulty: Difficulty::Normal,
         }
     }
 }
@@ -244,13 +329,14 @@ impl MatchSettings {
         };
         if !self.mode.accepts(level) {
             return Err(match self.mode {
-                GameMode::Deathmatch => format!(
-                    "{} is a campaign level: deathmatch needs an arena",
+                GameMode::Campaign => format!(
+                    "{} is not a campaign level: co-op needs a campaign level",
                     level.display_title()
                 ),
-                GameMode::Campaign => format!(
-                    "{} is a deathmatch arena: co-op needs a campaign level",
-                    level.display_title()
+                mode => format!(
+                    "{} is not an arena: {} needs an arena",
+                    level.display_title(),
+                    mode.title().to_lowercase()
                 ),
             });
         }
@@ -487,6 +573,7 @@ mod tests {
             frag_limit: 100_000,
             time_limit_secs: u32::MAX,
             friendly_fire: true,
+            difficulty: Difficulty::Brutal,
         };
         s.clamp();
         assert_eq!(s.max_players, MAX_COOP_PLAYERS);

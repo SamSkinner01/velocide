@@ -41,7 +41,7 @@ pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// 4: enemies + arena encounters (encounter GameEvents, kind::ENCOUNTER, Fx::EnemySpawned).
 /// 5: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
 /// 7: second-generation roster (docs/roster.md): weapons, thorns, brands, hit assist, enemies.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;
@@ -95,6 +95,11 @@ pub enum ClientMessage {
     /// Lobby / host commands: mode & level selection, start, return to lobby, kick
     /// (`shared::lobby`, docs/lobby.md).
     Lobby(crate::lobby::LobbyRequest),
+    /// The sender's weapon loadout (any phase; sanitised by the server, see
+    /// `docs/expansion.md` for when it takes effect).
+    SetLoadout(crate::loadout::Loadout),
+    /// The sender's character customisation (any phase; sanitised by the server).
+    SetCosmetics(crate::cosmetics::Cosmetics),
 }
 
 /// Unreliable client -> server messages.

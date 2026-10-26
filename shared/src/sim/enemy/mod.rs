@@ -32,6 +32,30 @@ use crate::input::look_dir;
 use crate::protocol::{EntityState, NetId, OWNER_NONE, enemy_flags};
 use crate::tuning::Tuning;
 
+/// Difficulty scaling applied to every enemy's behaviour (`SimWorld::enemy_scale`). The game
+/// mode sets it from the PvE difficulty and the player count (`docs/expansion.md`); health is
+/// scaled at spawn by the encounter / grind code instead. All 1.0 = the enemy definitions.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EnemyScale {
+    /// Multiplier on the damage enemies deal.
+    pub damage: f32,
+    /// Attack cooldowns and recoveries are divided by this (wind-ups keep their length so
+    /// attacks stay readable).
+    pub aggression: f32,
+    /// Multiplier on enemy projectile speeds.
+    pub projectile_speed: f32,
+}
+
+impl Default for EnemyScale {
+    fn default() -> Self {
+        Self {
+            damage: 1.0,
+            aggression: 1.0,
+            projectile_speed: 1.0,
+        }
+    }
+}
+
 /// AI / animation state (replicated in the entity's `state`; values are protocol).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AiState {

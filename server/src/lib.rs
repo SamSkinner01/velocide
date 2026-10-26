@@ -993,6 +993,9 @@ impl Server {
             }
             ClientMessage::SetReady { ready } => self.lobby_set_ready(client, player, ready),
             ClientMessage::Lobby(request) => self.handle_lobby_request(client, player, request),
+            // Accepted and ignored until the arsenal (loadouts) and cosmetics land
+            // (docs/expansion.md).
+            ClientMessage::SetLoadout(_) | ClientMessage::SetCosmetics(_) => {}
         }
     }
 

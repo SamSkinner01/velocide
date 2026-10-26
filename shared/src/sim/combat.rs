@@ -311,6 +311,10 @@ pub struct KillInfo {
     pub killer_effective_max: f32,
     /// Damage beyond what was needed (how violently it breaks apart).
     pub overkill: f32,
+    /// Metres from the killer (player or enemy) to the victim when it died; 0 when the killer
+    /// has no body (world, dev, gone). Kill feed ("34 m") and the LONGSHOT style bonus.
+    #[serde(default)]
+    pub distance: f32,
     pub tick: u32,
 }
 
@@ -563,6 +567,12 @@ impl SimWorld {
                 (e.net_kind(), !e.on_ground, e.position)
             }),
         };
+        let killer_position = match info.source {
+            Owner::Player(k) => self.players.get(&k).map(|p| p.movement.position),
+            Owner::Enemy(e) => self.enemies.get(&e).map(|e| e.position),
+            _ => None,
+        };
+        let distance = killer_position.map_or(0.0, |k| k.distance(position));
         let kill = KillInfo {
             victim: event.target,
             victim_kind,
@@ -578,6 +588,7 @@ impl SimWorld {
             killer_health,
             killer_effective_max,
             overkill: (info.amount - event.dealt).max(0.0),
+            distance,
             tick: self.tick,
         };
         self.events.push(SimEvent::Killed(kill));

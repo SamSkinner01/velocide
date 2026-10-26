@@ -17,8 +17,11 @@ pub enum LevelKind {
     /// Single-player / co-op campaign level with encounters and an exit.
     #[default]
     Campaign,
-    /// PvP deathmatch arena.
+    /// PvP deathmatch arena (also gun game and grind).
     Arena,
+    /// The warm-up hub players roam while the server is in its lobby (never offered as a
+    /// match level).
+    Hub,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -234,6 +237,9 @@ pub struct LevelDef {
     pub props: Vec<Prop>,
     /// Par time in seconds for results-screen grading (0 = no par time).
     pub par_time: f32,
+    /// Grind mode: where waves of Moulds may appear (arenas). Empty = the mode picks points on
+    /// the nav grid away from the players.
+    pub grind_spawns: Vec<Vec3>,
 }
 
 // ---- limits checked by [`LevelDef::validate`] -------------------------------------------------

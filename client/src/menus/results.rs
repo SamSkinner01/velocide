@@ -107,7 +107,7 @@ impl ResultsScreen {
     /// The reveal steps of this layout (their stamps make the sounds).
     fn steps(&self) -> Vec<Step> {
         match self.results.rules.kind {
-            GameMode::Campaign if !self.is_coop() => {
+            GameMode::Campaign | GameMode::Grind if !self.is_coop() => {
                 let mut v: Vec<Step> = (0..4)
                     .map(|i| {
                         let start = FIRST + i as f64 * ROW_STEP;
@@ -124,7 +124,7 @@ impl ResultsScreen {
                 });
                 v
             }
-            GameMode::Campaign => {
+            GameMode::Campaign | GameMode::Grind => {
                 let mut v: Vec<Step> = (0..self.results.players.len())
                     .map(|i| {
                         let start = FIRST + 0.35 + i as f64 * 0.45;
@@ -141,7 +141,7 @@ impl ResultsScreen {
                 });
                 v
             }
-            GameMode::Deathmatch => {
+            GameMode::Deathmatch | GameMode::GunGame => {
                 let mut v = vec![Step {
                     start: 0.35,
                     stamp: 0.6,
@@ -194,8 +194,8 @@ impl ResultsScreen {
             let last = self.stamps_played + 1 == steps.len();
             sounds.push(if last {
                 match self.results.rules.kind {
-                    GameMode::Campaign => Sfx::RankUp,
-                    GameMode::Deathmatch => Sfx::KillConfirm,
+                    GameMode::Campaign | GameMode::Grind => Sfx::RankUp,
+                    GameMode::Deathmatch | GameMode::GunGame => Sfx::KillConfirm,
                 }
             } else {
                 Sfx::KillConfirm
@@ -208,9 +208,13 @@ impl ResultsScreen {
         let list = ui.painter();
         backdrop(list, t, c, age);
         match self.results.rules.kind {
-            GameMode::Campaign if self.is_coop() => self.draw_coop(list, t, c, age, now, &steps),
-            GameMode::Campaign => self.draw_solo(list, t, c, age, now, &steps),
-            GameMode::Deathmatch => self.draw_deathmatch(list, t, c, age, now, &steps),
+            GameMode::Campaign | GameMode::Grind if self.is_coop() => {
+                self.draw_coop(list, t, c, age, now, &steps)
+            }
+            GameMode::Campaign | GameMode::Grind => self.draw_solo(list, t, c, age, now, &steps),
+            GameMode::Deathmatch | GameMode::GunGame => {
+                self.draw_deathmatch(list, t, c, age, now, &steps)
+            }
         }
         if !self.finished(now) {
             let hint = TextStyle::new(t.ash).centered().shadow(t.shadow);
@@ -918,8 +922,8 @@ mod tests {
     fn results(kind: GameMode, players: usize) -> MatchResults {
         MatchResults {
             rules: match kind {
-                GameMode::Campaign => ModeRules::campaign(),
-                GameMode::Deathmatch => ModeRules::deathmatch(20, 600.0),
+                GameMode::Campaign | GameMode::Grind => ModeRules::campaign(),
+                GameMode::Deathmatch | GameMode::GunGame => ModeRules::deathmatch(20, 600.0),
             },
             reason: EndReason::Exit,
             level: "Test".into(),

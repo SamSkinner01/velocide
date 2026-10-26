@@ -45,6 +45,7 @@ fn kill(flags: DamageFlags, attack: Attack) -> KillInfo {
         killer_health: 100.0,
         killer_effective_max: 100.0,
         overkill: 0.0,
+        distance: 10.0,
         tick: 100,
     }
 }
