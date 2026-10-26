@@ -7,11 +7,12 @@
 //!    lock-out fix; a `Respawned` event makes their client snap the camera), and
 //!    `SimEvent::EncounterStarted` fires.
 //! 2. Wave *n* spawns `delay` seconds after the encounter started (wave 1) or after the previous
-//!    wave was wiped out (`SimEvent::WaveStarted`). Co-op scaling: with `p` players (connected,
-//!    non-spectating, counted when the wave spawns) a wave of `n` authored spawns has
-//!    `round(n × (1 + 0.5 (p − 1)))` enemies — the extra copies are placed around the authored
-//!    points (validated against the nav grid and the collision world) — each with health ×
-//!    `(1 + 0.5 (p − 1))`. Wave enemies are *aware* (they hunt players they can't see).
+//!    wave was wiped out (`SimEvent::WaveStarted`). Difficulty and co-op scaling
+//!    (`sim::difficulty`, counted when the wave spawns): a wave of `n` authored spawns has
+//!    `round(n × count)` enemies — extra copies are placed around the authored points
+//!    (validated against the nav grid and the collision world), surplus ones are dropped from
+//!    the end — each with health × `health` and the difficulty's elite chance. Wave enemies
+//!    are *aware* (they hunt players they can't see).
 //! 3. When the last wave is dead it is **cleared** for good: `unlock_doors` (and the entry
 //!    `lock_doors`) open, `SimEvent::EncounterCleared`.
 //!
@@ -26,6 +27,7 @@ use glam::Vec3;
 use crate::level::{EnemySpawn, LevelKind};
 use crate::movement::MoveState;
 use crate::protocol::{EntityState, NetFrame, NetId, OWNER_NONE, encounter_flags, kind};
+use crate::sim::difficulty::ModeRng;
 use crate::sim::nav::NavClass;
 use crate::sim::{Owner, SimEvent, SimPlayer, SimWorld};
 use crate::tuning::Tuning;
@@ -72,26 +74,11 @@ pub fn counts_for_encounters(p: &SimPlayer) -> bool {
     !p.combat.dead
 }
 
-/// `round(n × (1 + 0.5 (players − 1)))`: enemies in a wave of `n` authored spawns.
-pub fn scaled_count(n: usize, players: u32) -> usize {
-    let extra = 0.5 * (players.max(1) - 1) as f32;
-    (n as f32 * (1.0 + extra)).round() as usize
-}
-
 impl SimWorld {
     /// Players the co-op scaling counts (connected, non-spectating). **Hook for the game
     /// modes / lobby** (spectators).
     pub fn coop_player_count(&self) -> u32 {
         self.players.len().max(1) as u32
-    }
-
-    /// Health multiplier and enemy-count factor for a wave spawning now.
-    fn wave_scaling(&self) -> (u32, f32) {
-        if !self.rules.coop_enemy_scaling {
-            return (1, 1.0);
-        }
-        let players = self.coop_player_count();
-        (players, 1.0 + 0.5 * (players - 1) as f32)
     }
 
     fn encounter_ticks(&self, secs: f32) -> u32 {
@@ -215,8 +202,8 @@ impl SimWorld {
         });
     }
 
-    /// Spawns the current wave of encounter `index` (with co-op scaling).
-    fn spawn_wave(&mut self, _t: &Tuning, index: usize) {
+    /// Spawns the current wave of encounter `index` (with difficulty and co-op scaling).
+    fn spawn_wave(&mut self, t: &Tuning, index: usize) {
         let Some(enc) = self.level.encounters.get(index).cloned() else {
             return;
         };
@@ -225,9 +212,13 @@ impl SimWorld {
             self.encounters.states[index].spawn_at = None;
             return;
         };
-        let (players, health) = self.wave_scaling();
-        let total = scaled_count(wave.spawns.len(), players);
+        let scaling = self.pve_scaling(t);
+        let (players, health) = (scaling.players, scaling.health);
+        let total = scaling.scaled_count(wave.spawns.len());
         let points = self.wave_spawn_points(&wave.spawns, total);
+        // Elite rolls: deterministic per encounter, wave and tick.
+        let mut rng =
+            ModeRng::new(((self.tick as u64) << 16) ^ ((index as u64) << 8) ^ wave_index as u64);
         let mut ids = Vec::with_capacity(points.len());
         for (spawn, mut position) in points {
             let yaw = spawn.yaw.to_radians();
@@ -237,11 +228,11 @@ impl SimWorld {
             {
                 position.y -= def.height.max(2.0 * def.radius) * 0.5;
             }
-            match self.spawn_enemy_scaled(&spawn.enemy, position, yaw, health) {
+            let elite = rng.chance(scaling.elite_chance);
+            match self.spawn_pve_enemy(&spawn.enemy, position, yaw, health, elite) {
                 Some(id) => {
                     if let Some(e) = self.enemies.get_mut(&id) {
                         e.encounter = Some((index as u16, wave_index.min(255) as u8));
-                        e.aware = true;
                     }
                     ids.push(id);
                 }
@@ -387,29 +378,45 @@ impl SimWorld {
             })
     }
 
-    /// Positions for `total` enemies of a wave: the authored spawns, then extra copies of
-    /// them (in order) placed around the originals on free, safe ground (flyers: free air).
+    /// Positions for `total` enemies of a wave: the authored spawns (the first `total` of
+    /// them when the difficulty thins the wave out), then extra copies of them (in order)
+    /// placed around the originals on free, safe ground (flyers: free air).
     fn wave_spawn_points(&self, spawns: &[EnemySpawn], total: usize) -> Vec<(EnemySpawn, Vec3)> {
-        let mut out: Vec<(EnemySpawn, Vec3)> =
-            spawns.iter().map(|s| (s.clone(), s.position)).collect();
+        let mut out: Vec<(EnemySpawn, Vec3)> = spawns
+            .iter()
+            .take(total)
+            .map(|s| (s.clone(), s.position))
+            .collect();
         if spawns.is_empty() {
             return out;
         }
+        let mut taken: Vec<(f32, Vec3)> = out
+            .iter()
+            .map(|(s, p)| (self.enemy_radius(&s.enemy), *p))
+            .collect();
         for k in 0..total.saturating_sub(spawns.len()) {
             let s = &spawns[k % spawns.len()];
             let copy = k / spawns.len();
-            let pos = self.find_copy_spot(s, copy, &out).unwrap_or(s.position);
+            let pos = self.find_copy_spot(s, copy, &taken).unwrap_or(s.position);
+            taken.push((self.enemy_radius(&s.enemy), pos));
             out.push((s.clone(), pos));
         }
         out
     }
 
-    /// A free spot near spawn `s` for its `copy`-th extra copy, not overlapping `taken`.
-    fn find_copy_spot(
+    /// Collision radius of enemy definition `name` (0.5 if unknown).
+    pub(crate) fn enemy_radius(&self, name: &str) -> f32 {
+        self.enemy_defs.get(name).map_or(0.5, |d| d.radius)
+    }
+
+    /// A free spot near spawn `s` for its `copy`-th extra copy, not overlapping the bodies in
+    /// `taken` (radius, feet), in sight of `s.position` (flyers: free air). Grind waves place
+    /// their Moulds around a spawn point with it too.
+    pub(crate) fn find_copy_spot(
         &self,
         s: &EnemySpawn,
         copy: usize,
-        taken: &[(EnemySpawn, Vec3)],
+        taken: &[(f32, Vec3)],
     ) -> Option<Vec3> {
         let def = self.enemy_defs.get(&s.enemy)?;
         let flying = matches!(def.locomotion, super::enemy::Locomotion::Flying { .. });
@@ -418,14 +425,13 @@ impl SimWorld {
         let class = NavClass::for_size(r, def.height);
         let world = &self.collision.world;
         let nav = self.ai.nav.as_deref();
-        let radius_of = |name: &str| self.enemy_defs.get(name).map_or(0.5, |d| d.radius);
         let start = copy as f32 * 1.3 + s.position.x * 0.17 + s.position.z * 0.11;
         for ring in [2.0 * r + 0.8, 2.0 * r + 1.8, 2.0 * r + 3.0, 2.0 * r + 4.5] {
             for k in 0..10 {
                 let a = start + k as f32 * std::f32::consts::TAU / 10.0;
                 let mut p = s.position + Vec3::new(a.cos(), 0.0, a.sin()) * ring;
-                if taken.iter().any(|(o, q)| {
-                    Vec3::new(q.x - p.x, 0.0, q.z - p.z).length() < r + radius_of(&o.enemy) + 0.3
+                if taken.iter().any(|(or, q)| {
+                    Vec3::new(q.x - p.x, 0.0, q.z - p.z).length() < r + or + 0.3
                         && (q.y - p.y).abs() < 2.5
                 }) {
                     continue;
@@ -532,11 +538,19 @@ mod tests {
 
     #[test]
     fn coop_counts() {
-        assert_eq!(scaled_count(4, 1), 4);
-        assert_eq!(scaled_count(4, 2), 6);
-        assert_eq!(scaled_count(4, 3), 8);
-        assert_eq!(scaled_count(4, 4), 10);
-        assert_eq!(scaled_count(3, 2), 5); // 4.5 rounds up
-        assert_eq!(scaled_count(0, 4), 0);
+        use crate::lobby::Difficulty;
+        use crate::sim::difficulty::PveScaling;
+        let t = Tuning::default();
+        let count = |n, d, players| PveScaling::compute(&t, d, players).scaled_count(n);
+        let normal = Difficulty::Normal;
+        assert_eq!(count(4, normal, 1), 4);
+        assert_eq!(count(4, normal, 2), 6); // 6.4
+        assert_eq!(count(4, normal, 3), 9); // 8.8
+        assert_eq!(count(4, normal, 4), 11); // 11.2
+        assert_eq!(count(3, normal, 2), 5); // 4.8
+        assert_eq!(count(0, normal, 4), 0);
+        assert_eq!(count(4, Difficulty::Easy, 1), 3);
+        assert_eq!(count(1, Difficulty::Easy, 1), 1, "never thinned to nothing");
+        assert_eq!(count(5, Difficulty::Inferno, 1), 8);
     }
 }

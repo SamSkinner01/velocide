@@ -31,9 +31,13 @@
 pub mod area; // Gust, Discharge, Breach
 pub mod brand;
 pub mod combat;
+// PvE difficulty × player count scaling: docs/style_modes.md.
+pub mod difficulty;
 pub mod embers;
 pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
+pub mod grind; // endless waves on an arena: docs/style_modes.md
+pub mod gungame; // the weapon ladder: docs/style_modes.md
 pub mod highlight; // play of the game (PvP highlights): docs/potg.md
 mod hitbox;
 pub mod hitscan;
@@ -62,8 +66,11 @@ pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
     PlayerCombat,
 };
+pub use difficulty::PveScaling;
 pub use embers::{EmberBurst, HealSource};
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, lob_velocity};
+pub use grind::{GrindEvent, GrindResult, GrindStatus};
+pub use gungame::{GunGameEvent, GunGameResult};
 pub use highlight::{Highlight, HighlightRules, HighlightTracker};
 pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{

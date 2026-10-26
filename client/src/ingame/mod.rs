@@ -148,9 +148,14 @@ impl InGame {
             StartMode::Menu => anyhow::bail!("nothing to start"),
             StartMode::SinglePlayer { level } => {
                 let level = level.clone().unwrap_or_else(|| s.last_level.clone());
+                // Game modes: grind on an arena (the single-player page / `--mode grind`), and
+                // the difficulty of the PvE modes.
+                let mode = common.launch.mode.unwrap_or(s.sp_mode);
                 (
                     SessionSpec::SinglePlayer {
                         level: level.clone(),
+                        mode: (mode == shared::lobby::GameMode::Grind).then_some(mode),
+                        difficulty: common.launch.difficulty.unwrap_or(s.difficulty),
                     },
                     format!(
                         "SINGLE PLAYER // {}",

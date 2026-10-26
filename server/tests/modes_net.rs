@@ -2,7 +2,9 @@
 //! loopback with a virtual clock. Style events reach only their owner (plus the replicated
 //! meter in `OwnState`), everyone sees ranks on the scoreboard, co-op downed / revive works with
 //! a client holding USE, a deathmatch frag limit and the campaign exit end the match with
-//! results and move the server to the lobby's Results phase.
+//! results and move the server to the lobby's Results phase. Grind: waves, the breather and the
+//! overrun reach every client, the run ends in graded results. Gun game: the ladder's loadouts
+//! reach the owners, promotions everyone, a punch kill on the Fist tier ends it.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,12 +14,12 @@ use engine::time::FixedTimestep;
 use glam::Vec3;
 use server::{Server, ServerConfig};
 use shared::input::{Buttons, PlayerInput};
-use shared::lobby::LobbyPhase;
+use shared::lobby::{Difficulty, GameMode, LobbyPhase};
 use shared::movement::MoveState;
 use shared::protocol::{GameEvent, NetId, player_flags};
 use shared::sim::{
-    Attack, DamageInfo, EndReason, Grade, HitTarget, LifeState, MatchResults, ModeEvent, ModeRules,
-    Owner, PlayerId, StyleBonus, StyleEvent,
+    Attack, DamageInfo, EndReason, Grade, GrindEvent, GunGameEvent, HitTarget, LifeState,
+    MatchResults, ModeEvent, ModeRules, Owner, PlayerId, StyleBonus, StyleEvent,
 };
 
 const STEP: Duration = Duration::from_millis(2);
@@ -315,5 +317,173 @@ fn reaching_the_exit_sends_graded_results() {
     let g = me.grades.expect("grades");
     assert_eq!(g.time, Some(Grade::S), "a teleport is well under par");
     assert_eq!(g.kills, Some(Grade::D), "but nobody was killed");
+    assert_eq!(n.server.lobby_phase(), LobbyPhase::Results);
+}
+
+/// A grind server on the built-in arena (no lobby: the explicit mode is kept).
+fn grind_config(difficulty: Difficulty) -> ServerConfig {
+    let mut c = config(shared::sim::BUILTIN_LEVEL);
+    c.lobby.settings.mode = GameMode::Grind;
+    c.lobby.settings.difficulty = difficulty;
+    c
+}
+
+impl TestClient {
+    fn grind_events(&self) -> Vec<GrindEvent> {
+        self.mode_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ModeEvent::Grind(g) => Some(g),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn last_scoreboard(&self) -> Option<shared::sim::Scoreboard> {
+        self.mode_events().into_iter().rev().find_map(|e| match e {
+            ModeEvent::Scoreboard(b) => Some(b),
+            _ => None,
+        })
+    }
+}
+
+#[test]
+fn grind_waves_reach_every_client_until_the_overrun() {
+    let mut n = Net::new(grind_config(Difficulty::Hard));
+    let a = n.add("Alpha");
+    let b = n.add("Bravo");
+    n.wait_in_game();
+    let (pa, pb) = (n.clients[a].id(), n.clients[b].id());
+    for p in [pa, pb] {
+        n.server.world_mut().players.get_mut(&p).unwrap().notarget = true;
+    }
+    assert_eq!(
+        n.server.world().mode.rules,
+        ModeRules::grind(Difficulty::Hard)
+    );
+    // Wave 1 after the first breather, on both clients, sized for two players on HARD.
+    let started = |n: &Net, wave: u32| {
+        n.clients.iter().all(|c| {
+            c.grind_events()
+                .iter()
+                .any(|e| matches!(e, GrindEvent::WaveStarted { wave: w, .. } if *w == wave))
+        })
+    };
+    assert!(n.run_until(7.0, |n| started(n, 1)), "wave 1 everywhere");
+    let enemies = n.clients[a]
+        .grind_events()
+        .into_iter()
+        .find_map(|e| match e {
+            GrindEvent::WaveStarted { enemies, .. } => Some(enemies),
+            _ => None,
+        })
+        .unwrap();
+    // 6 cost units x HARD 1.2 x two players 1.6 = 11.5: eleven Gnawers.
+    assert_eq!(enemies, 11);
+    n.run(0.5);
+    let board = n.clients[b].last_scoreboard().expect("scoreboard");
+    assert_eq!(board.rules.difficulty, Difficulty::Hard);
+    let g = board.grind.expect("grind status on the scoreboard");
+    assert_eq!((g.wave, g.total), (1, 11));
+    // Kill everything (trickled Moulds included): the breather reaches everyone.
+    let cleared = |n: &Net| {
+        n.clients.iter().all(|c| {
+            c.grind_events()
+                .iter()
+                .any(|e| matches!(e, GrindEvent::WaveCleared { wave: 1, .. }))
+        })
+    };
+    let mut ok = false;
+    for _ in 0..300 {
+        n.server.kill_all_enemies();
+        n.run(0.1);
+        if cleared(&n) {
+            ok = true;
+            break;
+        }
+    }
+    assert!(ok, "wave 1 cleared everywhere");
+    assert!(n.run_until(8.0, |n| started(n, 2)), "wave 2 everywhere");
+    // Everyone down: OVERRUN, then results for everyone and the Results phase.
+    let t = n.server.tuning().clone();
+    n.server.world_mut().kill_player(&t, pa, Attack::Dev);
+    n.server.world_mut().kill_player(&t, pb, Attack::Dev);
+    let ok = n.run_until(1.0, |n| {
+        n.clients.iter().all(|c| {
+            c.grind_events()
+                .iter()
+                .any(|e| matches!(e, GrindEvent::Overrun { .. }))
+        })
+    });
+    assert!(ok, "overrun everywhere");
+    let ok = n.run_until(4.0, |n| n.clients.iter().all(|c| c.results().is_some()));
+    assert!(ok, "results reached everyone");
+    let r = n.clients[a].results().unwrap();
+    assert_eq!(r.reason, EndReason::Overrun);
+    assert_eq!(r.grind.map(|g| (g.wave, g.cleared)), Some((2, 1)));
+    assert_eq!(r.rules.difficulty, Difficulty::Hard);
+    assert!(r.players.iter().all(|p| p.grades.is_some()));
+    assert_eq!(n.server.lobby_phase(), LobbyPhase::Results);
+}
+
+#[test]
+fn gun_game_ladder_over_the_network() {
+    let mut c = config(shared::sim::BUILTIN_LEVEL);
+    c.lobby.settings.mode = GameMode::GunGame;
+    let mut n = Net::new(c);
+    let a = n.add("Alpha");
+    let b = n.add("Bravo");
+    n.wait_in_game();
+    let (pa, pb) = (n.clients[a].id(), n.clients[b].id());
+    let ladder = n.server.tuning().gun_game.ladder.clone();
+    // The PvP profile (no Thorns) and the first build, in every owner's own state.
+    assert_eq!(n.clients[a].net.tuning().combat.thorn.charges, 0);
+    let first = shared::loadout::Loadout::single(ladder[0]);
+    let ok = n.run_until(1.0, |n| {
+        n.clients.iter().all(|c| {
+            c.net
+                .own_combat()
+                .is_some_and(|o| o.combat.weapons.loadout == first)
+        })
+    });
+    assert!(ok, "everyone holds the first tier's build");
+    n.run(1.8); // spawn protection
+    // A kill with the tier's weapon: promoted, everyone told, the owner holds the next build.
+    let kill = |n: &mut Net, victim: PlayerId, by: PlayerId, attack: Attack| {
+        let t = n.server.tuning().clone();
+        let w = n.server.world_mut();
+        w.players.get_mut(&victim).unwrap().combat.protection = 0;
+        let at = w.players[&victim].movement.position + Vec3::Y;
+        let info = DamageInfo::new(1e4, Owner::Player(by), attack).at(at, Vec3::NEG_Z);
+        w.apply_damage(&t, HitTarget::Player(victim), info);
+    };
+    kill(&mut n, pb, pa, Attack::primary(ladder[0].weapon));
+    let promoted = |c: &TestClient| {
+        c.mode_events().iter().any(|e| {
+            matches!(e, ModeEvent::GunGame(GunGameEvent::Promoted { player, tier: 1, .. })
+                if *player == pa)
+        })
+    };
+    assert!(n.run_until(1.0, |n| n.clients.iter().all(promoted)));
+    let second = shared::loadout::Loadout::single(ladder[1]);
+    let ok = n.run_until(1.0, |n| {
+        n.clients[a]
+            .net
+            .own_combat()
+            .is_some_and(|o| o.combat.weapons.loadout == second)
+    });
+    assert!(ok, "the owner's prediction sees the new build");
+    // On the Fist tier a punch kill ends the match.
+    let fist = ladder.len() as u8;
+    n.server.world_mut().mode.player(pa).stats.tier = fist;
+    n.run(2.5); // B respawns
+    kill(&mut n, pb, pa, Attack::Fist);
+    let ok = n.run_until(2.0, |n| n.clients.iter().all(|c| c.results().is_some()));
+    assert!(ok, "results reached everyone");
+    let r = n.clients[b].results().unwrap();
+    assert_eq!(r.reason, EndReason::Ladder);
+    assert_eq!(r.winner, Some(pa));
+    assert_eq!(r.players[0].stats.tier, fist + 1);
+    assert!(r.gun_game.is_some());
     assert_eq!(n.server.lobby_phase(), LobbyPhase::Results);
 }
