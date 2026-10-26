@@ -294,8 +294,8 @@ cistern_nine`.
 * **Heavy waves** (every `heavy_every` = 5th): bigger budget, `1 + (w − 1) / boss_every`
   guaranteed heavies (heavies debut on the heavy wave before their own unlock: the Gaoler on
   wave 5), the elite chance + `heavy_elite_chance` (15 %). **Boss waves** (every `boss_every` =
-  10th): a boss-grade elite leads the wave, a heavy with `boss_health` (×4) health and the elite
-  roll. The HUD and banner say HEAVY WAVE / BOSS WAVE.
+  10th): a boss-grade elite leads the wave, a heavy elite with `boss_health` (×1.6) health on
+  top of the elite's ×2.5, so ×4 overall. The HUD and banner say HEAVY WAVE / BOSS WAVE.
 * **Spawning**: a wave opens with `spawn_burst` (6) Moulds, then one every `spawn_interval`
   (0.35 s) while fewer than `max_alive + alive_per_player (p − 1)` (14 + 5 per extra player) of
   its Moulds live; waiting Moulds count as "left". Spawn points: the level's `grind_spawns` (a
@@ -516,7 +516,7 @@ Difficulty section above.
 
 `grind` (`GrindTuning`): `first_delay` 5, `breather` 6, `budget_base` 6, `budget_per_wave` 2.4,
 `budget_per_wave_sq` 0.06, `health_per_wave` 0.03, `heavy_every` 5, `heavy_budget` 1.25,
-`heavy_elite_chance` 0.15, `boss_every` 10, `boss_health` 4, `max_alive` 14,
+`heavy_elite_chance` 0.15, `boss_every` 10, `boss_health` 1.6, `max_alive` 14,
 `alive_per_player` 5, `spawn_burst` 6, `spawn_interval` 0.35, `max_wave_enemies` 150,
 `min_spawn_distance` 14, `end_delay` 2.5, `grade_wave` (20, 15, 10, 5), `roster` (the table in
 the Grind section).

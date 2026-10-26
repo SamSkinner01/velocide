@@ -525,8 +525,8 @@
         heavy_every: 5,             // heavy wave: budget x heavy_budget, guaranteed heavies ...
         heavy_budget: 1.25,
         heavy_elite_chance: 0.15,   // ... and more elites
-        boss_every: 10,             // a boss-grade elite (a heavy with boss_health x health)
-        boss_health: 4.0,
+        boss_every: 10,             // a boss-grade elite (a heavy with boss_health x health,
+        boss_health: 1.6,           // on top of the elite's x2.5: x4 overall)
         max_alive: 14,              // wave Moulds alive at once ...
         alive_per_player: 5,        // ... + this per extra player; the rest wait their turn
         spawn_burst: 6,             // a wave opens with this many ...
