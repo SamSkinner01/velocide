@@ -510,11 +510,13 @@ impl Sfx {
             BowFullDraw => info(-17.0, 2, 0.0, 0.1),
             BowRelease => info(-14.0, 3, 0.04, 0.0),
             ArrowImpact => variants(info(-16.0, 6, 0.08, 0.02), 2),
-            KilnRoar => info(-17.0, 3, 0.04, 0.1),
+            // Played per spray tick (12/s): merged into a roar every 0.3 s.
+            KilnRoar => info(-17.0, 3, 0.04, 0.3),
             KilnIgnite => info(-15.0, 2, 0.04, 0.1),
             SkewerCharge => info(-19.0, 2, 0.0, 0.05),
             SkewerFire => info(-12.0, 3, 0.03, 0.0),
-            FlurryFire => info(-14.0, 3, 0.04, 0.0),
+            // One sound per burst: its three shots are in the sound.
+            FlurryFire => info(-14.0, 3, 0.04, 0.15),
             SlugFire => info(-11.0, 3, 0.03, 0.0),
             FlakFire => info(-14.0, 3, 0.04, 0.0),
             FlakBurst => info(-12.0, 4, 0.06, 0.02),

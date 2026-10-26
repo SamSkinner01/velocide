@@ -19,10 +19,14 @@ use engine::gfx::{DrawItem, PointLight};
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::loadout::{Ability, WeaponKind};
-use shared::protocol::{EntityState, NetId};
+use shared::protocol::{EntityState, NetId, kind};
+use shared::sim::{FireIntent, WeaponState};
+use shared::tuning::CombatTuning;
 
 use super::super::InGame;
 use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
+use super::super::hud::HudWeapons;
+use super::super::viewmodel::Viewmodel;
 use super::Rng;
 use super::entities::enemy_size;
 use super::fx::{Beams, FxCtx, shake_at};
@@ -39,6 +43,44 @@ impl InGame {
         (state.current(), state.ability())
     }
 
+    /// The HUD's weapon block: the carried loadout, the selection, each slot's ability cooldown
+    /// (as a fraction of the cooldown of the ability that slot has selected), the armed bow
+    /// ability and, with a Limpet in hand, the live limpets.
+    pub(crate) fn hud_weapons(&self) -> HudWeapons {
+        let Some(net) = self.net() else {
+            return HudWeapons::default();
+        };
+        let s = self.combat.predictor.state();
+        let t = &net.tuning().combat;
+        let rate = net.tick_rate() as f32;
+        let cooldown = std::array::from_fn(|i| {
+            let Some(b) = s.loadout.slots[i] else {
+                return 0.0;
+            };
+            let mode = if i == s.slot as usize {
+                s.mode
+            } else {
+                self.controls.weapons.modes[i]
+            };
+            let full = (b.ability(mode).cooldown(t) * rate).max(1.0);
+            (s.alt_cooldown[i] as f32 / full).clamp(0.0, 1.0)
+        });
+        let build = s.build();
+        let limpets = build.abilities.contains(&Ability::Limpet).then(|| {
+            let (own, _, _) = super::own_projectiles(net);
+            let live = own.iter().filter(|e| e.kind == kind::LIMPET).count() as u32;
+            (live, t.limpet.max_live)
+        });
+        HudWeapons {
+            loadout: s.loadout,
+            slot: s.slot,
+            mode: s.mode,
+            cooldown,
+            armed: s.armed_ability(),
+            limpets,
+        }
+    }
+
     /// Stages an arsenal visual client-side (tools and screenshots; see [`ArsenalPreview`]).
     #[doc(hidden)]
     pub fn preview_arsenal(&mut self, preview: ArsenalPreview) {
@@ -47,7 +89,205 @@ impl InGame {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The local player's weapon feel
+
+/// What the local weapon feel remembers between frames.
+#[derive(Clone, Copy, Debug, Default)]
+struct LocalFeel {
+    /// The charge whine playing (Discharge / Skewer).
+    charge_sfx: Option<Sfx>,
+    drawing: bool,
+    full_draw: bool,
+    /// When the Kiln last sprayed / the last Cinderbox salvo started (view time).
+    last_kiln: f64,
+    last_salvo: f64,
+}
+
+/// The Kiln's ember spray from `muzzle` along `aim`: tongues of flame filling the cone and a
+/// few sparks falling out of it (local shots and other players').
+pub fn kiln_spray(
+    effects: &mut Effects,
+    rng: &mut Rng,
+    muzzle: Vec3,
+    aim: Vec3,
+    range: f32,
+    cone_degrees: f32,
+) {
+    let aim = aim.normalize_or(Vec3::NEG_Z);
+    let (right, up) = shared::sim::weapons::aim_basis(aim);
+    let half = (cone_degrees * 0.5).to_radians().tan();
+    for i in 0..7 {
+        let r = rng.unit().sqrt() * half;
+        let a = rng.angle();
+        let dir = (aim + right * (r * a.cos()) + up * (r * a.sin())).normalize_or(aim);
+        let life = rng.range(0.28, 0.4);
+        let spark = i >= 5;
+        effects.spawn(Particle {
+            position: muzzle + aim * 0.08,
+            velocity: dir * range / life * if spark { 0.9 } else { 1.1 },
+            gravity: if spark { 6.0 } else { -1.0 },
+            drag: 1.2,
+            max_life: life,
+            size: Vec2::splat(if spark { 0.07 } else { 0.18 }),
+            end_scale: if spark { 1.0 } else { 6.0 },
+            color: if spark {
+                Vec4::new(1.0, 0.75, 0.3, 1.0)
+            } else {
+                Vec4::new(1.0, rng.range(0.38, 0.62), 0.12, 0.9)
+            },
+            texture: if spark {
+                FxTex::Spark
+            } else {
+                FxTex::MuzzleFlash
+            },
+            additive: true,
+            rotation: rng.angle(),
+            spin: rng.range(-4.0, 4.0),
+            collide: spark.then_some(OnHit::Die),
+            ..Default::default()
+        });
+    }
+}
+
+impl ArsenalView {
+    /// A predicted shot of the local player: the weapon-specific feel on top of the shared
+    /// shot handling (sound, kick): the Thresher's drum turns, a Cinderbox salvo starts its
+    /// tubes, the Kiln catches (ignite on the first tick), sprays and roars.
+    #[allow(clippy::too_many_arguments)]
+    pub fn local_shot(
+        &mut self,
+        intent: &FireIntent,
+        viewmodel: &mut Viewmodel,
+        effects: &mut Effects,
+        rng: &mut Rng,
+        audio: &mut Audio,
+        muzzle: Vec3,
+        aim: Vec3,
+        t: &CombatTuning,
+    ) {
+        let weapon = match intent {
+            FireIntent::Primary { weapon, .. } => weapon,
+            // A Brand loosed from the bow: the string twangs under the branding hiss.
+            FireIntent::Ability {
+                weapon: WeaponKind::Longwick,
+                ability: Ability::Brand,
+                ..
+            } => {
+                audio.play_2d(Sfx::BowRelease);
+                return;
+            }
+            _ => return,
+        };
+        match weapon {
+            WeaponKind::Thresher => viewmodel.turn_drum(),
+            WeaponKind::Cinderbox => {
+                if self.time - self.local.last_salvo > 0.3 {
+                    viewmodel.salvo();
+                    self.local.last_salvo = self.time;
+                }
+            }
+            WeaponKind::Kiln => {
+                if self.time - self.local.last_kiln > 0.3 {
+                    audio.play_2d(Sfx::KilnIgnite);
+                }
+                self.local.last_kiln = self.time;
+                viewmodel.spray();
+                kiln_spray(effects, rng, muzzle, aim, t.kiln.range, t.kiln.cone_degrees);
+            }
+            _ => {}
+        }
+    }
+
+    /// Per frame, from the predicted weapon state: the charge glow and whine (Discharge,
+    /// Skewer), the bow's draw (creak while drawing, a ring at full draw, silence on release).
+    pub fn local_feel(
+        &mut self,
+        s: &WeaponState,
+        t: &CombatTuning,
+        tick_rate: u32,
+        viewmodel: &mut Viewmodel,
+        audio: &mut Audio,
+    ) {
+        viewmodel.set_charge(s.charge_fraction(t, tick_rate));
+        let whine = (s.charge > 0).then(|| match s.ability() {
+            Ability::Skewer => Sfx::SkewerCharge,
+            _ => Sfx::DischargeCharge,
+        });
+        if whine != self.local.charge_sfx {
+            if let Some(old) = self.local.charge_sfx {
+                audio.stop(old);
+            }
+            if let Some(new) = whine {
+                audio.play_2d(new);
+            }
+            self.local.charge_sfx = whine;
+        }
+        let draw = if s.draw > 0 {
+            s.draw_fraction(t, tick_rate)
+        } else {
+            0.0
+        };
+        viewmodel.set_draw(draw);
+        let drawing = s.draw > 0;
+        if drawing && !self.local.drawing {
+            audio.play_2d(Sfx::BowDraw);
+        } else if !drawing && self.local.drawing {
+            audio.stop(Sfx::BowDraw);
+            self.local.full_draw = false;
+        }
+        if drawing && draw >= 1.0 && !self.local.full_draw {
+            audio.play_2d(Sfx::BowFullDraw);
+            self.local.full_draw = true;
+        }
+        self.local.drawing = drawing;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Projectiles
+
+/// The arsenal projectile a replicated entity kind is.
+pub fn projectile_kind(k: u16) -> Option<ArsenalProjectile> {
+    Some(match k {
+        kind::ARROW => ArsenalProjectile::Arrow,
+        kind::PIN_ARROW => ArsenalProjectile::PinningArrow,
+        kind::EMBER_ARROW => ArsenalProjectile::EmberArrow,
+        kind::BRAND_ARROW => ArsenalProjectile::BrandArrow,
+        kind::RIVET => ArsenalProjectile::Rivet,
+        kind::CINDER_ROCKET => ArsenalProjectile::CinderRocket,
+        kind::FLAK_SHELL => ArsenalProjectile::FlakShell,
+        kind::LIMPET => ArsenalProjectile::Limpet,
+        kind::MORTAR_SHELL => ArsenalProjectile::MortarShell,
+        kind::FLARE => ArsenalProjectile::Flare,
+        _ => return None,
+    })
+}
+
+/// A replicated arsenal projectile as drawn this frame (`position` / `velocity` from its
+/// trajectory at the time it is drawn at, `age` from the client's bookkeeping).
+pub fn projectile_view(
+    e: &EntityState,
+    position: Vec3,
+    velocity: Vec3,
+    age: f32,
+) -> Option<ProjectileView> {
+    let kind = projectile_kind(e.kind)?;
+    let stuck = e.flags & shared::protocol::projectile_flags::STUCK != 0;
+    Some(ProjectileView {
+        kind,
+        position,
+        velocity: if stuck { Vec3::ZERO } else { velocity },
+        stuck,
+        // Stuck: the replicated velocity carries the orientation (the flight / the surface).
+        facing: if e.velocity.length_squared() > 1e-6 {
+            e.velocity
+        } else {
+            Vec3::NEG_Y
+        },
+        age,
+        seed: e.id.0,
+    })
+}
 
 /// A projectile of the expansion arsenal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -56,6 +296,8 @@ pub enum ArsenalProjectile {
     Arrow,
     PinningArrow,
     EmberArrow,
+    /// A Brand loosed from the Longwick (the taper arrow, glowing the brand's crimson).
+    BrandArrow,
     /// Riveter hot rivet.
     Rivet,
     /// Cinderbox salvo rocket.
@@ -70,10 +312,11 @@ pub enum ArsenalProjectile {
 }
 
 impl ArsenalProjectile {
-    pub const ALL: [ArsenalProjectile; 9] = [
+    pub const ALL: [ArsenalProjectile; 10] = [
         ArsenalProjectile::Arrow,
         ArsenalProjectile::PinningArrow,
         ArsenalProjectile::EmberArrow,
+        ArsenalProjectile::BrandArrow,
         ArsenalProjectile::Rivet,
         ArsenalProjectile::CinderRocket,
         ArsenalProjectile::FlakShell,
@@ -84,7 +327,7 @@ impl ArsenalProjectile {
 
     pub fn model(self) -> ModelId {
         match self {
-            ArsenalProjectile::Arrow => ModelId::Arrow,
+            ArsenalProjectile::Arrow | ArsenalProjectile::BrandArrow => ModelId::Arrow,
             ArsenalProjectile::PinningArrow => ModelId::PinningArrow,
             ArsenalProjectile::EmberArrow => ModelId::EmberArrow,
             ArsenalProjectile::Rivet => ModelId::Rivet,
@@ -111,6 +354,7 @@ impl ArsenalProjectile {
         match self {
             ArsenalProjectile::Arrow => (Vec3::new(1.2, 0.8, 0.4), 2.5),
             ArsenalProjectile::PinningArrow => (Vec3::new(0.6, 0.85, 1.4), 3.0),
+            ArsenalProjectile::BrandArrow => (Vec3::new(1.6, 0.35, 0.7), 3.0),
             ArsenalProjectile::EmberArrow => (Vec3::new(1.8, 0.7, 0.2), 4.0),
             ArsenalProjectile::Rivet => (Vec3::new(1.4, 0.5, 0.2), 2.0),
             ArsenalProjectile::CinderRocket => (Vec3::new(2.0, 0.9, 0.3), 4.5),
@@ -126,7 +370,8 @@ impl ArsenalProjectile {
         match self {
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
-            | ArsenalProjectile::EmberArrow => 0.24,
+            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BrandArrow => 0.24,
             ArsenalProjectile::Rivet => 0.06,
             _ => 0.0,
         }
@@ -135,7 +380,7 @@ impl ArsenalProjectile {
     /// Sound when it hits / lands (blasts have their own, [`Blast::sfx`]).
     pub fn impact_sfx(self) -> Option<Sfx> {
         match self {
-            ArsenalProjectile::Arrow => Some(Sfx::ArrowImpact),
+            ArsenalProjectile::Arrow | ArsenalProjectile::BrandArrow => Some(Sfx::ArrowImpact),
             ArsenalProjectile::PinningArrow => Some(Sfx::PinThunk),
             ArsenalProjectile::Rivet => Some(Sfx::RivetImpact),
             ArsenalProjectile::Limpet => Some(Sfx::LimpetStick),
@@ -195,7 +440,8 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
         ArsenalProjectile::Rivet => 0.12,
         ArsenalProjectile::Arrow
         | ArsenalProjectile::PinningArrow
-        | ArsenalProjectile::EmberArrow => 0.36,
+        | ArsenalProjectile::EmberArrow
+        | ArsenalProjectile::BrandArrow => 0.36,
         _ => 0.0,
     };
     let offset = if p.stuck {
@@ -239,6 +485,10 @@ pub fn draw_projectile(
             let sputter = 1.6 + 0.9 * ((time * 31.0 + p.seed as f64).sin() as f32).abs();
             tint.glow = Vec4::splat(sputter);
             light.0 *= 0.8 + 0.3 * sputter / 2.5;
+        }
+        ArsenalProjectile::BrandArrow => {
+            let b = super::fx::brand_color();
+            tint.glow = (b.truncate() * (0.8 + 0.3 * flicker)).extend(1.0);
         }
         _ => tint.glow = Vec4::splat(1.2 * flicker + 0.4),
     }
@@ -289,7 +539,8 @@ pub fn projectile_trail(
     match p.kind {
         ArsenalProjectile::Arrow
         | ArsenalProjectile::PinningArrow
-        | ArsenalProjectile::EmberArrow => {
+        | ArsenalProjectile::EmberArrow
+        | ArsenalProjectile::BrandArrow => {
             // A thin streak of wick smoke, sparks from the flame.
             let ember = p.kind == ArsenalProjectile::EmberArrow;
             if chance(rng, if ember { 50.0 } else { 30.0 }) {
@@ -309,6 +560,7 @@ pub fn projectile_trail(
             }
             let color = match p.kind {
                 ArsenalProjectile::PinningArrow => Vec4::new(0.7, 0.85, 1.0, 1.0),
+                ArsenalProjectile::BrandArrow => super::fx::brand_color(),
                 ArsenalProjectile::EmberArrow => Vec4::new(1.0, 0.5, 0.12, 1.0),
                 _ => Vec4::new(1.0, 0.75, 0.35, 1.0),
             };
@@ -462,7 +714,9 @@ pub fn projectile_impact(
 ) {
     let n = normal.normalize_or(Vec3::Y);
     match kind {
-        ArsenalProjectile::Arrow | ArsenalProjectile::PinningArrow => {
+        ArsenalProjectile::Arrow
+        | ArsenalProjectile::PinningArrow
+        | ArsenalProjectile::BrandArrow => {
             // Splinters and a puff of dust where it drove in.
             for _ in 0..6 {
                 effects.spawn(Particle {
@@ -993,7 +1247,32 @@ pub struct ArsenalView {
     flak: Vec<(Vec3, Vec3)>,
     /// Seconds since the next burn sizzle per burning entity.
     sizzle: HashMap<NetId, f32>,
+    /// Replicated arsenal projectiles and burning patches seen last frame (impacts when one
+    /// vanishes, the catch when a patch appears).
+    tracked: HashMap<NetId, Tracked>,
+    /// Burning patches on screen this frame (position, radius, life left) for their lights.
+    live_patches: Vec<(Vec3, f32, f32)>,
+    local: LocalFeel,
     time: f64,
+}
+
+/// Where a replicated projectile / patch was last frame.
+#[derive(Clone, Copy, Debug)]
+struct Tracked {
+    kind: Option<ArsenalProjectile>,
+    position: Vec3,
+    velocity: Vec3,
+    seen: bool,
+}
+
+/// What `ArsenalView::update` reads from the replicated world this frame.
+pub struct ArsenalFrame<'a> {
+    /// Interpolated entities (render tick).
+    pub entities: &'a [EntityState],
+    pub world: Option<&'a CollisionWorld>,
+    pub render_tick: f64,
+    pub tick_rate: u32,
+    pub tuning: &'a CombatTuning,
 }
 
 /// Burning-patch radius a Flare leaves (docs/expansion.md: 3 m).
@@ -1064,14 +1343,14 @@ impl ArsenalView {
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        entities: &[EntityState],
-        world: Option<&CollisionWorld>,
+        frame: &ArsenalFrame,
         effects: &mut Effects,
         beams: &mut Beams,
         audio: &mut Audio,
         rng: &mut Rng,
         dt: f32,
     ) {
+        let (entities, world) = (frame.entities, frame.world);
         self.time += dt as f64;
         let mut landed = Vec::new();
         for f in &mut self.flying {
@@ -1163,9 +1442,18 @@ impl ArsenalView {
             );
         }
         self.patches.retain(|p| p.age < p.seconds);
-        // Statuses on entities.
+        self.update_replicated(frame, effects, audio, rng, dt);
+        // Statuses: the replicated flags, and staged previews.
+        let mut shown: Vec<(NetId, Status)> = entities
+            .iter()
+            .flat_map(|e| replicated_statuses(e).map(move |s| (e.id, s)))
+            .collect();
         for ((id, _), (status, left)) in &mut self.statuses {
             *left -= dt;
+            shown.push((*id, *status));
+        }
+        self.statuses.retain(|_, (_, left)| *left > 0.0);
+        for (id, status) in &shown {
             let Some(e) = entities.iter().find(|e| e.id == *id) else {
                 continue;
             };
@@ -1185,9 +1473,100 @@ impl ArsenalView {
                 }
             }
         }
-        self.statuses.retain(|_, (_, left)| *left > 0.0);
-        let burning: Vec<NetId> = self.statuses.keys().map(|(id, _)| *id).collect();
-        self.sizzle.retain(|id, _| burning.contains(id));
+        self.sizzle
+            .retain(|id, _| shown.iter().any(|(e, s)| e == id && *s == Status::Burning));
+    }
+
+    /// Replicated arsenal projectiles that vanished without a blast (arrows, rivets) leave
+    /// their impact where they were last seen; burning patches burn (a scorch and the catch
+    /// when one appears).
+    fn update_replicated(
+        &mut self,
+        frame: &ArsenalFrame,
+        effects: &mut Effects,
+        audio: &mut Audio,
+        rng: &mut Rng,
+        dt: f32,
+    ) {
+        for t in self.tracked.values_mut() {
+            t.seen = false;
+        }
+        self.live_patches.clear();
+        let full = (frame.tuning.flare.patch_time * frame.tick_rate.max(1) as f32).max(1.0);
+        for e in frame.entities {
+            if e.kind == kind::BURNING_PATCH {
+                let radius = (e.state as f32 / 10.0).max(0.5);
+                let left = ((e.aux as f64 - frame.render_tick) as f32 / full).clamp(0.0, 1.0);
+                if !self.tracked.contains_key(&e.id) {
+                    effects.decal(e.position, Vec3::Y, radius * 0.9, DecalKind::Scorch);
+                    audio.play(Sfx::FlareBurn, PlayParams::at(e.position));
+                }
+                self.tracked.insert(
+                    e.id,
+                    Tracked {
+                        kind: None,
+                        position: e.position,
+                        velocity: Vec3::ZERO,
+                        seen: true,
+                    },
+                );
+                hazard_effects(
+                    effects,
+                    rng,
+                    Hazard::BurningPatch,
+                    e.position,
+                    radius,
+                    left.max(0.15),
+                    dt,
+                );
+                self.live_patches.push((e.position, radius, left.max(0.15)));
+                continue;
+            }
+            let Some(k) = projectile_kind(e.kind) else {
+                continue;
+            };
+            let position = shared::sim::projectiles::replicated_position(
+                e,
+                frame.render_tick,
+                frame.tick_rate,
+                frame.tuning,
+            );
+            let velocity = if e.flags & shared::protocol::projectile_flags::STUCK != 0 {
+                Vec3::ZERO
+            } else {
+                e.velocity
+            };
+            self.tracked.insert(
+                e.id,
+                Tracked {
+                    kind: Some(k),
+                    position,
+                    velocity,
+                    seen: true,
+                },
+            );
+        }
+        let gone: Vec<Tracked> = self.tracked.values().filter(|t| !t.seen).copied().collect();
+        self.tracked.retain(|_, t| t.seen);
+        for t in gone {
+            let Some(k) = t.kind else { continue };
+            if !matches!(
+                k,
+                ArsenalProjectile::Arrow
+                    | ArsenalProjectile::PinningArrow
+                    | ArsenalProjectile::BrandArrow
+                    | ArsenalProjectile::Rivet
+            ) {
+                continue; // blasts come as Fx; a flare becomes its patch
+            }
+            let dir = t.velocity.normalize_or_zero();
+            let hit = frame
+                .world
+                .filter(|_| dir != Vec3::ZERO)
+                .and_then(|w| w.cast_ray(t.position - dir * 0.5, dir, 2.0, MASK_SHOTS));
+            let (at, normal) = hit.map_or((t.position, -dir), |h| (h.point, h.normal));
+            projectile_impact(effects, audio, rng, k, at, normal);
+        }
     }
 
     /// Blasts are waiting for [`ArsenalView::play_pending`].
@@ -1224,6 +1603,17 @@ impl ArsenalView {
                 draw_projectile(lib, &f.view, self.time, draws, lights);
             }
         }
+        for (position, radius, left) in &self.live_patches {
+            if lights.len() < 48 {
+                lights.push(hazard_light(
+                    Hazard::BurningPatch,
+                    *position,
+                    *radius,
+                    *left,
+                    self.time,
+                ));
+            }
+        }
         for p in &self.patches {
             let left = 1.0 - p.age / p.seconds.max(0.1);
             if lights.len() < 48 {
@@ -1237,6 +1627,30 @@ impl ArsenalView {
             }
         }
     }
+}
+
+/// The statuses a replicated enemy or player shows (its `BURNING` / `PINNED` flags).
+pub fn replicated_statuses(e: &EntityState) -> impl Iterator<Item = Status> + use<> {
+    use shared::protocol::{enemy_flags, player_flags};
+    let (burning, pinned) = if e.kind == kind::PLAYER {
+        (
+            e.flags & player_flags::BURNING != 0,
+            e.flags & player_flags::PINNED != 0,
+        )
+    } else if kind::is_enemy(e.kind) {
+        (
+            e.flags & enemy_flags::BURNING != 0,
+            e.flags & enemy_flags::PINNED != 0,
+        )
+    } else {
+        (false, false)
+    };
+    [
+        burning.then_some(Status::Burning),
+        pinned.then_some(Status::Pinned),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 /// Body size (radius, height) of a replicated enemy or player for status visuals.
@@ -1254,10 +1668,27 @@ mod tests {
 
     #[test]
     fn every_projectile_has_its_own_model_and_a_sane_transform() {
+        // Every kind has its own model, except the brand arrow (a crimson taper arrow).
         let mut models: Vec<ModelId> = ArsenalProjectile::ALL.iter().map(|p| p.model()).collect();
         models.sort_unstable();
         models.dedup();
-        assert_eq!(models.len(), ArsenalProjectile::ALL.len());
+        assert_eq!(models.len(), ArsenalProjectile::ALL.len() - 1);
+        // Every replicated arsenal kind maps onto one.
+        for k in [
+            kind::ARROW,
+            kind::PIN_ARROW,
+            kind::EMBER_ARROW,
+            kind::BRAND_ARROW,
+            kind::RIVET,
+            kind::CINDER_ROCKET,
+            kind::FLAK_SHELL,
+            kind::LIMPET,
+            kind::MORTAR_SHELL,
+            kind::FLARE,
+        ] {
+            assert!(projectile_kind(k).is_some(), "kind {k}");
+        }
+        assert_eq!(projectile_kind(kind::BOMB), None);
         for kind in ArsenalProjectile::ALL {
             for stuck in [false, true] {
                 let p = ProjectileView {
@@ -1339,10 +1770,17 @@ mod tests {
             radius: 3.0,
             seconds: 1.0,
         });
+        let tuning = CombatTuning::default();
+        let frame = ArsenalFrame {
+            entities: &[],
+            world: None,
+            render_tick: 0.0,
+            tick_rate: 60,
+            tuning: &tuning,
+        };
         for _ in 0..40 {
             view.update(
-                &[],
-                None,
+                &frame,
                 &mut effects,
                 &mut beams,
                 &mut audio,
@@ -1358,8 +1796,7 @@ mod tests {
         assert!(effects.particle_count() > 20, "trails and flames");
         for _ in 0..60 {
             view.update(
-                &[],
-                None,
+                &frame,
                 &mut effects,
                 &mut beams,
                 &mut audio,

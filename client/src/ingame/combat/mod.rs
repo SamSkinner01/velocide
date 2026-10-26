@@ -30,7 +30,7 @@ use shared::input::look_dir;
 use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags, player_weapon};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
 
-use crate::models::{WeaponKind, WeaponLook as _};
+use crate::models::{Ability, WeaponKind, WeaponLook as _, ability_color};
 
 use super::{InGame, effects};
 use crate::app::Common;
@@ -182,6 +182,69 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::Breach => s(Sfx::BreachBlast, 1.0, 0.0, Vec4::ONE, 0.0, 0.5),
         Attack::Gravewell => s(Sfx::GravewellLaunch, 1.0, 0.0, Vec4::ONE, 0.0, 0.18),
         Attack::Fist => s(Sfx::Punch, 0.0, 0.0, Vec4::ONE, 0.0, 0.0),
+        // The expansion arsenal (arsenal-client): primaries, then abilities.
+        Attack::Lancet => s(
+            Sfx::LancetFire,
+            0.35,
+            0.022,
+            glow(WeaponKind::Lancet.primary_color(), 1.8, 0.85),
+            0.07,
+            0.03,
+        ),
+        Attack::Thresher => s(
+            Sfx::ThresherFire,
+            0.9,
+            0.02,
+            glow(WeaponKind::Thresher.primary_color(), 1.6, 0.75),
+            0.07,
+            0.18,
+        ),
+        Attack::Riveter => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.02),
+        Attack::Cinderbox => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
+        Attack::Longwick => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.05),
+        Attack::Kiln => AttackStyle {
+            flash: 0.0,
+            ..s(Sfx::KilnRoar, 0.25, 0.0, Vec4::ONE, 0.0, 0.01)
+        },
+        Attack::Skewer => s(
+            Sfx::SkewerFire,
+            0.9,
+            0.05,
+            glow(ability_color(Ability::Skewer), 2.0, 0.95),
+            0.3,
+            0.15,
+        ),
+        Attack::Flurry => s(
+            Sfx::FlurryFire,
+            0.4,
+            0.024,
+            glow(ability_color(Ability::Flurry), 1.8, 0.9),
+            0.08,
+            0.04,
+        ),
+        Attack::Slug => s(
+            Sfx::SlugFire,
+            1.0,
+            0.06,
+            glow(ability_color(Ability::Slug), 1.9, 0.95),
+            0.2,
+            0.35,
+        ),
+        Attack::Flak => s(Sfx::FlakFire, 0.8, 0.0, Vec4::ONE, 0.0, 0.15),
+        Attack::Volley => s(
+            Sfx::VolleyFire,
+            1.0,
+            0.022,
+            glow(ability_color(Ability::Volley), 1.7, 0.8),
+            0.08,
+            0.3,
+        ),
+        Attack::Flare => s(Sfx::FlareLaunch, 0.5, 0.0, Vec4::ONE, 0.0, 0.06),
+        Attack::Limpet => s(Sfx::LimpetThrow, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
+        Attack::Mortar => s(Sfx::MortarLaunch, 1.0, 0.0, Vec4::ONE, 0.0, 0.3),
+        Attack::TripleNock => s(Sfx::TripleNock, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
+        Attack::PinningArrow => s(Sfx::PinningRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
+        Attack::EmberArrow => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         _ => s(Sfx::QuillFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.0),
     }
 }
@@ -190,6 +253,7 @@ pub fn attack_style(a: Attack) -> AttackStyle {
 fn hitscan_range(attack: Attack, t: &shared::tuning::CombatTuning) -> f32 {
     match attack {
         Attack::Blast | Attack::BothBarrels => t.bellows.pellet_range,
+        Attack::Thresher => t.thresher.pellet_range,
         Attack::Arc => t.arclash.zap_range,
         _ => t.hitscan_range,
     }
@@ -207,7 +271,6 @@ pub struct CombatClient {
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
-    charging: bool,
     /// Recent combat intensity for the music (decays).
     heat: f32,
     /// Smoothed music intensity (the style rank can raise it: `mode_hud::mode_music_intensity`).
@@ -235,7 +298,6 @@ impl CombatClient {
             arsenal: arsenal::ArsenalView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
-            charging: false,
             heat: 0.0,
             music: 0.2,
             killed_by: None,
@@ -602,6 +664,16 @@ impl InGame {
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
+                        combat.arsenal.local_shot(
+                            intent,
+                            viewmodel,
+                            effects,
+                            &mut combat.rng,
+                            &mut common.audio,
+                            muzzle,
+                            aim,
+                            t,
+                        );
                         let charge = match intent {
                             FireIntent::Ability { charge, .. } => *charge,
                             _ => 1.0,
@@ -858,9 +930,15 @@ impl InGame {
             .brand_sigils(entities, local, listener, &mut combat.beams);
         // The arsenal's visuals (their per-frame shapes go in after the beams' update too).
         let world = net.world().map(|w| &w.collision.world);
-        combat.arsenal.update(
+        let frame = arsenal::ArsenalFrame {
             entities,
             world,
+            render_tick,
+            tick_rate: rate,
+            tuning: t,
+        };
+        combat.arsenal.update(
+            &frame,
             effects,
             &mut combat.beams,
             &mut common.audio,
@@ -887,16 +965,14 @@ impl InGame {
             combat.arsenal.play_pending(&mut ctx);
         }
 
-        // Viewmodel: Discharge glow + charge whine.
-        let charge = combat.predictor.charge(t, rate);
-        viewmodel.set_charge(charge);
-        let charging = combat.predictor.state().charge > 0;
-        if charging && !combat.charging {
-            common.audio.play_2d(Sfx::DischargeCharge);
-        } else if !charging && combat.charging {
-            common.audio.stop(Sfx::DischargeCharge);
-        }
-        combat.charging = charging;
+        // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds.
+        combat.arsenal.local_feel(
+            combat.predictor.state(),
+            t,
+            rate,
+            viewmodel,
+            &mut common.audio,
+        );
 
         // Music: nearby alert enemies + recent combat.
         let near = combat.entities.alert_enemies_near(entities, listener, 40.0) as f32;
@@ -961,14 +1037,15 @@ impl InGame {
         let protected = own.is_some_and(|c| c.combat.protection > 0);
         let weapons = *self.combat.predictor.state();
         let killed_by = self.combat.killed_by.clone();
-        let branded = net
+        let own_flags = net
             .local_player_id()
             .and_then(|p| {
                 net.frames()
                     .latest()
                     .and_then(|(_, f)| f.get(NetId::player(p)))
             })
-            .is_some_and(|e| e.flags & player_flags::BRANDED != 0);
+            .map_or(0, |e| e.flags);
+        let branded = own_flags & player_flags::BRANDED != 0;
         let info = CombatHudInfo {
             camera: &self.last_camera,
             yaw: self.controls.yaw,
@@ -982,6 +1059,8 @@ impl InGame {
             tick_rate: rate,
             killed_by: killed_by.as_deref(),
             branded,
+            burning: own_flags & player_flags::BURNING != 0,
+            pinned: own_flags & player_flags::PINNED != 0,
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);

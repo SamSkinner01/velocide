@@ -16,6 +16,7 @@ use shared::sim::{Attack, PlayerId};
 use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
+use super::arsenal::{self, Blast};
 use super::{Rng, attack_style, enemy_fx};
 use crate::models::{WeaponKind, WeaponLook as _};
 use crate::palette::palette;
@@ -455,6 +456,16 @@ pub fn explosion(ctx: &mut FxCtx, position: Vec3, radius: f32, attack: Attack, o
     match attack {
         Attack::Gravewell => implosion(ctx, position, radius),
         Attack::Wisp => wisp_pop(ctx, position, radius),
+        // The expansion arsenal's blasts (arsenal.rs).
+        Attack::Cinderbox => arsenal::blast(ctx, Blast::Cinder, position, radius),
+        Attack::Limpet => arsenal::blast(ctx, Blast::Limpet, position, radius),
+        Attack::Mortar => arsenal::blast(ctx, Blast::Mortar, position, radius),
+        Attack::EmberArrow => arsenal::blast(ctx, Blast::EmberArrow, position, radius),
+        Attack::Flak => {
+            // The ring flies out across the line of sight (no flight direction in the Fx).
+            let across = (position - ctx.listener).normalize_or(Vec3::NEG_Z);
+            arsenal::flak_airburst(ctx, position, across, 10, radius.max(4.0));
+        }
         _ => fireball(ctx, position, radius, attack, own),
     }
 }
@@ -771,6 +782,17 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.audio.play(style.sfx, PlayParams::at(muzzle));
             if *attack == Attack::Gust {
                 gust_puff(ctx.effects, ctx.beams, ctx.rng, muzzle, dir);
+                return;
+            }
+            // The Kiln sprays embers; the bow only twangs (its arrows are entities).
+            if *attack == Attack::Kiln {
+                arsenal::kiln_spray(ctx.effects, ctx.rng, muzzle, dir, 13.0, 16.0);
+                return;
+            }
+            if matches!(
+                attack,
+                Attack::Longwick | Attack::TripleNock | Attack::PinningArrow | Attack::EmberArrow
+            ) {
                 return;
             }
             if *attack == Attack::Arc {

@@ -113,16 +113,8 @@ pub fn projectile_model(k: u16) -> Option<ModelId> {
         ProjectileKind::Wisp => ModelId::Wisp,
         ProjectileKind::EmberBomb => ModelId::EmberBomb,
         ProjectileKind::Needle => ModelId::Needle,
-        // Stand-ins until the expansion arsenal has its own models (arsenal-client).
-        ProjectileKind::Arrow
-        | ProjectileKind::PinArrow
-        | ProjectileKind::BrandArrow
-        | ProjectileKind::Rivet => ModelId::Needle,
-        ProjectileKind::EmberArrow | ProjectileKind::Flare => ModelId::EmberBomb,
-        ProjectileKind::CinderRocket
-        | ProjectileKind::FlakShell
-        | ProjectileKind::Limpet
-        | ProjectileKind::MortarShell => ModelId::Bomb,
+        // The expansion arsenal's own (drawn through `arsenal.rs`, which picks the model).
+        _ => return super::arsenal::projectile_kind(k).map(|p| p.model()),
     })
 }
 
@@ -610,6 +602,14 @@ impl EntityView {
         if e.flags & projectile_flags::PENDING != 0 || pos.distance(f.camera) < 1.0 {
             return;
         }
+        // The expansion arsenal's projectiles have their own trails (arsenal.rs).
+        if e.flags & projectile_flags::PARRIED == 0 {
+            let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
+            if let Some(view) = super::arsenal::projectile_view(e, pos, vel, v.age) {
+                super::arsenal::projectile_trail(effects, beams, rng, &view, dt);
+                return;
+            }
+        }
         let stuck = e.flags & projectile_flags::STUCK != 0;
         let parried = e.flags & projectile_flags::PARRIED != 0;
         // Hums: the Wisp crackles as it drifts, a stuck Gravewell drones once while it pulls.
@@ -812,6 +812,10 @@ impl EntityView {
                 {
                     tint.body.w = ((1.0 - p) / 0.3).clamp(0.05, 1.0);
                 }
+                // Burning (arsenal): an ember flicker over the body.
+                if e.flags & enemy_flags::BURNING != 0 {
+                    tint.body *= super::arsenal::burn_tint(time, e.id.0);
+                }
                 let root = EnemyAnim::root(e.position + root_offset(e.kind), e.yaw);
                 lib.draw_enemy(&anim, root, &tint, draws);
                 // The aim laser (every client draws it from the replicated aim).
@@ -886,6 +890,15 @@ impl EntityView {
             }
             let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
             let parried = e.flags & projectile_flags::PARRIED != 0;
+            // The expansion arsenal's projectiles (arsenal.rs); a parried one goes the
+            // white-hot way below.
+            if !parried {
+                let age = self.projectiles.get(&e.id).map_or(0.0, |v| v.age);
+                if let Some(view) = super::arsenal::projectile_view(e, pos, vel, age) {
+                    super::arsenal::draw_projectile(lib, &view, self.time, draws, lights);
+                    continue;
+                }
+            }
             let stuck = e.flags & projectile_flags::STUCK != 0;
             let rot = if e.kind == kind::GRAVEWELL && stuck {
                 // Claws (-Z) bitten into the floor, the core turning.

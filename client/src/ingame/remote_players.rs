@@ -72,6 +72,17 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64) -> PlayerAnim {
         dead: v.dead,
         time,
         weapon: player_weapon(e.state).0.id(),
+        ability: player_weapon(e.state).1.id(),
+        draw: if f(player_flags::DRAWING) {
+            player_weapon(e.state).2 as f32 / 255.0
+        } else {
+            0.0
+        },
+        charge: if f(player_flags::CHARGING) {
+            player_weapon(e.state).2 as f32 / 255.0
+        } else {
+            0.0
+        },
         cycle: v.cycle,
     }
 }
