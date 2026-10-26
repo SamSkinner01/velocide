@@ -11,8 +11,9 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use super::weapons::{Weapon, WeaponState};
+use super::weapons::WeaponState;
 use super::{HitPart, HitTarget, PlayerId, SimEvent, SimWorld};
+use crate::loadout::{Ability, WeaponKind};
 use crate::protocol::{NetId, kind};
 use crate::tuning::{CombatTuning, Tuning};
 
@@ -51,8 +52,9 @@ impl Owner {
     }
 }
 
-/// What dealt damage: weapon + fire mode, fist, slam, an enemy attack or the world. Stable
-/// identifiers for the kill feed, style scoring ("variety") and sounds.
+/// What dealt damage: a weapon's primary fire or an ability, fist, slam, an enemy attack or the
+/// world. Stable identifiers for the kill feed, style scoring ("variety") and sounds. An
+/// ability is the same attack whichever weapon carries it ([`KillInfo::weapon`] says which).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Attack {
     /// Quill primary: precision hitscan quill.
@@ -94,18 +96,115 @@ pub enum Attack {
     World,
     /// Dev commands (`/kill`, `/killall`).
     Dev,
+
+    // ---- expansion primaries (docs/arsenal.md) ----
+    /// Lancet primary: a needle (hitscan).
+    Lancet,
+    /// Thresher primary (one pellet).
+    Thresher,
+    /// Riveter primary: one hot rivet.
+    Riveter,
+    /// Cinderbox primary: one cinder rocket of the salvo.
+    Cinderbox,
+    /// Longwick primary: a plain arrow (every draw).
+    Longwick,
+    /// Kiln primary: the ember spray (and the Burn it sets).
+    Kiln,
+    // ---- expansion abilities ----
+    /// Charged piercing shot.
+    Skewer,
+    /// One shot of the three-shot burst.
+    Flurry,
+    /// The heavy slug.
+    Slug,
+    /// The flak shell's burst pellets.
+    Flak,
+    /// One shot of the volley.
+    Volley,
+    /// The flare and its burning patch.
+    Flare,
+    /// A sticky charge's blast.
+    Limpet,
+    /// The lobbed shell's blast.
+    Mortar,
+    /// One arrow of the fan.
+    TripleNock,
+    /// The pinning arrow.
+    PinningArrow,
+    /// The ember arrow's hit and flame burst.
+    EmberArrow,
 }
 
 impl Attack {
-    /// The weapon this attack belongs to (`None` for thorn, fist, slam, enemies, world).
-    pub fn weapon(self) -> Option<Weapon> {
-        Some(match self {
-            Attack::Quill | Attack::Brand | Attack::Splinter => Weapon::Quill,
-            Attack::Blast | Attack::Gust | Attack::BothBarrels => Weapon::Bellows,
-            Attack::Arc | Attack::Wisp | Attack::Discharge => Weapon::Arclash,
-            Attack::Tumble | Attack::Breach | Attack::Gravewell => Weapon::Tumbler,
-            _ => return None,
-        })
+    /// The primary fire of `weapon`.
+    pub fn primary(weapon: WeaponKind) -> Attack {
+        match weapon {
+            WeaponKind::Quill => Attack::Quill,
+            WeaponKind::Bellows => Attack::Blast,
+            WeaponKind::Arclash => Attack::Arc,
+            WeaponKind::Tumbler => Attack::Tumble,
+            WeaponKind::Lancet => Attack::Lancet,
+            WeaponKind::Thresher => Attack::Thresher,
+            WeaponKind::Riveter => Attack::Riveter,
+            WeaponKind::Cinderbox => Attack::Cinderbox,
+            WeaponKind::Longwick => Attack::Longwick,
+            WeaponKind::Kiln => Attack::Kiln,
+        }
+    }
+
+    /// The attack of `ability` (on any weapon).
+    pub fn ability(ability: Ability) -> Attack {
+        match ability {
+            Ability::Brand => Attack::Brand,
+            Ability::Splinter => Attack::Splinter,
+            Ability::Gust => Attack::Gust,
+            Ability::BothBarrels => Attack::BothBarrels,
+            Ability::Wisp => Attack::Wisp,
+            Ability::Discharge => Attack::Discharge,
+            Ability::Breach => Attack::Breach,
+            Ability::Gravewell => Attack::Gravewell,
+            Ability::Skewer => Attack::Skewer,
+            Ability::Flurry => Attack::Flurry,
+            Ability::Slug => Attack::Slug,
+            Ability::Flak => Attack::Flak,
+            Ability::Volley => Attack::Volley,
+            Ability::Flare => Attack::Flare,
+            Ability::Limpet => Attack::Limpet,
+            Ability::Mortar => Attack::Mortar,
+            Ability::TripleNock => Attack::TripleNock,
+            Ability::PinningArrow => Attack::PinningArrow,
+            Ability::EmberArrow => Attack::EmberArrow,
+        }
+    }
+
+    /// The weapon whose primary fire this is.
+    pub fn primary_of(self) -> Option<WeaponKind> {
+        WeaponKind::ALL
+            .into_iter()
+            .find(|w| Attack::primary(*w) == self)
+    }
+
+    /// The ability this attack is.
+    pub fn as_ability(self) -> Option<Ability> {
+        Ability::ALL
+            .into_iter()
+            .find(|a| Attack::ability(*a) == self)
+    }
+
+    /// The weapon this attack belongs to: the weapon of a primary fire, or the only weapon
+    /// that can carry an ability (the bow's arrows). `None` for abilities several weapons can
+    /// carry (the kill's [`KillInfo::weapon`] knows which one fired), thorn, fist, slam,
+    /// enemies and the world.
+    pub fn weapon(self) -> Option<WeaponKind> {
+        if let Some(w) = self.primary_of() {
+            return Some(w);
+        }
+        let ability = self.as_ability()?;
+        let mut carriers = WeaponKind::ALL.into_iter().filter(|w| ability.fits(*w));
+        match (carriers.next(), carriers.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        }
     }
 
     /// Display name (kill feed).
@@ -129,6 +228,23 @@ impl Attack {
             Attack::Enemy { .. } => "Enemy",
             Attack::World => "World",
             Attack::Dev => "Dev",
+            Attack::Lancet => "Lancet",
+            Attack::Thresher => "Thresher",
+            Attack::Riveter => "Riveter",
+            Attack::Cinderbox => "Cinderbox",
+            Attack::Longwick => "Longwick",
+            Attack::Kiln => "Kiln",
+            Attack::Skewer => "Skewer",
+            Attack::Flurry => "Flurry",
+            Attack::Slug => "Slug",
+            Attack::Flak => "Flak",
+            Attack::Volley => "Volley",
+            Attack::Flare => "Flare",
+            Attack::Limpet => "Limpet",
+            Attack::Mortar => "Mortar",
+            Attack::TripleNock => "Triple Nock",
+            Attack::PinningArrow => "Pinning Arrow",
+            Attack::EmberArrow => "Ember Arrow",
         }
     }
 }
@@ -315,6 +431,11 @@ pub struct KillInfo {
     /// has no body (world, dev, gone). Kill feed ("34 m") and the LONGSHOT style bonus.
     #[serde(default)]
     pub distance: f32,
+    /// The weapon that fired the killing blow ([`SimWorld::attack_weapon`]): the weapon of a
+    /// primary, or the killer's weapon carrying the ability (`None`: fist, thorn, slam,
+    /// enemies, the world).
+    #[serde(default)]
+    pub weapon: Option<WeaponKind>,
     pub tick: u32,
 }
 
@@ -407,6 +528,31 @@ pub fn secs_to_ticks(secs: f32, tick_rate: u32, min: u16) -> u16 {
 }
 
 impl SimWorld {
+    /// The weapon `owner` dealt `attack` with: a primary's weapon; for an ability, the
+    /// owner's carried weapon that has it (the one in hand first), else the only weapon that
+    /// can carry it. `None` for fist, thorn, slam, enemies and the world.
+    pub fn attack_weapon(&self, owner: Owner, attack: Attack) -> Option<WeaponKind> {
+        if let Some(weapon) = attack.primary_of() {
+            return Some(weapon);
+        }
+        let ability = attack.as_ability()?;
+        let carried = owner
+            .player()
+            .and_then(|id| self.players.get(&id))
+            .and_then(|p| {
+                let w = &p.combat.weapons;
+                let held = w.build();
+                if held.abilities.contains(&ability) {
+                    return Some(held.weapon);
+                }
+                w.loadout
+                    .builds()
+                    .find(|b| b.abilities.contains(&ability))
+                    .map(|b| b.weapon)
+            });
+        carried.or_else(|| attack.weapon())
+    }
+
     /// Is `attacker` allowed to hurt `victim`? (Same-team damage is blocked except for
     /// knockback.)
     pub fn is_hostile(&self, attacker: Owner, victim: HitTarget) -> bool {
@@ -573,6 +719,7 @@ impl SimWorld {
             _ => None,
         };
         let distance = killer_position.map_or(0.0, |k| k.distance(position));
+        let weapon = self.attack_weapon(info.source, info.attack);
         let kill = KillInfo {
             victim: event.target,
             victim_kind,
@@ -589,6 +736,7 @@ impl SimWorld {
             killer_effective_max,
             overkill: (info.amount - event.dealt).max(0.0),
             distance,
+            weapon,
             tick: self.tick,
         };
         self.events.push(SimEvent::Killed(kill));

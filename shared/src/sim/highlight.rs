@@ -466,6 +466,7 @@ mod tests {
             killer_effective_max: 100.0,
             overkill: 0.0,
             distance: 10.0,
+            weapon: Some(crate::loadout::WeaponKind::Quill),
             tick,
         }
     }

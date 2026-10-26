@@ -39,7 +39,9 @@ use engine::ui::text::line_width;
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt, UiKey};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use shared::movement::{MoveMode, MoveState};
-use shared::protocol::{EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_flags};
+use shared::protocol::{
+    EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_flags, player_weapon,
+};
 use shared::sim::{Attack, FireIntent, Highlight, HitPart, HitShape, KillInfo, Owner, PlayerId};
 
 use super::InGame;
@@ -405,11 +407,25 @@ pub fn display_text(s: &str) -> String {
         .to_string()
 }
 
-/// The held weapon and alt mode of a replicated player — the `state` decoding the third-person
-/// model uses (`remote_players::player_anim`). When the player entity is repacked, switch this
-/// to the protocol's decode helper.
-fn held_weapon(e: &EntityState) -> (u8, u8) {
-    ((e.state & 0xF) as u8, ((e.state >> 4) & 0x3) as u8)
+/// What a replicated player holds, for the viewmodel: the weapon model (as the third-person
+/// model picks it, `remote_players::player_anim`), the glow of the selected ability (its place
+/// in the weapon class's pool: A / B of a default build) and the charge / draw level 0..1 while
+/// charging or drawing (`shared::protocol::player_weapon`).
+fn held_weapon(e: &EntityState) -> (u8, u8, f32) {
+    let (weapon, ability, charge) = player_weapon(e.state);
+    let model = crate::models::WeaponKind::for_weapon(weapon).index();
+    let mode = weapon
+        .abilities()
+        .iter()
+        .position(|a| *a == ability)
+        .unwrap_or(0) as u8
+        % 2;
+    let charging = e.flags & (player_flags::CHARGING | player_flags::DRAWING) != 0;
+    (
+        model,
+        mode,
+        if charging { charge as f32 / 255.0 } else { 0.0 },
+    )
 }
 
 /// A movement state for the camera rig and the viewmodel from a replicated player.
@@ -737,7 +753,7 @@ impl InGame {
                         hit: false,
                     },
                     FireIntent::ThrowThorn => Fx::ThornThrown { player: me },
-                    FireIntent::Alt { charge, .. }
+                    FireIntent::Ability { charge, .. }
                         if intent.attack() == Some(Attack::Discharge) =>
                     {
                         let a = &t.arclash;
@@ -983,16 +999,11 @@ impl InGame {
                 downed: pb.dead || e.flags & (player_flags::DEAD | player_flags::DOWNED) != 0,
                 dt,
             });
-            let (weapon, mode) = held_weapon(&e);
+            let (weapon, mode, charge) = held_weapon(&e);
             if pb.weapon.is_some_and(|w| w != (weapon, mode)) {
                 pb.viewmodel.on_switch();
             }
             pb.weapon = Some((weapon, mode));
-            let charge = if e.flags & player_flags::CHARGING != 0 {
-                (e.state >> 8) as f32 / 255.0
-            } else {
-                0.0
-            };
             pb.viewmodel.set_charge(charge);
             pb.viewmodel
                 .update(vdt, &state, e.yaw, e.pitch, common.settings.view_bob);
@@ -1603,7 +1614,8 @@ fn kill_marker(list: &mut UiDrawList, center: Vec2, r0: f32, len: f32, color: Ve
 
 #[cfg(test)]
 mod tests {
-    use shared::protocol::{QPos, kind};
+    use shared::loadout::{Ability, WeaponKind};
+    use shared::protocol::{QPos, kind, pack_player_weapon};
     use shared::sim::{DamageFlags, HitTarget};
 
     use super::super::combat::{kill_distance, kill_line_text};
@@ -1629,7 +1641,7 @@ mod tests {
             velocity: Vec3::new(10.0, 0.0, 0.0),
             yaw: 1.0,
             flags,
-            state: 2 | (1 << 4),
+            state: pack_player_weapon(WeaponKind::Arclash, Ability::Discharge, 200),
             ..Default::default()
         });
         f.insert(&EntityState {
@@ -1670,6 +1682,7 @@ mod tests {
             killer_effective_max: 100.0,
             overkill: 0.0,
             distance,
+            weapon: Some(shared::loadout::WeaponKind::Quill),
             tick,
         }
     }
@@ -1761,7 +1774,16 @@ mod tests {
         let at = 21 * RATE + 1;
         let pose = clip.viewpoint(at as f64).expect("P1 in the clip");
         assert!((pose.position.x - at as f32 / RATE as f32 * 10.0).abs() < 0.01);
-        assert_eq!(held_weapon(&pose), (2, 1));
+        // The Arclash with Discharge (its pool's second ability); no charge shown unless
+        // CHARGING.
+        let arclash = crate::models::WeaponKind::Arclash.index();
+        assert_eq!(held_weapon(&pose), (arclash, 1, 0.0));
+        let charging = EntityState {
+            flags: pose.flags | player_flags::CHARGING,
+            ..pose
+        };
+        let (_, _, charge) = held_weapon(&charging);
+        assert!((charge - 200.0 / 255.0).abs() < 0.01, "{charge}");
         // Others sampled without the viewpoint.
         let mut others = Vec::new();
         clip.sample(at as f64, Some(NetId::player(P1)), &mut others);
@@ -1875,6 +1897,27 @@ mod tests {
         assert_eq!(
             kill_line_text("RIVET_WITCH", "QUILL", "YOU", &trick),
             "RIVET_WITCH [QUILL] YOU 62m HEADSHOT RICOCHET x2 AIR"
+        );
+    }
+
+    #[test]
+    fn kill_feed_brackets_name_the_weapon_and_its_ability() {
+        use super::super::combat::weapon_attack_label;
+        assert_eq!(
+            weapon_attack_label(WeaponKind::Longwick, Attack::Longwick),
+            "LONGWICK"
+        );
+        assert_eq!(
+            weapon_attack_label(WeaponKind::Riveter, Attack::Volley),
+            "RIVETER VOLLEY"
+        );
+        assert_eq!(
+            weapon_attack_label(WeaponKind::Longwick, Attack::Brand),
+            "LONGWICK BRAND"
+        );
+        assert_eq!(
+            weapon_attack_label(WeaponKind::Quill, Attack::Quill),
+            "QUILL"
         );
     }
 

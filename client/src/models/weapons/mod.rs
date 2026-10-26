@@ -49,6 +49,28 @@ impl WeaponKind {
             .unwrap_or(WeaponKind::Quill)
     }
 
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+
+    /// The model drawn for a loadout weapon. The expansion's weapons borrow the model of
+    /// their class until they have their own (docs/arsenal.md).
+    pub fn for_weapon(weapon: shared::loadout::WeaponKind) -> WeaponKind {
+        use shared::loadout::WeaponClass;
+        match weapon {
+            shared::loadout::WeaponKind::Quill => WeaponKind::Quill,
+            shared::loadout::WeaponKind::Bellows => WeaponKind::Bellows,
+            shared::loadout::WeaponKind::Arclash => WeaponKind::Arclash,
+            shared::loadout::WeaponKind::Tumbler => WeaponKind::Tumbler,
+            other => match other.class() {
+                WeaponClass::Precision | WeaponClass::Draw => WeaponKind::Quill,
+                WeaponClass::Scatter => WeaponKind::Bellows,
+                WeaponClass::Rapid => WeaponKind::Arclash,
+                WeaponClass::Explosive => WeaponKind::Tumbler,
+            },
+        }
+    }
+
     pub fn model(self) -> ModelId {
         match self {
             WeaponKind::Quill => ModelId::Quill,

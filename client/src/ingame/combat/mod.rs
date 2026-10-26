@@ -24,7 +24,7 @@ use engine::physics::MASK_SHOTS;
 use engine::render::Renderer;
 use glam::{Vec3, Vec4};
 use shared::input::look_dir;
-use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags};
+use shared::protocol::{EntityState, GameEvent, NetId, kind, player_flags, player_weapon};
 use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo, Owner};
 
 use crate::models::WeaponKind;
@@ -310,12 +310,26 @@ fn attack_name(net: &NetClient, attack: Attack) -> String {
 /// "YOU [QUILL] GNAWER 38m HEADSHOT" style kill feed line ("GNAWER [BITE] YOU 3m"), names
 /// from the session.
 pub(crate) fn kill_line(net: &NetClient, k: &KillInfo) -> String {
+    let attack = match k.weapon {
+        Some(weapon) => weapon_attack_label(weapon, k.attack),
+        None => attack_name(net, k.attack),
+    };
     kill_line_text(
         &owner_name(net, k.killer, k.attack),
-        &attack_name(net, k.attack),
+        &attack,
         &victim_name(net, k),
         k,
     )
+}
+
+/// The bracket of a weapon's kill: its name for the primary ("RIVETER"), weapon and ability
+/// for an ability (several weapons share one: "RIVETER VOLLEY", "LONGWICK BRAND").
+pub fn weapon_attack_label(weapon: shared::loadout::WeaponKind, attack: Attack) -> String {
+    if Attack::primary(weapon) == attack {
+        weapon.name().to_uppercase()
+    } else {
+        format!("{} {}", weapon.name(), attack.name()).to_uppercase()
+    }
 }
 
 /// Whole metres from the killer to the victim for the kill feed, when the killer has a body
@@ -611,7 +625,7 @@ impl InGame {
             });
             for intent in &shot.intents {
                 match intent {
-                    FireIntent::Primary(_) | FireIntent::Alt { .. } => {
+                    FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
                         };
@@ -622,7 +636,7 @@ impl InGame {
                             viewmodel.turn_drum();
                         }
                         let charge = match intent {
-                            FireIntent::Alt { charge, .. } => *charge,
+                            FireIntent::Ability { charge, .. } => *charge,
                             _ => 1.0,
                         };
                         feedback.shake(
@@ -793,9 +807,13 @@ impl InGame {
         for e in entities.iter().filter(|e| e.kind == kind::PLAYER) {
             let vis = remote.visual_mut(e.id);
             vis.dead = e.flags & player_flags::DEAD != 0;
-            if e.flags & player_flags::CHARGING != 0 && vis.muzzle != Vec3::ZERO {
-                // Arclash Discharge charging: the capacitor crackles brighter.
-                let c = (e.state >> 8) as f32 / 255.0;
+            let (_, ability, level) = player_weapon(e.state);
+            if e.flags & player_flags::CHARGING != 0
+                && ability == shared::sim::Ability::Discharge
+                && vis.muzzle != Vec3::ZERO
+            {
+                // Discharge charging: the capacitor crackles brighter.
+                let c = level as f32 / 255.0;
                 effects.glow(
                     vis.muzzle,
                     Vec4::new(0.55, 0.8, 1.0, 0.5 + 0.5 * c),

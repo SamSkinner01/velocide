@@ -59,7 +59,7 @@ keeps the plain shapes; hit assist pads them at test time.
 
 ## Data model
 
-### `PlayerCombat` (per player; `OwnState::combat`, 32 B in a snapshot)
+### `PlayerCombat` (per player; `OwnState::combat`, 47 B in a snapshot)
 
 | field | meaning |
 |---|---|
@@ -74,24 +74,29 @@ keeps the plain shapes; hit assist pads them at test time.
 
 ### `WeaponState` (predictable: integers only)
 
-`weapon` (slot 0–3), `mode` (0 = alt A, 1 = alt B), `prev_buttons` (own edge detection),
-`primary_cooldown[4]`, `alt_cooldown[4]` (ticks, per weapon: switching mid-combo is free; the
-two alt modes of a weapon share its alt cooldown), `charge` (Discharge ticks held),
-`punch_cooldown`, `parry` (window ticks left), `thorns_used` + `thorn_recharge`.
+`loadout` (the builds carried, `docs/arsenal.md`), `slot` (0–3, a slot holding a weapon),
+`mode` (0 = ability A, 1 = ability B), `prev_buttons` (own edge detection),
+`primary_cooldown[4]`, `alt_cooldown[4]` (ticks, per slot: switching mid-combo is free; the two
+abilities of a build share its alt cooldown), `charge` (Discharge / Skewer ticks held), `draw`
+(Longwick), `armed` (the bow's armed ability), `bloom` (Lancet), `burst` (salvo / Flurry in
+progress), `punch_cooldown`, `parry` (window ticks left), `thorns_used` + `thorn_recharge`.
 
-**Input mapping.** `PlayerInput::weapon` 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler (other
-slots keep the current weapon); `weapon_mode` 0/1 (others → 0); switching weapon or mode is
-instant and cancels a Discharge charge. `FIRE` held = automatic primary at the weapon's
-interval (the Arclash zaps every 0.1 s). `ALT_FIRE` held = alt at its cooldown, except
-Discharge (hold to charge, fires on **release**). Both Barrels also puts the Bellows primary on
-its interval. `PUNCH` press = fist + parry window. `THROW` press = thorn (if a charge is left;
-1 per `thorn.recharge_time`).
+**Input mapping.** `PlayerInput::weapon` = slot of the loadout (empty slots and other values
+keep the current weapon); `weapon_mode` 0/1 (others → 0); switching weapon or mode is instant
+and cancels a charge. With the default loadout (Quill, Bellows, Arclash, Tumbler): `FIRE` held =
+automatic primary at the weapon's interval (the Arclash zaps every 0.1 s). `ALT_FIRE` held =
+ability at its cooldown, except Discharge (hold to charge, fires on **release**). Both Barrels
+also puts the primary on its interval. `PUNCH` press = fist + parry window. `THROW` press =
+thorn (if a charge is left; 1 per `thorn.recharge_time`; none in PvP). The other weapons'
+firing styles (salvo, draw, bursts, arming): `docs/arsenal.md`.
 
 `step_weapons` is pure and deterministic. The owning client should run it on every predicted
 input (exactly like `player_move_step`) for instant muzzle flashes/sounds/recoil, keep the
 predicted `WeaponState` per input, and compare it with `OwnState::combat.weapons` for
 `last_input_seq` (mismatch → reset to the server's and replay). Nothing server-side changes
-the weapon state, so the prediction is exact (test `server_weapon_state_is_exactly_the_predicted_one`).
+the weapon state except a new loadout (respawn, warm-up, gun game), so the prediction is exact
+(tests `server_weapon_state_is_exactly_the_predicted_one`,
+`prediction_stays_exact_with_a_custom_loadout`).
 
 ### Rules (`SimWorld::rules: CombatRules`)
 
@@ -428,7 +433,7 @@ block each other (player movement must stay predictable).
 
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
-| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BRANDED 1<<15` | weapon (bits 0–3) \| mode (4–5) \| Discharge charge 0–255 (8–15) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
+| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BURNING 1<<12, PINNED 1<<13, DRAWING 1<<14, BRANDED 1<<15` | held weapon, selected ability, charge / draw: `protocol::player_weapon(state)` (`docs/arsenal.md`) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
 | enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–14 enemies area), `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `EMBER_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
@@ -539,7 +544,7 @@ spawn protected; death screen.
 
 | thing | render / play |
 |---|---|
-| **PLAYER** entity | drawn 10 % larger than life (visual only); body/stance from `LOW_PROFILE`; weapon model from `state & 0xF` and alt mode; `CHARGING` → Arclash capacitor glow + crackling arcs (charge in bits 8–15); `BRANDED` → turning brand sigil above the head; `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
+| **PLAYER** entity | drawn 10 % larger than life (visual only); body/stance from `LOW_PROFILE`; weapon model and ability from `protocol::player_weapon(state)` (the expansion's weapons borrow their class's model for now); `CHARGING` with Discharge → Arclash capacitor glow + crackling arcs (charge level from `player_weapon`); `BRANDED` → turning brand sigil above the head; `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
 | **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; `BRANDED` → turning brand sigil (a diamond and a point-down triangle, camera-facing) above it; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
 | **projectiles** | bomb: tumbling studded ball, fuse sparks and a flickering fuse band (`BombBounce` on `ProjectileBounce`); gravewell: canister with a green light, `STUCK` → claws down, vortex of motes drawn in from the pull radius, `GravewellHum` once; wisp: spinning ball of lightning, crackling arcs, violet light, `WispHum` every 0.45 s; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
 | **EMBER_BURST** | glowing embers (`palette().heal`) rising off a faint glow over a wisp of smoke, `state/10` m radius, burst size from `health` (pool), re-puffing while the pool lasts; `BIG` → the same, looser (the heat release itself is drawn by the dying enemy) |

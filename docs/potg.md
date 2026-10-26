@@ -22,12 +22,16 @@ And every kill-feed line shows how far the kill was: `YOU [QUILL] GNAWER 38m HEA
 when the killer has no body (the world, a dev command, gone). The kill feed
 (`combat::kill_line_text`) prints the whole metres after the victim whenever the killer has a
 body and it wasn't a suicide (at least `1m`), then the existing tags, single-spaced so the line
-stays short at 640×360:
+stays short at 640×360. The bracket names the weapon (`KillInfo::weapon`): its name for a
+primary, weapon and ability for an ability — several weapons share one
+(`combat::weapon_attack_label`); the fist, thorns, slams, Moulds and the world keep their
+attack's name:
 
 ```text
 YOU [QUILL] GNAWER 38m HEADSHOT
+YOU [RIVETER VOLLEY] BOB 22m
 GNAWER [BITE] YOU 1m
-RIVET_WITCH [QUILL] YOU 62m HEADSHOT RICOCHET x2 AIR
+RIVET_WITCH [LONGWICK] YOU 62m HEADSHOT RICOCHET x2 AIR
 THE PIT [WORLD] BOB
 ```
 
@@ -143,9 +147,10 @@ highlight the recording doesn't cover (joined late) gives no clip.
    follow the replay speed. The camera is the player's eyes: their replicated entity (position,
    velocity, yaw, pitch, movement flags) sampled at the clip tick drives a fresh `CameraRig`
    (eye height, slide view roll, speed FOV kick, landing dips) and a fresh `Viewmodel` with
-   their held weapon and alt mode (`held_weapon`: the same `state` decoding the third-person
-   model uses — switch it to the protocol's decode helper when the player entity is repacked),
-   the switch raise and the Discharge charge glow. Everything else comes from the clip through
+   their held weapon (`held_weapon`: `shared::protocol::player_weapon` decodes the weapon,
+   the selected ability and the charge / draw level; the model as the third-person Shrike picks
+   it, the glow by the ability's place in its class pool), the switch raise and the charge /
+   draw glow while `CHARGING` / `DRAWING`. Everything else comes from the clip through
    the game's own drawers — fresh `RemotePlayers` (everyone else incl. the local player, dead /
    downed poses from the flags), `EntityView` (projectiles, embers, thorns, enemies), `fx::play`
    (explosions, ricochets, heals...), `RemoteSounds` (footsteps), and the session's `Effects`,
@@ -181,7 +186,7 @@ lengths are bounded by what was recorded, never by the server's ticks.
 
 ```text
 cargo test -p shared --lib highlight        # scoring, bursts, titles, announcements, finish (9)
-cargo test -p client --lib replay           # recorder, clips, slow motion, kill feed lines (10)
+cargo test -p client --lib replay           # recorder, clips, slow motion, kill feed lines (11)
 cargo test -p server --test potg_net        # over UDP with real clients (3)
 cargo run -p client --release --example potg_shots -- out/
 ```
@@ -195,8 +200,9 @@ cargo run -p client --release --example potg_shots -- out/
   cuts the lead-in and tail (frames, events, `Fx` in order, interpolated viewpoint pose, held
   weapon); the lead-in starts after a respawn and the tail ends after a death; no clip without
   the highlight in the recording; 20 s of a busy match stay within a few MB; the slow-motion
-  curve; server text sanitised; kill-feed lines with and without a distance; the viewpoint's own
-  `Fx` play in first person; replicated movement drives the camera state.
+  curve; server text sanitised; kill-feed lines with and without a distance and their weapon /
+  ability brackets; the viewpoint's own `Fx` play in first person; replicated movement drives
+  the camera state.
 * `potg_net`: a deathmatch double kill is marked for everyone only after it closes, a later
   single frag isn't, and at the frag limit every client gets `PlayOfTheGame` (the double) before
   `ModeEvent::Ended`; a burst still open at the frag limit (two 50 m frags: LONGSHOT DOUBLE) is
@@ -222,5 +228,6 @@ cargo run -p client --release --example potg_shots -- out/
 * Slow motion doesn't slow the sounds down.
 * If the host ends a match from the lobby, the results phase arrives a tick before the play of
   the game, so the plain results can flash for a frame before the card.
-* Gun game (and other new PvP modes) get the play of the game through `is_pvp()`; their
-  weapons are shown through the same `held_weapon` decoding as the third-person models.
+* Gun game (and other new PvP modes) get the play of the game through `is_pvp()`.
+* LONGSHOT keys off the killing blow's flags: damage over time (Burn, when it lands) must not
+  carry `HITSCAN` / `PROJECTILE`, or a burning victim running 40 m away would count.
