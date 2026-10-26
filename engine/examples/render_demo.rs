@@ -343,7 +343,7 @@ impl Scene {
             .collect();
 
         // ---- viewmodel ----
-        let (gun, gun_glow, muzzle) = models::lancet();
+        let (gun, gun_glow, muzzle) = models::demo_gun();
         let flash_quad = meshgen::quad(Vec2::splat(0.16), Vec4::ONE).build();
         let cube = meshgen::cuboid(Vec3::splat(0.25), Vec4::ONE).build();
 

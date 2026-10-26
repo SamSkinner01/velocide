@@ -24,25 +24,25 @@ fn main() -> anyhow::Result<()> {
         parts.len()
     );
 
-    let (gun, glow, _) = models::lancet();
-    let lancet = dir.join("lancet.gltf");
+    let (gun, glow, _) = models::demo_gun();
+    let demo_gun = dir.join("demo_gun.gltf");
     engine::assets::gltf::write_parts(
-        &lancet,
+        &demo_gun,
         &[
             engine::assets::gltf::ModelPart {
-                name: "lancet".into(),
+                name: "demo_gun".into(),
                 mesh: gun,
                 texture: Some(engine::assets::procedural::material_texture("metal")),
                 base_color: engine::glam::Vec4::ONE,
             },
             engine::assets::gltf::ModelPart {
-                name: "lancet_cell".into(),
+                name: "demo_gun_cell".into(),
                 mesh: glow,
                 texture: None,
                 base_color: engine::glam::Vec4::ONE,
             },
         ],
     )?;
-    log::info!("wrote {}", lancet.display());
+    log::info!("wrote {}", demo_gun.display());
     Ok(())
 }

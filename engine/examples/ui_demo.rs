@@ -186,11 +186,11 @@ mod demo {
         ("FIRE", "MOUSE 1"),
         ("ALT FIRE", "MOUSE 2"),
         ("PUNCH / PARRY", "F"),
-        ("THROW PRISM", "Q"),
-        ("LANCET", "1"),
-        ("THRESHER", "2"),
-        ("RIVETER", "3"),
-        ("CINDERBOX", "4"),
+        ("THROW THORN", "Q"),
+        ("QUILL", "1"),
+        ("BELLOWS", "2"),
+        ("ARCLASH", "3"),
+        ("TUMBLER", "4"),
         ("CHAT", ""),
     ];
 
@@ -416,7 +416,7 @@ mod demo {
                 "Mx. Ossuary",
                 "arena or campaign? I want to try the new gaoler room",
             ),
-            ("rivet_witch", "arena. loser buys the prisms"),
+            ("rivet_witch", "arena. loser buys the thorns"),
             ("HOLLOWPOINT", "gl hf"),
             ("", "tin saint joined (131 ms)."),
             ("tin saint", "lag is fine, go go go"),
@@ -620,7 +620,7 @@ mod demo {
             ChatLine {
                 name: "rivet_witch".into(),
                 name_color: t.stamina,
-                text: "prism up, shoot it!".into(),
+                text: "thorn up, shoot it!".into(),
                 time: now - 4.0,
             },
             ChatLine {
@@ -653,8 +653,8 @@ mod demo {
             t,
             vec2(c.max.x - 12.0, c.max.y - 12.0),
             2,
-            "THRESHER",
-            &["SPREAD", "SLUG", "FLAK"],
+            "BELLOWS",
+            &["BLAST", "GUST", "BOTH BARRELS"],
             1,
         );
         list

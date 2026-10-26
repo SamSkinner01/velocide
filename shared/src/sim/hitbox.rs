@@ -17,7 +17,7 @@ use crate::protocol::NetId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HitTarget {
     Player(PlayerId),
-    /// Any replicated gameplay entity (enemies, prisms...).
+    /// Any replicated gameplay entity (enemies, thorns...).
     Entity(NetId),
 }
 

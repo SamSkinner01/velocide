@@ -1302,7 +1302,7 @@ mod tests {
         }
     }
 
-    fn rivet(w: &mut SimWorld, t: &Tuning) -> Option<NetId> {
+    fn wisp(w: &mut SimWorld, t: &Tuning) -> Option<NetId> {
         let at = Vec3::new(0.0, 50.0, 0.0);
         w.spawn_projectile(t, ProjectileKind::Wisp, Owner::World, at, Vec3::ZERO)
     }
@@ -1313,34 +1313,34 @@ mod tests {
         let mut w = world();
         let start = NetId::DYNAMIC_START;
         // One live entity of every kind at the start of the dynamic range.
-        let projectile = rivet(&mut w, &t).unwrap();
+        let projectile = wisp(&mut w, &t).unwrap();
         let enemy = w.spawn_enemy("gnawer", Vec3::new(20.0, 0.0, 20.0), 0.0).unwrap();
         let embers = w
             .spawn_embers(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
             .unwrap();
-        let prism = w
+        let thorn = w
             .spawn_thorn(&t, PlayerId(9), Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO)
             .unwrap();
         assert_eq!(
-            [projectile, enemy, embers, prism].map(|id| id.0),
+            [projectile, enemy, embers, thorn].map(|id| id.0),
             [start, start + 1, start + 2, start + 3]
         );
         // A very long session reaches the end of the id space ...
         w.next_dynamic_id = NetId::STATIC_START - 1;
-        let last = rivet(&mut w, &t).unwrap();
+        let last = wisp(&mut w, &t).unwrap();
         assert_eq!(last.0, NetId::STATIC_START - 1);
         // ... and wraps around, skipping the ids still alive (it used to hand out the last id
         // forever, each new entity silently replacing the previous one).
-        let wrapped = rivet(&mut w, &t).unwrap();
+        let wrapped = wisp(&mut w, &t).unwrap();
         assert_eq!(wrapped.0, start + 4);
-        let next = rivet(&mut w, &t).unwrap();
+        let next = wisp(&mut w, &t).unwrap();
         assert_eq!(next.0, start + 5);
         assert_eq!(w.projectiles.len(), 4);
-        for id in [projectile, enemy, embers, prism, last, wrapped, next] {
+        for id in [projectile, enemy, embers, thorn, last, wrapped, next] {
             assert!(id.0 >= start && id.0 < NetId::STATIC_START);
         }
         assert!(w.projectiles.contains_key(&projectile) && w.enemies.contains_key(&enemy));
-        assert!(w.embers.contains_key(&embers) && w.thorns.contains_key(&prism));
+        assert!(w.embers.contains_key(&embers) && w.thorns.contains_key(&thorn));
     }
 
     #[test]
@@ -1348,9 +1348,9 @@ mod tests {
         let t = Tuning::default();
         let mut w = world();
         for _ in 0..MAX_PROJECTILES {
-            assert!(rivet(&mut w, &t).is_some());
+            assert!(wisp(&mut w, &t).is_some());
         }
-        assert!(rivet(&mut w, &t).is_none());
+        assert!(wisp(&mut w, &t).is_none());
         assert_eq!(w.projectiles.len(), MAX_PROJECTILES);
         for i in 0..MAX_ENEMIES {
             let at = Vec3::new((i % 16) as f32 * 3.0 - 24.0, 0.0, (i / 16) as f32 * 3.0 - 24.0);

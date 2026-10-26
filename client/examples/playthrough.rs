@@ -1344,7 +1344,7 @@ fn percentile(v: &mut [f32], p: f32) -> f32 {
 
 fn performance(rig: &mut Rig) {
     println!("\n== performance (release) ==");
-    // Client: the Furnace Cathedral (arena 5) full of enemies, Cinderbox explosions.
+    // Client: the Furnace Cathedral (arena 5) full of enemies, Tumbler explosions.
     let mut c = rig.client("Bench", LaunchOptions::default());
     rig.transition(
         &mut c,
@@ -1369,11 +1369,11 @@ fn performance(rig: &mut Rig) {
     rig.run(&mut [&mut c], 1);
     c.pad(GamepadButton::DPadRight, false);
     rig.run(&mut [&mut c], 1);
-    c.pad(GamepadButton::DPadRight, true); // 3 Riveter
+    c.pad(GamepadButton::DPadRight, true); // 3 Arclash
     rig.run(&mut [&mut c], 1);
     c.pad(GamepadButton::DPadRight, false);
     rig.run(&mut [&mut c], 1);
-    c.pad(GamepadButton::DPadRight, true); // 4 Cinderbox
+    c.pad(GamepadButton::DPadRight, true); // 4 Tumbler
     rig.run(&mut [&mut c], 1);
     c.pad(GamepadButton::DPadRight, false);
     c_fire(&mut c, true);

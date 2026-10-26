@@ -20,7 +20,7 @@ impl Buttons {
     pub const ALT_FIRE: Buttons = Buttons(1 << 4);
     /// Melee punch; parries projectiles and telegraphed attacks when timed right.
     pub const PUNCH: Buttons = Buttons(1 << 5);
-    /// Throw a ricochet prism.
+    /// Throw a ricochet thorn.
     pub const THROW: Buttons = Buttons(1 << 6);
     /// Interact / revive a downed teammate.
     pub const USE: Buttons = Buttons(1 << 7);

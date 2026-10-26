@@ -210,7 +210,7 @@ then merged and checked against the whole test suite with zero clippy warnings.
 | 4 | Advanced movement, tuning hot-reload, 2 clients at 100 ms | `shared::movement`, `assets/tuning.ron`, `scripts/local_test.sh` |
 | 5 | Retro post-processing, viewmodel pass | `engine::render` (shaders in `assets/shaders/`) |
 | 6 | First weapon, lag-compensated hits, server enemy, hitstop/shake | `shared::sim::{weapons,hitscan,enemy}`, `server::lagcomp`, `client::ingame::{feedback,combat}` |
-| 7 | Parry with network tolerance, proximity healing, hard damage, explosions | `shared::sim::{parry,blood,combat,projectiles}` |
+| 7 | Parry with network tolerance, proximity healing, hard damage, explosions | `shared::sim::{parry,embers,combat,projectiles}` |
 | 8 | Full weapon set with alt-fires, ricochet thorns | `shared::sim::{weapons,thorn,brand}` |
 | 9 | Style meter, ranks, results with scoreboard | `shared::sim::style`, `client::ingame::{style_hud,match_flow}` |
 | 10 | All enemy types, navigation, wave encounters, co-op scaling | `shared::sim::{enemy,nav,encounter}`, `assets/enemies/` |

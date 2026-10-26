@@ -1,4 +1,4 @@
-//! Short position history of a simulated entity (projectiles, prisms, enemies), recorded at
+//! Short position history of a simulated entity (projectiles, thorns, enemies), recorded at
 //! the end of every tick — the same moment the server records hitboxes for lag compensation.
 //! Lets the simulation rewind *non-hitbox* things (parryable projectiles, ricochet prisms,
 //! enemies for melee parries) to a player's view time.

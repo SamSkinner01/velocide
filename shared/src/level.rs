@@ -570,7 +570,7 @@ mod tests {
                 waves: vec![Wave {
                     delay: 0.0,
                     spawns: vec![
-                        EnemySpawn { enemy: "husk".into(), position: Vec3::ZERO, yaw: 0.0 };
+                        EnemySpawn { enemy: "gnawer".into(), position: Vec3::ZERO, yaw: 0.0 };
                         MAX_WAVE_SPAWNS + 1
                     ],
                 }],

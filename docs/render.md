@@ -179,7 +179,7 @@ Uncaptured wgpu errors are logged (`log::error!`) instead of panicking.
   as the draw tint.
 - `assets::load_png`, `decode_png`, `save_png`.
 - `cargo run -p engine --example render_gen_models` regenerates `assets/models/warden.gltf`
-  (demo model) and `assets/models/lancet.gltf` (demo gun).
+  (demo model) and `assets/models/demo_gun.gltf` (demo gun).
 
 ## App, input, debug UI
 

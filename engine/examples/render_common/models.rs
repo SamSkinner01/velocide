@@ -68,9 +68,9 @@ impl FlipUpsideDown for MeshBuilder {
     }
 }
 
-/// Viewmodel gun "Lancet" (original design): returns (body mesh, glowing strip mesh, muzzle
+/// Viewmodel demo gun (original design): returns (body mesh, glowing strip mesh, muzzle
 /// position in the mesh's local space). Local space: barrel points down -Z.
-pub fn lancet() -> (MeshData, MeshData, Vec3) {
+pub fn demo_gun() -> (MeshData, MeshData, Vec3) {
     let steel = Vec4::new(0.72, 0.75, 0.8, 1.0);
     let dark = Vec4::new(0.32, 0.33, 0.37, 1.0);
     let grip_color = Vec4::new(0.36, 0.22, 0.16, 1.0);
