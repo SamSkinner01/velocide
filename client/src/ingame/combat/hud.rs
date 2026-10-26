@@ -404,7 +404,9 @@ impl CombatHud {
                 let style = TextStyle::new(fade(t.bone, k)).centered().outline(outline);
                 list.text(vec2(c.center().x, c.center().y - 6.0), by, &style);
             }
-            if info.respawn_in > 0.0 {
+            // Longer waits are the game mode holding you out (grind: back at the next wave;
+            // the mode HUD says so), not a countdown.
+            if info.respawn_in > 0.0 && info.respawn_in < 600.0 {
                 let style = TextStyle::new(fade(t.bone_dim, k))
                     .scale(2.0)
                     .centered()

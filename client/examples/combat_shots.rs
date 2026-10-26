@@ -157,6 +157,172 @@ fn spawn(game: &mut InGame, count: u32) {
     game.send_chat(&format!("/spawn {TARGET} {count}"));
 }
 
+/// Fires the expansion's weapons and abilities for real: `/loadout` puts them in the slots on
+/// the spot, the script aims at the Moulds and fires (`weapon_*.png`).
+fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let aimed = |g: &mut InGame, buttons: Buttons| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t);
+        }
+        hold(g, buttons);
+    };
+    game.send_chat("/killall");
+    spawn(game, 4);
+    h.frames(game, 70, still);
+    game.send_chat("/loadout lancet:skewer,flurry thresher:slug,flak riveter:volley,flare cinderbox:limpet,mortar");
+    h.frames(game, 20, still);
+
+    // Lancet: needles, then a Skewer charged and loosed.
+    select(game, 0, 0);
+    h.frames(game, 8, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("weapon_lancet");
+    h.frames(game, 10, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 40, |g, _| aimed(g, Buttons::ALT_FIRE));
+    h.shot("weapon_lancet_skewer_charge");
+    h.frames(game, 3, |g, _| aimed(g, Buttons::NONE));
+    h.shot("weapon_lancet_skewer");
+    h.frames(game, 30, still);
+
+    // Thresher: the drum-fed blast, then a Flak shell bursting in the pack.
+    select(game, 1, 0);
+    h.frames(game, 12, still);
+    h.frames(game, 3, |g, i| {
+        aimed(g, if i == 0 { Buttons::FIRE } else { Buttons::NONE })
+    });
+    h.shot("weapon_thresher");
+    select(game, 1, 1);
+    h.frames(game, 40, still);
+    let mut burst = false;
+    for i in 0..30 {
+        aimed(
+            game,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        );
+        h.frame(game);
+        if !burst && i > 2 && find_entity(game, |e| e.kind == kind::FLAK_SHELL).is_none() {
+            burst = true;
+            h.frames(game, 2, still);
+            h.shot("weapon_thresher_flak");
+        }
+    }
+    if !burst {
+        h.shot("weapon_thresher_flak");
+    }
+
+    // Riveter: a stream of hot rivets, then a Flare and its burning patch.
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 60, still);
+    select(game, 2, 0);
+    h.frames(game, 14, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("weapon_riveter");
+    h.frames(game, 10, still);
+    select(game, 2, 1);
+    h.frames(game, 20, still);
+    h.frames(game, 2, |g, i| {
+        aimed(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 70, still);
+    h.shot("weapon_riveter_flare_patch");
+
+    // Cinderbox: a salvo, its blasts; limpets thrown, stuck, detonated; a mortar.
+    select(game, 3, 0);
+    h.frames(game, 20, still);
+    h.frames(game, 9, |g, i| {
+        aimed(g, if i == 0 { Buttons::FIRE } else { Buttons::NONE })
+    });
+    h.shot("weapon_cinderbox_salvo");
+    h.frames(game, 20, still);
+    h.shot("weapon_cinderbox_blasts");
+    for _ in 0..3 {
+        h.frames(game, 2, |g, i| {
+            aimed(
+                g,
+                if i == 0 {
+                    Buttons::ALT_FIRE
+                } else {
+                    Buttons::NONE
+                },
+            )
+        });
+        h.frames(game, 30, still);
+    }
+    h.frames(game, 20, still);
+    h.shot("weapon_cinderbox_limpets");
+    h.frames(game, 24, |g, _| aimed(g, Buttons::ALT_FIRE));
+    h.frames(game, 3, still);
+    h.shot("weapon_cinderbox_limpets_detonate");
+    h.frames(game, 20, still);
+    select(game, 3, 1);
+    h.frames(game, 30, still);
+    h.frames(game, 2, |g, i| {
+        aimed(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 18, still);
+    h.shot("weapon_cinderbox_mortar");
+    h.frames(game, 50, still);
+
+    // The Longwick: a full draw, the release; a pinning arrow; the Kiln setting Moulds alight.
+    game.send_chat("/killall");
+    spawn(game, 4);
+    h.frames(game, 60, still);
+    game.send_chat("/loadout longwick:pinning,ember kiln:flare,discharge quill bellows");
+    h.frames(game, 20, still);
+    select(game, 0, 0);
+    h.frames(game, 10, still);
+    h.frames(game, 50, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("weapon_longwick_full_draw");
+    h.frames(game, 2, |g, _| aimed(g, Buttons::NONE));
+    h.shot("weapon_longwick_release");
+    h.frames(game, 6, still);
+    h.shot("weapon_longwick_arrow");
+    h.frames(game, 20, still);
+    // Arm the Pinning Arrow (a press), draw, loose.
+    h.frames(game, 2, |g, i| {
+        aimed(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 50, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("weapon_longwick_armed");
+    h.frames(game, 12, |g, _| aimed(g, Buttons::NONE));
+    h.shot("weapon_longwick_pinned");
+    h.frames(game, 20, still);
+    select(game, 1, 0);
+    h.frames(game, 10, still);
+    h.frames(game, 40, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("weapon_kiln");
+    h.frames(game, 20, |g, _| aimed(g, Buttons::NONE));
+    h.shot("weapon_kiln_burning");
+    game.send_chat("/loadout quill bellows arclash tumbler");
+    game.send_chat("/killall");
+    h.frames(game, 30, still);
+}
+
 /// The expansion arsenal's projectiles, blasts, burning patch and status effects, staged
 /// client-side with `InGame::preview_arsenal` (`arsenal_*.png`).
 fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
@@ -587,6 +753,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
 
     arsenal_previews(&mut h, &mut game);
+    arsenal_weapon_shots(&mut h, &mut game);
 
     // Enemies attacking: walking, winding up (we're still god-moded).
     game.send_chat("/notarget");

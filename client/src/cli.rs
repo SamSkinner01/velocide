@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use shared::lobby::GameMode;
+use shared::lobby::{Difficulty, GameMode};
 
 use crate::net::NetSimConfig;
 
@@ -19,7 +19,9 @@ GAME:
     --level <NAME>               level for --sp / --host (alone: single-player)
     --name <NAME>                player name (not saved)
     --max-players <N>            player slots when hosting (default from settings)
-    --mode <MODE>                hosting: campaign | deathmatch (default: last used)
+    --mode <MODE>                campaign | deathmatch | gungame | grind (hosting: default last
+                                 used; --sp: grind plays endless waves on an arena)
+    --difficulty <LEVEL>         campaign / grind: easy | normal | hard | brutal | inferno
     --ready                      ready up in the lobby automatically
     --autostart                  hosting: start the match when everyone is ready (implies --ready)
     --netsim <LAT,JIT,LOSS>      simulate one-way latency ms, jitter ms, loss % on this client
@@ -59,8 +61,10 @@ pub struct LaunchOptions {
     pub start: StartMode,
     pub name: Option<String>,
     pub max_players: Option<u32>,
-    /// Hosting: initial game mode.
+    /// Hosting: initial game mode. Single-player: grind on an arena.
     pub mode: Option<GameMode>,
+    /// PvE difficulty (single-player, hosting); default: the last one picked.
+    pub difficulty: Option<Difficulty>,
     /// Ready up in the lobby automatically (`--ready`, `--bot`, `--autostart`).
     pub ready: bool,
     /// Hosting: the server starts the match once everyone is ready.
@@ -84,6 +88,7 @@ impl Default for LaunchOptions {
             name: None,
             max_players: None,
             mode: None,
+            difficulty: None,
             ready: false,
             autostart: false,
             netsim: None,
@@ -179,10 +184,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
             }
             "--mode" => {
                 let v = value("--mode")?;
-                o.mode = Some(
-                    GameMode::parse(&v)
-                        .ok_or_else(|| format!("--mode: '{v}' is not campaign or deathmatch"))?,
-                );
+                o.mode = Some(GameMode::parse(&v).ok_or_else(|| {
+                    format!("--mode: '{v}' is not campaign, deathmatch, gungame or grind")
+                })?);
+            }
+            "--difficulty" => {
+                let v = value("--difficulty")?;
+                o.difficulty = Some(Difficulty::parse(&v).ok_or_else(|| {
+                    format!("--difficulty: '{v}' is not easy, normal, hard, brutal or inferno")
+                })?);
             }
             "--ready" => o.ready = true,
             "--autostart" => {

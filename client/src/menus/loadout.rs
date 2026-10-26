@@ -6,7 +6,8 @@
 //! player leaves and sends the loadout to the server: `NetClient::set_loadout`). Rules kept
 //! while editing: no weapon twice (picking a weapon another slot holds swaps the two slots),
 //! at least one weapon (the last one can't be emptied), the two abilities differ (picking the
-//! other one swaps them).
+//! other one swaps them). Gun game hands out its own weapons (`force_loadout`) and ignores
+//! the loadout; the screen says so.
 //!
 //! Numbers come from the tuning: in menus the local `assets/tuning.ron` in its PvE and PvP
 //! balance (`Tuning::for_mode`, shown as `PVE / PVP`), in game too (a match runs one of the
@@ -197,6 +198,10 @@ impl LoadoutMenu {
             p.name = p.name.to_uppercase();
             changed = true;
         }
+        ui.spacing(4.0);
+        let dim = TextStyle::new(ui.theme().ash);
+        ui.text("GUN GAME HANDS OUT ITS OWN", &dim);
+        ui.text("WEAPONS: IT IGNORES YOUR LOADOUT.", &dim);
         changed
     }
 
