@@ -4,10 +4,12 @@
 //! `$XDG_CONFIG_HOME/velocide/settings.ron`, else `~/.config/velocide/settings.ron`
 //! (`%APPDATA%\velocide\settings.ron` on Windows), else `./settings.ron`. A missing or invalid
 //! file gives the defaults (with a warning) and never stops the game; unknown fields are
-//! ignored and missing ones use their defaults, so old files keep working.
+//! ignored and missing ones use their defaults, so old files keep working. Accessibility
+//! options (colour vision, shape cues) are their own `accessibility` section.
 
 use std::path::{Path, PathBuf};
 
+use engine::color_vision::{ColorVision, ColorVisionMode};
 use engine::gfx::RetroSettings;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,50 @@ use crate::controls::Bindings;
 
 /// Crosshair styles offered in the menu.
 pub const CROSSHAIRS: [&str; 4] = ["CROSS + DOT", "CROSS", "DOT", "NONE"];
+
+/// When the extra non-colour cues (player marker shapes, the parry icon, health popups) show.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CueMode {
+    /// With any colour-vision mode.
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+impl CueMode {
+    pub const ALL: [CueMode; 3] = [CueMode::Auto, CueMode::On, CueMode::Off];
+    /// Menu labels, in [`CueMode::ALL`] order.
+    pub const LABELS: [&'static str; 3] = ["AUTO", "ON", "OFF"];
+
+    pub fn index(self) -> usize {
+        match self {
+            CueMode::Auto => 0,
+            CueMode::On => 1,
+            CueMode::Off => 2,
+        }
+    }
+}
+
+/// The ACCESSIBILITY page (its own section in the settings file).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Accessibility {
+    /// Colour-vision mode (palette swap + full-screen correction) and correction strength.
+    pub color_vision: ColorVision,
+    pub shape_cues: CueMode,
+}
+
+impl Accessibility {
+    /// Whether the non-colour cues are drawn right now.
+    pub fn shape_cues_on(&self) -> bool {
+        match self.shape_cues {
+            CueMode::Auto => self.color_vision.mode != ColorVisionMode::Off,
+            CueMode::On => true,
+            CueMode::Off => false,
+        }
+    }
+}
 
 /// Internal render heights offered as "resolution scale" (0 = native).
 pub const RESOLUTIONS: [(u32, &str); 5] = [
@@ -29,7 +75,8 @@ pub const RESOLUTIONS: [(u32, &str); 5] = [
 #[serde(default)]
 pub struct Settings {
     /// Every retro effect toggle, the internal resolution and vsync (also shake / flashes /
-    /// hitstop, which the game applies itself).
+    /// hitstop, which the game applies itself). Its `color_vision` is not saved here: the
+    /// renderer gets [`Settings::render_settings`], which fills it from `accessibility`.
     pub retro: RetroSettings,
     /// Horizontal field of view in degrees at 16:9 (wider screens see more, "Hor+").
     pub fov: f32,
@@ -65,6 +112,7 @@ pub struct Settings {
     pub view_bob: f32,
     pub show_viewmodel: bool,
     pub fullscreen: bool,
+    pub accessibility: Accessibility,
 }
 
 impl Default for Settings {
@@ -96,6 +144,7 @@ impl Default for Settings {
             view_bob: 1.0,
             show_viewmodel: true,
             fullscreen: false,
+            accessibility: Accessibility::default(),
         }
     }
 }
@@ -202,7 +251,18 @@ impl Settings {
         r.internal_height = r.internal_height.min(2160);
         r.vertex_snap_strength = finite_or(r.vertex_snap_strength, 1.0).clamp(0.25, 8.0);
         r.color_bits = r.color_bits.clamp(2, 8);
+        self.accessibility.color_vision = self.accessibility.color_vision.sanitized();
         self.bindings.fill_missing();
+    }
+
+    /// What the renderer gets: the retro options plus the colour-vision correction (which is
+    /// stored with the accessibility settings). Always pass this, not `retro`, to
+    /// `Renderer::apply_settings`.
+    pub fn render_settings(&self) -> RetroSettings {
+        RetroSettings {
+            color_vision: self.accessibility.color_vision,
+            ..self.retro.clone()
+        }
     }
 
     /// The mixer volumes (squared slider values: linear sliders feel bunched at the top).

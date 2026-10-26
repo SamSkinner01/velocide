@@ -201,7 +201,7 @@ fn main() -> anyhow::Result<()> {
     }
     rig.lobby(&mut host_common, &mut host, 2.0, |_| false);
     rig.extras[0].send_chat("arena or campaign? I want to try the cistern");
-    rig.extras[1].send_chat("cistern. loser buys the prisms");
+    rig.extras[1].send_chat("cistern. loser buys the thorns");
     rig.extras[0].set_ready(true);
     rig.extras[2].set_ready(true);
     rig.lobby(&mut host_common, &mut host, 0.5, |_| false);

@@ -1,7 +1,7 @@
 //! Replicated entity state, quantisation and snapshot delta compression.
 //!
-//! Every replicated thing (players, doors, and later enemies, projectiles, pickups, prisms,
-//! blood orbs...) is a generic [`NetEntity`] identified by a [`NetId`]. The server builds one
+//! Every replicated thing (players, doors, and later enemies, projectiles, pickups, thorns,
+//! healing bursts...) is a generic [`NetEntity`] identified by a [`NetId`]. The server builds one
 //! [`NetFrame`] (all entities, quantised) per snapshot and encodes it for each client as a
 //! **delta** against the last frame that client acknowledged ([`encode_delta`]); the client
 //! applies it to its copy of the same baseline ([`decode_delta`]). A full snapshot is simply a
@@ -79,9 +79,9 @@ impl NetId {
 /// (keep them stable: they are part of the protocol).
 pub mod kind {
     /// A player (`owner` = player id). `flags` = [`super::player_flags`]; `state` = weapon
-    /// (bits 0–3) | alt mode (bits 4–5) | Overcharge charge (bits 8–15); `health` = health;
-    /// `aux` = hard damage (bits 0–7) | prism charges (8–11) | live stickies (12–15) |
-    /// wall-cling normal as a quantised yaw (16–31, while `WALL_CLING`). See `docs/combat.md`.
+    /// (bits 0–3) | alt mode (bits 4–5) | Discharge charge (bits 8–15); `health` = health;
+    /// `aux` = hard damage (bits 0–7) | thorn charges (8–11) | (12–15 unused) | wall-cling
+    /// normal as a quantised yaw (16–31, while `WALL_CLING`). See `docs/combat.md`.
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
@@ -102,15 +102,16 @@ pub mod kind {
     pub const HERON: u16 = 24;
 
     // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
-    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left.
+    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–69 are retired
+    // (the first arsenal's rivet, sawblade, rocket, flak, sticky, mortar).
     pub const PROJECTILE_FIRST: u16 = 64;
     pub const PROJECTILE_LAST: u16 = 127;
-    pub const RIVET: u16 = 64;
-    pub const SAWBLADE: u16 = 65;
-    pub const ROCKET: u16 = 66;
-    pub const FLAK: u16 = 67;
-    pub const STICKY: u16 = 68;
-    pub const MORTAR: u16 = 69;
+    /// Tumbler bomb (`state` = world bounces left before it explodes).
+    pub const BOMB: u16 = 72;
+    /// Tumbler Gravewell canister (`STUCK` while it pulls).
+    pub const GRAVEWELL: u16 = 73;
+    /// Arclash Wisp (ball of lightning).
+    pub const WISP: u16 = 74;
     // 70, 71: retired enemy projectiles. 80..: enemy projectiles.
     /// The Censer's lobbed ember bomb (explodes on impact, parryable).
     pub const EMBER_BOMB: u16 = 80;
@@ -121,9 +122,12 @@ pub mod kind {
     /// Heal pool: `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
     pub const BLOOD_BURST: u16 = 128;
 
-    // 160..176: prisms.
-    /// Ricochet prism, replicated by trajectory like projectiles; `owner` = thrower.
-    pub const PRISM: u16 = 160;
+    // 160..176: thorns.
+    /// Thrown relay spike, replicated by trajectory like projectiles (gravity
+    /// `thorn.gravity`); `owner` = thrower; `flags` = [`super::thorn_flags`]. While `PLANTED`,
+    /// `position` is where it sits and `velocity` its orientation (the flight direction it
+    /// planted along, unit length).
+    pub const THORN: u16 = 160;
 
     pub fn is_enemy(kind: u16) -> bool {
         (ENEMY_FIRST..=ENEMY_LAST).contains(&kind)
@@ -158,7 +162,7 @@ pub mod player_flags {
     pub const DEAD: u32 = 1 << 2;
     /// Parry window open (punch pose).
     pub const PARRY: u32 = 1 << 3;
-    /// Charging the Lancet Overcharge (charge level in `state` bits 8–15).
+    /// Charging the Arclash Discharge (charge level in `state` bits 8–15).
     pub const CHARGING: u32 = 1 << 4;
     /// Spawn protection / god mode: can't be hurt.
     pub const PROTECTED: u32 = 1 << 5;
@@ -171,6 +175,8 @@ pub mod player_flags {
     pub const SLAMMING: u32 = 1 << 10;
     /// Clinging to a wall; `aux` bits 16–31 hold the wall normal's yaw (`quantize_yaw`).
     pub const WALL_CLING: u32 = 1 << 11;
+    /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area).
+    pub const BRANDED: u32 = 1 << 15;
 }
 
 /// Flag bits of enemy entities.
@@ -192,13 +198,17 @@ pub mod enemy_flags {
     pub const AIMING: u32 = 1 << 6;
     /// The aim laser has locked (the last moments before the shot: dodge now).
     pub const AIM_LOCKED: u32 = 1 << 7;
+    /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area; the
+    /// brand lives in a `SimWorld` side table and is OR-ed in by `SimWorld::replicate`).
+    pub const BRANDED: u32 = 1 << 15;
 }
 
 /// Flag bits of projectile entities.
 pub mod projectile_flags {
-    /// Deflected by a punch: flies straight (no gravity), now owned by the parrier.
+    /// Deflected by a punch or a Gust: flies straight (no gravity), now owned by the
+    /// deflector.
     pub const PARRIED: u32 = 1 << 0;
-    /// Stuck to the level / a target: `position` is current (no trajectory).
+    /// Stuck to the level (a Gravewell pulling): `position` is current (no trajectory).
     pub const STUCK: u32 = 1 << 1;
     /// Touched a player and waits out the parry tolerance at `position`.
     pub const PENDING: u32 = 1 << 2;
@@ -212,10 +222,15 @@ pub mod blood_flags {
     pub const BIG: u32 = 1 << 0;
 }
 
-/// Flag bits of prisms.
-pub mod prism_flags {
-    /// Lying still: `position` is current (no trajectory).
-    pub const RESTING: u32 = 1 << 0;
+/// Flag bits of thorns.
+pub mod thorn_flags {
+    /// Not moving (planted in a surface or lying on the floor): `position` is current, no
+    /// trajectory; `velocity` is its orientation.
+    pub const PLANTED: u32 = 1 << 0;
+    /// Lying on the floor after hitting a target (drawn flat, not stuck in).
+    pub const LYING: u32 = 1 << 1;
+    /// Dropping to the floor after hitting a target (tumbling, trajectory with gravity).
+    pub const DROPPING: u32 = 1 << 2;
 }
 
 /// Flag bits of door entities.

@@ -22,6 +22,7 @@ use shared::sim::style::rank_name;
 use shared::sim::{LifeState, MatchPhase, ModeEvent, PlayerId, Scoreboard};
 
 use super::InGame;
+use super::cues;
 use super::hud::{Hud, project};
 use super::remote_players::{RemotePlayers, player_color};
 use super::scoreboard::{ScoreColumn, ScoreRow};
@@ -349,7 +350,8 @@ impl ModeHud {
                 continue;
             }
             let col = player_color(row.player);
-            draw::fill(list, Rect::new(vec2(x, y), vec2(x + 3.0, y + 7.0)), col);
+            let (slot, ink) = (row.player.0 as usize, fade(t.ink, 0.85));
+            cues::player_swatch(list, vec2(x, y), vec2(3.0, 7.0), slot, col, ink);
             let name = engine::ui::text::truncate(&name_of(info.players, row.player), 90.0, 1.0);
             list.text(
                 vec2(x + 7.0, y),

@@ -2,9 +2,9 @@
 //! [`DamageFlags`], [`DamageInfo`]), player vitals ([`PlayerCombat`]), the **single damage
 //! pipeline** ([`SimWorld::apply_damage`]) and the default death/respawn rule.
 //!
-//! Everything that hurts anything goes through `apply_damage`: it applies the rules (dash
-//! i-frames, spawn protection, friendly fire, self damage, armour, weak points, hard damage),
-//! knockback, blood bursts, aggro and kills, and emits [`SimEvent::Damage`] /
+//! Everything that hurts anything goes through `apply_damage`: it applies the rules (brands,
+//! dash i-frames, spawn protection, friendly fire, self damage, armour, weak points, hard
+//! damage), knockback, healing bursts, aggro and kills, and emits [`SimEvent::Damage`] /
 //! [`SimEvent::Killed`]. Those events are what the server turns into hit markers, damage
 //! indicators and the kill feed, and what the style system scores.
 
@@ -55,31 +55,34 @@ impl Owner {
 /// identifiers for the kill feed, style scoring ("variety") and sounds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Attack {
-    /// Lancet primary.
+    /// Quill primary: precision hitscan quill.
     #[default]
-    Lancet,
-    /// Lancet alt A: charged piercing beam.
-    Overcharge,
-    /// Lancet alt B: 3-shot fan.
-    Fan,
-    /// Thresher primary (one pellet).
-    Pellet,
-    /// Thresher alt A.
-    Slug,
-    /// Thresher alt B grenade.
-    Flak,
-    /// Riveter primary.
-    Rivet,
-    /// Riveter alt A.
-    Sawblade,
-    /// Riveter alt B (one rivet of the ring).
-    Volley,
-    /// Cinderbox primary.
-    Rocket,
-    /// Cinderbox alt A.
-    Sticky,
-    /// Cinderbox alt B.
-    Mortar,
+    Quill,
+    /// Quill alt A: marking shot (brands what it hits).
+    Brand,
+    /// Quill alt B: the main shot and each of the splinters it bursts into.
+    Splinter,
+    /// Bellows primary (one pellet).
+    Blast,
+    /// Bellows alt A: compressed-air cone (knockback, deflects projectiles). A projectile it
+    /// turned around deals its damage as `Gust` too.
+    Gust,
+    /// Bellows alt B: both barrels at once (one pellet).
+    BothBarrels,
+    /// Arclash primary: one zap (and each chain jump).
+    Arc,
+    /// Arclash alt A: the ball of lightning's zaps and its pop.
+    Wisp,
+    /// Arclash alt B: the charged nova.
+    Discharge,
+    /// Tumbler primary: bouncing bomb.
+    Tumble,
+    /// Tumbler alt A: point-blank charge.
+    Breach,
+    /// Tumbler alt B: the canister's implosion.
+    Gravewell,
+    /// A thrown thorn hitting something in flight.
+    Thorn,
     /// Punch (also the counter damage of a melee parry).
     Fist,
     /// Slam landing shockwave.
@@ -94,13 +97,13 @@ pub enum Attack {
 }
 
 impl Attack {
-    /// The weapon this attack belongs to (`None` for fist, slam, enemies, world).
+    /// The weapon this attack belongs to (`None` for thorn, fist, slam, enemies, world).
     pub fn weapon(self) -> Option<Weapon> {
         Some(match self {
-            Attack::Lancet | Attack::Overcharge | Attack::Fan => Weapon::Lancet,
-            Attack::Pellet | Attack::Slug | Attack::Flak => Weapon::Thresher,
-            Attack::Rivet | Attack::Sawblade | Attack::Volley => Weapon::Riveter,
-            Attack::Rocket | Attack::Sticky | Attack::Mortar => Weapon::Cinderbox,
+            Attack::Quill | Attack::Brand | Attack::Splinter => Weapon::Quill,
+            Attack::Blast | Attack::Gust | Attack::BothBarrels => Weapon::Bellows,
+            Attack::Arc | Attack::Wisp | Attack::Discharge => Weapon::Arclash,
+            Attack::Tumble | Attack::Breach | Attack::Gravewell => Weapon::Tumbler,
             _ => return None,
         })
     }
@@ -108,18 +111,19 @@ impl Attack {
     /// Display name (kill feed).
     pub fn name(self) -> &'static str {
         match self {
-            Attack::Lancet => "Lancet",
-            Attack::Overcharge => "Overcharge",
-            Attack::Fan => "Fan",
-            Attack::Pellet => "Thresher",
-            Attack::Slug => "Slug",
-            Attack::Flak => "Flak",
-            Attack::Rivet => "Riveter",
-            Attack::Sawblade => "Sawblade",
-            Attack::Volley => "Volley",
-            Attack::Rocket => "Cinderbox",
-            Attack::Sticky => "Sticky",
-            Attack::Mortar => "Mortar",
+            Attack::Quill => "Quill",
+            Attack::Brand => "Brand",
+            Attack::Splinter => "Splinter",
+            Attack::Blast => "Bellows",
+            Attack::Gust => "Gust",
+            Attack::BothBarrels => "Both Barrels",
+            Attack::Arc => "Arclash",
+            Attack::Wisp => "Wisp",
+            Attack::Discharge => "Discharge",
+            Attack::Tumble => "Tumbler",
+            Attack::Breach => "Breach",
+            Attack::Gravewell => "Gravewell",
+            Attack::Thorn => "Thorn",
             Attack::Fist => "Fist",
             Attack::Slam => "Slam",
             Attack::Enemy { .. } => "Enemy",
@@ -136,17 +140,17 @@ pub struct DamageFlags(pub u32);
 
 impl DamageFlags {
     pub const NONE: DamageFlags = DamageFlags(0);
-    /// Instant ray (Lancet, Thresher pellets/slug).
+    /// Instant ray (Quill shots and splinters, Bellows pellets, Arclash zaps).
     pub const HITSCAN: DamageFlags = DamageFlags(1 << 0);
-    /// Direct projectile impact (rivet, saw, orb...).
+    /// Direct projectile impact (thorn, enemy projectiles...).
     pub const PROJECTILE: DamageFlags = DamageFlags(1 << 1);
-    /// Explosion splash (rocket, flak, sticky, mortar).
+    /// Explosion splash (bomb, breach, gravewell implosion, wisp pop).
     pub const EXPLOSIVE: DamageFlags = DamageFlags(1 << 2);
     /// Punch / melee swipe.
     pub const MELEE: DamageFlags = DamageFlags(1 << 3);
     /// Dealt by a deflected (parried) projectile, or the counter-hit of a melee parry.
     pub const PARRIED: DamageFlags = DamageFlags(1 << 4);
-    /// The shot ricocheted off at least one prism (see [`DamageInfo::ricochets`]).
+    /// The shot ricocheted off at least one thorn (see [`DamageInfo::ricochets`]).
     pub const RICOCHET: DamageFlags = DamageFlags(1 << 5);
     /// Slam shockwave.
     pub const SLAM: DamageFlags = DamageFlags(1 << 6);
@@ -156,8 +160,8 @@ impl DamageFlags {
     pub const WEAK_POINT: DamageFlags = DamageFlags(1 << 8);
     /// The victim is the source (own explosion).
     pub const SELF: DamageFlags = DamageFlags(1 << 9);
-    /// A piercing beam already passed through another target.
-    pub const PIERCED: DamageFlags = DamageFlags(1 << 10);
+    /// An Arclash zap that jumped from another target (chain).
+    pub const CHAINED: DamageFlags = DamageFlags(1 << 10);
     /// A deflected projectile hit the one who originally fired it (RETURN TO SENDER).
     pub const RETURNED: DamageFlags = DamageFlags(1 << 11);
     /// Kill volume / out of the level.
@@ -166,6 +170,8 @@ impl DamageFlags {
     pub const ARMOURED: DamageFlags = DamageFlags(1 << 13);
     /// The victim was standing in the explosion's centre / hit directly by the explosive.
     pub const DIRECT: DamageFlags = DamageFlags(1 << 14);
+    /// The victim was branded: the damage was multiplied by `quill.brand_multiplier`.
+    pub const BRANDED: DamageFlags = DamageFlags(1 << 15);
 
     pub fn contains(self, other: DamageFlags) -> bool {
         self.0 & other.0 == other.0 && other.0 != 0
@@ -206,7 +212,7 @@ pub struct DamageInfo {
     /// scaled by their `knockback_scale`).
     pub knockback: Vec3,
     pub flags: DamageFlags,
-    /// Prism bounces before this hit (each multiplied the damage).
+    /// Thorn bounces before this hit (each multiplied the damage).
     pub ricochets: u8,
     /// The projectile that dealt it, if any.
     pub projectile: Option<NetId>,
@@ -291,7 +297,7 @@ pub struct KillInfo {
     pub flags: DamageFlags,
     pub part: HitPart,
     pub position: Vec3,
-    /// Prism bounces of the killing shot.
+    /// Thorn bounces of the killing shot.
     pub ricochets: u8,
     /// The killer (a player) was in the air.
     pub killer_airborne: bool,
@@ -326,7 +332,7 @@ pub struct PlayerCombat {
     pub protection: u16,
     /// Dev `/god`: never takes damage.
     pub god: bool,
-    /// Weapons, fist, prisms (predictable by the owning client).
+    /// Weapons, fist, thorns (predictable by the owning client).
     pub weapons: WeaponState,
     /// Tick of the last damage taken (0 = never).
     pub last_hurt_tick: u32,
@@ -411,7 +417,15 @@ impl SimWorld {
 
     /// THE damage pipeline. Applies `info` to `target` with every rule, emits
     /// [`SimEvent::Damage`] (and [`SimEvent::Killed`]) and returns the outcome.
-    pub fn apply_damage(&mut self, t: &Tuning, target: HitTarget, info: DamageInfo) -> DamageEvent {
+    ///
+    /// A branded target (see [`SimWorld::brand_target`]) takes `quill.brand_multiplier` ×
+    /// the damage from every source (flag [`DamageFlags::BRANDED`]); the world and dev
+    /// commands are exempt.
+    pub fn apply_damage(&mut self, t: &Tuning, target: HitTarget, mut info: DamageInfo) -> DamageEvent {
+        if !matches!(info.attack, Attack::World | Attack::Dev) && self.is_branded(target) {
+            info.amount *= t.combat.quill.brand_multiplier;
+            info.flags.insert(DamageFlags::BRANDED);
+        }
         let event = match target {
             HitTarget::Player(id) => self.damage_player(t, id, info),
             HitTarget::Entity(id) => self.damage_enemy(t, id, info),
@@ -420,6 +434,7 @@ impl SimWorld {
             self.events.push(SimEvent::Damage(event));
         }
         if event.killed {
+            self.brands.remove(&target);
             self.on_killed(t, &event);
         }
         event
@@ -477,7 +492,7 @@ impl SimWorld {
                 event.blocked = Some(Blocked::Invulnerable);
             }
         }
-        // Knockback: always for explosions (rocket jumps, teammates' blasts, through
+        // Knockback: always for explosions (blast jumps, teammates' blasts, through
         // i-frames); otherwise only when the hit counts.
         let kb_applies = event.blocked.is_none()
             || (explosive && event.blocked != Some(Blocked::God))
@@ -506,7 +521,7 @@ impl SimWorld {
         if p.combat.damage >= c.max_health {
             event.killed = true;
         }
-        // PvP: damaging another player spawns a blood burst too (players compete for it).
+        // PvP: damaging another player spawns a healing burst too (players compete for it).
         if let Owner::Player(_) = info.source
             && !is_self
             && dealt > 0.0

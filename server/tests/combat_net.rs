@@ -281,7 +281,7 @@ fn lag_compensated_hit_at_100ms_latency() {
         "the target moved {} m: a real test",
         r.offset
     );
-    assert_eq!(r.dealt, 22.0, "hit as seen");
+    assert_eq!(r.dealt, 24.0, "hit as seen");
     let r = lag_comp_shot(50.0, 0.0);
     assert_eq!(
         r.dealt, 0.0,
@@ -296,7 +296,7 @@ fn lag_compensated_hit_at_100ms_latency() {
         r.offset, r.rewind_ms, r.dealt
     );
     assert!(r.offset > 4.0);
-    assert_eq!(r.dealt, 22.0, "hit as seen");
+    assert_eq!(r.dealt, 24.0, "hit as seen");
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn cover_blocks_shots_over_the_network() {
 }
 
 #[test]
-fn rocket_jump_reconciles() {
+fn breach_jump_reconciles() {
     let mut n = Net::new(config());
     let a = n.add("Jumper", latency(50.0, 5));
     n.wait_in_game();
@@ -359,7 +359,7 @@ fn rocket_jump_reconciles() {
         let mut inp = idle(0.0);
         inp.weapon = 3;
         inp.pitch = -1.5;
-        inp.buttons.set(Buttons::FIRE, c.ticks == fire);
+        inp.buttons.set(Buttons::ALT_FIRE, c.ticks == fire);
         inp.buttons.set(Buttons::JUMP, c.ticks == fire);
         Some(inp)
     };
@@ -380,7 +380,7 @@ fn rocket_jump_reconciles() {
         })
         .expect("self damage reported");
     println!(
-        "rocket jump: apex {max_y:.2} m (a jump alone: ~2.6 m), self damage {:.1}, corrections {}, max error at ack {:.3} m, snaps {}",
+        "breach jump: apex {max_y:.2} m (a jump alone: ~2.6 m), self damage {:.1}, corrections {}, max error at ack {:.3} m, snaps {}",
         damaged.amount, s.corrections, s.max_correction_m, s.correction_snaps
     );
     assert!(
@@ -388,8 +388,8 @@ fn rocket_jump_reconciles() {
             .flags
             .contains(DamageFlags::SELF | DamageFlags::EXPLOSIVE)
     );
-    assert_eq!(damaged.attack, Attack::Rocket);
-    assert!(max_y > 4.0, "rocket jump apex {max_y}");
+    assert_eq!(damaged.attack, Attack::Breach);
+    assert!(max_y > 4.0, "breach jump apex {max_y}");
     assert!(
         s.corrections >= 1 && s.corrections <= 3,
         "{} corrections",
@@ -539,57 +539,68 @@ fn gnawer_chases_and_hits_a_client() {
     assert!(n.health(id) <= 86.0, "bitten (14)");
 }
 
+/// A stationary 20 HP target defined here (independent of the enemy roster).
+fn target_dummy() -> shared::sim::EnemyDef {
+    shared::sim::EnemyDef::parse(
+        "(name: \"Dummy\", net_kind: 60, model: \"dummy\", health: 20.0, speed: 0.0,
+          acceleration: 60.0, radius: 0.45, height: 1.9, body_top: Some(1.45),
+          weak_points: [(name: \"head\", kind: Head, offset: (0.0, 1.66, 0.0), radius: 0.26,
+          multiplier: 2.0)])",
+    )
+    .expect("dummy definition")
+}
+
 #[test]
-fn every_weapon_mode_damages_husks_over_the_network() {
+fn every_weapon_mode_damages_targets_over_the_network() {
     let mut n = Net::new(config());
     let a = n.add("Gunner", latency(30.0, 8));
     n.wait_in_game();
     let id = n.clients[a].id();
     n.place(id, Vec3::ZERO);
     n.server.world_mut().players.get_mut(&id).unwrap().notarget = true;
-    // (weapon, mode, button, distance)
-    let cases: [(u8, u8, Buttons, f32, &str); 12] = [
-        (0, 0, Buttons::FIRE, 12.0, "lancet"),
-        (0, 0, Buttons::ALT_FIRE, 12.0, "overcharge"),
-        (0, 1, Buttons::ALT_FIRE, 12.0, "fan"),
-        (1, 0, Buttons::FIRE, 6.0, "thresher"),
-        (1, 0, Buttons::ALT_FIRE, 12.0, "slug"),
-        (1, 1, Buttons::ALT_FIRE, 6.0, "flak"),
-        (2, 0, Buttons::FIRE, 10.0, "rivets"),
-        (2, 0, Buttons::ALT_FIRE, 10.0, "sawblade"),
-        (2, 1, Buttons::ALT_FIRE, 2.5, "volley"),
-        (3, 0, Buttons::FIRE, 12.0, "rocket"),
-        (3, 0, Buttons::ALT_FIRE, 8.0, "sticky"),
-        (3, 1, Buttons::ALT_FIRE, 20.0, "mortar"),
+    n.server
+        .world_mut()
+        .enemy_defs
+        .insert("dummy", target_dummy());
+    // (weapon, mode, button, distance, name, ticks held)
+    let cases: [(u8, u8, Buttons, f32, &str, u32); 12] = [
+        (0, 0, Buttons::FIRE, 12.0, "quill", 1),
+        (0, 0, Buttons::ALT_FIRE, 12.0, "brand", 1),
+        (0, 1, Buttons::ALT_FIRE, 12.0, "splinter", 1),
+        (1, 0, Buttons::FIRE, 6.0, "bellows", 1),
+        (1, 0, Buttons::ALT_FIRE, 5.0, "gust", 1),
+        (1, 1, Buttons::ALT_FIRE, 6.0, "both barrels", 1),
+        (2, 0, Buttons::FIRE, 10.0, "arc", 1),
+        (2, 0, Buttons::ALT_FIRE, 4.0, "wisp", 1),
+        (2, 1, Buttons::ALT_FIRE, 5.0, "discharge", 40),
+        (3, 0, Buttons::FIRE, 10.0, "tumbler", 1),
+        (3, 0, Buttons::ALT_FIRE, 2.5, "breach", 1),
+        (3, 1, Buttons::ALT_FIRE, 10.0, "gravewell", 1),
     ];
-    for (weapon, mode, button, dist, name) in cases {
+    for (weapon, mode, button, dist, name, hold) in cases {
         n.server.kill_all_enemies();
         n.run(1.0, &mut |_, _| Some(idle(0.0)));
-        let husk =
+        let target =
             n.server
-                .spawn_enemies("gnawer", Vec3::new(0.0, 0.0, -dist), std::f32::consts::PI, 1)[0];
+                .spawn_enemies("dummy", Vec3::new(0.0, 0.0, -dist), std::f32::consts::PI, 1)[0];
         n.run(0.5, &mut |_, _| Some(idle(0.0)));
         let start = n.clients[a].ticks;
-        let sticky = name == "sticky";
-        let mortar = name == "mortar";
-        let hold = if name == "overcharge" { 50 } else { 1 };
+        // Bombs drop on the way: aim at the head.
+        let lift = if name == "tumbler" { 1.6 } else { 0.8 };
         let mut input = |_: usize, c: &TestClient| {
             let mut inp = idle(0.0);
             inp.weapon = weapon;
             inp.weapon_mode = mode;
-            let target = c
+            let aim = c
                 .net
-                .remote_entity(husk)
-                .map(|e| e.position + Vec3::Y * if sticky { 1.6 } else { 0.8 })
+                .remote_entity(target)
+                .map(|e| e.position + Vec3::Y * lift)
                 .unwrap_or(Vec3::new(0.0, 1.0, -dist));
-            let (yaw, pitch) = if mortar { (0.0, 0.0) } else { c.aim_at(target) };
+            let (yaw, pitch) = c.aim_at(aim);
             inp.yaw = yaw;
             inp.pitch = pitch;
             let t = c.ticks - start;
-            let pressed = t >= 10 && t < 10 + hold
-                // Sticky: press again later to detonate.
-                || (sticky && t == 80);
-            inp.buttons.set(button, pressed);
+            inp.buttons.set(button, t >= 10 && t < 10 + hold);
             Some(inp)
         };
         n.run(3.0, &mut input);
@@ -597,13 +608,13 @@ fn every_weapon_mode_damages_husks_over_the_network() {
             .server
             .world()
             .enemies
-            .get(&husk)
+            .get(&target)
             .map_or(0.0, |e| e.health.max(0.0));
         let confirmed = n.clients[a].game_events().any(|e| {
-            matches!(e, GameEvent::HitConfirm(h) if h.target == HitTarget::Entity(husk) && h.damage > 0.0)
+            matches!(e, GameEvent::HitConfirm(h) if h.target == HitTarget::Entity(target) && h.damage > 0.0)
         });
-        println!("{name}: husk health {health:.0}, hit confirmed {confirmed}");
-        assert!(health < 45.0, "{name} damaged the gnawer");
+        println!("{name}: target health {health:.0}, hit confirmed {confirmed}");
+        assert!(health < 20.0, "{name} damaged the target");
         assert!(confirmed, "{name}: client got a hit confirm");
     }
     let kills = n.clients[a]
@@ -614,7 +625,7 @@ fn every_weapon_mode_damages_husks_over_the_network() {
 }
 
 #[test]
-fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
+fn bandwidth_with_8_players_50_gnawers_and_150_projectiles() {
     let mut n = Net::new(config());
     let clients: Vec<usize> = (0..4)
         .map(|i| n.add(&format!("P{i}"), latency(30.0, 10 + i as u64)))
@@ -642,6 +653,7 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
             right: if (t / 60).is_multiple_of(2) { 90 } else { -90 },
             yaw: t as f32 * 0.02 + i as f32,
             pitch: 0.9,
+            // Arclash: a zap every 0.1 s.
             weapon: 2,
             ..Default::default()
         };
@@ -660,13 +672,18 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
                 let w = n.server.world_mut();
                 for k in 0..(150 - live).min(4) {
                     let a = (w.tick as f32 + k as f32) * 0.37;
-                    w.spawn_projectile(
+                    // Wisps high above everything (no gravity, nothing to zap), kept alive
+                    // 5 s like any long flight.
+                    let id = w.spawn_projectile(
                         &tuning,
-                        ProjectileKind::Rocket,
+                        ProjectileKind::Wisp,
                         Owner::Player(PlayerId(0)),
                         Vec3::new(a.cos() * 30.0, 40.0, a.sin() * 30.0),
                         Vec3::new(-a.sin() * 20.0, 5.0, a.cos() * 20.0),
                     );
+                    if let Some(p) = id.and_then(|id| w.projectiles.get_mut(&id)) {
+                        p.expire_tick = p.spawn_tick + 300;
+                    }
                     topped_up += 1;
                 }
             }
@@ -686,7 +703,7 @@ fn bandwidth_with_8_players_50_husks_and_150_projectiles() {
     let entity_avg = (after.entity_bytes - before.entity_bytes) as f64 / snapshots;
     let fx_per_snapshot = (after.fx_sent - before.fx_sent) as f64 / snapshots;
     println!(
-        "8 players (4 clients + 4 bots), {} husks, {} projectiles live (max {max_projectiles}, {topped_up} spawned by the test):",
+        "8 players (4 clients + 4 bots), {} gnawers, {} projectiles live (max {max_projectiles}, {topped_up} spawned by the test):",
         after.enemies, after.projectiles
     );
     println!(

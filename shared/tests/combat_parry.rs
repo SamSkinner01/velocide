@@ -1,6 +1,7 @@
 //! Parry: projectile deflection at 0 and ~200 ms of view lag (≈100 ms RTT + interpolation),
-//! the delayed-damage tolerance window, too-late failures, the flak punch combo, the
-//! telegraphed melee parry hook and the Harrier swat (a parry during its dive) under lag.
+//! the delayed-damage tolerance window, too-late failures, players' projectiles (not punchable;
+//! the Gust turns them around), the telegraphed melee parry hook and the Harrier swat (a parry
+//! during its dive) under lag.
 
 mod combat_support;
 
@@ -195,58 +196,65 @@ fn parry_window_catches_projectiles_arriving_during_it() {
 }
 
 #[test]
-fn punching_your_own_flak_launches_it() {
+fn players_projectiles_are_not_punchable() {
+    // No parryable grenades: the fist does nothing to your own (or anyone's) bombs, wisps and
+    // gravewells; the Bellows Gust is how you turn a player's projectile around.
+    for kind in [ProjectileKind::Bomb, ProjectileKind::Wisp, ProjectileKind::Gravewell] {
+        assert!(!kind.parryable(), "{kind:?}");
+        assert!(!kind.owner_can_parry(), "{kind:?}");
+    }
     let mut a = Arena::coop();
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.ticks(5);
-    a.select(p, 1, 1);
-    a.held.get_mut(&p).unwrap().pitch = 0.2;
+    a.select(p, 2, 0);
+    a.held.get_mut(&p).unwrap().pitch = 0.0;
     a.tap(p, Buttons::ALT_FIRE, 3);
-    let flak = *a.world.projectiles.keys().next().expect("flak");
-    let before = a.world.projectiles[&flak].velocity.length();
-    let ev = a.tap(p, Buttons::PUNCH, 0);
-    let parried = parries(&ev);
-    assert_eq!(parried.len(), 1, "own flak is punchable");
-    let f = &a.world.projectiles[&flak];
-    assert!(f.parried && f.gravity == 0.0);
-    assert!(
-        (f.velocity.length() - 28.0 * 2.0).abs() < 0.1,
-        "2x speed: {} (was {before})",
-        f.velocity.length()
-    );
-    assert_eq!(f.explosion.unwrap().damage, 110.0, "2x damage");
-    // Own rockets are not punchable.
-    a.select(p, 3, 0);
-    a.ticks(60);
-    a.tap(p, Buttons::FIRE, 1);
+    let wisp = *a.world.projectiles.keys().next().expect("wisp");
     let ev = a.tap(p, Buttons::PUNCH, 0);
     assert!(parries(&ev).is_empty());
+    assert!(!a.world.projectiles[&wisp].parried);
 }
 
 #[test]
-fn pvp_players_parry_each_others_rockets() {
+fn pvp_players_gust_back_each_others_bombs() {
     let mut a = Arena::pvp();
     let p0 = a.player(0, Vec3::ZERO, 0.0);
-    let p1 = a.player(1, Vec3::new(0.0, 0.0, -25.0), PI);
+    let p1 = a.player(1, Vec3::new(0.0, 0.0, -10.0), PI);
     a.ticks(5);
     a.select(p1, 3, 0);
     let target = a.eye(p0);
     a.aim(p1, target);
     a.tap(p1, Buttons::FIRE, 0);
-    let rocket = *a.world.projectiles.keys().next().unwrap();
+    let bomb = *a.world.projectiles.keys().next().unwrap();
+    // A punch does nothing to it ...
     let mut ev = Vec::new();
     for _ in 0..60 {
-        let d = a.world.projectiles[&rocket].position.distance(a.eye(p0));
-        if d < 2.5 {
+        let d = a.world.projectiles[&bomb].position.distance(a.eye(p0));
+        if d < 6.0 {
             break;
         }
         ev.extend(a.tick());
     }
-    ev.extend(a.tap(p0, Buttons::PUNCH, 60));
-    assert_eq!(parries(&ev).len(), 1);
-    assert_eq!(a.health(p0), 100.0);
-    // Back to sender: the shooter takes the doubled rocket.
-    assert!(damage_to(&ev, HitTarget::Player(p1)) > 70.0);
+    ev.extend(a.tap(p0, Buttons::PUNCH, 0));
+    assert!(parries(&ev).is_empty());
+    assert!(!a.world.projectiles[&bomb].parried);
+    // ... a Gust sends it back: the shooter takes it, x1.5.
+    a.select(p0, 1, 0);
+    let back = a.eye(p1);
+    a.aim(p0, back);
+    let ev = a.tap(p0, Buttons::ALT_FIRE, 40);
+    assert!(ev.iter().any(|e| matches!(e, SimEvent::Deflected { player, .. } if *player == p0)));
+    assert!(a.health(p0) >= 94.0, "only the gust's own recoil, no blast: {}", a.health(p0));
+    let hit = ev
+        .iter()
+        .find_map(|e| match e {
+            SimEvent::Damage(d) if d.target == HitTarget::Player(p1) => Some(*d),
+            _ => None,
+        })
+        .expect("back to sender");
+    assert!(hit.info.flags.contains(DamageFlags::RETURNED | DamageFlags::EXPLOSIVE));
+    assert_eq!(hit.info.attack, Attack::Gust);
+    assert!(hit.dealt > 70.0, "{}", hit.dealt);
 }
 
 /// A test brute with a telegraphed, parryable slam (the hook in general; the Gaoler's bash is

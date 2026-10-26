@@ -86,7 +86,7 @@
         respawn_delay: 2.0,             // default death rule (game modes replace it)
         spawn_protection: 1.5,
         player_head_multiplier: 2.0,    // PvP headshots
-        self_damage_fraction: 0.35,     // own explosions (knockback stays full: rocket jumps)
+        self_damage_fraction: 0.35,     // own explosions (knockback stays full: blast jumps)
         hitscan_range: 400.0,
 
         // Fist / parry
@@ -129,101 +129,124 @@
             merge_distance: 1.0,
             merge_window: 0.2,
         ),
-        prism: (
-            charges: 4,
-            recharge_time: 2.5,
-            throw_speed: 18.0,
-            throw_up_speed: 6.0,
-            gravity: 20.0,
-            lifetime: 4.0,
-            radius: 0.2,
+        // Hit assist: player-owned attacks test against shapes this much bigger (m).
+        hit_assist: (
+            enemy_body_pad: 0.2,
+            enemy_weak_pad: 0.1,  // weak points / heads
+            player_body_pad: 0.12, // PvP
+            player_head_pad: 0.06,
+        ),
+        // Thrown relay spikes: plant in the world; Quill shots ricochet off them.
+        thorn: (
+            charges: 3,
+            recharge_time: 3.0,
+            throw_speed: 30.0,
+            inherit_velocity: 0.5, // of the thrower's velocity
+            gravity: 12.0,
+            flight_time: 3.0,      // fizzles if it never hits anything
+            lifetime: 8.0,         // once planted / lying
+            radius: 0.08,
+            damage: 8.0,           // hitting a target (it then drops and lies as a live thorn)
             ricochet_radius: 0.6,
-            chain_range: 30.0,
+            chain_range: 30.0,     // next thorn, else a branded hostile, else the nearest hostile
             target_range: 40.0,
-            damage_multiplier: 1.5,
-            restitution: 0.35,
+            damage_multiplier: 1.5, // per bounce
         ),
-        // 1: hitscan sidearm. Alt A Overcharge (hold, release), alt B Fan.
-        lancet: (
-            damage: 22.0,
-            interval: 0.3,
-            overcharge_time: 0.8,
-            overcharge_min_damage: 25.0,
-            overcharge_max_damage: 75.0,
-            overcharge_pierce: 5,
-            overcharge_cooldown: 0.5,
-            fan_shots: 3,
-            fan_spread_degrees: 6.0,
-            fan_damage: 15.0,
-            fan_cooldown: 0.9,
+        // 1: precision spike-caster (hitscan). Alt A Brand, alt B Splinter.
+        quill: (
+            damage: 24.0,
+            interval: 0.28,
+            brand_damage: 10.0,
+            brand_cooldown: 2.5,
+            brand_duration: 5.0,
+            brand_multiplier: 1.35, // branded targets take this much damage from everything
+            splinter_damage: 20.0,
+            splinter_cooldown: 1.1,
+            splinter_count: 6,
+            splinter_cone_degrees: 40.0,
+            splinter_range: 18.0,
+            splinter_shard_damage: 9.0,
         ),
-        // 2: hitscan scattergun. Alt A Slug, alt B Flak (parryable grenade).
-        thresher: (
-            pellets: 10,
-            pellet_damage: 9.0,
-            cone_degrees: 7.0,
-            interval: 0.75,
+        // 2: twin-barrel blast cannon. Alt A Gust, alt B Both Barrels.
+        bellows: (
+            pellets: 12,
+            pellet_damage: 8.0,
+            cone_degrees: 8.0,
+            pellet_range: 60.0,
+            interval: 0.8,
             pellet_knockback: 2.0,
-            pellet_range: 120.0,
-            slug_damage: 70.0,
-            slug_cooldown: 1.0,
-            slug_knockback: 14.0,
-            slug_recoil: 6.0,
-            flak_speed: 28.0,
-            flak_gravity: 25.0,
-            flak_fuse: 1.2,
-            flak_radius: 5.0,
-            flak_damage: 55.0,
-            flak_knockback: 18.0,
-            flak_cooldown: 1.0,
-            flak_projectile_radius: 0.2,
-            flak_parry_speed_multiplier: 2.0,
+            gust_range: 7.0,
+            gust_cone_degrees: 60.0,
+            gust_damage: 6.0,
+            gust_knockback: 18.0,
+            gust_up: 4.0,
+            gust_recoil: 10.0,     // gust-jump
+            gust_cooldown: 1.6,
+            deflect_speed_multiplier: 1.25, // hostile projectiles caught in the gust
+            deflect_damage_multiplier: 1.5,
+            both_pellets: 24,
+            both_cone_degrees: 5.0,
+            both_recoil: 9.0,
+            both_cooldown: 1.4,
         ),
-        // 3: projectile nailer. Alt A Sawblade, alt B Volley.
-        riveter: (
-            rivet_speed: 90.0,
-            rivet_damage: 8.0,
-            rate: 12.0,
-            spread_degrees: 1.5,
-            rivet_radius: 0.08,
-            rivet_lifetime: 2.0,
-            saw_speed: 40.0,
-            saw_damage: 10.0,
-            saw_damage_interval: 0.1,
-            saw_bounces: 3,
-            saw_lifetime: 3.0,
-            saw_cooldown: 1.0,
-            saw_radius: 0.35,
-            volley_count: 8,
-            volley_ring_degrees: 10.0,
-            volley_damage: 12.0,
-            volley_cooldown: 1.2,
+        // 3: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
+        arclash: (
+            zap_interval: 0.1,
+            zap_range: 30.0,
+            zap_damage: 6.0,
+            chain_range: 7.0,
+            chain_jumps: 2,
+            chain_falloff: 0.75,   // per jump
+            wisp_speed: 12.0,
+            wisp_lifetime: 2.5,
+            wisp_radius: 0.3,
+            wisp_zap_interval: 0.2,
+            wisp_zap_range: 6.0,
+            wisp_zap_damage: 8.0,
+            wisp_pop_radius: 4.0,  // world contact or expiry
+            wisp_pop_damage: 25.0,
+            wisp_pop_knockback: 8.0,
+            wisp_cooldown: 2.8,
+            discharge_charge_time: 1.0,
+            discharge_min_radius: 3.5,
+            discharge_max_radius: 8.0,
+            discharge_min_damage: 25.0,
+            discharge_max_damage: 80.0,
+            discharge_min_knockback: 12.0,
+            discharge_max_knockback: 24.0,
+            discharge_cooldown: 2.0,
         ),
-        // 4: explosive launcher. Alt A Sticky (alt again detonates), alt B Mortar.
-        cinderbox: (
-            rocket_speed: 45.0,
-            rocket_radius: 4.5,
-            rocket_damage: 70.0,
-            rocket_knockback: 22.0,
-            rocket_interval: 0.9,
-            rocket_projectile_radius: 0.2,
-            rocket_lifetime: 5.0,
-            sticky_speed: 30.0,
-            sticky_gravity: 20.0,
-            sticky_radius: 4.0,
-            sticky_damage: 60.0,
-            sticky_knockback: 18.0,
-            sticky_max: 3,
-            sticky_cooldown: 0.2,
-            sticky_chain_window: 0.4, // alt within this of a throw throws another; later detonates
-            sticky_lifetime: 20.0,
-            mortar_speed: 22.0,
-            mortar_angle_degrees: 35.0,
-            mortar_gravity: 25.0,
-            mortar_radius: 7.0,
-            mortar_damage: 90.0,
-            mortar_knockback: 24.0,
-            mortar_cooldown: 2.0,
+        // 4: bouncing-bomb launcher. Alt A Breach, alt B Gravewell.
+        tumbler: (
+            bomb_speed: 30.0,
+            bomb_gravity: 18.0,
+            bomb_restitution: 0.6,
+            bomb_contacts: 3,      // explodes on this world contact, on a hostile, or ...
+            bomb_fuse: 1.6,        // ... after this long
+            bomb_projectile_radius: 0.2,
+            bomb_radius: 4.5,
+            bomb_damage: 65.0,
+            bomb_knockback: 20.0,
+            interval: 0.85,
+            breach_reach: 3.0,
+            breach_pullback: 0.2,
+            breach_radius: 4.0,
+            breach_damage: 70.0,
+            breach_knockback: 24.0,
+            breach_cooldown: 1.2,
+            gravewell_speed: 20.0,
+            gravewell_angle_degrees: 25.0,
+            gravewell_gravity: 20.0,
+            gravewell_projectile_radius: 0.25,
+            gravewell_flight_time: 5.0,
+            gravewell_pull_time: 1.5,  // pulls once stuck, then implodes
+            gravewell_pull_radius: 9.0,
+            gravewell_pull_speed: 9.0,
+            gravewell_player_pull: 0.5, // PvP
+            gravewell_radius: 5.0,
+            gravewell_damage: 80.0,
+            gravewell_knockback: 6.0,
+            gravewell_cooldown: 3.0,
         ),
         // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
         enemy_projectiles: (
@@ -257,7 +280,8 @@
         parry: 60.0,
         return_to_sender: 80.0,     // kill with a parried projectile
         ricochet: 30.0,             // ricochet hit ...
-        ricochet_per_bounce: 20.0,  // ... + per extra prism bounce
+        ricochet_per_bounce: 20.0,  // ... + per extra thorn bounce
+        deflect: 30.0,              // a Gust turned a hostile projectile around
         exploded: 20.0,
         slam_kill: 40.0,
         fisted: 30.0,

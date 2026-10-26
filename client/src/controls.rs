@@ -38,7 +38,9 @@ pub enum Action {
     AltFire,
     /// Punch / parry.
     Punch,
-    ThrowPrism,
+    /// Throw a thorn (older settings files call it `ThrowPrism`).
+    #[serde(alias = "ThrowPrism")]
+    ThrowThorn,
     Use,
     Weapon1,
     Weapon2,
@@ -69,7 +71,7 @@ impl Action {
         Action::Fire,
         Action::AltFire,
         Action::Punch,
-        Action::ThrowPrism,
+        Action::ThrowThorn,
         Action::Use,
         Action::Weapon1,
         Action::Weapon2,
@@ -99,12 +101,12 @@ impl Action {
             Action::Fire => "FIRE",
             Action::AltFire => "ALT FIRE",
             Action::Punch => "PUNCH / PARRY",
-            Action::ThrowPrism => "THROW PRISM",
+            Action::ThrowThorn => "THROW THORN",
             Action::Use => "USE / REVIVE",
-            Action::Weapon1 => "LANCET",
-            Action::Weapon2 => "THRESHER",
-            Action::Weapon3 => "RIVETER",
-            Action::Weapon4 => "CINDERBOX",
+            Action::Weapon1 => "QUILL",
+            Action::Weapon2 => "BELLOWS",
+            Action::Weapon3 => "ARCLASH",
+            Action::Weapon4 => "TUMBLER",
             Action::NextWeapon => "NEXT WEAPON",
             Action::PrevWeapon => "PREVIOUS WEAPON",
             Action::NextMode => "CYCLE FIRE MODE",
@@ -143,7 +145,7 @@ impl Action {
                 B::GamepadAxis(GamepadAxis::LeftTrigger, AxisDirection::Positive),
             ],
             Action::Punch => vec![key(Key::KeyF), pad(GamepadButton::RightBumper)],
-            Action::ThrowPrism => vec![key(Key::KeyQ), pad(GamepadButton::North)],
+            Action::ThrowThorn => vec![key(Key::KeyQ), pad(GamepadButton::North)],
             Action::Use => vec![key(Key::KeyE), pad(GamepadButton::West)],
             Action::Weapon1 => vec![key(Key::Digit1)],
             Action::Weapon2 => vec![key(Key::Digit2)],
@@ -272,20 +274,20 @@ pub const MODES_PER_WEAPON: usize = 2;
 /// The four weapons, indexed by `PlayerInput::weapon` (0-based slot).
 pub const WEAPONS: [WeaponInfo; 4] = [
     WeaponInfo {
-        name: "LANCET",
-        modes: ["OVERCHARGE", "FAN"],
+        name: "QUILL",
+        modes: ["BRAND", "SPLINTER"],
     },
     WeaponInfo {
-        name: "THRESHER",
-        modes: ["SLUG", "FLAK"],
+        name: "BELLOWS",
+        modes: ["GUST", "BOTH BARRELS"],
     },
     WeaponInfo {
-        name: "RIVETER",
-        modes: ["SAWBLADE", "VOLLEY"],
+        name: "ARCLASH",
+        modes: ["WISP", "DISCHARGE"],
     },
     WeaponInfo {
-        name: "CINDERBOX",
-        modes: ["STICKY", "MORTAR"],
+        name: "TUMBLER",
+        modes: ["BREACH", "GRAVEWELL"],
     },
 ];
 
@@ -378,7 +380,7 @@ const BUTTON_ACTIONS: [(Action, Buttons); 8] = [
     (Action::Fire, Buttons::FIRE),
     (Action::AltFire, Buttons::ALT_FIRE),
     (Action::Punch, Buttons::PUNCH),
-    (Action::ThrowPrism, Buttons::THROW),
+    (Action::ThrowThorn, Buttons::THROW),
     (Action::Use, Buttons::USE),
 ];
 

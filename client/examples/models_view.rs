@@ -5,8 +5,10 @@
 //! - `closeup_*.png`: each enemy from the front three-quarter and from behind;
 //! - `shrike_*.png`, `gnawer_*.png`, `censer_*.png`, `harrier_*.png`, `gaoler_*.png`,
 //!   `heron_*.png`: animation states, every attack's wind-up and strike;
-//! - `vm_*.png`: first-person viewmodels (rest, kick, switch, punch, overcharge, throw...);
-//! - `projectiles.png`, `props.png`.
+//! - `vm_*.png`: first-person viewmodels (rest, kick, alt modes, crest fold, bellows pump,
+//!   discharge charge, drum turn, switch, punch, thorn throw...);
+//! - `weapons.png`, `weapons_34.png`: the four guns at real scale (side, three-quarter front);
+//! - `projectiles.png`, `thorns.png` (planted in a wall, lying, in flight), `props.png`.
 //!
 //! ```text
 //! cargo run -p client --example models_view -- [--out DIR] [--only PREFIX]
@@ -15,7 +17,8 @@
 use std::path::{Path, PathBuf};
 
 use client::models::{
-    EnemyAnim, EnemyKind, EnemyState, ModelId, ModelLibrary, PlayerAnim, Tint, ViewmodelAnim, props,
+    DrumTurn, EnemyAnim, EnemyKind, EnemyState, ModelId, ModelLibrary, PlayerAnim, Tint, ViewmodelAnim,
+    projectiles, props,
 };
 use engine::assets::meshgen::{self, BoxDesc, BoxUv, MeshBuilder};
 use engine::assets::procedural;
@@ -520,7 +523,7 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         time: 1.7,
         ..Default::default()
     };
-    let names = ["LANCET", "THRESHER", "RIVETER", "CINDERBOX"];
+    let names = ["QUILL", "BELLOWS", "ARCLASH", "TUMBLER"];
     let mut cases: Vec<(String, ViewmodelAnim)> = Vec::new();
     for w in 0..4u8 {
         let n = names[w as usize];
@@ -542,18 +545,44 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
         ));
     }
     cases.push((
-        "LANCET OVERCHARGE".into(),
+        "QUILL CREST FOLDING".into(),
         ViewmodelAnim {
-            alt_charge: 1.0,
+            fire_kick: 0.55,
             ..base(0)
         },
     ));
     cases.push((
-        "RIVETER SPIN".into(),
+        "BELLOWS PUMP".into(),
         ViewmodelAnim {
-            spin: 1.3,
-            fire_kick: 0.6,
+            fire_kick: 0.5,
+            alt_mode: 1,
+            ..base(1)
+        },
+    ));
+    cases.push((
+        "ARCLASH DISCHARGE .4".into(),
+        ViewmodelAnim {
+            alt_mode: 1,
+            alt_charge: 0.4,
             ..base(2)
+        },
+    ));
+    cases.push((
+        "ARCLASH DISCHARGE FULL".into(),
+        ViewmodelAnim {
+            alt_mode: 1,
+            alt_charge: 1.0,
+            time: 1.71,
+            ..base(2)
+        },
+    ));
+    cases.push((
+        "TUMBLER DRUM TURNING".into(),
+        ViewmodelAnim {
+            spin: DrumTurn::STEP * 0.5,
+            fire_kick: 0.6,
+            alt_mode: 1,
+            ..base(3)
         },
     ));
     cases.push((
@@ -614,23 +643,20 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
 
 fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     let projectiles = [
-        (ModelId::Rivet, "RIVET"),
-        (ModelId::Sawblade, "SAW"),
-        (ModelId::Rocket, "ROCKET"),
-        (ModelId::FlakGrenade, "FLAK"),
-        (ModelId::StickyCharge, "STICKY"),
-        (ModelId::MortarShell, "MORTAR"),
+        (ModelId::Bomb, "BOMB"),
+        (ModelId::Gravewell, "GRAVEWELL"),
+        (ModelId::Wisp, "WISP"),
+        (ModelId::Thorn, "THORN"),
         (ModelId::EmberBomb, "EMBER"),
         (ModelId::Needle, "NEEDLE"),
-        (ModelId::Prism, "PRISM"),
-        (ModelId::BloodCore, "BLOOD"),
+        (ModelId::BloodCore, "CORE"),
     ];
     let mut shot = Shot::new(look_at(
         Vec3::new(0.0, 1.4, 3.3),
         Vec3::new(0.0, 0.9, 0.0),
         60.0,
     ));
-    for ((id, name), pos) in projectiles.iter().zip(row(projectiles.len(), 0.62)) {
+    for ((id, name), pos) in projectiles.iter().zip(row(projectiles.len(), 0.8)) {
         let rot = Quat::from_rotation_y(-1.1) * Quat::from_rotation_x(0.35);
         let root = Mat4::from_rotation_translation(rot, pos + Vec3::new(0.0, 1.0, 0.0));
         lib.draw_model(*id, root, &Tint::default(), &mut shot.draws);
@@ -638,6 +664,61 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             .push((pos + Vec3::new(0.0, 0.55, 0.0), name.to_string()));
     }
     let mut shots = vec![("projectiles".to_string(), "PROJECTILES".to_string(), shot)];
+
+    // Thorns: planted in the wall at different angles, lying on the floor, in flight.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(1.2, 1.6, -2.6),
+        Vec3::new(0.0, 1.2, -5.5),
+        60.0,
+    ));
+    for (x, y, yaw, pitch) in [(-1.0, 1.6, 0.3, -0.2), (0.0, 1.1, -0.25, 0.15), (0.9, 1.8, 0.0, 0.5)] {
+        // The wall face is at z = -5.5; the thorn flew towards -Z.
+        let rot = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+        let root = Mat4::from_rotation_translation(rot, Vec3::new(x, y, -5.5));
+        lib.draw_model(ModelId::Thorn, root, &Tint::default(), &mut shot.draws);
+    }
+    let lying = Quat::from_rotation_y(0.9) * Quat::from_rotation_z(0.3);
+    lib.draw_model(
+        ModelId::Thorn,
+        Mat4::from_rotation_translation(lying, Vec3::new(0.4, 0.04, -4.4)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    lib.draw_model(
+        ModelId::Thorn,
+        Mat4::from_rotation_translation(
+            Quat::from_rotation_y(-0.6),
+            Vec3::new(-0.6, 0.9, -3.8),
+        ),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    shot.labels.push((
+        Vec3::new(0.0, 0.6, -5.4),
+        format!("PLANTED (TIP {:.2} M DEEP)", projectiles::THORN_TIP),
+    ));
+    shots.push(("thorns".into(), "THORNS".into(), shot));
+
+    // Weapons at real scale, side and three-quarter views.
+    for (name, title, cam, yaw) in [
+        ("weapons", "WEAPONS (SIDE)", Vec3::new(0.0, 1.15, 1.75), std::f32::consts::FRAC_PI_2),
+        ("weapons_34", "WEAPONS (3/4 FRONT)", Vec3::new(0.0, 1.5, 1.6), 2.4),
+    ] {
+        let mut shot = Shot::new(look_at(cam, Vec3::new(0.0, 1.08, 0.0), 50.0));
+        for (i, w) in client::models::WeaponKind::ALL.iter().enumerate() {
+            let pos = Vec3::new(
+                if i % 2 == 0 { -0.45 } else { 0.45 },
+                if i < 2 { 1.35 } else { 0.8 },
+                0.0,
+            );
+            let root = Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), pos);
+            let pose = client::models::weapons::weapon_pose(*w, 0, 0.0, 0.0, 0.0, t);
+            lib.get(w.model()).draw(&pose, root, &Tint::default(), &mut shot.draws);
+            shot.labels
+                .push((pos + Vec3::new(0.0, -0.22, 0.0), format!("{w:?}").to_uppercase()));
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
 
     let mut shot = Shot::new(look_at(
         Vec3::new(0.0, 3.2, 13.0),

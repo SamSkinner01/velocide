@@ -1,7 +1,7 @@
 //! Combat HUD layer, drawn on top of `Hud::draw`: hit markers (body / headshot / armour /
 //! kill), floating damage numbers, damage direction indicators, a low-health vignette, the
-//! death screen ("RESPAWNING IN N"), prism charges, live stickies, per-weapon cooldowns and
-//! the Overcharge gauge next to the crosshair. Health and hard damage themselves go through
+//! death screen ("RESPAWNING IN N"), thorn charges, per-weapon cooldowns, the Arclash
+//! Discharge gauge next to the crosshair and a BRANDED warning while you carry a brand. Health and hard damage themselves go through
 //! `HudInfo` into the existing health block.
 
 use engine::gfx::{Camera, UiDrawList};
@@ -61,6 +61,8 @@ pub struct CombatHudInfo<'a> {
     pub tick_rate: u32,
     /// "KILLED BY ..." line for the death screen.
     pub killed_by: Option<&'a str>,
+    /// Someone branded you (you take extra damage).
+    pub branded: bool,
     pub time: f64,
 }
 
@@ -223,10 +225,10 @@ impl CombatHud {
             list.text(p - vec2(0.0, 6.0 + 18.0 * age), &n.text, &style);
         }
 
-        // Cooldowns + Overcharge gauge under / beside the crosshair.
+        // Cooldowns + Discharge gauge under / beside the crosshair.
         let w = info.weapons;
         let wi = (w.weapon as usize).min(3);
-        let weapon = Weapon::from_slot(w.weapon).unwrap_or(Weapon::Lancet);
+        let weapon = Weapon::from_slot(w.weapon).unwrap_or(Weapon::Quill);
         let rate = info.tick_rate as f32;
         let prim_total = (weapon.primary_interval(info.tuning) * rate).max(1.0);
         let alt_total = (weapon.alt_cooldown(w.mode, info.tuning) * rate).max(1.0);
@@ -266,8 +268,8 @@ impl CombatHud {
                 Vec4::ONE
             } else {
                 mix(
-                    Vec4::new(0.5, 1.0, 1.0, 1.0),
-                    Vec4::new(0.85, 0.55, 1.0, 1.0),
+                    Vec4::new(0.35, 0.65, 1.0, 1.0),
+                    Vec4::new(0.8, 0.95, 1.0, 1.0),
                     f,
                 )
             };
@@ -275,13 +277,22 @@ impl CombatHud {
                 Rect::new(vec2(bar.min.x, bar.max.y - h * f), bar.max),
                 color,
             );
+            // Nova radius at this charge, beside the gauge.
+            let a = &info.tuning.arclash;
+            let radius =
+                a.discharge_min_radius + (a.discharge_max_radius - a.discharge_min_radius) * f;
+            list.text(
+                vec2(bar.max.x + 4.0, bar.min.y - 2.0),
+                &format!("{radius:.0}M"),
+                &TextStyle::new(fade(color, 0.9)).outline(outline),
+            );
         }
 
-        // Prisms + stickies above the weapon block (bottom right).
-        let charges = info.tuning.prism.charges;
-        let avail = w.prisms(info.tuning);
+        // Thorns above the weapon block (bottom right).
+        let charges = info.tuning.thorn.charges;
+        let avail = w.thorns(info.tuning);
         let recharge =
-            (w.prism_recharge as f32 / (info.tuning.prism.recharge_time * rate).max(1.0)).min(1.0);
+            (w.thorn_recharge as f32 / (info.tuning.thorn.recharge_time * rate).max(1.0)).min(1.0);
         let pip = vec2(7.0, 4.0);
         let pw = hud::pips_width(pip, 3.0, charges);
         let px = c.max.x - 12.0 - pw;
@@ -297,20 +308,17 @@ impl CombatHud {
         );
         list.text(
             vec2(px - 4.0, py - 2.0),
-            "PRISM",
+            "THORN",
             &TextStyle::new(t.bone_dim).right().outline(outline),
         );
-        if weapon == Weapon::Cinderbox && w.mode == 0 {
-            let max = info.tuning.cinderbox.sticky_max;
-            let color = if w.stickies > 0 {
-                t.blood_bright
-            } else {
-                t.bone_dim
-            };
+        if info.branded && !info.dead {
+            let pulse = 0.65 + 0.35 * ((now * 6.0).sin() as f32);
             list.text(
-                vec2(c.max.x - 12.0, py - 13.0),
-                &format!("STICKY {}/{}", w.stickies, max),
-                &TextStyle::new(color).right().outline(outline),
+                vec2(c.center().x, center.y + 30.0),
+                "BRANDED",
+                &TextStyle::new(fade(Vec4::new(1.0, 0.25, 0.4, 1.0), pulse))
+                    .centered()
+                    .outline(outline),
             );
         }
         if info.protected && !info.dead {

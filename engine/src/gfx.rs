@@ -6,6 +6,8 @@
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 
+use crate::color_vision::ColorVision;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct MeshId(pub u32);
 
@@ -64,6 +66,11 @@ pub struct RetroSettings {
     pub screen_shake: bool,
     pub screen_flashes: bool,
     pub hitstop: bool,
+    /// Colour-vision correction applied in the post pass, before colour quantisation (see
+    /// `color_vision`). Not saved with the retro options: the game keeps it with its
+    /// accessibility settings and copies it in.
+    #[serde(skip)]
+    pub color_vision: ColorVision,
 }
 
 impl Default for RetroSettings {
@@ -81,6 +88,7 @@ impl Default for RetroSettings {
             screen_shake: true,
             screen_flashes: true,
             hitstop: true,
+            color_vision: ColorVision::default(),
         }
     }
 }

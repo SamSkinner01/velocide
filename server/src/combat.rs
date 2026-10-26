@@ -242,13 +242,75 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 },
                 None,
             ),
-            SimEvent::PrismThrown { player, .. } => {
-                fx.push(tick, Fx::PrismThrown { player: *player }, Some(*player))
+            SimEvent::ThornThrown { player, .. } => {
+                fx.push(tick, Fx::ThornThrown { player: *player }, Some(*player))
             }
-            SimEvent::PrismExpired { id } => fx.push(tick, Fx::PrismExpired { id: *id }, None),
-            SimEvent::StickiesDetonated { player, .. } => fx.push(
+            SimEvent::ThornPlanted { position, .. } => fx.push(
                 tick,
-                Fx::StickiesDetonated { player: *player },
+                Fx::ThornPlanted {
+                    position: (*position).into(),
+                },
+                None,
+            ),
+            SimEvent::ThornExpired { id } => fx.push(tick, Fx::ThornExpired { id: *id }, None),
+            SimEvent::Splinters {
+                shooter,
+                origin,
+                ends,
+            } => fx.push(
+                tick,
+                Fx::Splinters {
+                    shooter: shooter.0 as u16,
+                    origin: (*origin).into(),
+                    ends: ends.iter().map(|e| QPos::from(*e)).collect(),
+                },
+                None,
+            ),
+            SimEvent::ArcChain { shooter, points } => fx.push(
+                tick,
+                Fx::ArcChain {
+                    shooter: shared::protocol::owner_code(*shooter),
+                    points: points.iter().map(|p| QPos::from(*p)).collect(),
+                },
+                None,
+            ),
+            SimEvent::WispZap { from, to, .. } => fx.push(
+                tick,
+                Fx::WispZap {
+                    from: (*from).into(),
+                    to: (*to).into(),
+                },
+                None,
+            ),
+            SimEvent::Branded { position, .. } => fx.push(
+                tick,
+                Fx::Branded {
+                    position: (*position).into(),
+                },
+                None,
+            ),
+            SimEvent::Deflected {
+                player, position, ..
+            } => fx.push(
+                tick,
+                Fx::Deflected {
+                    player: *player,
+                    position: (*position).into(),
+                },
+                None,
+            ),
+            SimEvent::Discharge {
+                player,
+                position,
+                radius,
+                ..
+            } => fx.push(
+                tick,
+                Fx::Discharge {
+                    player: *player,
+                    position: (*position).into(),
+                    radius_dm: radius_dm(*radius),
+                },
                 Some(*player),
             ),
             SimEvent::ProjectileBounced { kind, position, .. } => fx.push(
@@ -349,7 +411,8 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             SimEvent::Jumped { .. }
             | SimEvent::Landed { .. }
             | SimEvent::Healed { .. }
-            | SimEvent::PrismShattered { .. }
+            | SimEvent::ThornShattered { .. }
+            | SimEvent::GravewellStuck { .. }
             | SimEvent::EnemyRemoved { .. } => {}
             // Style and game-mode events are routed by `server::modes`.
             SimEvent::Style(_) | SimEvent::Mode(_) => {}
@@ -372,7 +435,7 @@ mod tests {
         Fx::Explosion {
             position: QPos::default(),
             radius_dm: 45,
-            attack: Attack::Rocket,
+            attack: Attack::Tumble,
             owner: 0,
         }
     }

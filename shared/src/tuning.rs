@@ -187,7 +187,8 @@ impl Default for MovementTuning {
     }
 }
 
-/// Combat rules: player vitals, fist/parry, blood healing, prisms, explosions and every weapon.
+/// Combat rules: player vitals, fist/parry, healing bursts, thorns, hit assist, explosions and
+/// every weapon.
 /// Damage in HP, distances in metres, speeds in m/s, times in seconds, angles in degrees
 /// (cones are *full* apertures: a 70° cone accepts ±35° off the aim). See `docs/gameplay.md`
 /// for the rules and `docs/combat.md` for how each value is used. Enemy numbers live in
@@ -258,11 +259,12 @@ pub struct CombatTuning {
     pub slam_min_power_scale: f32,
 
     pub blood: BloodTuning,
-    pub prism: PrismTuning,
-    pub lancet: LancetTuning,
-    pub thresher: ThresherTuning,
-    pub riveter: RiveterTuning,
-    pub cinderbox: CinderboxTuning,
+    pub hit_assist: HitAssistTuning,
+    pub thorn: ThornTuning,
+    pub quill: QuillTuning,
+    pub bellows: BellowsTuning,
+    pub arclash: ArclashTuning,
+    pub tumbler: TumblerTuning,
     pub enemy_projectiles: EnemyProjectileTuning,
 }
 
@@ -306,11 +308,12 @@ impl Default for CombatTuning {
             slam_min_power_scale: 0.3,
 
             blood: BloodTuning::default(),
-            prism: PrismTuning::default(),
-            lancet: LancetTuning::default(),
-            thresher: ThresherTuning::default(),
-            riveter: RiveterTuning::default(),
-            cinderbox: CinderboxTuning::default(),
+            hit_assist: HitAssistTuning::default(),
+            thorn: ThornTuning::default(),
+            quill: QuillTuning::default(),
+            bellows: BellowsTuning::default(),
+            arclash: ArclashTuning::default(),
+            tumbler: TumblerTuning::default(),
             enemy_projectiles: EnemyProjectileTuning::default(),
         }
     }
@@ -352,249 +355,327 @@ impl Default for BloodTuning {
     }
 }
 
-/// Ricochet prisms.
+/// Hit assist: extra radius (m) added to hit shapes when *player-owned* attacks test against
+/// them (rays, projectile sweeps, explosion distances, the fist, thorn hits). Enemy attacks use
+/// the plain shapes. Applied at test time; the lag-compensation history keeps the plain shapes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PrismTuning {
+pub struct HitAssistTuning {
+    pub enemy_body_pad: f32,
+    /// Enemy weak points (heads and cores).
+    pub enemy_weak_pad: f32,
+    /// PvP: other players' bodies ...
+    pub player_body_pad: f32,
+    /// ... and heads.
+    pub player_head_pad: f32,
+}
+
+impl Default for HitAssistTuning {
+    fn default() -> Self {
+        Self {
+            enemy_body_pad: 0.2,
+            enemy_weak_pad: 0.1,
+            player_body_pad: 0.12,
+            player_head_pad: 0.06,
+        }
+    }
+}
+
+/// Thorns: thrown relay spikes (`THROW`). They plant in the world; Quill shots ricochet off
+/// them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThornTuning {
     pub charges: u32,
-    /// Seconds per recharged prism.
+    /// Seconds per recharged thorn.
     pub recharge_time: f32,
     pub throw_speed: f32,
-    pub throw_up_speed: f32,
+    /// Fraction of the thrower's velocity the thorn inherits.
+    pub inherit_velocity: f32,
     pub gravity: f32,
+    /// Seconds a thorn flies before it fizzles if it never hits anything.
+    pub flight_time: f32,
+    /// Seconds a thorn lives once planted (or lying on the floor).
     pub lifetime: f32,
-    /// Collision radius against the world.
+    /// Collision radius against the world and hit shapes.
     pub radius: f32,
-    /// A hitscan shot passing this close to a live prism ricochets off it.
+    /// Damage to an enemy / player it hits in flight (it then drops to the floor).
+    pub damage: f32,
+    /// A Quill shot passing this close to a live thorn ricochets off it.
     pub ricochet_radius: f32,
-    /// Another live prism within this range is preferred as the next bounce (chain).
+    /// Another live thorn within this range is preferred as the next bounce (chain) ...
     pub chain_range: f32,
-    /// Otherwise the nearest hostile within this range (weak point preferred, line of sight).
+    /// ... else a branded hostile, else the nearest hostile within this range (weak point
+    /// preferred, line of sight).
     pub target_range: f32,
     /// Damage multiplier per bounce.
     pub damage_multiplier: f32,
-    /// Speed kept when bouncing off the world.
-    pub restitution: f32,
 }
 
-impl Default for PrismTuning {
+impl Default for ThornTuning {
     fn default() -> Self {
         Self {
-            charges: 4,
-            recharge_time: 2.5,
-            throw_speed: 18.0,
-            throw_up_speed: 6.0,
-            gravity: 20.0,
-            lifetime: 4.0,
-            radius: 0.2,
+            charges: 3,
+            recharge_time: 3.0,
+            throw_speed: 30.0,
+            inherit_velocity: 0.5,
+            gravity: 12.0,
+            flight_time: 3.0,
+            lifetime: 8.0,
+            radius: 0.08,
+            damage: 8.0,
             ricochet_radius: 0.6,
             chain_range: 30.0,
             target_range: 40.0,
             damage_multiplier: 1.5,
-            restitution: 0.35,
         }
     }
 }
 
-/// 1 — Lancet: hitscan sidearm. Alt A Overcharge (hold, release), alt B Fan.
+/// 1 — Quill: precision spike-caster (hitscan). Alt A Brand, alt B Splinter.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct LancetTuning {
+pub struct QuillTuning {
     pub damage: f32,
     pub interval: f32,
-    pub overcharge_time: f32,
-    pub overcharge_min_damage: f32,
-    pub overcharge_max_damage: f32,
-    /// Targets the beam passes through (the first one included).
-    pub overcharge_pierce: u32,
-    pub overcharge_cooldown: f32,
-    pub fan_shots: u32,
-    /// Outermost shot's angle off the aim (±).
-    pub fan_spread_degrees: f32,
-    pub fan_damage: f32,
-    pub fan_cooldown: f32,
+    pub brand_damage: f32,
+    pub brand_cooldown: f32,
+    /// Seconds a brand lasts.
+    pub brand_duration: f32,
+    /// A branded target takes this much damage from every source.
+    pub brand_multiplier: f32,
+    pub splinter_damage: f32,
+    pub splinter_cooldown: f32,
+    /// Secondary traces burst from the impact ...
+    pub splinter_count: u32,
+    /// ... inside this cone (full aperture) ...
+    pub splinter_cone_degrees: f32,
+    pub splinter_range: f32,
+    /// ... each dealing this.
+    pub splinter_shard_damage: f32,
 }
 
-impl Default for LancetTuning {
+impl Default for QuillTuning {
     fn default() -> Self {
         Self {
-            damage: 22.0,
-            interval: 0.30,
-            overcharge_time: 0.8,
-            overcharge_min_damage: 25.0,
-            overcharge_max_damage: 75.0,
-            overcharge_pierce: 5,
-            overcharge_cooldown: 0.5,
-            fan_shots: 3,
-            fan_spread_degrees: 6.0,
-            fan_damage: 15.0,
-            fan_cooldown: 0.9,
+            damage: 24.0,
+            interval: 0.28,
+            brand_damage: 10.0,
+            brand_cooldown: 2.5,
+            brand_duration: 5.0,
+            brand_multiplier: 1.35,
+            splinter_damage: 20.0,
+            splinter_cooldown: 1.1,
+            splinter_count: 6,
+            splinter_cone_degrees: 40.0,
+            splinter_range: 18.0,
+            splinter_shard_damage: 9.0,
         }
     }
 }
 
-/// 2 — Thresher: hitscan scattergun. Alt A Slug, alt B Flak (parryable grenade).
+/// 2 — Bellows: twin-barrel blast cannon. Alt A Gust, alt B Both Barrels.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ThresherTuning {
+pub struct BellowsTuning {
     pub pellets: u32,
     pub pellet_damage: f32,
     pub cone_degrees: f32,
-    pub interval: f32,
-    pub pellet_knockback: f32,
     pub pellet_range: f32,
-    pub slug_damage: f32,
-    pub slug_cooldown: f32,
-    pub slug_knockback: f32,
-    /// Shooter is pushed back this much (server-side impulse).
-    pub slug_recoil: f32,
-    pub flak_speed: f32,
-    pub flak_gravity: f32,
-    pub flak_fuse: f32,
-    pub flak_radius: f32,
-    pub flak_damage: f32,
-    pub flak_knockback: f32,
-    pub flak_cooldown: f32,
-    pub flak_projectile_radius: f32,
-    /// Speed multiplier when a flak grenade is punched (instead of `parry_speed_multiplier`).
-    pub flak_parry_speed_multiplier: f32,
+    pub interval: f32,
+    /// Knockback per pellet along its ray.
+    pub pellet_knockback: f32,
+    pub gust_range: f32,
+    pub gust_cone_degrees: f32,
+    pub gust_damage: f32,
+    /// Hostiles in the gust are knocked back this fast along the aim ...
+    pub gust_knockback: f32,
+    /// ... plus this upwards.
+    pub gust_up: f32,
+    /// The shooter is pushed back this fast (gust-jump).
+    pub gust_recoil: f32,
+    pub gust_cooldown: f32,
+    /// A hostile projectile caught in the gust becomes yours: speed and damage multipliers.
+    pub deflect_speed_multiplier: f32,
+    pub deflect_damage_multiplier: f32,
+    pub both_pellets: u32,
+    pub both_cone_degrees: f32,
+    pub both_recoil: f32,
+    pub both_cooldown: f32,
 }
 
-impl Default for ThresherTuning {
+impl Default for BellowsTuning {
     fn default() -> Self {
         Self {
-            pellets: 10,
-            pellet_damage: 9.0,
-            cone_degrees: 7.0,
-            interval: 0.75,
+            pellets: 12,
+            pellet_damage: 8.0,
+            cone_degrees: 8.0,
+            pellet_range: 60.0,
+            interval: 0.8,
             pellet_knockback: 2.0,
-            pellet_range: 120.0,
-            slug_damage: 70.0,
-            slug_cooldown: 1.0,
-            slug_knockback: 14.0,
-            slug_recoil: 6.0,
-            flak_speed: 28.0,
-            flak_gravity: 25.0,
-            flak_fuse: 1.2,
-            flak_radius: 5.0,
-            flak_damage: 55.0,
-            flak_knockback: 18.0,
-            flak_cooldown: 1.0,
-            flak_projectile_radius: 0.2,
-            flak_parry_speed_multiplier: 2.0,
+            gust_range: 7.0,
+            gust_cone_degrees: 60.0,
+            gust_damage: 6.0,
+            gust_knockback: 18.0,
+            gust_up: 4.0,
+            gust_recoil: 10.0,
+            gust_cooldown: 1.6,
+            deflect_speed_multiplier: 1.25,
+            deflect_damage_multiplier: 1.5,
+            both_pellets: 24,
+            both_cone_degrees: 5.0,
+            both_recoil: 9.0,
+            both_cooldown: 1.4,
         }
     }
 }
 
-/// 3 — Riveter: projectile nailer. Alt A Sawblade, alt B Volley.
+/// 3 — Arclash: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct RiveterTuning {
-    pub rivet_speed: f32,
-    pub rivet_damage: f32,
-    /// Rivets per second while held.
-    pub rate: f32,
-    pub spread_degrees: f32,
-    pub rivet_radius: f32,
-    pub rivet_lifetime: f32,
-    pub saw_speed: f32,
-    /// Damage per `saw_damage_interval` of contact.
-    pub saw_damage: f32,
-    pub saw_damage_interval: f32,
-    pub saw_bounces: u32,
-    pub saw_lifetime: f32,
-    pub saw_cooldown: f32,
-    pub saw_radius: f32,
-    pub volley_count: u32,
-    /// Angle of the ring off the aim.
-    pub volley_ring_degrees: f32,
-    pub volley_damage: f32,
-    pub volley_cooldown: f32,
+pub struct ArclashTuning {
+    /// Seconds between zaps while the primary is held.
+    pub zap_interval: f32,
+    pub zap_range: f32,
+    pub zap_damage: f32,
+    /// A zap that hits jumps to the nearest other hostile within this range of the target ...
+    pub chain_range: f32,
+    /// ... this many times at most ...
+    pub chain_jumps: u32,
+    /// ... each jump multiplying the damage by this.
+    pub chain_falloff: f32,
+    pub wisp_speed: f32,
+    pub wisp_lifetime: f32,
+    pub wisp_radius: f32,
+    /// The wisp zaps the nearest hostile within `wisp_zap_range` this often.
+    pub wisp_zap_interval: f32,
+    pub wisp_zap_range: f32,
+    pub wisp_zap_damage: f32,
+    /// On world contact or expiry it pops.
+    pub wisp_pop_radius: f32,
+    pub wisp_pop_damage: f32,
+    pub wisp_pop_knockback: f32,
+    pub wisp_cooldown: f32,
+    /// Seconds to a full Discharge charge.
+    pub discharge_charge_time: f32,
+    /// Nova radius / damage / outward knockback with no charge and with a full charge.
+    pub discharge_min_radius: f32,
+    pub discharge_max_radius: f32,
+    pub discharge_min_damage: f32,
+    pub discharge_max_damage: f32,
+    pub discharge_min_knockback: f32,
+    pub discharge_max_knockback: f32,
+    pub discharge_cooldown: f32,
 }
 
-impl Default for RiveterTuning {
+impl Default for ArclashTuning {
     fn default() -> Self {
         Self {
-            rivet_speed: 90.0,
-            rivet_damage: 8.0,
-            rate: 12.0,
-            spread_degrees: 1.5,
-            rivet_radius: 0.08,
-            rivet_lifetime: 2.0,
-            saw_speed: 40.0,
-            saw_damage: 10.0,
-            saw_damage_interval: 0.1,
-            saw_bounces: 3,
-            saw_lifetime: 3.0,
-            saw_cooldown: 1.0,
-            saw_radius: 0.35,
-            volley_count: 8,
-            volley_ring_degrees: 10.0,
-            volley_damage: 12.0,
-            volley_cooldown: 1.2,
+            zap_interval: 0.1,
+            zap_range: 30.0,
+            zap_damage: 6.0,
+            chain_range: 7.0,
+            chain_jumps: 2,
+            chain_falloff: 0.75,
+            wisp_speed: 12.0,
+            wisp_lifetime: 2.5,
+            wisp_radius: 0.3,
+            wisp_zap_interval: 0.2,
+            wisp_zap_range: 6.0,
+            wisp_zap_damage: 8.0,
+            wisp_pop_radius: 4.0,
+            wisp_pop_damage: 25.0,
+            wisp_pop_knockback: 8.0,
+            wisp_cooldown: 2.8,
+            discharge_charge_time: 1.0,
+            discharge_min_radius: 3.5,
+            discharge_max_radius: 8.0,
+            discharge_min_damage: 25.0,
+            discharge_max_damage: 80.0,
+            discharge_min_knockback: 12.0,
+            discharge_max_knockback: 24.0,
+            discharge_cooldown: 2.0,
         }
     }
 }
 
-/// 4 — Cinderbox: explosive launcher. Alt A Sticky (alt again detonates), alt B Mortar.
+/// 4 — Tumbler: bouncing-bomb launcher. Alt A Breach, alt B Gravewell.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct CinderboxTuning {
-    pub rocket_speed: f32,
-    pub rocket_radius: f32,
-    pub rocket_damage: f32,
-    pub rocket_knockback: f32,
-    pub rocket_interval: f32,
-    pub rocket_projectile_radius: f32,
-    pub rocket_lifetime: f32,
-    pub sticky_speed: f32,
-    pub sticky_gravity: f32,
-    pub sticky_radius: f32,
-    pub sticky_damage: f32,
-    pub sticky_knockback: f32,
-    pub sticky_max: u32,
-    pub sticky_cooldown: f32,
-    /// Pressing alt again within this time of the last throw throws another sticky (up to
-    /// `sticky_max`); pressing it later detonates every sticky.
-    pub sticky_chain_window: f32,
-    /// Unexploded stickies detonate on their own after this long.
-    pub sticky_lifetime: f32,
-    pub mortar_speed: f32,
+pub struct TumblerTuning {
+    pub bomb_speed: f32,
+    pub bomb_gravity: f32,
+    /// Speed kept when bouncing off the world.
+    pub bomb_restitution: f32,
+    /// World contacts before it explodes (it explodes on this one).
+    pub bomb_contacts: u32,
+    /// Explodes after this long at the latest.
+    pub bomb_fuse: f32,
+    pub bomb_projectile_radius: f32,
+    pub bomb_radius: f32,
+    pub bomb_damage: f32,
+    pub bomb_knockback: f32,
+    pub interval: f32,
+    /// Breach explodes at the first surface / hostile this far along the aim ...
+    pub breach_reach: f32,
+    /// ... pulled back this much towards the shooter.
+    pub breach_pullback: f32,
+    pub breach_radius: f32,
+    pub breach_damage: f32,
+    pub breach_knockback: f32,
+    pub breach_cooldown: f32,
+    pub gravewell_speed: f32,
     /// Launch angle above the aim.
-    pub mortar_angle_degrees: f32,
-    pub mortar_gravity: f32,
-    pub mortar_radius: f32,
-    pub mortar_damage: f32,
-    pub mortar_knockback: f32,
-    pub mortar_cooldown: f32,
+    pub gravewell_angle_degrees: f32,
+    pub gravewell_gravity: f32,
+    pub gravewell_projectile_radius: f32,
+    /// Seconds in flight before it implodes where it is (it normally sticks long before).
+    pub gravewell_flight_time: f32,
+    /// Once stuck it pulls for this long, then implodes.
+    pub gravewell_pull_time: f32,
+    pub gravewell_pull_radius: f32,
+    /// Pull speed towards the centre (enemies: × their `knockback_scale`).
+    pub gravewell_pull_speed: f32,
+    /// PvP: hostile players are pulled at this fraction of the speed.
+    pub gravewell_player_pull: f32,
+    pub gravewell_radius: f32,
+    pub gravewell_damage: f32,
+    pub gravewell_knockback: f32,
+    pub gravewell_cooldown: f32,
 }
 
-impl Default for CinderboxTuning {
+impl Default for TumblerTuning {
     fn default() -> Self {
         Self {
-            rocket_speed: 45.0,
-            rocket_radius: 4.5,
-            rocket_damage: 70.0,
-            rocket_knockback: 22.0,
-            rocket_interval: 0.9,
-            rocket_projectile_radius: 0.2,
-            rocket_lifetime: 5.0,
-            sticky_speed: 30.0,
-            sticky_gravity: 20.0,
-            sticky_radius: 4.0,
-            sticky_damage: 60.0,
-            sticky_knockback: 18.0,
-            sticky_max: 3,
-            sticky_cooldown: 0.2,
-            sticky_chain_window: 0.4,
-            sticky_lifetime: 20.0,
-            mortar_speed: 22.0,
-            mortar_angle_degrees: 35.0,
-            mortar_gravity: 25.0,
-            mortar_radius: 7.0,
-            mortar_damage: 90.0,
-            mortar_knockback: 24.0,
-            mortar_cooldown: 2.0,
+            bomb_speed: 30.0,
+            bomb_gravity: 18.0,
+            bomb_restitution: 0.6,
+            bomb_contacts: 3,
+            bomb_fuse: 1.6,
+            bomb_projectile_radius: 0.2,
+            bomb_radius: 4.5,
+            bomb_damage: 65.0,
+            bomb_knockback: 20.0,
+            interval: 0.85,
+            breach_reach: 3.0,
+            breach_pullback: 0.2,
+            breach_radius: 4.0,
+            breach_damage: 70.0,
+            breach_knockback: 24.0,
+            breach_cooldown: 1.2,
+            gravewell_speed: 20.0,
+            gravewell_angle_degrees: 25.0,
+            gravewell_gravity: 20.0,
+            gravewell_projectile_radius: 0.25,
+            gravewell_flight_time: 5.0,
+            gravewell_pull_time: 1.5,
+            gravewell_pull_radius: 9.0,
+            gravewell_pull_speed: 9.0,
+            gravewell_player_pull: 0.5,
+            gravewell_radius: 5.0,
+            gravewell_damage: 80.0,
+            gravewell_knockback: 6.0,
+            gravewell_cooldown: 3.0,
         }
     }
 }
@@ -708,8 +789,10 @@ pub struct StyleTuning {
     pub return_to_sender: f32,
     /// A ricochet shot hit something ...
     pub ricochet: f32,
-    /// ... plus this per prism bounce after the first.
+    /// ... plus this per thorn bounce after the first.
     pub ricochet_per_bounce: f32,
+    /// A Gust turned a hostile projectile around.
+    pub deflect: f32,
     /// Explosive kill.
     pub exploded: f32,
     pub slam_kill: f32,
@@ -752,6 +835,7 @@ impl Default for StyleTuning {
             return_to_sender: 80.0,
             ricochet: 30.0,
             ricochet_per_bounce: 20.0,
+            deflect: 30.0,
             exploded: 20.0,
             slam_kill: 40.0,
             fisted: 30.0,
@@ -921,11 +1005,12 @@ impl CombatTuning {
             punch_cone_degrees);
         clamp!(self, d, 0.0, MAX_SPEED; parry_max_speed, punch_knockback, slam_knockback);
         self.blood.sanitize();
-        self.prism.sanitize();
-        self.lancet.sanitize();
-        self.thresher.sanitize();
-        self.riveter.sanitize();
-        self.cinderbox.sanitize();
+        self.hit_assist.sanitize();
+        self.thorn.sanitize();
+        self.quill.sanitize();
+        self.bellows.sanitize();
+        self.arclash.sanitize();
+        self.tumbler.sanitize();
         self.enemy_projectiles.sanitize();
     }
 }
@@ -940,76 +1025,90 @@ impl BloodTuning {
     }
 }
 
-impl PrismTuning {
+impl HitAssistTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, 2.0; enemy_body_pad, enemy_weak_pad, player_body_pad,
+            player_head_pad);
+    }
+}
+
+impl ThornTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
         clamp_count!(self; charges);
-        clamp!(self, d, 0.0, MAX_TIME; recharge_time, lifetime);
-        clamp!(self, d, 0.0, MAX_SPEED; throw_speed, throw_up_speed);
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, flight_time, lifetime);
+        clamp!(self, d, 0.0, MAX_SPEED; throw_speed);
+        clamp!(self, d, 0.0, 1.0; inherit_velocity);
         clamp!(self, d, 0.0, MAX_ACCEL; gravity);
         clamp!(self, d, 0.0, 10.0; radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage);
         clamp!(self, d, 0.0, MAX_DIST; ricochet_radius, chain_range, target_range);
         clamp!(self, d, 0.0, MAX_MULT; damage_multiplier);
-        clamp!(self, d, 0.0, 1.0; restitution);
     }
 }
 
-impl LancetTuning {
+impl QuillTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_DAMAGE; damage, overcharge_min_damage, overcharge_max_damage,
-            fan_damage);
-        clamp!(self, d, 0.0, MAX_TIME; interval, overcharge_time, overcharge_cooldown,
-            fan_cooldown);
-        clamp!(self, d, 0.0, 90.0; fan_spread_degrees);
-        clamp_count!(self; overcharge_pierce, fan_shots);
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage, brand_damage, splinter_damage,
+            splinter_shard_damage);
+        clamp!(self, d, 0.0, MAX_TIME; interval, brand_cooldown, brand_duration,
+            splinter_cooldown);
+        clamp!(self, d, 0.0, MAX_MULT; brand_multiplier);
+        clamp!(self, d, 0.0, 180.0; splinter_cone_degrees);
+        clamp!(self, d, 0.0, MAX_DIST; splinter_range);
+        clamp_count!(self; splinter_count);
     }
 }
 
-impl ThresherTuning {
+impl BellowsTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp_count!(self; pellets);
-        clamp!(self, d, 0.0, MAX_DAMAGE; pellet_damage, slug_damage, flak_damage);
-        clamp!(self, d, 0.0, 180.0; cone_degrees);
-        clamp!(self, d, 0.0, MAX_TIME; interval, slug_cooldown, flak_fuse, flak_cooldown);
-        clamp!(self, d, 0.0, MAX_SPEED; pellet_knockback, slug_knockback, slug_recoil,
-            flak_speed, flak_knockback);
-        clamp!(self, d, 0.0, MAX_DIST; pellet_range, flak_radius);
-        clamp!(self, d, 0.0, MAX_ACCEL; flak_gravity);
-        clamp!(self, d, 0.0, 10.0; flak_projectile_radius);
-        clamp!(self, d, 0.0, MAX_MULT; flak_parry_speed_multiplier);
+        clamp_count!(self; pellets, both_pellets);
+        clamp!(self, d, 0.0, MAX_DAMAGE; pellet_damage, gust_damage);
+        clamp!(self, d, 0.0, 180.0; cone_degrees, both_cone_degrees);
+        clamp!(self, d, 0.0, 360.0; gust_cone_degrees);
+        clamp!(self, d, 0.0, MAX_DIST; pellet_range, gust_range);
+        clamp!(self, d, 0.0, MAX_TIME; interval, gust_cooldown, both_cooldown);
+        clamp!(self, d, 0.0, MAX_SPEED; pellet_knockback, gust_knockback, gust_up, gust_recoil,
+            both_recoil);
+        clamp!(self, d, 0.0, MAX_MULT; deflect_speed_multiplier, deflect_damage_multiplier);
     }
 }
 
-impl RiveterTuning {
+impl ArclashTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_SPEED; rivet_speed, saw_speed);
-        clamp!(self, d, 0.0, MAX_DAMAGE; rivet_damage, saw_damage, volley_damage);
-        clamp!(self, d, 0.1, 1000.0; rate);
-        clamp!(self, d, 0.0, 180.0; spread_degrees);
-        clamp!(self, d, 0.0, 89.0; volley_ring_degrees);
-        clamp!(self, d, 0.0, 10.0; rivet_radius, saw_radius);
-        clamp!(self, d, 0.0, MAX_TIME; rivet_lifetime, saw_damage_interval, saw_lifetime,
-            saw_cooldown, volley_cooldown);
-        clamp_count!(self; saw_bounces, volley_count);
+        clamp!(self, d, 0.0, MAX_TIME; zap_interval, wisp_lifetime, wisp_zap_interval,
+            wisp_cooldown, discharge_charge_time, discharge_cooldown);
+        clamp!(self, d, 0.0, MAX_DIST; zap_range, chain_range, wisp_zap_range, wisp_pop_radius,
+            discharge_min_radius, discharge_max_radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; zap_damage, wisp_zap_damage, wisp_pop_damage,
+            discharge_min_damage, discharge_max_damage);
+        clamp!(self, d, 0.0, MAX_SPEED; wisp_speed, wisp_pop_knockback, discharge_min_knockback,
+            discharge_max_knockback);
+        clamp!(self, d, 0.0, 10.0; wisp_radius);
+        clamp!(self, d, 0.0, MAX_MULT; chain_falloff);
+        clamp_count!(self; chain_jumps);
     }
 }
 
-impl CinderboxTuning {
+impl TumblerTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_SPEED; rocket_speed, rocket_knockback, sticky_speed,
-            sticky_knockback, mortar_speed, mortar_knockback);
-        clamp!(self, d, 0.0, MAX_DIST; rocket_radius, sticky_radius, mortar_radius);
-        clamp!(self, d, 0.0, MAX_DAMAGE; rocket_damage, sticky_damage, mortar_damage);
-        clamp!(self, d, 0.0, MAX_TIME; rocket_interval, rocket_lifetime, sticky_cooldown,
-            sticky_chain_window, sticky_lifetime, mortar_cooldown);
-        clamp!(self, d, 0.0, 10.0; rocket_projectile_radius);
-        clamp!(self, d, 0.0, MAX_ACCEL; sticky_gravity, mortar_gravity);
-        clamp!(self, d, 0.0, 90.0; mortar_angle_degrees);
-        clamp_count!(self; sticky_max);
+        clamp!(self, d, 0.0, MAX_SPEED; bomb_speed, bomb_knockback, breach_knockback,
+            gravewell_speed, gravewell_pull_speed, gravewell_knockback);
+        clamp!(self, d, 0.0, MAX_ACCEL; bomb_gravity, gravewell_gravity);
+        clamp!(self, d, 0.0, 1.0; bomb_restitution, gravewell_player_pull);
+        clamp!(self, d, 0.0, MAX_TIME; bomb_fuse, interval, breach_cooldown,
+            gravewell_flight_time, gravewell_pull_time, gravewell_cooldown);
+        clamp!(self, d, 0.0, 10.0; bomb_projectile_radius, gravewell_projectile_radius);
+        clamp!(self, d, 0.0, MAX_DIST; bomb_radius, breach_reach, breach_pullback, breach_radius,
+            gravewell_pull_radius, gravewell_radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; bomb_damage, breach_damage, gravewell_damage);
+        clamp!(self, d, 0.0, 90.0; gravewell_angle_degrees);
+        clamp_count!(self; bomb_contacts);
     }
 }
 
@@ -1042,7 +1141,7 @@ impl StyleTuning {
         clamp!(self, d, 1.0, MAX_POINTS; points_per_rank);
         clamp!(self, d, 0.0, MAX_POINTS; decay_lowest, decay_highest, kill, frag, headshot,
             airkill, airshot, multikill, parry, return_to_sender, ricochet, ricochet_per_bounce,
-            exploded, slam_kill, fisted);
+            deflect, exploded, slam_kill, fisted);
         clamp!(self, d, 0.0, 1.0; rank_down_refill, freshness_cost, freshness_restore,
             freshness_regen, freshness_min, stale_threshold);
         clamp!(self, d, 0.0, MAX_TIME; rank_grace, multikill_window);
@@ -1177,13 +1276,12 @@ mod tests {
         let mut expected = Tuning::default();
         for n in [
             &mut expected.movement.wall_jumps,
-            &mut expected.combat.prism.charges,
-            &mut expected.combat.lancet.overcharge_pierce,
-            &mut expected.combat.lancet.fan_shots,
-            &mut expected.combat.thresher.pellets,
-            &mut expected.combat.riveter.saw_bounces,
-            &mut expected.combat.riveter.volley_count,
-            &mut expected.combat.cinderbox.sticky_max,
+            &mut expected.combat.thorn.charges,
+            &mut expected.combat.quill.splinter_count,
+            &mut expected.combat.bellows.pellets,
+            &mut expected.combat.bellows.both_pellets,
+            &mut expected.combat.arclash.chain_jumps,
+            &mut expected.combat.tumbler.bomb_contacts,
         ] {
             *n = 3;
         }
@@ -1194,11 +1292,11 @@ mod tests {
             let mut t = defaults_with(float, &u32::MAX.to_string());
             assert!(t.sanitize());
             let c = &t.combat;
-            assert_eq!(c.thresher.pellets, MAX_COUNT);
-            assert_eq!(c.riveter.volley_count, MAX_COUNT);
-            assert!(c.hitscan_range <= MAX_DIST && c.thresher.pellet_range <= MAX_DIST);
-            assert!(c.parry_max_speed <= MAX_SPEED && c.cinderbox.rocket_speed <= MAX_SPEED);
-            assert!(c.riveter.rate >= 0.1 && t.net.snapshot_rate >= 1.0);
+            assert_eq!(c.bellows.pellets, MAX_COUNT);
+            assert_eq!(c.quill.splinter_count, MAX_COUNT);
+            assert!(c.hitscan_range <= MAX_DIST && c.bellows.pellet_range <= MAX_DIST);
+            assert!(c.parry_max_speed <= MAX_SPEED && c.tumbler.bomb_speed <= MAX_SPEED);
+            assert!(c.hit_assist.enemy_body_pad <= 2.0 && t.net.snapshot_rate >= 1.0);
             assert!(t.movement.radius >= 0.05 && t.style.points_per_rank >= 1.0);
             assert!(t.net.lag_comp_max_ms <= MAX_MS);
             let text = ron::to_string(&t).unwrap();

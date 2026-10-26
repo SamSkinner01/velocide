@@ -1,9 +1,10 @@
 # VELOCIDE combat simulation
 
-Server-authoritative combat: weapons with alt fires, lag-compensated hitscan, projectiles and
-explosions, parry with network tolerance, ricochet prisms, blood-burst healing, hard damage,
-the enemy definitions (the Moulds, `docs/enemies.md`) and how all of it reaches clients. Rules
-and default numbers come from
+Server-authoritative combat: weapons with alt fires, lag-compensated hitscan with hit assist,
+projectiles and explosions, area attacks, parry with network tolerance, thorn ricochets,
+brands, healing bursts, hard damage, the enemy definitions (the Moulds, `docs/enemies.md`) and
+how all of it reaches clients. The arsenal itself (names, silhouettes, behaviour, net kinds) is
+specified in `docs/roster.md`. Rules and default numbers come from
 `docs/gameplay.md`; every number is in `CombatTuning` (`assets/tuning.ron`, section `combat`)
 or in `assets/enemies/*.ron`. Networking basics: `docs/network.md`.
 
@@ -14,14 +15,16 @@ for every entity kind and event (the spec for phase 2, client side).
 
 | module | contents |
 |---|---|
-| `shared::sim` (`mod.rs`) | `SimWorld` (players, enemies, projectiles, prisms, blood, pending hits, rules), the tick pipeline, `SimEvent`, `ShotEvent`, `neutral_input`, replication, hitboxes |
+| `shared::sim` (`mod.rs`) | `SimWorld` (players, enemies, projectiles, thorns, brands, blood, pending hits, rules), the tick pipeline, `SimEvent`, `ShotEvent`, `neutral_input`, replication, hitboxes |
 | `shared::sim::combat` | `Owner`, `Attack`, `DamageFlags`, `DamageInfo`, `DamageEvent`, `Blocked`, `KillInfo`, `PlayerCombat`, `CombatRules`, **the damage pipeline** (`SimWorld::apply_damage`), death/respawn rule, vitals |
 | `shared::sim::weapons` | `Weapon`, `WeaponState`, `FireIntent`, **`step_weapons`** (predictable), `SimWorld::resolve_intent` (what each mode does) |
-| `shared::sim::hitscan` | `ShotSpec`, `ShotView`, lag-compensated traces, piercing, ricochet |
-| `shared::sim::projectiles` | `ProjectileKind`, `Projectile`, `Explosive`, projectile step, explosions, stickies, `replicated_position` (client helper) |
-| `shared::sim::parry` | punch, parry checks, deflection, auto-aim, parry-delayed damage, melee parry hook |
-| `shared::sim::prism` / `blood` | ricochet prisms, blood bursts (healing) |
-| `shared::sim::trail` | short per-tick position history (rewinding non-hitbox things: projectiles, prisms, enemies) |
+| `shared::sim::hitscan` | `ShotSpec`, `ShotView`, `Impact`, lag-compensated traces, hit assist (`hit_pads`), thorn ricochets, Splinter bursts, Arclash chains |
+| `shared::sim::area` | Bellows Gust (cone + deflection), Arclash Discharge (nova), Tumbler Breach |
+| `shared::sim::projectiles` | `ProjectileKind`, `Projectile`, `Explosive`, projectile step, bomb bounces, Gravewell pull, Wisp zaps, explosions, `replicated_position` (client helper) |
+| `shared::sim::parry` | punch, parry checks, deflection (`redirect_projectile`, shared with the Gust), auto-aim, parry-delayed damage, melee parry hook |
+| `shared::sim::thorn` / `brand` / `blood` | thrown thorns (plant, drop, lie), brands (side table), healing bursts |
+| `shared::sim::hitbox` | `HitShape`, `Hitbox`, `HitPads` (hit assist: padded rays, sweeps, distances) |
+| `shared::sim::trail` | short per-tick position history (rewinding non-hitbox things: projectiles, thorns, enemies) |
 | `shared::sim::enemy` | `EnemyDef` (RON format) + `EnemyRegistry`, `Enemy`, `AiState`, damage/death; `ai.rs`: state machine, targeting, attacks, movement |
 | `shared::protocol` | entity kinds and flag bits (`snapshot.rs`), `GameEvent` combat variants, `OwnState::combat`, `SnapshotMessage::fx`, `DamageReport`, `HitReport`, `Fx`/`FxEvent`, `QPos` (`combat.rs`) |
 | `server::combat` | routing `SimEvent`s to reliable `GameEvent`s per recipient and batched `Fx` (`FxLog`) |
@@ -33,22 +36,25 @@ for every entity kind and event (the spec for phase 2, client side).
 1. **Inputs → movement → weapons**, per player, per input (one input = one tick):
    movement step (dead players use `neutral_input`: no axes/buttons, view kept), then
    `step_weapons(&mut combat.weapons, input, alive, tuning, tick_rate)` → `FireIntent`s, each
-   resolved immediately (`resolve_intent`): hitscan rewound to the input's view time,
-   projectile spawns, punch + first parry check, prism throws, sticky detonation. A
-   `MoveEvents::slam_landed` triggers the slam shockwave.
-2. **Projectiles** move/collide/explode; parry-delayed impacts that ran out apply. Then
-   **open parry windows** are re-checked against the moved projectiles.
+   resolved immediately (`resolve_intent`): hitscan rewound to the input's view time, area
+   attacks (Gust, Discharge, Breach), projectile spawns, punch + first parry check, thorn
+   throws. A `MoveEvents::slam_landed` triggers the slam shockwave.
+2. **Projectiles** move/collide/bounce/explode (stuck Gravewells pull, Wisps zap);
+   parry-delayed impacts that ran out apply. Then **open parry windows** are re-checked
+   against the moved projectiles.
 3. **Enemies**: targeting, AI, attacks, movement; then due **pending enemy hits** apply.
-4. **Prisms** (ballistic, bounce, expire), **blood bursts** (healing), **vitals** (hard damage
-   recovery, spawn protection, respawn timers).
+4. **Thorns** (fly, plant, hit and drop, lie, expire), **brands** (expire, drop with their
+   target), **healing bursts**, **vitals** (hard damage recovery, spawn protection, respawn
+   timers).
 5. **World rules**: below the kill floor → put back at a spawn immediately (safety net);
    inside a kill volume → `kill_player(…, Attack::World)` (dies, respawns by the rule).
 6. Returns every `SimEvent` of the tick.
 
 The server records `SimWorld::hitboxes` (living players: body capsule + head sphere; living
 enemies: body capsule + weak point spheres) into `LagCompHistory` after every tick, so enemies
-are lag-compensated exactly like players. Projectiles, prisms and enemies also keep a
-`Trail` of their end-of-tick positions (same moment) for parry/ricochet rewinding.
+are lag-compensated exactly like players. Projectiles, thorns and enemies also keep a
+`Trail` of their end-of-tick positions (same moment) for parry/ricochet rewinding. The history
+keeps the plain shapes; hit assist pads them at test time.
 
 ## Data model
 
@@ -68,23 +74,23 @@ are lag-compensated exactly like players. Projectiles, prisms and enemies also k
 ### `WeaponState` (predictable: integers only)
 
 `weapon` (slot 0–3), `mode` (0 = alt A, 1 = alt B), `prev_buttons` (own edge detection),
-`primary_cooldown[4]`, `alt_cooldown[4]` (ticks, per weapon: switching mid-combo is free),
-`charge` (Overcharge ticks held), `punch_cooldown`, `parry` (window ticks left),
-`prisms_used` + `prism_recharge`, `stickies` (live count, server-authoritative) +
-`sticky_since` (ticks since the last throw).
+`primary_cooldown[4]`, `alt_cooldown[4]` (ticks, per weapon: switching mid-combo is free; the
+two alt modes of a weapon share its alt cooldown), `charge` (Discharge ticks held),
+`punch_cooldown`, `parry` (window ticks left), `thorns_used` + `thorn_recharge`.
 
-**Input mapping.** `PlayerInput::weapon` 0 Lancet, 1 Thresher, 2 Riveter, 3 Cinderbox (other
+**Input mapping.** `PlayerInput::weapon` 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler (other
 slots keep the current weapon); `weapon_mode` 0/1 (others → 0); switching weapon or mode is
-instant and cancels an Overcharge charge. `FIRE` held = automatic primary at the weapon's
-interval. `ALT_FIRE` held = alt at its cooldown, except Overcharge (hold to charge, fires on
-**release**) and Sticky (on **press**: see Cinderbox). `PUNCH` press = fist + parry window.
-`THROW` press = prism (if a charge is left; 1 per `recharge_time`).
+instant and cancels a Discharge charge. `FIRE` held = automatic primary at the weapon's
+interval (the Arclash zaps every 0.1 s). `ALT_FIRE` held = alt at its cooldown, except
+Discharge (hold to charge, fires on **release**). Both Barrels also puts the Bellows primary on
+its interval. `PUNCH` press = fist + parry window. `THROW` press = thorn (if a charge is left;
+1 per `thorn.recharge_time`).
 
 `step_weapons` is pure and deterministic. The owning client should run it on every predicted
 input (exactly like `player_move_step`) for instant muzzle flashes/sounds/recoil, keep the
 predicted `WeaponState` per input, and compare it with `OwnState::combat.weapons` for
-`last_input_seq` (mismatch → reset to the server's and replay; only `stickies` normally
-differs, when a sticky exploded server-side).
+`last_input_seq` (mismatch → reset to the server's and replay). Nothing server-side changes
+the weapon state, so the prediction is exact (test `server_weapon_state_is_exactly_the_predicted_one`).
 
 ### Rules (`SimWorld::rules: CombatRules`)
 
@@ -104,17 +110,22 @@ Everything that hurts goes through this one function.
 pub struct DamageInfo {
     amount: f32,          // base damage (multipliers are applied by the pipeline)
     source: Owner,        // World | Player(id) | Enemy(net id)
-    attack: Attack,       // Lancet, Overcharge, Fan, Pellet, Slug, Flak, Rivet, Sawblade, Volley,
-                          // Rocket, Sticky, Mortar, Fist, Slam, Enemy{kind, attack}, World, Dev
+    attack: Attack,       // Quill, Brand, Splinter, Blast, Gust, BothBarrels, Arc, Wisp,
+                          // Discharge, Tumble, Breach, Gravewell, Thorn, Fist, Slam,
+                          // Enemy{kind, attack}, World, Dev
     point: Vec3, dir: Vec3,   // where, and the direction the damage travels
     part: HitPart,        // Body | Head | Weak(i)
     knockback: Vec3,      // velocity change
     flags: DamageFlags,   // HITSCAN PROJECTILE EXPLOSIVE MELEE PARRIED RICOCHET SLAM HEADSHOT WEAK_POINT
-                          // SELF PIERCED RETURNED ENVIRONMENT ARMOURED DIRECT
-    ricochets: u8,        // prism bounces before this hit
+                          // SELF CHAINED RETURNED ENVIRONMENT ARMOURED DIRECT BRANDED
+    ricochets: u8,        // thorn bounces before this hit
     projectile: Option<NetId>,
 }
 ```
+
+**Brands** first: a branded target (`SimWorld::brands`, see below) takes
+`quill.brand_multiplier` (×1.35) of `amount` from every source except the world / dev
+commands, flag `BRANDED`. A kill drops the brand.
 
 **Players**, in order: missing/dead → `Blocked::NoTarget` (shots pass through corpses).
 Self: explosive → `× self_damage_fraction` (0.35) and flag `SELF`; non-explosive self damage
@@ -122,7 +133,7 @@ Self: explosive → `× self_damage_fraction` (0.35) and flag `SELF`; non-explos
 (non-explosive) → `× player_head_multiplier` (2), `HEADSHOT`. Then `god` → `God`, spawn
 protection → `SpawnProtection`, dash i-frames (`MoveState::is_invulnerable`) →
 `Invulnerable` (kill volumes ignore the last two). **Knockback** is applied when the hit
-counts *or* is explosive (rocket jumps through i-frames, teammates' explosions in co-op).
+counts *or* is explosive (blast jumps through i-frames, teammates' explosions in co-op).
 Counted hits: `damage += amount`, `hard += amount × hard_damage_fraction` (capped at
 `damage`), `hard_delay` reset, last attacker recorded; `damage ≥ max_health` → killed. In PvP
 a counted hit spawns a blood burst the victim can't drain.
@@ -133,7 +144,8 @@ damage arriving from the front arc (`-dir` within `front_arc/2` of the facing) `
 front_multiplier` unless the weak point is in `bypass` (explosions too if `explosions`),
 flag `ARMOURED`. Knockback `× knockback_scale` into the enemy's velocity (airborne if it has
 an upward component). Aggro bookkeeping. Blood burst (`heal_fraction` of damage dealt,
-`melee_heal_fraction` for punches/parry counters). `health ≤ 0` → killed.
+`melee_heal_fraction` for punches/parry counters). `health ≤ 0` → killed. (Hurt-flash and
+death effects on the client are sparks / ash, not gore, for Shrikes.)
 
 Emits `SimEvent::Damage(DamageEvent { target, info, dealt, hard, health_after, killed,
 blocked, tick })` (also for blocked hits, not for `NoTarget`) and, on a kill,
@@ -157,8 +169,9 @@ Style mapping (for the style agent): HEADSHOT = `flags.HEADSHOT`; AIRKILL =
 `killer_airborne`; AIRSHOT = `victim_airborne`; MULTIKILL = kills by the same killer within
 0.6 s of `tick`; PARRY = `SimEvent::Parried`; RETURN TO SENDER = `parried_projectile`;
 RICOCHET = `ricochets`; EXPLODED = `flags.EXPLOSIVE`; SLAM KILL = `attack == Slam`;
-FISTED = `attack == Fist`; CLOSE CALL = `killer_health < 30`; FRAG = `victim_kind == PLAYER`.
-Variety/freshness can key off `attack` (weapon + mode). The server exposes every event via
+FISTED = `attack == Fist`; CLOSE CALL = `killer_health < 30`; FRAG = `victim_kind == PLAYER`;
+DEFLECT = `SimEvent::Deflected` (a Gust turned a projectile around). Freshness keys off
+`attack` (weapon + mode; a Gust-deflected projectile's attack becomes `Gust`). The server exposes every event via
 `Server::drain_sim_events()`.
 
 ### Death and respawn (game modes)
@@ -175,35 +188,50 @@ and fires nothing.
 
 | weapon / mode | implementation |
 |---|---|
-| **Lancet** primary | hitscan from the eye along the aim, 22, every 0.30 s, ricochets |
-| Overcharge (alt A) | charge while alt held (0.8 s max); on release a beam `25 + 50 × charge`, pierces 5 targets (`PIERCED` on all but the first), ricochets; 0.5 s cooldown |
-| Fan (alt B) | 3 hitscans at −6°, 0°, +6° (yaw), 15 each, ricochet; 0.9 s |
-| **Thresher** primary | 10 pellets in a 7° cone (deterministic spread: splitmix of tick/player/seq), 9 each, knockback 2 m/s each along the ray, 120 m range, no ricochet; 0.75 s |
-| Slug (alt A) | hitscan 70, knockback 14 m/s, **recoil** −6 m/s along the aim on the shooter (server impulse → reconciled), ricochets; 1.0 s |
-| Flak (alt B) | grenade 28 m/s, gravity 25, explodes on impact or after the 1.2 s fuse (r 5, 55, kb 18); parryable, **also by its owner** (2× speed, 2× damage); 1.0 s |
-| **Riveter** primary | rivet projectile 90 m/s, 8, 12/s, 1.5° spread |
-| Sawblade (alt A) | disc 40 m/s, r 0.35, pierces: 10 per target per 0.1 s of contact, bounces off the level 3× (reflect), 3 s life; 1.0 s |
-| Volley (alt B) | 8 rivets on a 10° ring around the aim, 12 each; 1.2 s |
-| **Cinderbox** primary | rocket 45 m/s, explodes on contact: r 4.5, 70 → 30 % at the edge, kb 22; 0.9 s |
-| Sticky (alt A) | **press alt**: no stickies out → throw (30 m/s, gravity 20); stickies out and the last throw < 0.4 s ago and < 3 out → throw another; otherwise → **detonate all** (r 4, 60, kb 18 each). Sticks to the level or to whatever it hits (follows enemies/players; falls off when they die); 20 s self-destruct |
-| Mortar (alt B) | lob: aim rotated 35° up, 22 m/s, gravity 25, r 7, 90, kb 24; 2.0 s |
-| **Fist** (`PUNCH`) | lag-compensated melee: nearest hittable target along the aim within 2.6 m, or whose nearest surface is within 2.6 m and inside the 50° cone, with line of sight; 25, `MELEE`, knockback 10 m/s (flattened aim + up); 0.4 s; opens the parry window |
-| **Prism** (`THROW`) | thrown from eye + 0.5 m: aim × 18 + up 6 (+ half the thrower's velocity), gravity 20, bounces (restitution 0.35), rests on the floor, 4 s life; 4 charges, 1 per 2.5 s |
+| **Quill** primary | hitscan from the eye along the aim, 24, every 0.28 s, ricochets off thorns |
+| Brand (alt A) | hitscan 10, ricochets; whatever the last leg hits (and survives) is branded: `SimWorld::brand_target` (one brand per player, newest per target, 5 s), `SimEvent::Branded`; 2.5 s |
+| Splinter (alt B) | hitscan 20, ricochets; at the last leg's `Impact` 6 secondary traces (`splinter_burst`): 40° cone, 18 m, 9 each, deterministic spread (`SpreadRng` of tick/player/seq); from a target along the shot with that target excluded, from the level along the shot reflected about the surface normal; same (rewound) hitboxes; `SimEvent::Splinters`; 1.1 s |
+| **Bellows** primary (Blast) | 12 pellets in an 8° cone (deterministic spread), 8 each, knockback 2 m/s each along the ray, 60 m, no ricochet; 0.8 s |
+| Gust (alt A) | `area::gust`: every hostile hitbox (rewound, padded) in a 7 m / 60° cone with line of sight: 6 (always a body hit), knockback `aim × 18 + 4ŷ`; every hostile projectile (enemies'; opponents' in PvP; not stuck, not pending on someone else) in the cone now or where the shooter saw it is turned around with `redirect_projectile` (owner → shooter, along the aim — no auto-aim, ×1.25 speed, ×1.5 damage, `parried`, attack → `Gust`) — no heal or parry reward, `SimEvent::Deflected` (style DEFLECT); recoil `−aim × 10` on the shooter; 1.6 s |
+| Both Barrels (alt B) | 24 pellets in a 5° cone, 8 each; recoil `−aim × 9`; puts the primary on its interval too; 1.4 s |
+| **Arclash** primary (Arc) | while held, a zap every 0.1 s: hitscan 30 m, 6, no ricochet; a hit chains (`arc_chain`) to the nearest other hostile within 7 m of the padded shape (line of sight from the previous target; branded targets first), ≤ 2 jumps, ×0.75 per jump, flags `HITSCAN \| CHAINED`, `SimEvent::ArcChain` |
+| Wisp (alt A) | projectile 12 m/s from eye + 0.6 m, no gravity, 2.5 s, passes through targets; every 0.2 s zaps the nearest hostile within 6 m (padded, line of sight) for 8 (`SimEvent::WispZap`); pops on the level or at the end: r 4, 25, kb 8; 2.8 s |
+| Discharge (alt B) | hold to charge (`WeaponState::charge`, 1.0 s max), release: `area::discharge` around the shooter's body centre: radius 3.5–8, damage 25–80, outward knockback 12–24 by charge to every hostile (padded distance, line of sight to the body or head), never the shooter; `SimEvent::Discharge`; 2.0 s |
+| **Tumbler** primary (Tumble) | bomb 30 m/s, gravity 18; bounces off the level (×0.6, `ProjectileBounced`), explodes on its 3rd contact, on a hostile (direct) or after 1.6 s: r 4.5, 65 → 30 % at the edge, kb 20; 0.85 s |
+| Breach (alt A) | `area::breach`: ray 3 m along the aim against the level and the (padded) hostiles; explosion at the first hit pulled back 0.2 m (else 3 m out): r 4, 70, kb 24, normal self damage (35 %, full knockback); no projectile; 1.2 s |
+| Gravewell (alt B) | canister lobbed at 20 m/s, aim rotated 25° up (never below the aim), gravity 20, passes through targets; sticks to the level (`STUCK`, `SimEvent::GravewellStuck`); for 1.5 s each tick every hostile enemy within 9 m gets its velocity towards the centre raised to `9 × knockback_scale` m/s (easing off within 2 m, kept staggered), hostile players (PvP) half that; then implodes: r 5, 80, kb 6; 3.0 s |
+| **Fist** (`PUNCH`) | lag-compensated melee (hit assist): nearest hittable target along the aim within 2.6 m, or whose nearest (padded) surface is within 2.6 m and inside the 50° cone, with line of sight; 25, `MELEE`, knockback 10 m/s (flattened aim + up); 0.4 s; opens the parry window |
+| **Thorn** (`THROW`) | thrown from eye + 0.5 m along the aim at 30 m/s (+ half the thrower's velocity), gravity 12; plants in the first surface (`Planted`, oriented along its flight, `SimEvent::ThornPlanted`) and lives 8 s; hitting a hostile (padded sweep): 8 (`Attack::Thorn`, `PROJECTILE`), then it drops and lies on the floor (`Lying`, 8 s); never landing: gone after 3 s; 3 charges, 1 per 3 s |
+
+## Hit assist
+
+Player-owned attacks test against shapes inflated by `combat.hit_assist`
+(`SimWorld::hit_pads(attacker, target)`): enemy bodies +0.2 m, enemy weak points / heads
++0.1 m; in PvP player bodies +0.12 m, heads +0.06 m. Enemy (and world-owned) attacks get
+`HitPads::NONE`. Applied at test time to the (rewound) plain shapes:
+
+* rays (every hitscan, splinters, ricochet legs, Breach, the fist's aim ray):
+  `Hitbox::ray_hit_padded` — the plain shapes first, the padded ones only on a miss, so a
+  plain head hit is never turned into a body hit;
+* projectile and thorn sweeps: `sweep_sphere_padded`;
+* explosions, the Discharge, Wisp zaps, Arc chain range, the fist's cone and the Gust:
+  `distance_to_point_padded` (an explosion never pads its owner).
 
 ## Hitscan and lag compensation
 
 1. `shot_view`: hitboxes rewound through `HitboxHistory` to `input.view_time_ticks()` (the
    tick the client was rendering, `view_tick + view_frac/256`), clamped by the history to
    `[newest − net.lag_comp_max_ms, newest]`; without a history (or before it has frames)
-   current hitboxes. Prisms are rewound to the same (clamped) time through their trails.
+   current hitboxes. Thorns are rewound to the same (clamped) time through their trails.
 2. Ray vs level (`MASK_SHOTS`: world + doors) gives the far limit; ray vs every rewound
    hitbox the shooter `can_hit` (alive and hostile: not itself, not co-op teammates, not
-   corpses) — nearest first, one hit per target, up to `1 + pierce` targets.
-3. The first prism within `ricochet_radius` of the ray before that limit (if the shot can
-   ricochet) cuts the ray: targets before it are hit, it shatters, and the shot re-fires
-   from it (see Ricochet).
-4. Each hit → `apply_damage` with `HITSCAN` (+ `RICOCHET`, `PIERCED`), part from the shape,
-   knockback along the ray.
+   corpses; hit assist) — the nearest one is hit.
+3. The first thorn within `ricochet_radius` of the ray before that limit (if the shot can
+   ricochet) takes the shot instead: it shatters and the shot re-fires from it (see
+   Ricochet).
+4. A hit → `apply_damage` with `HITSCAN` (+ `RICOCHET`), part from the shape, knockback
+   along the ray. The last leg's `Impact` (point, direction, surface normal or target) feeds
+   Brand, Splinter and Arc.
 
 **Rewind budget.** The server has to rewind ≈ one-way latency × 2 + interpolation delay +
 input buffer: ~205 ms at 100 ms RTT, ~305 ms at 200 ms RTT (measured). The networking
@@ -221,14 +249,15 @@ wins.
 
 | kind (net kind) | gravity | radius | life | on target | on level | parryable |
 |---|---|---|---|---|---|---|
-| Rivet (64) | 0 | 0.08 | 2 s | 8 / 12 damage | vanish (`ProjectileImpact`) | no |
-| Sawblade (65) | 0 | 0.35 | 3 s | pierce, 10 per 0.1 s contact | bounce ×3 (`ProjectileBounced`) | no |
-| Rocket (66) | 0 | 0.2 | 5 s (explodes) | explode | explode | yes |
-| Flak (67) | 25 | 0.2 | 1.2 s fuse (explodes) | explode | explode | yes, owner too |
-| Sticky (68) | 20 | 0.15 | 20 s (explodes) | stick to it | stick | no |
-| Mortar (69) | 25 | 0.25 | 10 s | explode | explode | yes |
+| Bomb (72) | 18 | 0.2 | 1.6 s fuse (explodes) | explode (direct) | bounce ×2 (`state` = bounces left), explode on the 3rd contact | no |
+| Gravewell (73) | 20 | 0.25 | 5 s in flight, then 1.5 s stuck (implodes) | passes through | stick, pull, implode | no |
+| Wisp (74) | 0 | 0.3 | 2.5 s (pops) | passes through, zaps every 0.2 s | pop | no |
 | EmberBomb (80) | `enemy_projectiles.ember_gravity` (20) | 0.3 | 6 s | explode (r `ember_explosion_radius` 2.5, the attack's damage, kb `ember_knockback` 9) | explode | yes |
 | Needle (81) | `needle_gravity` (0) | 0.12 | 2 s | direct damage (attack's) | vanish (`ProjectileImpact`) | yes |
+
+Kinds 64–69 (the first arsenal's rivet, sawblade, rocket, flak, sticky, mortar) are retired.
+Players' projectiles are not parryable (no punchable grenades); the Bellows Gust turns any
+hostile projectile around, the players' included (PvP).
 
 Enemy projectiles: `SimWorld::spawn_enemy_projectile(t, kind, enemy, attack, pos, vel,
 damage)` (used by `AttackKind::Projectile` attacks; speed/damage/count/spread/lead/muzzle/lob
@@ -243,10 +272,11 @@ explosion) — unless a parry deflects it first (next section).
 ### Explosions (`SimWorld::explode`)
 
 For every living player and enemy hitbox: distance from the centre to the nearest shape
-surface `d ≤ radius` (or the direct-hit target); line of sight from the centre to the body
+surface (padded for player-owned explosions, except the owner) `d ≤ radius` (or the
+direct-hit target); line of sight from the centre to the body
 centre or head (blocked → unaffected, unless touching); `frac = 1 − 0.7 · d/radius`; damage
 `× frac`; knockback `normalize(dir_from_centre + 0.3ŷ) × knockback × frac` (full for the
-owner: rocket jumps; teammates in co-op get knockback only). Flags `EXPLOSIVE` (+ `DIRECT`,
+owner: blast jumps; teammates in co-op get knockback only). Flags `EXPLOSIVE` (+ `DIRECT`,
 `PARRIED`, `RETURNED`).
 
 ## Parry
@@ -259,13 +289,14 @@ owner: rocket jumps; teammates in co-op get knockback only). Flags `EXPLOSIVE` (
   puncher: the impact point backed off 0.6 m along its incoming direction) is within
   `parry_range` (3 m) of the eye inside `parry_cone_degrees` (70°, i.e. ±35°), or within
   `parry_close_range` (1.2 m) anywhere in front (never from behind).
-* Eligible: parryable kinds not stuck; others' projectiles (enemies; opponents in PvP); own and
-  co-op teammates' only for `owner_can_parry` kinds (flak). A projectile you just deflected
-  can't be re-parried by you.
+* Eligible: parryable kinds (enemy projectiles) not stuck; others' (enemies'; opponents' in
+  PvP); own and co-op teammates' only for `owner_can_parry` kinds (none at the moment). A
+  projectile you just deflected can't be re-parried by you.
 * **Deflection**: owner → the puncher (`original_owner` kept), `parried`, no gravity, position
   eye + 1 m along the new direction = aim, auto-aimed at the nearest hostile (head/weak point
-  if visible) within `parry_auto_aim_degrees` (15°) / 80 m; speed `× 1.5` (flak `× 2`),
-  damage `× 2` (explosion too), lifetime reset, pending impact cancelled.
+  if visible) within `parry_auto_aim_degrees` (15°) / 80 m; speed `× 1.5`, damage `× 2`
+  (explosion too), lifetime reset, pending impact cancelled. `SimWorld::redirect_projectile`
+  does the work (the Gust calls it with ×1.25 / ×1.5 and no auto-aim).
 * **Network tolerance**: parryable hits on a player are delayed by
   `parry_delay_ticks = ceil(net.parry_tolerance_ms + view lag of the victim)` (view lag
   clamped to `lag_comp_max_ms`; set `combat.parry_compensate_view_lag = false` to use the
@@ -291,14 +322,25 @@ owner: rocket jumps; teammates in co-op get knockback only). Flags `EXPLOSIVE` (
 
 ## Ricochet
 
-From a shattered prism the shot re-fires at: the nearest other live prism within
-`chain_range` (30 m) in line of sight (chain), else the nearest hittable target within
-`target_range` (40 m) — aiming at its first visible weak point / head, else its body. No
-target → continues in the original direction. Each bounce multiplies damage by 1.5 (`22 →
-33 → 49.5`, ×2 on a head). Bounce legs use current hitboxes/prisms (they auto-aim at current
-positions). Hitscan modes that ricochet: Lancet primary, Overcharge, Fan, Slug (not pellets).
-In PvP the targets are opposing players. Events: `SimEvent::Ricochet { shooter, attack,
-points }` (prism positions…, final end) and `PrismShattered`.
+From a shattered thorn the shot re-fires at: the nearest other live thorn within
+`chain_range` (30 m) in line of sight (chain), else the nearest **branded** hittable target
+within `target_range` (40 m), else the nearest hittable target in range — aiming at its first
+visible weak point / head, else its body. No target → continues in the original direction.
+Each bounce multiplies damage by 1.5 (`24 → 36 → 54`, ×2 on a head). Bounce legs use current
+hitboxes/thorns (they auto-aim at current positions). Quill shots ricochet (primary, Brand,
+Splinter — the main shot, not the splinters); Bellows pellets, Arclash zaps and Wisp zaps
+don't. In PvP the targets are opposing players. Events: `SimEvent::Ricochet { shooter,
+attack, points }` (thorn positions…, final end) and `ThornShattered`.
+
+## Brands
+
+`SimWorld::brands: BTreeMap<HitTarget, Brand { owner, expire_tick }>` — a side table, so
+neither `SimPlayer` nor `Enemy` carries brand state. `brand_target(owner, target, point)`
+drops the owner's previous brand and brands `target` for `quill.brand_duration` (one live brand
+per player; a target holds the newest brand). `step_brands` drops expired brands and brands
+on dead / removed targets; a kill drops it at once. `SimWorld::replicate` ORs the `BRANDED`
+flag (bit 15 of `player_flags` / `enemy_flags`) into the target's entity. Ricochets and Arc
+chains prefer branded targets; the damage pipeline multiplies damage to them.
 
 ## Healing, hard damage, i-frames
 
@@ -383,15 +425,15 @@ block each other (player movement must stay predictable).
 
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
-| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64 (reserved)` | weapon (bits 0–3) \| mode (4–5) \| Overcharge charge 0–255 (8–15) | health (ceil) | hard (bits 0–7) \| prism charges (8–11) \| live stickies (12–15) |
-| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (bits 6–14 enemies area, 15 `BRANDED`) | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
+| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BRANDED 1<<15` | weapon (bits 0–3) \| mode (4–5) \| Discharge charge 0–255 (8–15) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
+| enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–14 enemies area), `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `BLOOD_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
-| `PRISM` 160 | thrower | **at launch tick** | – | `RESTING 1` | – | – | launch tick |
+| `THORN` 160 | thrower | **at launch tick**; while `PLANTED`: where it sits / its orientation (unit) | – | `PLANTED 1, LYING 2, DROPPING 4` | – | – | launch tick |
 
-**Trajectory replication** (projectiles, prisms): `pos(t) = p0 + v0·Δ − ½·g·Δ²·ŷ`,
+**Trajectory replication** (projectiles, thorns): `pos(t) = p0 + v0·Δ − ½·g·Δ²·ŷ`,
 `Δ = (t − aux) / tick_rate`, g = the kind's gravity (`ProjectileKind::gravity`,
-`prism.gravity`), 0 when `PARRIED`; `STUCK`/`PENDING`/`RESTING` → `position` as is.
+`thorn.gravity`), 0 when `PARRIED`; `STUCK`/`PENDING`/`PLANTED` → `position` as is.
 `shared::sim::projectiles::replicated_position(&entity, time_ticks, tick_rate,
 &tuning.combat)` implements it. The entity changes only when the trajectory does (bounce,
 parry, stick), so flying projectiles cost nothing per snapshot; the reproduction error is
@@ -414,7 +456,8 @@ parry, stick), so flying projectiles cost nothing per snapshot; the reproduction
 ### Cosmetic events (`SnapshotMessage::fx: Vec<FxEvent>`, unreliable)
 
 Batched into each client's next snapshot; important ones (`Explosion`, `Ricochet`,
-`SlamShockwave`, `EnemyShockwave`, `EnemyAttack`) are repeated in the following snapshot as
+`Splinters`, `ArcChain`, `Branded`, `Deflected`, `Discharge`, `SlamShockwave`,
+`EnemyShockwave`, `EnemyAttack`, `EnemySpawned`) are repeated in the following snapshot as
 well, so clients **must de-duplicate by `seq`** (global, +1 per event). `tick` = when it
 happened (play it when the render clock reaches it). At most 256 per snapshot (important first,
 then newest). Positions are `QPos` (1/64 m varints).
@@ -427,9 +470,15 @@ then newest). Positions are `QPos` (1/64 m varints).
 | `Punch { player, hit }` | everyone but the puncher |
 | `Heal { player, amount_tenths, from }` | everyone |
 | `SlamShockwave { player, position, power, radius_dm }` | everyone |
-| `PrismThrown { player }` | everyone but the thrower |
-| `PrismExpired { id }` | everyone |
-| `StickiesDetonated { player }` | everyone but the owner |
+| `ThornThrown { player }` | everyone but the thrower |
+| `ThornPlanted { position }` | everyone |
+| `ThornExpired { id }` | everyone |
+| `Splinters { shooter, origin, ends }` | everyone (the shooter can't predict them) |
+| `ArcChain { shooter, points }` | everyone |
+| `WispZap { from, to }` | everyone |
+| `Branded { position }` | everyone |
+| `Deflected { player, position }` | everyone |
+| `Discharge { player, position, radius_dm }` | everyone but the player (predicted) |
 | `ProjectileBounce { kind, position }` | everyone |
 | `ProjectileImpact { kind, position, normal }` | everyone |
 | `EnemyAttack { enemy, attack, strike, parryable }` | everyone |
@@ -441,7 +490,7 @@ then newest). Positions are `QPos` (1/64 m varints).
 
 Implemented in `client/src/ingame/combat/` (see `docs/client.md` → "Combat presentation"):
 `weapon_feel.rs` (local weapon prediction), `fx.rs` (tracers, lights, `Fx` playback),
-`entities.rs` (enemies, projectiles, blood, prisms), `hud.rs` (combat HUD), `mod.rs`
+`entities.rs` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud.rs` (combat HUD), `mod.rs`
 (`CombatClient`, the `GameEvent` reactions and the per-frame glue). `NetClient` exposes
 `own_combat()` (latest `OwnState::combat` + its input seq) and `drain_fx()` (de-duplicated
 `FxEvent`s). Verified with `cargo run -p client --release --example combat_shots` (headless
@@ -450,57 +499,64 @@ screenshots of every case below).
 Prediction duties:
 
 * **Weapons**: `WeaponPredictor` runs `step_weapons` on each predicted input (right after
-  `NetClient::tick`) and plays muzzle flash, weapon sound (`LancetFire`, `ThresherFire`,
-  `ThresherSlug`, `FlakLaunch`, `RiveterFire`, `SawLaunch`, `VolleyFire`, `CinderFire`,
-  `StickyArm`, `MortarFire`, `LancetFan`, `LancetBeam`), viewmodel kick and local tracers
-  (client ray against the level and the displayed capsules; impact sparks + scorch decal)
-  immediately for every `FireIntent`; `LancetCharge` loop + viewmodel cell glow + crosshair
-  gauge while `charge > 0`; Riveter barrels spin while firing; `Punch` anim + sound;
-  `PrismThrow`; `StickyDetonate` click; `WeaponSwitch` / `ModeSwitch` on selection changes.
-  On every newer `OwnState` the prediction is re-based on `combat.weapons` and the unacked
-  inputs are replayed without effects (`client_combat` test: 0 mismatches over 587 inputs
-  at 100 ms RTT). Recoil and knockback stay server-side (movement reconciliation).
+  `NetClient::tick`) and plays muzzle flash, weapon sound (`QuillFire`, `BrandFire`,
+  `SplinterFire`, `BellowsBlast`, `BellowsGust`, `BothBarrels`, `ArcZap`, `WispLaunch`,
+  `DischargeRelease`, `BombLaunch`, `BreachBlast`, `GravewellLaunch`), viewmodel kick and local
+  tracers (client ray against the level and the displayed capsules; sparks + ash on bodies,
+  sparks + scorch decal on the level; jagged arcs for Arclash zaps) immediately for every
+  `FireIntent`; the Gust puff / rings and the Discharge nova are predicted too;
+  `DischargeCharge` whine + capacitor glow + crosshair gauge (with the nova radius) while
+  `charge > 0`; the Tumbler drum turns a chamber per shot; `Punch` anim + sound;
+  `ThornThrow`; `WeaponSwitch` / `ModeSwitch` on selection changes. On every newer
+  `OwnState` the prediction is re-based on `combat.weapons` and the unacked inputs are replayed
+  without effects (`client_combat` test: 0 mismatches over 587 inputs at 100 ms RTT, every
+  weapon and mode incl. a charged Discharge). Recoil and knockback stay server-side (movement
+  reconciliation).
 * **Death**: `NetClient::tick` predicts (and sends) `sim::neutral_input` for inputs up to
   the predicted respawn (`OwnCombat::dead_at`: `seq ≤ own.seq + respawn_in`), so the corpse
   doesn't mispredict; the death screen shows "YOU DIED", the killer line from the `Killed`
   event and "RESPAWNING IN N.N".
-* **Projectiles/prisms**: other players' / enemies' projectiles and *all* prisms are drawn
+* **Projectiles/thorns**: other players' / enemies' projectiles and *all* thorns are drawn
   at `replicated_position(e, render_tick, …)` (consistent with lag compensation, parry and
   ricochet validation). **Your own projectiles** are taken from the newest snapshot and drawn
   at the present (`server_tick_estimate`, at most 6 ticks past the newest snapshot), starting
-  at the drawn muzzle and blending onto the true path over 0.15 s, so a rocket leaves the
+  at the drawn muzzle and blending onto the true path over 0.15 s, so a bomb leaves the
   barrel at once instead of an interpolation delay (~130 ms) later; your own explosions
-  (`Fx::Explosion::owner`) play on arrival to match.
+  (`Fx::Explosion::owner`) play on arrival to match (an own Breach's bang was already played
+  by the prediction).
 
 HUD (from `OwnState::combat` + the predicted `WeaponState`): health `max − damage` with
-the hard-damage segment (existing health block via `HudInfo`); prism pips with recharge
-progress; `STICKY n/3` with the Cinderbox in sticky mode; primary / alt cooldown bars under
-the crosshair; Overcharge gauge beside it; hit markers (body white, head/weak point red,
+the hard-damage segment (existing health block via `HudInfo`); thorn pips with recharge
+progress; primary / alt cooldown bars under the crosshair; the Discharge gauge beside it
+with the nova radius; a pulsing BRANDED warning while someone branded you; hit markers (body white, head/weak point red,
 armour grey, kill: big red, expanding) + damage numbers (pellets merged); damage direction
 chevrons around the crosshair; pulsing low-health vignette below 40 %; `PROTECTED` while
 spawn protected; death screen.
 
 | thing | render / play |
 |---|---|
-| **PLAYER** entity | body/stance from `LOW_PROFILE`; weapon model from `state & 0xF` and alt mode; `CHARGING` → Lancet glow (charge in bits 8–15); `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
-| **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
-| **projectiles** | rivet: thin bolt + trail; sawblade: spinning disc (`SawBounce` on `ProjectileBounce`); rocket: smoke trail + light; flak: tumbling grenade + fuse beep; sticky: blinking charge (`STUCK` → attached, beeping); mortar: arcing shell; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
+| **PLAYER** entity | drawn 10 % larger than life (visual only); body/stance from `LOW_PROFILE`; weapon model from `state & 0xF` and alt mode; `CHARGING` → Arclash capacitor glow + crackling arcs (charge in bits 8–15); `BRANDED` → turning brand sigil above the head; `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
+| **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; `BRANDED` → turning brand sigil (a diamond and a point-down triangle, camera-facing) above it; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
+| **projectiles** | bomb: tumbling studded ball, fuse sparks and a flickering fuse band (`BombBounce` on `ProjectileBounce`); gravewell: canister with a green light, `STUCK` → claws down, vortex of motes drawn in from the pull radius, `GravewellHum` once; wisp: spinning ball of lightning, crackling arcs, violet light, `WispHum` every 0.45 s; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
 | **BLOOD_BURST** | red mist cloud of `state/10` m radius, density from `health` (pool); `BIG` → gib shower + big mist; fades over its life |
-| **PRISM** | spinning mirrored shard with glints; `RESTING` → lying/hovering still; disappears on removal (shatter shown via `Ricochet`/`PrismExpired`) |
+| **THORN** | flying: the glass spike along its path; `DROPPING`: tumbling; `PLANTED`: tip-first in the surface along `velocity` (quivers after landing), drawn ×1.5 with a steady halo and a pulse ring so the relay reads at a distance; `LYING`: flat on the floor; disappears on removal (shatter via `Ricochet` / `ThornExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
 | `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
 | `Killed` | kill feed (`KILLER [ATTACK] VICTIM  HEADSHOT RETURNED RICOCHET xN AIR`, only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; gibs come from the enemy entity entering `Dying` (also `EnemyDeath`/`Gib` sounds) |
 | `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
-| `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers from the shooter's muzzle to each end, impact sparks/decals at the ends |
-| `Fx::Ricochet` | bright tracer through `points`, prism shatter at each prism point, `Ricochet` sound (pitch up per bounce) |
-| `Fx::Explosion` | fireball sized by `radius_dm`, light flash, screen shake by distance, scorch decal, `Explosion` |
+| `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers (jagged arcs for `Arc`) from the shooter's muzzle to each end, impact sparks/decals at the ends; `Gust` → the air puff along the muzzle direction |
+| `Fx::Ricochet` | bright tracer through `points`, thorn shatter at each thorn point, `Ricochet` sound (pitch up per bounce) |
+| `Fx::Explosion` | by `attack`: bomb / enemy fireball (`Explosion`), tight white-hot Breach with debris (`BreachBlast`, not for its owner), Gravewell implosion (motes rushing in, green flash, closing ring, `GravewellImplode`), Wisp pop (violet arcs, `DischargeRelease` pitched up); light flash, shake by distance, scorch |
+| `Fx::Splinters` | ice-cyan splinter tracers from `origin` to each end, glass glints, `SplinterBurst` |
+| `Fx::ArcChain` / `WispZap` | jagged arcs between the points + glows / sparks, `ArcChain` (pitch up per jump) / `WispZap` |
+| `Fx::Branded` / `Deflected` | brand flash + `Branded` / white flash, sparks, `Deflect` |
+| `Fx::Discharge` | remote nova: rings rushing out along the floor, arcs, `DischargeRelease` |
+| `Fx::ThornThrown` / `ThornPlanted` / `ThornExpired` | remote throw anim + `ThornThrow` / glass chips + `ThornPlant` / crumble + `ThornShatter` |
 | `Fx::Punch` | remote arm swing, `Punch`/`PunchHit` |
 | `Fx::Heal` | red streak from `from` to the player; for you: green-ish heal flash + `Heal` |
 | `Fx::SlamShockwave` | ground ring of `radius_dm`, dust, `SlamImpact` |
-| `Fx::PrismThrown` / `PrismExpired` | remote throw anim + `PrismThrow` / small fizzle |
-| `Fx::StickiesDetonated` | remote detonator click |
-| `Fx::ProjectileBounce` / `ProjectileImpact` | sparks (+ `SawBounce`) / impact puff + `ProjectileImpact` |
+| `Fx::ProjectileBounce` / `ProjectileImpact` | sparks (+ `BombBounce`) / impact puff + `ProjectileImpact` |
 | `Fx::EnemyAttack` | `strike == false`: the attack's telegraph sound (by attack name: `GnawerBiteWindup`, `CenserWhirl`, `HarrierShriek`, `GaolerBashWindup`, `GaolerChain`, `HeronLaser`...) + glint in `colors.telegraph`; `parryable` → yellow flash; `strike == true`: its strike sound + bash dust ring / sweep arc / leap dust |
 | `Fx::Explosion` with `Attack::Enemy` | an ember bomb bursting: flash, embers, smoke ring, light, `EmberBurst` (no fireball) |
 | `Fx::EnemyFired` / `EnemyShockwave` / `EnemyAlert` | muzzle flash + `CenserLob` / `HeronNeedle` / slam ring / the type's alert bark |
@@ -515,7 +571,7 @@ commands are disabled on this server" and never broadcast. Each command costs a 
 
 
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
-`/god`, `/notarget`, `/give` (full health, no hard damage, prisms, cooldowns), `/kill`,
+`/god`, `/notarget`, `/give` (full health, no hard damage, thorns, cooldowns), `/kill`,
 `/hurt <hp>`, `/ff [on|off]`, `/needle [distance]` (alias `/orb`: a Heron needle slowed to
 22 m/s flies at you: parry practice), `/ember [distance]` (an ember bomb is lobbed onto you),
 `/encounter <n>`, `/encounters`, `/tp <x> <y> <z>`, `/goto <exit|start|checkpoint
@@ -529,15 +585,15 @@ broadcast. Programmatic: `ServerCommand::{SpawnEnemy, KillAllEnemies, SetFriendl
 
 | | |
 |---|---|
-| lag-compensated Lancet shot at a target strafing 16 m/s, ~100 ms RTT, default tuning | target was 3.3 m from where the shooter saw it; server rewound 205 ms; **hit** (22). Same shot with `lag_comp_max_ms = 0`: miss |
+| lag-compensated Quill shot at a target strafing 16 m/s, ~100 ms RTT, default tuning | target was 3.3 m from where the shooter saw it; server rewound 205 ms; **hit** (24). Same shot with `lag_comp_max_ms = 0`: miss |
 | same at ~200 ms RTT (`lag_comp_max_ms = 400`) | 4.75 m away, rewound 305 ms, **hit** |
 | parry of a 22 m/s orb, punching when the *displayed* orb is 2 m away | 0 ms: parried (2 ticks after the server impact, thanks to interpolation delay); ~100 ms RTT: parried 8 ticks late; ~200 ms RTT: parried 14 ticks late; punching 300 ms after the displayed touch: fails, 20 damage |
-| rocket jump (rocket at the feet + jump), 50 ms one-way | apex 14.6 m, self damage 23.2, 1 correction (0.35 m at the ack), no snaps, prediction == server afterwards |
-| crowded frame: 8 players, 50 fodder enemies, 150 projectiles | full 3.5 KB; delta 74 B with idle enemies and flying projectiles |
-| bandwidth: 4 clients + 4 bots, 50 fodder enemies chasing, 150–240 projectiles, riveters firing | **28 KB/s per client** server→client (snapshot 844 B: 615 B entities ≈ 10 B per moving enemy, 3.4 FX); server tick 0.8 ms (dev build) |
+| breach jump (Breach at the feet + jump), 50 ms one-way | apex 17.9 m, self damage 24.3, 1 correction (0.40 m at the ack), no snaps, prediction == server afterwards |
+| crowded frame: 8 players, 50 enemies, 150 projectiles | full 3.6 KB; delta 74 B with idle enemies and flying projectiles |
+| bandwidth: 4 clients + 4 bots, 50 enemies chasing, 150 projectiles, Arclash zapping 10/s each | **33 KB/s per client** server→client (snapshot 1020 B: 722 B entities, 6.8 FX); server tick 0.4 ms (dev build) |
 | 2 players (`net_loopback`) | snapshot 197 B (own state 155 B of it: movement 123 + combat 32); 0 prediction corrections with one player shooting |
-| client weapon prediction (`client_combat`), 100 ms RTT, 587 inputs of firing / charging / switching / punching / prisms | 0 re-base mismatches; predicted `WeaponState` == server's |
-| client frame + render with combat effects (`combat_shots`, headless 1280×720, release) | avg 0.25 ms, p95 0.33 ms over 1638 frames |
+| client weapon prediction (`client_combat`), 100 ms RTT, 587 inputs of every weapon / mode, Discharge charges, switching, punching, thorns | 0 re-base mismatches; predicted `WeaponState` == server's |
+| client frame + render with combat effects (`combat_shots`, headless 1280×720, release) | avg 0.30 ms, p95 0.44 ms over 2419 frames |
 
 Run: `cargo test -p shared --test combat_weapons --test combat_parry --test combat_ricochet
 --test combat_enemy --test combat_replication` and `cargo test -p server --test combat_net
@@ -548,10 +604,12 @@ Run: `cargo test -p shared --test combat_weapons --test combat_parry --test comb
 * No interest management: every client gets every enemy (~10 B per moving enemy per
   snapshot). Distance-based update rates would cut the crowded-scene 28 KB/s a lot.
 * Players and enemies don't collide (enemy navigation: `docs/enemies.md`).
-* Client: the predicted sticky count can be off by one for a snapshot when a sticky explodes
-  server-side (re-based right after); hitscan tracers of your own pellets use client-side
-  spread (the server's spread decides damage).
+* Client: hitscan tracers of your own pellets use client-side spread (the server's spread
+  decides damage); splinters and arc chains are drawn from the server's events (one
+  interpolation delay late).
 * Default `net.lag_comp_max_ms` (350) compensates up to ~245 ms RTT (see above).
 * Pending (parry-delayed) hits favour the victim by up to `lag_comp_max_ms + 80 ms`.
-* Rivets that leave the level vanish silently after 2 s; sawblades only bounce off the level.
+* A Gravewell sticks to the level only (it passes through targets); a stuck one is drawn
+  claws-down (clients don't know the surface normal). Bombs never come to rest: a rolling bomb
+  uses its contacts up quickly and explodes.
 * Explosion LOS tests the body centre and head only (a foot sticking out of cover is safe).

@@ -1365,7 +1365,7 @@ fn performance(rig: &mut Rig) {
     rig.run(&mut [&mut c], 120);
     let enemies = c.server_stats().map_or(0, |s| s.enemies);
     println!("      enemies alive on the server: {enemies}");
-    c.pad(GamepadButton::DPadRight, true); // 2 Thresher
+    c.pad(GamepadButton::DPadRight, true); // 2 Bellows
     rig.run(&mut [&mut c], 1);
     c.pad(GamepadButton::DPadRight, false);
     rig.run(&mut [&mut c], 1);
@@ -1426,7 +1426,7 @@ fn performance(rig: &mut Rig) {
     );
     rig.leave(&mut c);
 
-    // Server: 8 players running, jumping and firing rockets in Cistern Nine.
+    // Server: 8 players running, jumping and firing bombs in Cistern Nine.
     let server = match server::ServerHandle::spawn(server::ServerConfig {
         bind: "127.0.0.1:0".parse().expect("addr"),
         level: "cistern_nine".into(),

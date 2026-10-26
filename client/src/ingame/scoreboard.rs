@@ -14,6 +14,8 @@ use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec4, vec2};
 use shared::lobby::GameMode;
 
+use super::cues;
+
 /// Cell text until a system provides the value.
 pub const PLACEHOLDER: &str = "-";
 
@@ -54,6 +56,8 @@ pub fn columns_for(mode: GameMode) -> Vec<ScoreColumn> {
 pub struct ScoreRow {
     pub name: String,
     pub color: Vec4,
+    /// Player slot: with shape cues on, its marker shape replaces the colour bar.
+    pub slot: Option<usize>,
     /// Round-trip time in ms (`None`: unknown / bot / single-player).
     pub ping_ms: Option<f32>,
     pub is_local: bool,
@@ -72,6 +76,7 @@ impl ScoreRow {
         Self {
             name: name.to_string(),
             color,
+            slot: None,
             ping_ms: None,
             is_local: false,
             is_host: false,
@@ -173,11 +178,17 @@ pub fn draw_in(list: &mut UiDrawList, t: &Theme, rect: Rect, table: &ScoreTable)
                 fade(t.blood, 0.35),
             );
         }
-        draw::fill(
-            list,
-            Rect::new(vec2(x_name, y), vec2(x_name + 4.0, y + 7.0)),
-            r.color,
-        );
+        match r.slot {
+            Some(slot) => {
+                let ink = fade(t.ink, 0.9);
+                cues::player_swatch(list, vec2(x_name, y), vec2(4.0, 7.0), slot, r.color, ink);
+            }
+            None => draw::fill(
+                list,
+                Rect::new(vec2(x_name, y), vec2(x_name + 4.0, y + 7.0)),
+                r.color,
+            ),
+        }
         let mut name_x = x_name + 8.0;
         if r.is_host {
             crown(list, vec2(name_x, y), t.rank_color(1));

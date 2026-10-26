@@ -826,10 +826,10 @@ mod tests {
         let theme = Theme::default();
         let canvas = Vec2::new(640.0, 360.0);
         let mut feed = TextFeed::new(6, 4.0);
-        feed.push("YOU [CINDERBOX] HUSK", Vec4::ONE, 0.0);
+        feed.push("YOU [TUMBLER] HUSK", Vec4::ONE, 0.0);
         for k in 1..5 {
             // Merged repeats re-trigger the slide-in.
-            feed.push("YOU [CINDERBOX] HUSK", Vec4::ONE, k as f64 * 0.01);
+            feed.push("YOU [TUMBLER] HUSK", Vec4::ONE, k as f64 * 0.01);
         }
         feed.push("X".repeat(200), Vec4::ONE, 0.05);
         // Every moment of the slide-in, right-aligned 10 units from the edge (the kill feed).

@@ -135,7 +135,7 @@ fn binding_replaces_the_same_device_and_steals_from_others() {
         b.get(Action::Jump)
             .contains(&Binding::GamepadButton(GamepadButton::South))
     );
-    assert!(!b.get(Action::ThrowPrism).contains(&Binding::Key(Key::KeyQ)));
+    assert!(!b.get(Action::ThrowThorn).contains(&Binding::Key(Key::KeyQ)));
     b.bind(Action::Jump, Binding::GamepadButton(GamepadButton::North));
     assert!(
         !b.get(Action::Jump)
@@ -212,7 +212,7 @@ fn rebinding_through_the_settings_screen() {
     );
     assert!(
         !s.bindings
-            .get(Action::ThrowPrism)
+            .get(Action::ThrowThorn)
             .contains(&Binding::GamepadButton(GamepadButton::North))
     );
 }

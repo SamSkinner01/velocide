@@ -27,7 +27,7 @@ pub enum Shade {
     /// functions drive `Pose::glow` from the attack state (dim idle, flaring through the
     /// wind-up); the client can additionally flash it through `Tint::glow`.
     Glow,
-    /// Emissive (unlit) steady part — weak points, lamps, the Shrike's blood core —
+    /// Emissive (unlit) steady part — weak points, lamps, the heart of the Shrike's wick —
     /// multiplied by `Pose::core`.
     Core,
     /// Emissive part in the team colour (Shrike visor): `Tint::team x Pose::glow`.
@@ -83,7 +83,7 @@ pub struct Tint {
     pub glow: Vec4,
 }
 
-/// The Shrikes' default colour (single-player / co-op): blood red.
+/// The Shrikes' default colour (single-player / co-op): ember red.
 pub const DEFAULT_TEAM_COLOR: Vec4 = Vec4::new(0.85, 0.07, 0.09, 1.0);
 
 impl Default for Tint {

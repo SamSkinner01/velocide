@@ -38,7 +38,7 @@ pub struct ViewmodelDrawInfo {
     pub muzzle: Vec3,
     /// View-space direction the barrel points.
     pub muzzle_dir: Vec3,
-    /// View-space position of the thrown prism / fist knuckles (punch sparks), if visible.
+    /// View-space position of the held thorn's tip / fist knuckles (punch sparks), if visible.
     pub fist: Option<Vec3>,
 }
 
@@ -144,9 +144,23 @@ impl ModelLibrary {
         tint: &Tint,
         out: &mut Vec<DrawItem>,
     ) -> PlayerDrawInfo {
+        self.draw_player_scaled(anim, feet, 1.0, tint, out)
+    }
+
+    /// [`ModelLibrary::draw_player`] scaled about the feet (other players use
+    /// `shrike::REMOTE_SCALE`: drawn 10 % larger to read at a distance; visual only).
+    pub fn draw_player_scaled(
+        &self,
+        anim: &PlayerAnim,
+        feet: Vec3,
+        scale: f32,
+        tint: &Tint,
+        out: &mut Vec<DrawItem>,
+    ) -> PlayerDrawInfo {
         let rig = self.get(ModelId::Shrike);
         let pose = shrike::pose(anim);
-        let root = shrike::root_transform(anim, feet);
+        let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let root = shrike::root_transform(anim, feet) * Mat4::from_scale(Vec3::splat(scale));
         rig.draw(&pose, root, tint, out);
         let hand = rig.part_transform(&pose, root, shrike::HAND_R);
         let weapon = weapons::WeaponKind::from_index(anim.weapon);
@@ -197,7 +211,7 @@ impl ModelLibrary {
     }
 
     /// Draws the first-person viewmodel (view space) for `anim`: the weapon in the right hand,
-    /// the punching left fist and the prism throw. Push the items into
+    /// the punching left fist and the Thorn throw. Push the items into
     /// `FrameDesc::viewmodel`.
     pub fn draw_viewmodel(
         &self,

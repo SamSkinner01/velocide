@@ -2,7 +2,7 @@
 //!
 //! [`SimWorld`] is the whole game state the server simulates (and the client mirrors for
 //! prediction): the level and its collision world, the players (movement + combat state),
-//! enemies, projectiles, ricochet prisms and blood bursts.
+//! enemies, projectiles, thorns, brands and healing bursts.
 //!
 //! One server tick ([`SimWorld::step`]) is a fixed pipeline:
 //!
@@ -10,11 +10,13 @@
 //!    movement step ([`player_move_step`], the same function client prediction runs; dead
 //!    players move with [`neutral_input`]), followed by [`weapons::step_weapons`] (also
 //!    predictable) whose fire intents are resolved right away: lag-compensated hitscan via the
-//!    server's history, projectile spawns, punches/parries, prism throws, slam shockwaves.
+//!    server's history, area attacks, projectile spawns, punches/parries, thorn throws, slam
+//!    shockwaves.
 //! 2. **projectiles** (sweeps, impacts, explosions, parry-delayed impacts), then open parry
 //!    windows are re-checked against the moved projectiles.
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
-//! 4. **prisms**, **blood bursts** (healing), **vitals** (hard damage recovery, respawns).
+//! 4. **thorns**, **brands**, **healing bursts**, **vitals** (hard damage recovery,
+//!    respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
 //! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
 //!    events, checkpoints, revives, the exit, deathmatch limits, the scoreboard.
@@ -26,7 +28,9 @@
 //! Replication: [`SimWorld::replicate`] writes every replicated entity into a
 //! [`NetFrame`]; new entity types add themselves there with their own [`kind`] constant.
 
+pub mod area; // Gust, Discharge, Breach
 pub mod blood;
+pub mod brand;
 pub mod combat;
 pub mod encounter; // arena encounters (waves, doors, co-op scaling): docs/enemies.md
 pub mod enemy;
@@ -37,9 +41,9 @@ pub mod hitscan;
 pub mod modes;
 pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
-pub mod prism;
 pub mod projectiles;
 pub mod style;
+pub mod thorn;
 pub mod trail;
 pub mod weapons;
 
@@ -50,20 +54,21 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
 pub use blood::{BloodBurst, HealSource};
+pub use brand::Brand;
 pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
     PlayerCombat,
 };
 pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, lob_velocity};
-pub use hitbox::{HitPart, HitShape, HitTarget, Hitbox};
+pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules,
     ModeState, PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
 };
 pub use parry::{ParryEvent, ParryTarget};
-pub use prism::Prism;
 pub use projectiles::{Projectile, ProjectileKind};
 pub use style::{PlayerStyle, StyleBonus, StyleEvent, StyleKey, StyleSystem, StyleView};
+pub use thorn::{Thorn, ThornState};
 pub use weapons::{FireIntent, Weapon, WeaponState, step_weapons};
 
 use crate::input::PlayerInput;
@@ -201,9 +206,9 @@ impl SimPlayer {
 
     /// Replicated state including combat presentation fields (see `docs/combat.md`):
     /// `flags` += `DEAD`, `PARRY`, `CHARGING`, `PROTECTED`; `state` = weapon (bits 0–3) |
-    /// alt mode (bits 4–5) | Overcharge charge 0..255 (bits 8–15); `health` = health (rounded
-    /// up); `aux` = hard damage (bits 0–7, rounded up) | prism charges (bits 8–11) | live
-    /// stickies (bits 12–15) | wall-cling yaw (bits 16–31).
+    /// alt mode (bits 4–5) | Discharge charge 0..255 (bits 8–15); `health` = health (rounded
+    /// up); `aux` = hard damage (bits 0–7, rounded up) | thorn charges (bits 8–11) |
+    /// wall-cling yaw (bits 16–31). (`BRANDED` is added by [`SimWorld::replicate`].)
     pub fn replicated_state(&self, t: &Tuning, tick_rate: u32) -> EntityState {
         let mut e = self.entity_state(&t.movement);
         let c = &self.combat;
@@ -225,10 +230,9 @@ impl SimPlayer {
         e.state = (w.weapon as u16 & 0xF) | ((w.mode as u16 & 0x3) << 4) | (charge << 8);
         e.health = c.health(&t.combat).ceil().clamp(0.0, 65535.0) as u16;
         let hard = c.hard.ceil().clamp(0.0, 255.0) as u32;
-        let prisms = w.prisms(&t.combat).min(15);
-        let stickies = (w.stickies as u32).min(15);
+        let thorns = w.thorns(&t.combat).min(15);
         // Keep the wall-cling yaw from `entity_state` in the high 16 bits.
-        e.aux = (e.aux & 0xFFFF_0000) | hard | (prisms << 8) | (stickies << 12);
+        e.aux = (e.aux & 0xFFFF_0000) | hard | (thorns << 8);
         e
     }
 
@@ -330,11 +334,54 @@ pub enum SimEvent {
     },
     /// A player fired (hitscan: `ends` = end of each ray; projectile weapons: empty).
     Shot(ShotEvent),
-    /// A hitscan shot bounced off prisms: prism positions, then the final end point.
+    /// A Quill shot bounced off thorns: thorn positions, then the final end point.
     Ricochet {
         shooter: Owner,
         attack: Attack,
         points: Vec<Vec3>,
+    },
+    /// A Splinter shot burst into secondary traces at `origin` (end of each).
+    Splinters {
+        shooter: PlayerId,
+        origin: Vec3,
+        ends: Vec<Vec3>,
+    },
+    /// An Arclash zap jumped between targets: the first target's hit point, then the centre
+    /// of each target it chained to.
+    ArcChain {
+        shooter: Owner,
+        points: Vec<Vec3>,
+    },
+    /// A Wisp zapped a target.
+    WispZap {
+        id: NetId,
+        from: Vec3,
+        to: Vec3,
+    },
+    /// A Brand shot branded `target` (hit at `position`).
+    Branded {
+        owner: PlayerId,
+        target: HitTarget,
+        position: Vec3,
+    },
+    /// A Gust turned a hostile projectile around (it now belongs to `player`).
+    Deflected {
+        player: PlayerId,
+        id: NetId,
+        kind: ProjectileKind,
+        position: Vec3,
+    },
+    /// An Arclash Discharge nova around `position` (`charge` 0..=1).
+    Discharge {
+        player: PlayerId,
+        position: Vec3,
+        radius: f32,
+        charge: f32,
+    },
+    /// A Gravewell canister stuck to the level and starts pulling.
+    GravewellStuck {
+        id: NetId,
+        position: Vec3,
     },
     Explosion {
         position: Vec3,
@@ -347,20 +394,22 @@ pub enum SimEvent {
         /// Hit something or parried.
         hit: bool,
     },
-    PrismThrown {
+    ThornThrown {
         player: PlayerId,
         id: NetId,
     },
-    PrismShattered {
+    /// A flying thorn planted itself in the level.
+    ThornPlanted {
         id: NetId,
         position: Vec3,
     },
-    PrismExpired {
+    /// A shot ricocheted off a thorn (it is gone).
+    ThornShattered {
         id: NetId,
+        position: Vec3,
     },
-    StickiesDetonated {
-        player: PlayerId,
-        count: u32,
+    ThornExpired {
+        id: NetId,
     },
     /// A slam landed: shockwave around `position` (`power` 0..=1).
     SlamShockwave {
@@ -374,7 +423,7 @@ pub enum SimEvent {
         kind: ProjectileKind,
         position: Vec3,
     },
-    /// A non-explosive projectile hit the level and vanished.
+    /// A non-explosive projectile hit the level and vanished (enemy projectiles).
     ProjectileImpact {
         id: NetId,
         kind: ProjectileKind,
@@ -480,7 +529,9 @@ pub struct SimWorld {
     pub enemy_defs: EnemyRegistry,
     pub enemies: BTreeMap<NetId, Enemy>,
     pub projectiles: BTreeMap<NetId, Projectile>,
-    pub prisms: BTreeMap<NetId, Prism>,
+    pub thorns: BTreeMap<NetId, Thorn>,
+    /// Live Quill brands, keyed by the branded target (`brand.rs`).
+    pub brands: BTreeMap<HitTarget, Brand>,
     pub blood: BTreeMap<NetId, BloodBurst>,
     /// Parry-delayed enemy melee damage.
     pub pending_hits: Vec<parry::PendingHit>,
@@ -533,7 +584,8 @@ impl SimWorld {
             enemy_defs: EnemyRegistry::builtin(),
             enemies: BTreeMap::new(),
             projectiles: BTreeMap::new(),
-            prisms: BTreeMap::new(),
+            thorns: BTreeMap::new(),
+            brands: BTreeMap::new(),
             blood: BTreeMap::new(),
             pending_hits: Vec::new(),
             mode,
@@ -562,11 +614,11 @@ impl SimWorld {
 
     /// Allocates an id for a new dynamic replicated entity. Ids count up from
     /// `NetId::DYNAMIC_START`; after the last one (2²⁴ − 1) they wrap around, skipping ids
-    /// still in use by an enemy, projectile, prism or blood burst. `None` if no id is free:
+    /// still in use by an enemy, projectile, thorn or healing burst. `None` if no id is free:
     /// the spawn is refused.
     pub fn alloc_net_id(&mut self) -> Option<NetId> {
         let span = (NetId::STATIC_START - NetId::DYNAMIC_START) as usize;
-        let live = self.enemies.len() + self.projectiles.len() + self.prisms.len() + self.blood.len();
+        let live = self.enemies.len() + self.projectiles.len() + self.thorns.len() + self.blood.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -587,7 +639,7 @@ impl SimWorld {
     fn net_id_in_use(&self, id: NetId) -> bool {
         self.enemies.contains_key(&id)
             || self.projectiles.contains_key(&id)
-            || self.prisms.contains_key(&id)
+            || self.thorns.contains_key(&id)
             || self.blood.contains_key(&id)
     }
 
@@ -624,8 +676,10 @@ impl SimWorld {
 
     pub fn remove_player(&mut self, id: PlayerId) -> Option<SimPlayer> {
         let player = self.players.remove(&id)?;
-        // Their prisms vanish; their pending hits and projectiles' targets are moot.
-        self.prisms.retain(|_, p| p.owner != id);
+        // Their thorns and brands vanish; their pending hits and projectiles' targets are moot.
+        self.thorns.retain(|_, th| th.owner != id);
+        self.brands
+            .retain(|target, b| b.owner != id && *target != HitTarget::Player(id));
         self.cancel_pending_for_victim(id);
         for e in self.enemies.values_mut() {
             if e.target == Some(id) {
@@ -662,7 +716,8 @@ impl SimWorld {
         // Combat state goes back to the level start too.
         self.enemies.clear();
         self.projectiles.clear();
-        self.prisms.clear();
+        self.thorns.clear();
+        self.brands.clear();
         self.blood.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
@@ -723,7 +778,8 @@ impl SimWorld {
         true
     }
 
-    /// External impulse (explosions, knockback): changes velocity between movement steps.
+    /// External impulse (explosions, recoil, knockback): changes velocity between movement
+    /// steps.
     /// Clients pick it up through reconciliation.
     pub fn apply_impulse(&mut self, id: PlayerId, delta_velocity: Vec3) {
         if let Some(p) = self.players.get_mut(&id) {
@@ -807,8 +863,9 @@ impl SimWorld {
             self.apply_due_pending_hits(tuning);
         }
 
-        // 4. Prisms, healing, vitals.
-        self.step_prisms(tuning);
+        // 4. Thorns, brands, healing, vitals.
+        self.step_thorns(tuning);
+        self.step_brands();
         self.step_blood(tuning);
         self.tick_vitals(tuning);
 
@@ -907,6 +964,9 @@ impl SimWorld {
             let mut e = p.replicated_state(tuning, self.tick_rate);
             // Game mode flags (co-op DOWNED), modes.rs.
             self.decorate_player_entity(&mut e);
+            if self.is_branded(HitTarget::Player(p.id)) {
+                e.flags |= player_flags::BRANDED;
+            }
             frame.insert(&e);
         }
         for door in &self.level.doors {
@@ -924,13 +984,18 @@ impl SimWorld {
             });
         }
         for e in self.enemies.values() {
-            frame.insert(&e.entity_state(self.tick));
+            let mut state = e.entity_state(self.tick);
+            // Brands live in a side table (brand.rs), not on the enemy.
+            if self.is_branded(HitTarget::Entity(e.id)) {
+                state.flags |= crate::protocol::enemy_flags::BRANDED;
+            }
+            frame.insert(&state);
         }
         for p in self.projectiles.values() {
             frame.insert(&p.entity_state());
         }
-        for p in self.prisms.values() {
-            frame.insert(&p.entity_state());
+        for th in self.thorns.values() {
+            frame.insert(&th.entity_state());
         }
         for b in self.blood.values() {
             frame.insert(&b.entity_state());
@@ -1237,7 +1302,7 @@ mod tests {
 
     fn rivet(w: &mut SimWorld, t: &Tuning) -> Option<NetId> {
         let at = Vec3::new(0.0, 50.0, 0.0);
-        w.spawn_projectile(t, ProjectileKind::Rivet, Owner::World, at, Vec3::ZERO)
+        w.spawn_projectile(t, ProjectileKind::Wisp, Owner::World, at, Vec3::ZERO)
     }
 
     #[test]
@@ -1252,7 +1317,7 @@ mod tests {
             .spawn_blood(&t, Vec3::new(-20.0, 1.0, 0.0), 10.0, 1.0, 5.0, true)
             .unwrap();
         let prism = w
-            .spawn_prism(&t, PlayerId(9), Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO)
+            .spawn_thorn(&t, PlayerId(9), Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO)
             .unwrap();
         assert_eq!(
             [projectile, enemy, blood, prism].map(|id| id.0),
@@ -1273,7 +1338,7 @@ mod tests {
             assert!(id.0 >= start && id.0 < NetId::STATIC_START);
         }
         assert!(w.projectiles.contains_key(&projectile) && w.enemies.contains_key(&enemy));
-        assert!(w.blood.contains_key(&blood) && w.prisms.contains_key(&prism));
+        assert!(w.blood.contains_key(&blood) && w.thorns.contains_key(&prism));
     }
 
     #[test]

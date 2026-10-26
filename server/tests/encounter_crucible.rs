@@ -185,7 +185,7 @@ fn arena_one_locks_rallies_scales_waves_and_clears_for_good() {
     let wave1 = n.living_enemies();
     assert_eq!(wave1.len(), 6, "2 players: 1.5x the 4 authored gnawers");
     assert!(wave1.iter().all(|(_, max)| *max == 67.5), "health x1.5: {wave1:?}");
-    // Every enemy stands somewhere sensible (inside the arena, not in lava).
+    // Every enemy stands somewhere sensible (inside the arena, not in the slag).
     for e in n.server.world().enemies.values() {
         assert!(enc.arena.unwrap().contains(e.position), "enemy outside the arena at {}", e.position);
         assert!(!level.kill_volumes.iter().any(|v| v.contains(e.position)));
@@ -296,7 +296,7 @@ fn checkpoint_reset_hooks_and_single_player_counts() {
     assert!(n.run_until(10.0, |n| n.clients.iter().all(|c| c.net.is_in_game())));
     let a = n.clients[0].id();
     n.server.world_mut().players.get_mut(&a).unwrap().combat.god = true;
-    // Arena 2 (Bleeding Cloister): gnawers + censers on the mezzanine.
+    // Arena 2 (Weeping Cloister): gnawers + censers on the mezzanine.
     n.place(a, Vec3::new(0.0, 0.0, -105.0));
     assert!(n.run_until(1.5, |n| n.living_enemies().len() == 6));
     assert_eq!(n.phase(1), EncounterPhase::Active);

@@ -278,7 +278,7 @@ mod demo {
             for i in 0..=24 {
                 let x = -12.0 + i as f32;
                 let pos = Vec3::new(x, 0.0, -6.0);
-                audio.play_at(if i % 4 == 0 { Sfx::LancetFire } else { Sfx::Footstep }, pos);
+                audio.play_at(if i % 4 == 0 { Sfx::QuillFire } else { Sfx::Footstep }, pos);
                 wait(&mut audio, 0.2);
             }
             for i in 0..32 {

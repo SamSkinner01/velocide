@@ -28,9 +28,26 @@ pub const CHROME: Vec4 = Vec4::new(0.92, 0.94, 0.98, 1.0);
 /// Dark gunmetal for joints, grips and inner parts.
 pub const GUNMETAL: Vec4 = Vec4::new(0.30, 0.31, 0.35, 1.0);
 pub const BLACK_STEEL: Vec4 = Vec4::new(0.16, 0.16, 0.19, 1.0);
-/// Blood-red lacquer (Shrike accents, default team colour).
+/// Deep red lacquer.
 pub const BLOOD: Vec4 = Vec4::new(0.78, 0.06, 0.08, 1.0);
 pub const WHITE: Vec4 = Vec4::ONE;
+/// Glazed porcelain (Shrike masks).
+pub const PORCELAIN: Vec4 = Vec4::new(0.95, 0.93, 0.88, 1.0);
+/// Polished bone / ivory (the Quill's body and crest).
+pub const IVORY: Vec4 = Vec4::new(0.9, 0.84, 0.7, 1.0);
+/// Warm brass (harness buckles, bracers, the Bellows).
+pub const BRASS: Vec4 = Vec4::new(0.8, 0.6, 0.27, 1.0);
+/// Bright copper (Arclash prongs and windings).
+pub const COPPER: Vec4 = Vec4::new(0.86, 0.46, 0.26, 1.0);
+/// Tanned leather and its darker, oiled variant.
+pub const LEATHER: Vec4 = Vec4::new(0.58, 0.37, 0.21, 1.0);
+pub const DARK_LEATHER: Vec4 = Vec4::new(0.32, 0.21, 0.15, 1.0);
+/// Cloth wraps (forearms, shins, grips).
+pub const WRAP: Vec4 = Vec4::new(0.7, 0.63, 0.52, 1.0);
+/// Black-iron castings (the Tumbler, bomb shells).
+pub const IRON: Vec4 = Vec4::new(0.27, 0.26, 0.25, 1.0);
+/// The wick flame's base colour (team-tinted on the Shrike, near-white so the tint shows).
+pub const FLAME: Vec4 = Vec4::new(1.0, 0.86, 0.62, 1.0);
 
 // ---------------------------------------------------------------------------------------------
 // Geometry helpers
@@ -498,6 +515,28 @@ fn rect_ring_basis(center: Vec3, u: Vec3, v: Vec3, half: Vec2) -> Vec<Vec3> {
     ]
 }
 
+/// A jagged lightning bolt from `a` to `b`: `segments` thin boxes through midpoints jittered
+/// up to `jitter` sideways (deterministic per `seed`), `width` = half thickness.
+pub fn bolt(a: Vec3, b: Vec3, segments: usize, jitter: f32, seed: u32, width: f32) -> MeshBuilder {
+    let mut m = MeshBuilder::new();
+    let (side, depth) = frame_for(b - a);
+    let mut points = vec![a];
+    for i in 1..segments.max(1) {
+        let t = i as f32 / segments as f32;
+        let h = seed.wrapping_mul(2_654_435_761).wrapping_add(i as u32 * 40_503) as f32;
+        let (s, c) = (h * 0.0137).sin_cos();
+        points.push(a.lerp(b, t) + side * (s * jitter) + depth * (c * jitter));
+    }
+    points.push(b);
+    for w in points.windows(2) {
+        add(
+            &mut m,
+            limb(w[0], w[1], Vec2::splat(width), Vec2::splat(width * 0.8), Vec4::ONE),
+        );
+    }
+    m
+}
+
 /// Bakes the usual "readable at low res" shading into vertex colours: lighter tops, darker
 /// undersides.
 pub fn finish(b: &mut MeshBuilder) {
@@ -511,7 +550,7 @@ pub fn gem(center: Vec3, radius: f32, subdivisions: u32, color: Vec4) -> MeshBui
     g
 }
 
-/// Bipyramid crystal (prism shard) along `axis`: hexagonal waist, two pointed tips.
+/// Bipyramid crystal (shards, barbs) along `axis`: hexagonal waist, two pointed tips.
 pub fn crystal(
     center: Vec3,
     axis: Vec3,
@@ -676,6 +715,66 @@ pub fn tex_bone() -> TextureData {
             col *= 0.82;
         }
         opaque(col)
+    });
+    c.into_texture()
+}
+
+/// Grained leather with stitched edges and scuffs (Shrike coat, gloves, harness).
+pub fn tex_leather() -> TextureData {
+    const SEED: u32 = 761;
+    let mut c = Canvas::new(32, 32);
+    c.fill(|x, y, u, v| {
+        let grain = fbm(u, v, 5, 3, SEED);
+        let (f1, _, _) = cellular(u, v, 6, SEED + 3);
+        let mut g = 0.72 + grain * 0.22 - (0.25 - f1).max(0.0) * 0.5;
+        // Stitch rows along two edges.
+        if (x == 2 || x == 29) && y % 4 < 2 {
+            g = 1.0;
+        }
+        if rand01(x, y, SEED + 1) < 0.04 {
+            g *= 1.18;
+        }
+        opaque(Vec3::new(g * 1.02, g, g * 0.96))
+    });
+    c.into_texture()
+}
+
+/// Glazed porcelain: smooth, bright, with a faint crackle in the glaze (Shrike masks).
+pub fn tex_porcelain() -> TextureData {
+    const SEED: u32 = 769;
+    let mut c = Canvas::new(32, 32);
+    c.fill(|x, y, u, v| {
+        let n = fbm(u, v, 2, 2, SEED);
+        let (f1, f2, _) = cellular(u, v, 5, SEED + 4);
+        let mut g = 0.93 + n * 0.07;
+        // Crackle lines where two cells meet.
+        if (f2 - f1) < 0.035 {
+            g *= 0.8;
+        }
+        // Glaze highlight.
+        if rand01(x, y, SEED + 2) < 0.02 {
+            g = 1.0;
+        }
+        opaque(Vec3::new(g, g * 0.99, g * 0.96))
+    });
+    c.into_texture()
+}
+
+/// Cloth wrapping: diagonal overlapping bands (wrapped forearms, shins, grips).
+pub fn tex_wrap() -> TextureData {
+    const SEED: u32 = 773;
+    let mut c = Canvas::new(32, 32);
+    c.fill(|x, y, u, v| {
+        let band = (x + y * 2).rem_euclid(10);
+        let weave = value_noise2(u, v, 16, 16, SEED);
+        let mut g = 0.78 + weave * 0.14;
+        if band == 0 {
+            g *= 0.55; // overlap edge shadow
+        } else if band == 1 {
+            g *= 1.1;
+        }
+        g -= (fbm(u, v, 3, 2, SEED + 1) - 0.6).max(0.0) * 0.6; // grime
+        opaque(Vec3::splat(g))
     });
     c.into_texture()
 }

@@ -10,7 +10,7 @@ use super::kit::tests::assert_valid;
 use super::library::match_parts;
 use super::rig::{Pose, Rig, Tint, validate_joints};
 use super::shrike::PlayerAnim;
-use super::weapons::{self, BarrelSpin, ViewmodelAnim, WeaponKind};
+use super::weapons::{self, DrumTurn, ViewmodelAnim, WeaponKind};
 use super::{ModelId, generate_all, load_parts, props, shrike};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -131,7 +131,7 @@ fn broken_file_is_rejected() {
     // A valid glTF of the wrong model: part names don't match.
     engine::assets::gltf::write_parts(
         &dir.join(ModelId::Gnawer.file_name()),
-        &ModelId::Rivet.build(),
+        &ModelId::Bomb.build(),
     )
     .unwrap();
     assert!(load_parts(ModelId::Gnawer, &dir).is_err());
@@ -591,18 +591,104 @@ fn viewmodels_are_finite_and_framed() {
 }
 
 #[test]
-fn barrel_spin_spins_up_and_down() {
-    let mut spin = BarrelSpin::default();
+fn drum_turns_one_chamber_per_shot_with_overshoot() {
+    let mut drum = DrumTurn::default();
+    drum.kick();
+    let mut peak = 0.0f32;
     for _ in 0..60 {
-        spin.update(true, 1.0 / 60.0);
+        drum.update(1.0 / 60.0);
+        peak = peak.max(drum.angle());
     }
-    assert!((spin.speed - BarrelSpin::MAX_SPEED).abs() < 1e-3);
-    let a = spin.angle;
-    for _ in 0..120 {
-        spin.update(false, 1.0 / 60.0);
+    assert!((drum.angle() - DrumTurn::STEP).abs() < 1e-3, "{}", drum.angle());
+    assert!(peak > DrumTurn::STEP * 1.02, "a little overshoot: {peak}");
+    // Many shots keep the numbers bounded and every rest angle a whole chamber.
+    for _ in 0..500 {
+        drum.kick();
+        drum.update(0.5);
     }
-    assert_eq!(spin.speed, 0.0);
-    assert!(spin.angle != a && spin.angle.is_finite());
+    let chambers = drum.angle() / DrumTurn::STEP;
+    assert!(drum.angle().is_finite() && drum.angle().abs() < 200.0);
+    assert!((chambers - chambers.round()).abs() < 1e-2, "{chambers}");
+    // Huge or zero time steps are harmless.
+    drum.update(f32::MAX);
+    drum.update(0.0);
+    assert!(drum.angle().is_finite());
+}
+
+#[test]
+fn weapon_mechanisms_move() {
+    use super::weapons::{arclash, bellows, quill, tumbler};
+    let moved = |pose: &Pose, part: usize| !pose.locals[part].abs_diff_eq(Mat4::IDENTITY, 1e-5);
+    // Quill: the crest folds front to back on the shot and stands at rest.
+    let rest = weapons::weapon_pose(WeaponKind::Quill, 0, 0.0, 0.0, 0.0, 1.0);
+    let kick = weapons::weapon_pose(WeaponKind::Quill, 0, 1.0, 0.0, 0.0, 1.0);
+    for i in 0..quill::CREST_COUNT {
+        assert!(!moved(&rest, quill::QUILL + i) && moved(&kick, quill::QUILL + i), "quill {i}");
+    }
+    // Bellows: the pump closes the board half way through the recoil, open at rest.
+    let pump = weapons::weapon_pose(WeaponKind::Bellows, 0, 0.5, 0.0, 0.0, 1.0);
+    let open = weapons::weapon_pose(WeaponKind::Bellows, 0, 0.0, 0.0, 0.0, 1.0);
+    assert!(moved(&pump, bellows::BOARD) && moved(&pump, bellows::PLEATS));
+    assert!(!moved(&open, bellows::BOARD));
+    // Arclash: arcs only while charging (or on a strong shot); the glow whitens with charge.
+    let calm = weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 0.0, 0.0, 1.0);
+    assert!(calm.is_hidden(arclash::ARCS));
+    let arcing = (0..8)
+        .map(|i| weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 1.0, 0.0, i as f64 / 50.0))
+        .filter(|p| !p.is_hidden(arclash::ARCS))
+        .count();
+    assert!(arcing > 0);
+    let full = weapons::weapon_pose(WeaponKind::Arclash, 1, 0.0, 1.0, 0.0, 1.0);
+    assert!(full.glow.x > calm.glow.x * 2.0);
+    // Tumbler: the drum follows the spin angle.
+    let turned = weapons::weapon_pose(WeaponKind::Tumbler, 0, 0.0, 0.0, DrumTurn::STEP, 1.0);
+    assert!(moved(&turned, tumbler::DRUM));
+    // Mode colours differ per weapon and mode.
+    let mut colours: Vec<[u32; 3]> = WeaponKind::ALL
+        .iter()
+        .flat_map(|w| [w.glow_color(0), w.glow_color(1)])
+        .map(|c| [c.x, c.y, c.z].map(|v| (v * 100.0) as u32))
+        .collect();
+    colours.sort_unstable();
+    colours.dedup();
+    assert_eq!(colours.len(), 8);
+}
+
+#[test]
+fn shrike_wick_and_coat() {
+    let base = PlayerAnim {
+        on_ground: true,
+        time: 7.5,
+        ..Default::default()
+    };
+    // The wick burns (and flickers) while alive, is snuffed on death and gutters downed.
+    let alive = shrike::pose(&base);
+    assert!(!alive.is_hidden(shrike::WICK) && alive.glow.x > 0.5);
+    let dead = shrike::pose(&PlayerAnim { dead: true, ..base });
+    assert!(dead.is_hidden(shrike::WICK) && dead.glow.x < 0.1);
+    let downed = shrike::pose(&PlayerAnim {
+        downed: true,
+        ..base
+    });
+    assert!(!downed.is_hidden(shrike::WICK) && downed.glow.x < alive.glow.x);
+    let glows: Vec<f32> = (0..10)
+        .map(|i| shrike::pose(&PlayerAnim { time: i as f64 * 0.037, ..base }).glow.x)
+        .collect();
+    assert!(glows.iter().any(|g| (g - glows[0]).abs() > 0.02), "flicker");
+    // Running streams the coat tails back: their hems end up behind the knees.
+    let rig = dummy_rig(ModelId::Shrike);
+    let hem = |anim: &PlayerAnim| {
+        let pose = shrike::pose(anim);
+        rig.part_transform(&pose, Mat4::IDENTITY, shrike::COAT_R)
+            .transform_point3(Vec3::new(0.03, -0.62, 0.035))
+    };
+    let still = hem(&base);
+    let running = hem(&PlayerAnim {
+        velocity: Vec3::new(0.0, 0.0, -14.0),
+        cycle: 0.3,
+        ..base
+    });
+    assert!(running.z > still.z + 0.15, "still {still}, running {running}");
 }
 
 #[test]
@@ -622,8 +708,9 @@ fn prop_poses_are_finite() {
 
 #[test]
 fn lookups() {
-    assert_eq!(WeaponKind::from_index(2), WeaponKind::Riveter);
-    assert_eq!(WeaponKind::from_index(9), WeaponKind::Lancet);
+    assert_eq!(WeaponKind::from_index(2), WeaponKind::Arclash);
+    assert_eq!(WeaponKind::from_index(9), WeaponKind::Quill);
+    assert!(!WeaponKind::Quill.two_handed() && WeaponKind::Tumbler.two_handed());
     assert_eq!(EnemyKind::from_name("Gaoler"), Some(EnemyKind::Gaoler));
     assert_eq!(EnemyKind::from_name("nope"), None);
     let c = PlayerAnim::advance_cycle(0.95, Vec3::new(0.0, 0.0, -100.0), 0.1);

@@ -1101,12 +1101,12 @@ mod tests {
     fn server_tuning_is_sanitized() {
         let mut c = client();
         let mut t = Tuning::default();
-        t.combat.thresher.pellets = u32::MAX;
+        t.combat.bellows.pellets = u32::MAX;
         t.combat.hitscan_range = 1.0e30;
         t.movement.gravity = f32::NAN;
         c.handle_message(ServerMessage::Tuning(Box::new(t)));
         let t = c.tuning();
-        assert_eq!(t.combat.thresher.pellets, 64);
+        assert_eq!(t.combat.bellows.pellets, 64);
         assert!(t.combat.hitscan_range <= 1.0e4);
         assert_eq!(t.movement.gravity, Tuning::default().movement.gravity);
         assert!(c.drain_events().contains(&NetEvent::TuningChanged));
