@@ -138,6 +138,23 @@ Bow abilities change the *next release* rather than firing on their own: pressin
 arms them (HUD shows it); the following primary release uses it. **arsenal** may adjust this if
 it plays badly, documenting why.
 
+As built (milestone 1, details in `docs/arsenal.md`): pressing `ALT_FIRE` again disarms; the
+cooldown starts at the release. A request also applies at once to a body that hasn't processed
+an input yet (a player joining mid-match sends `SetLoadout` a moment after spawning). Requests
+live in `SimWorld::loadout_requests` (the server carries them into every new world), forced
+loadouts in `SimWorld::forced_loadouts`; the warm-up flag is `SimWorld::warmup` (**lobby** sets
+it). An ability is one `Attack` on every weapon, so `Attack::weapon()` is `None` for abilities
+several weapons can carry: **`KillInfo::weapon`** (new field) names the weapon that fired the
+killing blow — use it for the kill feed's weapon and gun-game tiers.
+
+As built (milestone 2): **Limpet** — a tap throws a charge, holding the ability 0.25 s
+detonates every charge out, and a throw with 3 already out detonates them instead. Read
+literally ("using Limpet again while charges are out detonates them all") a second use would
+always detonate the first charge, so "up to 3 live" could never happen; tap / hold keeps both.
+Ability damage on another weapon of the class: × the carrier's `ability_power` / the home
+weapon's, never above the listed numbers (`docs/arsenal.md`). Pinned players are slowed through
+their predicted `MoveState` (`slow_time`, `slow_scale`).
+
 ### Balance per mode (**arsenal**)
 
 `assets/tuning.ron` keeps the weapons' base numbers in `combat` and gains a `balance` section
@@ -146,7 +163,10 @@ each a per-weapon and per-ability set of multipliers (damage, fire interval / co
 radius, knockback, self-damage...) plus absolute overrides where a multiplier can't express it.
 `Tuning::for_mode(GameMode) -> Tuning` returns the effective tuning; the server runs a match
 with it and sends **that** to clients (`ServerMessage::Tuning`), so prediction always matches.
-Hot reload recomputes it. The PvE profile starts at 1.0 everywhere (today's campaign feel is
+Hot reload recomputes it. (As built: the server recomputes it from the world's
+`match_settings.mode` in `replace_world` and on reloads; whoever switches the running world's
+mode without a new world calls `Server::update_effective_tuning`. Overrides are field paths
+inside `combat`, e.g. `"thorn.charges": 0`.) The PvE profile starts at 1.0 everywhere (today's campaign feel is
 the reference); the PvP profile is tuned for time-to-kill and counterplay between players (time
 to kill in the 0.8–1.6 s band for a skilled player at the weapon's range; one-shots only from
 full-draw bow headshots, Slug/Skewer headshots at full charge). Document the reasoning in
@@ -207,6 +227,11 @@ hides the thorn pips (and the "Q" hint) when charges are 0.
   you up a tier (via `force_loadout`); a kill with the Fist on the last tier wins. A punch kill
   on someone (any tier) knocks the victim **down** a tier. Thorns are off (PvP profile).
 - Respawns are quick (deathmatch respawn rules). A time limit still applies (most tiers wins).
+- *As built (modes)*: the Fist tier keeps the last ladder build in hand and only a punch kill
+  counts there, because `force_loadout` turns an empty loadout into the default one and the
+  client would show / replicate it as the Quill. A real fists-only tier needs an unarmed
+  loadout from **arsenal** / **arsenal-client**; `sim::gungame::tier_loadout` is the one place
+  to switch to it.
 - HUD: your tier, the next weapon, the leader's tier. Results: winner, tiers reached.
 
 **modes** owns `shared/src/sim/modes.rs`, `shared/src/sim/encounter.rs`, new
@@ -317,10 +342,11 @@ New Moulds (net kinds 25–28; `assets/enemies/*.ron`, models, sounds, AI):
   feed key off attack names; the Censer already has a "swing"). The Bellwether's toll needs a
   target within 40 m and an ally within 18 m but **no line of sight** (it hangs back; hunting it
   down is the counterplay); 30 damage on the bell during the 1.6 s wind-up cracks it. The
-  Snuffer's slow is a **server-side** cap of the victim's horizontal speed (0.6 × ground speed,
-  ~75 % of a free run) applied between movement steps like knockback, so the victim's client
-  corrects towards it rather than predicting it; if **arsenal**'s player slow (PINNED) lands as
-  a predicted movement modifier, the latch should switch to it (`SimWorld::step_latched`).
+  Snuffer's slow (72 % speed) uses **arsenal**'s predicted player slow (`MoveState::slow_time` /
+  `slow_scale`), refreshed every tick while it clings; a Pinning Arrow pins a latched Snuffer
+  off its victim. **modes**' `spawn_pve_enemy` spawns through `spawn_enemy_with`, so rolled
+  elites are elites (the grind boss gets `boss_health` ×4 *and* the elite bonus ×2.5); dev
+  `/spawn` uses `pve_scaling`'s health.
   The Effigy can't be killed (health stops at 1, hits still report their full damage).
   Shared hunks outside the listed files: `client/src/models/mod.rs` (`ModelId` entries for the
   four rigs and `SlagStrip`), `client/examples/models_view.rs` (pose sheets, a lineup),

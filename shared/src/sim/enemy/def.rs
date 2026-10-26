@@ -249,8 +249,8 @@ pub struct Latch {
     pub interval: f32,
     /// Lets go after this long.
     pub max_time: f32,
-    /// The victim's horizontal speed is held to this fraction of `movement.ground_speed`
-    /// while latched (server-side, between movement steps; a modest slow, not a root).
+    /// The victim moves at this fraction of their speeds while latched (the movement state's
+    /// predicted slow, `MoveState::slow_scale`; a modest slow, not a root).
     pub slow: f32,
     /// A punch from the victim throws it off: counter damage and stun.
     pub punch_damage: f32,
@@ -265,7 +265,7 @@ impl Default for Latch {
             damage: 16.0,
             interval: 0.25,
             max_time: 6.0,
-            slow: 0.6,
+            slow: 0.72,
             punch_damage: 30.0,
             punch_stun: 1.6,
             shake_stun: 1.0,

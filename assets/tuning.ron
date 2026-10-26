@@ -167,6 +167,7 @@
             splinter_cone_degrees: 40.0,
             splinter_range: 18.0,
             splinter_shard_damage: 9.0,
+            ability_power: 1.0,     // abilities on it vs on their home weapon (docs/arsenal.md)
         ),
         // 2: twin-barrel blast cannon. Alt A Gust, alt B Both Barrels.
         bellows: (
@@ -186,9 +187,11 @@
             deflect_speed_multiplier: 1.25, // hostile projectiles caught in the gust
             deflect_damage_multiplier: 1.5,
             both_pellets: 24,
+            both_pellet_damage: 8.0,
             both_cone_degrees: 5.0,
             both_recoil: 9.0,
             both_cooldown: 1.4,
+            ability_power: 1.0,
         ),
         // 3: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
         arclash: (
@@ -216,6 +219,7 @@
             discharge_min_knockback: 12.0,
             discharge_max_knockback: 24.0,
             discharge_cooldown: 2.0,
+            ability_power: 1.0,
         ),
         // 4: bouncing-bomb launcher. Alt A Breach, alt B Gravewell.
         tumbler: (
@@ -248,6 +252,176 @@
             gravewell_damage: 80.0,
             gravewell_knockback: 6.0,
             gravewell_cooldown: 3.0,
+            ability_power: 1.0,
+        ),
+        // ---- expansion arsenal (docs/arsenal.md) ----
+        // Needle pistol (hitscan, Precision). Spamming it blooms the spread.
+        lancet: (
+            damage: 14.0,
+            interval: 0.15,
+            bloom_per_shot: 0.25,  // heat per shot (s), drains in real time ...
+            bloom_max: 0.6,        // ... up to this ...
+            bloom_degrees: 3.0,    // ... spread at full heat (sustained fire settles at 75 %)
+            ability_power: 0.85,
+        ),
+        // Drum-fed auto-scattergun (Scatter), automatic while held.
+        thresher: (
+            pellets: 7,
+            pellet_damage: 7.0,
+            cone_degrees: 11.0,
+            pellet_range: 45.0,
+            interval: 0.42,
+            pellet_knockback: 1.5,
+            ability_power: 0.9,
+        ),
+        // Pneumatic rivet driver (Rapid): fast hot rivets with light gravity.
+        riveter: (
+            damage: 7.0,
+            interval: 0.09,        // 5 ticks at 60 Hz: 12 rivets/s
+            rivet_speed: 90.0,
+            rivet_gravity: 6.0,
+            rivet_radius: 0.06,
+            rivet_lifetime: 1.5,
+            spread_degrees: 1.2,
+            ability_power: 0.9,
+        ),
+        // Box launcher (Explosive): one pull = a salvo of cinder rockets.
+        cinderbox: (
+            rockets: 3,
+            salvo_gap: 0.08,
+            interval: 1.3,
+            rocket_speed: 42.0,
+            rocket_radius: 0.15,
+            rocket_lifetime: 2.5,
+            spread_degrees: 2.5,
+            explosion_radius: 2.6,
+            damage: 32.0,
+            knockback: 14.0,
+            ability_power: 0.95,
+        ),
+        // Recurve bow (Draw): hold to draw, release; speed and damage grow with the draw.
+        longwick: (
+            draw_time: 0.75,
+            interval: 0.25,        // after a release
+            min_speed: 45.0,
+            max_speed: 120.0,
+            min_damage: 22.0,
+            max_damage: 105.0,
+            arrow_gravity: 14.0,
+            arrow_radius: 0.05,
+            arrow_lifetime: 4.0,
+            ability_power: 1.0,
+        ),
+        // Ember sprayer (Rapid): a short cone that sets targets alight.
+        kiln: (
+            range: 13.0,
+            cone_degrees: 16.0,
+            interval: 0.08,        // 5 ticks at 60 Hz
+            damage: 3.0,
+            burn_stacks: 1,        // per spray
+            ability_power: 0.85,
+        ),
+        // Abilities (pools per class: docs/arsenal.md).
+        skewer: (
+            charge_time: 0.8,
+            min_damage: 30.0,
+            max_damage: 90.0,
+            pierce: 3,             // targets passed through ...
+            pierce_falloff: 0.8,   // ... x0.8 each
+            cooldown: 1.4,
+        ),
+        flurry: (
+            shots: 3,
+            gap: 0.06,
+            damage_scale: 0.8,     // of the weapon's primary damage
+            spread_degrees: 1.0,
+            cooldown: 1.6,
+        ),
+        slug: (
+            damage: 55.0,
+            knockback: 6.0,
+            cooldown: 1.2,
+        ),
+        flak: (
+            shell_speed: 45.0,
+            shell_radius: 0.12,
+            burst_distance: 14.0,  // or on contact
+            pellets: 10,
+            pellet_damage: 9.0,
+            ring_degrees: 25.0,
+            pellet_range: 14.0,
+            cooldown: 1.8,
+        ),
+        volley: (
+            shots: 10,
+            cone_degrees: 6.0,
+            damage_scale: 1.0,     // of the weapon's primary damage
+            cooldown: 2.2,
+        ),
+        flare: (
+            speed: 22.0,
+            angle_degrees: 10.0,
+            gravity: 16.0,
+            projectile_radius: 0.12,
+            flight_time: 4.0,
+            patch_radius: 3.0,
+            patch_time: 4.0,
+            burn_rate: 2.0,        // Burn stacks per second to everything inside the patch
+            cooldown: 3.0,
+        ),
+        limpet: (
+            speed: 24.0,
+            gravity: 16.0,
+            projectile_radius: 0.12,
+            max_live: 3,
+            fuse: 20.0,
+            explosion_radius: 3.5,
+            damage: 50.0,
+            knockback: 14.0,
+            cooldown: 0.4,         // between throws
+            detonate_hold: 0.25,   // hold this long: every charge out detonates
+        ),
+        mortar: (
+            speed: 26.0,
+            angle_degrees: 35.0,   // above the aim
+            gravity: 20.0,
+            projectile_radius: 0.2,
+            flight_time: 6.0,
+            explosion_radius: 6.0,
+            damage: 85.0,
+            knockback: 26.0,
+            cooldown: 3.0,
+        ),
+        triple_nock: (
+            arrows: 3,
+            fan_degrees: 7.0,
+            damage_scale: 1.0,     // of a plain arrow at the same draw
+            min_draw: 0.3,
+            cooldown: 1.4,
+        ),
+        pinning_arrow: (
+            enemy_time: 1.4,
+            heavy_time: 0.6,
+            heavy_health: 300.0,   // base health from which an enemy counts as heavy
+            player_time: 1.0,
+            player_slow: 0.5,
+            damage_scale: 1.0,
+            cooldown: 2.5,
+        ),
+        ember_arrow: (
+            damage_scale: 0.75,    // the arrow's own hit, of a plain arrow at the same draw
+            explosion_radius: 3.0,
+            damage: 30.0,
+            knockback: 8.0,
+            burn_stacks: 2,
+            cooldown: 3.0,
+        ),
+        // Burn status (Kiln, Flare patches, Ember Arrow).
+        burn: (
+            dps: 4.0,              // per stack
+            max_stacks: 3,
+            duration: 3.0,         // refreshed by every new stack
+            tick_interval: 0.25,   // damage steps
         ),
         // Speed and damage of enemy projectiles come from assets/enemies/*.ron.
         enemy_projectiles: (
@@ -293,6 +467,8 @@
         freshness_regen: 0.02,      // per second, everything
         freshness_min: 0.2,
         stale_threshold: 0.5,       // "STALE" below this
+        longshot: 50.0,             // potg: hitscan / arrow kill from ...
+        longshot_distance: 40.0,    // ... at least this far (m)
     ),
     // Game modes (shared/src/sim/modes.rs, docs/style_modes.md). Deathmatch respawn delay and
     // spawn protection are combat.respawn_delay / combat.spawn_protection; frag / time limits
@@ -313,5 +489,125 @@
         grade_kills: (1.0, 0.9, 0.75, 0.5),       // fraction of your share of the enemies
         grade_style: (120.0, 85.0, 60.0, 35.0),   // style points per enemy share
         grade_damage: (1.0, 3.0, 6.0, 10.0),      // damage taken per enemy share, at most
+    ),
+    // PvE difficulty and co-op scaling (shared/src/sim/difficulty.rs, docs/style_modes.md):
+    // campaign encounters and grind waves. Tables are per difficulty:
+    // (EASY, NORMAL, HARD, BRUTAL, INFERNO); NORMAL with one player is the reference.
+    difficulty: (
+        health: (0.7, 1.0, 1.3, 1.65, 2.1),             // enemy health at spawn
+        count: (0.75, 1.0, 1.2, 1.4, 1.6),              // enemies per wave
+        damage: (0.6, 1.0, 1.25, 1.5, 1.85),            // damage enemies deal
+        aggression: (0.8, 1.0, 1.15, 1.3, 1.5),         // cooldowns / recoveries divided by this
+        projectile_speed: (0.85, 1.0, 1.1, 1.2, 1.3),
+        elite_chance: (0.0, 0.02, 0.06, 0.12, 0.2),     // per spawned Mould
+        downed_time: (1.5, 1.0, 0.8, 0.65, 0.5),        // x modes.downed_time
+        revive_health: (1.5, 1.0, 0.85, 0.7, 0.55),     // x modes.revive_health
+        // Every extra player: x (1 + value (players - 1)). Four players on NORMAL: health and
+        // count x2.8, damage x1.3, aggression x1.24 (the old rule was x2.5 / x2.5 only).
+        player_health: 0.6,
+        player_count: 0.6,
+        player_damage: 0.1,
+        player_aggression: 0.08,
+        player_elite_chance: 0.02,  // added per extra player
+        player_downed_time: 0.1,    // downed time x (1 - value (players - 2)) from the 3rd on
+        min_downed_time: 4.0,
+    ),
+    // Grind: endless waves on an arena until everyone is down (shared/src/sim/grind.rs).
+    grind: (
+        first_delay: 5.0,           // before wave 1
+        breather: 6.0,              // between waves; whoever is out comes back after it
+        // Wave budget in enemy cost units: base + per_wave (w - 1) + per_wave_sq (w - 1)^2,
+        // x difficulty count x players. Wave 1 = 6 Gnawers, wave 10 = 32.5, wave 20 = 73.
+        budget_base: 6.0,
+        budget_per_wave: 2.4,
+        budget_per_wave_sq: 0.06,
+        health_per_wave: 0.03,      // enemy health x (1 + value (w - 1)) on top of difficulty
+        heavy_every: 5,             // heavy wave: budget x heavy_budget, guaranteed heavies ...
+        heavy_budget: 1.25,
+        heavy_elite_chance: 0.15,   // ... and more elites
+        boss_every: 10,             // a boss-grade elite (a heavy with boss_health x health)
+        boss_health: 4.0,
+        max_alive: 14,              // wave Moulds alive at once ...
+        alive_per_player: 5,        // ... + this per extra player; the rest wait their turn
+        spawn_burst: 6,             // a wave opens with this many ...
+        spawn_interval: 0.35,       // ... then one more every this many seconds
+        max_wave_enemies: 150,
+        min_spawn_distance: 14.0,   // Moulds appear at least this far from every player
+        end_delay: 2.5,             // everyone down -> results after this
+        grade_wave: (20.0, 15.0, 10.0, 5.0),    // wave reached for S, A, B, C
+        // cost: budget per Mould; from_wave: first normal wave; weight: pick weight; heavy:
+        // brought by heavy waves (from heavy_every waves before from_wave) and bosses.
+        // Moulds the server doesn't have are skipped.
+        roster: [
+            (enemy: "gnawer", cost: 1.0, from_wave: 1, weight: 10.0, heavy: false),
+            (enemy: "harrier", cost: 1.5, from_wave: 2, weight: 4.0, heavy: false),
+            (enemy: "censer", cost: 2.0, from_wave: 3, weight: 5.0, heavy: false),
+            (enemy: "snuffer", cost: 1.5, from_wave: 4, weight: 4.0, heavy: false),
+            (enemy: "heron", cost: 3.0, from_wave: 6, weight: 3.0, heavy: false),
+            (enemy: "bellwether", cost: 4.0, from_wave: 7, weight: 2.0, heavy: false),
+            (enemy: "gaoler", cost: 6.0, from_wave: 8, weight: 2.0, heavy: true),
+            (enemy: "smelter", cost: 6.0, from_wave: 12, weight: 2.0, heavy: true),
+        ],
+    ),
+    // Gun game (shared/src/sim/gungame.rs): a kill with your tier's weapon moves you up; after
+    // the last tier comes the Fist, and a punch kill there wins. A punch kill knocks the victim
+    // down `punch_demotes` tiers.
+    gun_game: (
+        ladder: [
+            (weapon: Arclash, abilities: (Wisp, Discharge)),
+            (weapon: Kiln, abilities: (Flare, Discharge)),
+            (weapon: Thresher, abilities: (Slug, Flak)),
+            (weapon: Riveter, abilities: (Volley, Wisp)),
+            (weapon: Bellows, abilities: (Gust, BothBarrels)),
+            (weapon: Tumbler, abilities: (Breach, Gravewell)),
+            (weapon: Cinderbox, abilities: (Limpet, Mortar)),
+            (weapon: Lancet, abilities: (Skewer, Flurry)),
+            (weapon: Quill, abilities: (Brand, Splinter)),
+            (weapon: Longwick, abilities: (TripleNock, PinningArrow)),
+        ],
+        punch_demotes: 1,
+    ),
+    // Balance per mode (docs/arsenal.md). `combat` above is the reference; a profile scales
+    // it per weapon (primary) and per ability -- `(damage, interval, radius, knockback,
+    // speed)`, 1.0 if left out -- then sets absolute `overrides` by field path inside
+    // `combat`. `pve`: campaign, grind. `pvp`: deathmatch, gun game. The server sends clients
+    // the effective tuning of the match.
+    // Reasoning per number: docs/arsenal.md ("Balance profiles"). PvP aims at 0.8-1.6 s to
+    // kill for a skilled player at the weapon's range; one-shots only from full-draw bow
+    // headshots and Slug / full-charge Skewer headshots.
+    balance: (
+        pve: (
+            weapons: {},
+            abilities: {},
+            overrides: {},
+        ),
+        pvp: (
+            weapons: {
+                Lancet: (damage: 0.85),
+                Bellows: (damage: 0.7),
+                Thresher: (damage: 0.8),
+                Cinderbox: (damage: 0.75),
+                Longwick: (damage: 0.5, interval: 0.85),
+                Kiln: (damage: 1.2),
+            },
+            abilities: {
+                BothBarrels: (damage: 0.4),
+                Wisp: (damage: 0.7),
+                Discharge: (damage: 0.9),
+                Breach: (damage: 0.85),
+                Gravewell: (damage: 0.75),
+                Skewer: (damage: 0.58),
+                Flurry: (damage: 0.75),
+                Flak: (damage: 0.8),
+                Volley: (damage: 0.7),
+                Limpet: (damage: 0.6),
+                Mortar: (damage: 0.75, radius: 0.85),
+                TripleNock: (damage: 0.5),
+            },
+            overrides: {
+                "thorn.charges": 0.0,           // no Thorns in PvP: THROW does nothing
+                "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
+            },
+        ),
     ),
 )

@@ -8,12 +8,12 @@
 //! * **Latch** (the Snuffer): a pounce whose first victim it reaches (not dashing, not
 //!   protected, not already carrying a Snuffer) gets the impact and is **latched**:
 //!   `AiState::Latched`, the Snuffer clings to their chest (moved with them every tick, no
-//!   collision), smothers the wick (`latch.damage` per second, all of it hard damage) and holds
-//!   their horizontal speed to `latch.slow` × the ground speed. A punch by the victim throws
-//!   it off (counter damage, stun); a dash shakes it off (stun); it lets go when the victim
-//!   dies / becomes untargetable, after `max_time`, or when the world freezes. The slow is
-//!   applied by the server between movement steps (like knockback): the owning client sees
-//!   it through reconciliation, which is why it is a modest cap and never a root.
+//!   collision), smothers the wick (`latch.damage` per second, all of it hard damage) and slows
+//!   them to `latch.slow` of their speeds through the movement state's predicted slow
+//!   (`MoveState::slow_time` / `slow_scale`, the arsenal's Pinned slow: the owning client
+//!   predicts it). A punch by the victim throws it off (counter damage, stun); a dash shakes it
+//!   off (stun); a Pinning Arrow pins it off; it lets go when the victim dies / becomes
+//!   untargetable, after `max_time`, or when the world freezes.
 //! * **Pour** (the Smelter): the slag line is laid when the wind-up starts ([`SimWorld::
 //!   lay_slag_line`], `hazard.rs`) and ignites on the strike tick; a cancelled pour removes it.
 //! * **Training dummies** (the Effigy): no AI at all; they flinch when hit and heal back to
@@ -25,6 +25,10 @@ use super::{AiState, AttackDef, AttackKind, Enemy, Interrupt, Latch, Pour};
 use crate::input::look_dir;
 use crate::sim::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
 use crate::sim::{HitTarget, PlayerId, SimEvent, SimWorld};
+
+/// The latch refreshes its victim's slow for this long every tick (it eases off this quickly
+/// once it lets go).
+const LATCH_SLOW_HOLD: f32 = 0.25;
 use crate::tuning::Tuning;
 
 /// A training dummy's flinch (the `Recover` state it shows after a hit), seconds.
@@ -232,6 +236,11 @@ impl SimWorld {
             e.stun(secs_to_ticks(latch.shake_stun, rate, 1));
             return false;
         }
+        if self.is_pinned(HitTarget::Entity(e.id)) {
+            // A Pinning Arrow pins it off its victim (it stays rooted where it was hit).
+            self.release(e, latch.shake_stun, Vec3::ZERO);
+            return false;
+        }
         self.place_on_victim(t, e, victim);
         // Smother the wick: every hit of it is hard damage.
         e.latch_tick_in = e.latch_tick_in.saturating_sub(1);
@@ -261,17 +270,18 @@ impl SimWorld {
                     .min(c.max_health);
             }
         }
-        // Hold the victim's horizontal speed (a slow, not a root).
-        if let Some(p) = self.players.get_mut(&victim)
-            && !p.movement.is_dashing()
-        {
-            let cap = latch.slow.max(0.0) * t.movement.ground_speed;
-            let v = p.movement.velocity;
-            let flat = Vec3::new(v.x, 0.0, v.z);
-            if flat.length() > cap {
-                let flat = flat.normalize_or_zero() * cap;
-                p.movement.velocity = Vec3::new(flat.x, v.y, flat.z);
-            }
+        // Slow the victim (a slow, not a root) through the predicted movement slow: refreshed
+        // every tick while it clings. A longer slow already running (a Pinning Arrow) keeps
+        // whichever scale is stronger.
+        if let Some(p) = self.players.get_mut(&victim) {
+            let m = &mut p.movement;
+            let scale = latch.slow.clamp(0.05, 1.0);
+            m.slow_scale = if m.slow_time > LATCH_SLOW_HOLD {
+                m.slow_scale.min(scale)
+            } else {
+                scale
+            };
+            m.slow_time = m.slow_time.max(LATCH_SLOW_HOLD);
         }
         true
     }

@@ -78,10 +78,12 @@ impl NetId {
 /// Entity kinds (the `kind` field of [`NetEntity`]). Gameplay code adds its own constants here
 /// (keep them stable: they are part of the protocol).
 pub mod kind {
-    /// A player (`owner` = player id). `flags` = [`super::player_flags`]; `state` = weapon
-    /// (bits 0–3) | alt mode (bits 4–5) | Discharge charge (bits 8–15); `health` = health;
-    /// `aux` = hard damage (bits 0–7) | thorn charges (8–11) | (12–15 unused) | wall-cling
-    /// normal as a quantised yaw (16–31, while `WALL_CLING`). See `docs/combat.md`.
+    /// A player (`owner` = player id). `flags` = [`super::player_flags`]; `state` = held
+    /// `WeaponKind` (bits 0–3) | selected `Ability` (bits 4–8) | charge / draw level (bits
+    /// 9–15), packed and read only through [`super::pack_player_weapon`] /
+    /// [`super::player_weapon`]; `health` = health; `aux` = hard damage (bits 0–7) | thorn
+    /// charges (8–11) | (12–15 unused) | wall-cling normal as a quantised yaw (16–31, while
+    /// `WALL_CLING`). See `docs/combat.md`, `docs/arsenal.md`.
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
@@ -111,10 +113,31 @@ pub mod kind {
     pub const EFFIGY: u16 = 28;
 
     // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
-    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–69 are retired
-    // (the first arsenal's rivet, sawblade, rocket, flak, sticky, mortar).
+    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–71 and 75–79 are
+    // the expansion arsenal's (docs/arsenal.md; the first arsenal's 64–71 retired with v7).
     pub const PROJECTILE_FIRST: u16 = 64;
     pub const PROJECTILE_LAST: u16 = 127;
+    /// Longwick arrow (plain; Triple Nock's too): ballistic (`longwick.arrow_gravity`).
+    pub const ARROW: u16 = 64;
+    /// Riveter hot rivet: fast, light gravity.
+    pub const RIVET: u16 = 65;
+    /// Cinderbox cinder rocket (one of a salvo): straight, explodes on contact.
+    pub const CINDER_ROCKET: u16 = 66;
+    /// Flak shell: straight; airbursts into a ring of pellets.
+    pub const FLAK_SHELL: u16 = 67;
+    /// Limpet sticky charge (`STUCK` once attached; `owner` = thrower).
+    pub const LIMPET: u16 = 68;
+    /// Mortar shell: lobbed, explodes on contact.
+    pub const MORTAR_SHELL: u16 = 69;
+    /// Flare: lobbed; leaves a `BURNING_PATCH` where it lands.
+    pub const FLARE: u16 = 70;
+    /// Pinning arrow (the Longwick's Pinning Arrow).
+    pub const PIN_ARROW: u16 = 71;
+    /// Ember arrow (the Longwick's Ember Arrow): bursts into flame on impact.
+    pub const EMBER_ARROW: u16 = 75;
+    /// Branding arrow (Brand on the Longwick).
+    pub const BRAND_ARROW: u16 = 76;
+    // 77..=79: reserved for the arsenal.
     /// Tumbler bomb (`state` = world bounces left before it explodes).
     pub const BOMB: u16 = 72;
     /// Tumbler Gravewell canister (`STUCK` while it pulls).
@@ -130,6 +153,11 @@ pub mod kind {
     // 128..160: pickups / ember bursts / hazards.
     /// Ember burst (heal pool): `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
     pub const EMBER_BURST: u16 = 128;
+    // 136..=139: hazards of the arsenal (docs/arsenal.md); 140..=143: enemies' hazards.
+    /// A burning patch (Flare): `position` = centre on the ground, `owner` = player,
+    /// `state` = radius (dm), `aux` = tick it burns out. Burns hostiles inside.
+    pub const BURNING_PATCH: u16 = 136;
+    // 137..=139: reserved for the arsenal.
     // 140..=143: enemy hazards (enemies area, docs/enemies.md).
     /// The Smelter's slag line on the ground: `position` = start, `velocity` = end − start
     /// (it follows the floor between them), `flags` = [`super::slag_flags`], `state` = width
@@ -194,7 +222,14 @@ pub mod player_flags {
     pub const SLAMMING: u32 = 1 << 10;
     /// Clinging to a wall; `aux` bits 16–31 hold the wall normal's yaw (`quantize_yaw`).
     pub const WALL_CLING: u32 = 1 << 11;
-    /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area).
+    // Bits 12–14: status effects and the bow (arsenal, docs/arsenal.md).
+    /// Burning (Burn status, PvP): ember flicker on the body.
+    pub const BURNING: u32 = 1 << 12;
+    /// Pinned by a Pinning Arrow (PvP): slowed.
+    pub const PINNED: u32 = 1 << 13;
+    /// Drawing the Longwick (draw level in `state`, [`super::player_weapon`]).
+    pub const DRAWING: u32 = 1 << 14;
+    /// Branded by a Brand shot: takes extra damage, draws a sigil (weapons area).
     pub const BRANDED: u32 = 1 << 15;
 }
 
@@ -211,7 +246,8 @@ pub mod enemy_flags {
     pub const AIRBORNE: u32 = 1 << 4;
     /// Has directional armour.
     pub const ARMOURED: u32 = 1 << 5;
-    // Bits 6..=14: per-type presentation state (enemies area); bit 15 is `BRANDED`.
+    // Bits 6..=12: per-type presentation state (enemies area); 13–14 status effects
+    // (arsenal); bit 15 is `BRANDED`.
     /// Aim laser on (a laser wind-up): `yaw` / `pitch` are the exact aim from the attack's
     /// muzzle (unquantised while this is set).
     pub const AIMING: u32 = 1 << 6;
@@ -224,9 +260,33 @@ pub mod enemy_flags {
     pub const ELITE: u32 = 1 << 9;
     /// Latched onto a player (`owner` = the victim; the Snuffer).
     pub const LATCHED: u32 = 1 << 10;
+    /// Burning (Burn status): ember flicker on the body (arsenal).
+    pub const BURNING: u32 = 1 << 13;
+    /// Pinned by a Pinning Arrow: rooted in place (arsenal).
+    pub const PINNED: u32 = 1 << 14;
     /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area; the
     /// brand lives in a `SimWorld` side table and is OR-ed in by `SimWorld::replicate`).
     pub const BRANDED: u32 = 1 << 15;
+}
+
+/// `state` of a player entity: the held weapon, the selected ability and a charge / draw
+/// level (0..=255, kept to 7 bits on the wire).
+pub fn pack_player_weapon(
+    weapon: crate::loadout::WeaponKind,
+    ability: crate::loadout::Ability,
+    charge: u8,
+) -> u16 {
+    (weapon.id() as u16 & 0xF) | ((ability.id() as u16 & 0x1F) << 4) | ((charge as u16 >> 1) << 9)
+}
+
+/// Decodes a player entity's `state` ([`pack_player_weapon`]): held weapon, selected ability,
+/// charge / draw level 0..=255 (the Discharge / Skewer charge while `CHARGING`, the bow's draw
+/// while `DRAWING`). Unknown ids decode as the defaults (Quill, Brand).
+pub fn player_weapon(state: u16) -> (crate::loadout::WeaponKind, crate::loadout::Ability, u8) {
+    let weapon = crate::loadout::WeaponKind::from_id((state & 0xF) as u8).unwrap_or_default();
+    let ability = crate::loadout::Ability::from_id(((state >> 4) & 0x1F) as u8).unwrap_or_default();
+    let c7 = (state >> 9) as u8 & 0x7F;
+    (weapon, ability, (c7 << 1) | (c7 >> 6))
 }
 
 /// Flag bits of projectile entities.
@@ -743,6 +803,27 @@ impl Reader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_weapon_state_round_trips() {
+        use crate::loadout::{Ability, WeaponKind};
+        for w in WeaponKind::ALL {
+            for a in Ability::ALL {
+                for charge in [0u8, 1, 2, 127, 128, 200, 254, 255] {
+                    let (dw, da, dc) = player_weapon(pack_player_weapon(w, a, charge));
+                    assert_eq!((dw, da), (w, a));
+                    // 7 bits on the wire: within one step, ends exact.
+                    assert!(dc.abs_diff(charge) <= 2, "{charge} -> {dc}");
+                    if charge == 0 || charge == 255 {
+                        assert_eq!(dc, charge);
+                    }
+                }
+            }
+        }
+        // Garbage decodes to something valid.
+        let (w, a, _) = player_weapon(0xFFFF);
+        assert_eq!((w, a), (WeaponKind::Quill, Ability::Brand));
+    }
 
     fn player(id: u32, pos: Vec3, yaw: f32) -> EntityState {
         EntityState {

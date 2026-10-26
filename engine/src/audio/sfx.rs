@@ -130,6 +130,13 @@ pub enum Sfx {
     Countdown,
     MatchStart,
     MatchEnd,
+    // potg (play of the game, docs/potg.md)
+    /// The "PLAY OF THE GAME" title card slamming in: boom, brass stab, foundry bell.
+    PotgStinger,
+    /// The card cutting to the replay.
+    PotgWhoosh,
+    /// The replay dropping into slow motion on the final kill.
+    PotgSlowmo,
     // enemies: the third roster (docs/enemies.md)
     /// A Bellwether notices you: a hollow groan through the hood, the bell humming.
     BellwetherAlert,
@@ -310,6 +317,10 @@ impl Sfx {
         Sfx::Countdown,
         Sfx::MatchStart,
         Sfx::MatchEnd,
+        // potg
+        Sfx::PotgStinger,
+        Sfx::PotgWhoosh,
+        Sfx::PotgSlowmo,
         // enemies
         Sfx::BellwetherAlert,
         Sfx::BellwetherTollWindup,
@@ -458,6 +469,10 @@ impl Sfx {
             Countdown => info(-16.0, 2, 0.0, 0.1),
             MatchStart => info(-13.0, 1, 0.0, 0.2),
             MatchEnd => info(-13.0, 1, 0.0, 0.2),
+            // potg
+            PotgStinger => info(-11.0, 1, 0.0, 0.5),
+            PotgWhoosh => info(-16.0, 1, 0.0, 0.2),
+            PotgSlowmo => info(-15.0, 1, 0.0, 0.3),
 
             // enemies
             BellwetherAlert => info(-16.0, 3, 0.05, 0.1),
@@ -2521,6 +2536,65 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             reverb(&mut b, 0.7, 0.5, 0.2, 0.6);
             b
         }
+        // ----- potg ------------------------------------------------------------------------
+        PotgStinger => {
+            // A short riser, then everything at once: a sub boom, a detuned brass stab in
+            // D minor (add 9) closing down, the foundry bell and a crash of sparks.
+            let riser = whoosh(r, 0.32, 400.0, 5000.0, 1.4);
+            let boom = thump(1.2, 110.0, 32.0, 0.09, 0.45);
+            let stab = chord(
+                &[50.0, 57.0, 62.0, 65.0, 69.0, 76.0],
+                1.9,
+                Wave::Saw,
+                5200.0,
+                600.0,
+                0.004,
+                0.8,
+                1.5,
+            );
+            let bell = metal(
+                2.2,
+                146.8,
+                &[
+                    (1.0, 1.0, 1.4),
+                    (2.0, 0.55, 0.9),
+                    (2.76, 0.45, 0.7),
+                    (4.07, 0.3, 0.45),
+                    (5.43, 0.2, 0.3),
+                ],
+            );
+            let crash = noise(r, 1.4, Pass::High, 7000.0, 2500.0, 0.6, 0.002, 0.45);
+            let sparks = crackle(r, 1.2, 90.0, 0.35);
+            let hit = 0.3;
+            let mut b = layer(&[
+                (&riser, 0.35, 0.0),
+                (&boom, 1.0, hit),
+                (&stab, 0.75, hit),
+                (&bell, 0.4, hit),
+                (&crash, 0.3, hit),
+                (&sparks, 0.25, hit + 0.05),
+            ]);
+            reverb(&mut b, 0.8, 0.45, 0.25, 0.8);
+            b
+        }
+        PotgWhoosh => {
+            // Air rushing past, rising, with a soft landing thud: cut to the replay.
+            let air = whoosh(r, 0.75, 250.0, 3800.0, 1.1);
+            let thud = thump(0.35, 90.0, 45.0, 0.03, 0.12);
+            let mut b = layer(&[(&air, 1.0, 0.0), (&thud, 0.5, 0.55)]);
+            reverb(&mut b, 0.5, 0.5, 0.15, 0.3);
+            b
+        }
+        PotgSlowmo => {
+            // Time dragging: a deep tone falling an octave and a half under a low rumble.
+            let fall = tone(1.5, Wave::Triangle, 196.0, 52.0, 1.1, 0.01, 0.7);
+            let rumble = noise(r, 1.4, Pass::Low, 500.0, 70.0, 0.9, 0.05, 0.6);
+            let boom = thump(0.9, 70.0, 30.0, 0.12, 0.35);
+            let mut b = layer(&[(&fall, 0.8, 0.0), (&rumble, 0.5, 0.0), (&boom, 0.7, 0.0)]);
+            reverb(&mut b, 0.7, 0.6, 0.2, 0.5);
+            b
+        }
+
         // ----- enemies: the third roster (docs/enemies.md) ---------------------------------
         BellwetherAlert => {
             // A hollow groan through the hood over the bell humming in sympathy.

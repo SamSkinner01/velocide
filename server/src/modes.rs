@@ -38,6 +38,8 @@ pub fn route_events(events: &[SimEvent]) -> ModeRouted {
 impl Server {
     /// Sends one tick's style / mode messages (called by `run_tick`).
     pub(crate) fn send_mode_events(&mut self, events: &[SimEvent]) {
+        // Play of the game first: it must reach clients before the results (highlights.rs).
+        self.update_highlights(events);
         let routed = route_events(events);
         for event in routed.broadcast {
             self.broadcast(&shared::protocol::ServerMessage::Game(event));

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use super::combat::{Attack, DamageFlags, KillInfo, Owner};
 use super::{HitTarget, PlayerId, SimEvent, SimWorld};
+use crate::loadout::{Ability, WeaponBuild, WeaponKind};
 use crate::protocol::kind;
 use crate::tuning::{StyleTuning, Tuning};
 
@@ -74,6 +75,8 @@ pub enum StyleBonus {
     CloseCall,
     /// Informational: the gain was cut by staleness (`points` = how much was lost).
     Stale,
+    /// potg: a kill with a hitscan shot or an arrow from `longshot_distance` or farther.
+    Longshot,
 }
 
 impl StyleBonus {
@@ -94,12 +97,15 @@ impl StyleBonus {
             StyleBonus::Fisted => "FISTED",
             StyleBonus::CloseCall => "CLOSE CALL",
             StyleBonus::Stale => "STALE",
+            StyleBonus::Longshot => "LONGSHOT",
         }
     }
 }
 
-/// What freshness is tracked for: every weapon fire mode (weapon-major: primary, alt A,
-/// alt B) plus the fist, the slam, parries and thorns.
+/// What freshness is tracked for: every weapon's primary fire and every ability (an ability
+/// is one key whichever weapon carries it), plus the fist, the slam, parries and thorns. The
+/// first sixteen are the second-generation set in its old order; the expansion's are appended
+/// (the index is the position in `StyleView::freshness`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StyleKey {
     Quill,
@@ -118,10 +124,28 @@ pub enum StyleKey {
     Slam,
     Parry,
     Thorn,
+    // ---- expansion arsenal (docs/arsenal.md) ----
+    Lancet,
+    Thresher,
+    Riveter,
+    Cinderbox,
+    Longwick,
+    Kiln,
+    Skewer,
+    Flurry,
+    Slug,
+    Flak,
+    Volley,
+    Flare,
+    Limpet,
+    Mortar,
+    TripleNock,
+    PinningArrow,
+    EmberArrow,
 }
 
 impl StyleKey {
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 33;
     pub const ALL: [StyleKey; Self::COUNT] = [
         StyleKey::Quill,
         StyleKey::Brand,
@@ -139,6 +163,23 @@ impl StyleKey {
         StyleKey::Slam,
         StyleKey::Parry,
         StyleKey::Thorn,
+        StyleKey::Lancet,
+        StyleKey::Thresher,
+        StyleKey::Riveter,
+        StyleKey::Cinderbox,
+        StyleKey::Longwick,
+        StyleKey::Kiln,
+        StyleKey::Skewer,
+        StyleKey::Flurry,
+        StyleKey::Slug,
+        StyleKey::Flak,
+        StyleKey::Volley,
+        StyleKey::Flare,
+        StyleKey::Limpet,
+        StyleKey::Mortar,
+        StyleKey::TripleNock,
+        StyleKey::PinningArrow,
+        StyleKey::EmberArrow,
     ];
 
     pub fn index(self) -> usize {
@@ -163,8 +204,35 @@ impl StyleKey {
             Attack::Thorn => StyleKey::Thorn,
             Attack::Fist => StyleKey::Fist,
             Attack::Slam => StyleKey::Slam,
+            Attack::Lancet => StyleKey::Lancet,
+            Attack::Thresher => StyleKey::Thresher,
+            Attack::Riveter => StyleKey::Riveter,
+            Attack::Cinderbox => StyleKey::Cinderbox,
+            Attack::Longwick => StyleKey::Longwick,
+            Attack::Kiln => StyleKey::Kiln,
+            Attack::Skewer => StyleKey::Skewer,
+            Attack::Flurry => StyleKey::Flurry,
+            Attack::Slug => StyleKey::Slug,
+            Attack::Flak => StyleKey::Flak,
+            Attack::Volley => StyleKey::Volley,
+            Attack::Flare => StyleKey::Flare,
+            Attack::Limpet => StyleKey::Limpet,
+            Attack::Mortar => StyleKey::Mortar,
+            Attack::TripleNock => StyleKey::TripleNock,
+            Attack::PinningArrow => StyleKey::PinningArrow,
+            Attack::EmberArrow => StyleKey::EmberArrow,
             Attack::Enemy { .. } | Attack::World | Attack::Dev => return None,
         })
+    }
+
+    /// The key of `weapon`'s primary fire.
+    pub fn primary(weapon: WeaponKind) -> StyleKey {
+        Self::from_attack(Attack::primary(weapon)).unwrap_or(StyleKey::Quill)
+    }
+
+    /// The key of `ability` (on any weapon).
+    pub fn ability(ability: Ability) -> StyleKey {
+        Self::from_attack(Attack::ability(ability)).unwrap_or(StyleKey::Brand)
     }
 
     /// The key of a damage instance: a parried projectile scores as `Parry`, one turned around
@@ -176,10 +244,13 @@ impl StyleKey {
         Self::from_attack(attack)
     }
 
-    /// The keys of a weapon slot (0 Quill .. 3 Tumbler): primary, alt A, alt B.
-    pub fn weapon_keys(slot: u8) -> [StyleKey; 3] {
-        let base = (slot.min(3) as usize) * 3;
-        [Self::ALL[base], Self::ALL[base + 1], Self::ALL[base + 2]]
+    /// The keys of a build: primary, ability A, ability B.
+    pub fn build_keys(build: &WeaponBuild) -> [StyleKey; 3] {
+        [
+            Self::primary(build.weapon),
+            Self::ability(build.abilities[0]),
+            Self::ability(build.abilities[1]),
+        ]
     }
 
     pub fn label(self) -> &'static str {
@@ -200,6 +271,23 @@ impl StyleKey {
             StyleKey::Slam => "SLAM",
             StyleKey::Parry => "PARRY",
             StyleKey::Thorn => "THORN",
+            StyleKey::Lancet => "LANCET",
+            StyleKey::Thresher => "THRESHER",
+            StyleKey::Riveter => "RIVETER",
+            StyleKey::Cinderbox => "CINDERBOX",
+            StyleKey::Longwick => "LONGWICK",
+            StyleKey::Kiln => "KILN",
+            StyleKey::Skewer => "SKEWER",
+            StyleKey::Flurry => "FLURRY",
+            StyleKey::Slug => "SLUG",
+            StyleKey::Flak => "FLAK",
+            StyleKey::Volley => "VOLLEY",
+            StyleKey::Flare => "FLARE",
+            StyleKey::Limpet => "LIMPET",
+            StyleKey::Mortar => "MORTAR",
+            StyleKey::TripleNock => "TRIPLE NOCK",
+            StyleKey::PinningArrow => "PINNING ARROW",
+            StyleKey::EmberArrow => "EMBER ARROW",
         }
     }
 }
@@ -231,14 +319,61 @@ impl StyleEvent {
     }
 }
 
-/// The owner's view of their style (in `OwnState`, every snapshot; 18 bytes).
+/// The owner's view of their style (in `OwnState`, every snapshot; 4 bytes while every key is
+/// fully fresh, see `freshness_bytes`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StyleView {
     pub rank: u8,
     /// Fill of the current rank's bar, 0..=255.
     pub meter: u8,
     /// Freshness per [`StyleKey`] (index order), 0..=255 = `freshness_min`..1.
+    #[serde(with = "freshness_bytes")]
     pub freshness: [u8; StyleKey::COUNT],
+}
+
+/// `[u8; StyleKey::COUNT]` on the wire: a bitmask of the keys that are not fully fresh and
+/// their values in key order (lossless; most keys are fresh most of the time, so it is a few
+/// bytes instead of one per key).
+mod freshness_bytes {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::StyleKey;
+
+    const N: usize = StyleKey::COUNT;
+    const _: () = assert!(N <= 64, "the stale mask is a u64");
+
+    #[derive(Serialize, Deserialize)]
+    struct Sparse {
+        /// Bit `i`: key `i` is below 255 (its value is next in `values`).
+        stale: u64,
+        values: Vec<u8>,
+    }
+
+    pub fn serialize<S: Serializer>(v: &[u8; N], s: S) -> Result<S::Ok, S::Error> {
+        let mut sparse = Sparse {
+            stale: 0,
+            values: Vec::new(),
+        };
+        for (i, &x) in v.iter().enumerate() {
+            if x != u8::MAX {
+                sparse.stale |= 1 << i;
+                sparse.values.push(x);
+            }
+        }
+        sparse.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; N], D::Error> {
+        let sparse = Sparse::deserialize(d)?;
+        let mut out = [u8::MAX; N];
+        let mut values = sparse.values.into_iter();
+        for (i, o) in out.iter_mut().enumerate() {
+            if sparse.stale & (1 << i) != 0 {
+                *o = values.next().unwrap_or(u8::MAX);
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl Default for StyleView {
@@ -310,7 +445,24 @@ pub fn kill_bonuses(
             multikill.min(u8::MAX as u32) as u8,
         ));
     }
+    // potg: LONGSHOT.
+    if is_longshot(kill, t.longshot_distance) {
+        out.push((StyleBonus::Longshot, t.longshot, 0));
+    }
     out
+}
+
+/// LONGSHOT (potg, also scored by `sim::highlight`): a player's kill from `min_distance` metres
+/// or more with a hitscan shot or one of their own non-explosive projectiles (arrows, rivets);
+/// not explosions, not a returned projectile.
+pub fn is_longshot(kill: &KillInfo, min_distance: f32) -> bool {
+    let f = kill.flags;
+    kill.killer.player().is_some()
+        && kill.distance >= min_distance
+        && (f.contains(DamageFlags::HITSCAN)
+            || (f.contains(DamageFlags::PROJECTILE)
+                && !f.contains(DamageFlags::EXPLOSIVE)
+                && !f.contains(DamageFlags::PARRIED)))
 }
 
 /// Is this kill a CLOSE CALL (the killer alive but under `close_call_health`)?
@@ -696,20 +848,45 @@ mod tests {
             assert_eq!(k.index(), i);
         }
         assert_eq!(
-            StyleKey::weapon_keys(1),
+            StyleKey::build_keys(&WeaponKind::Bellows.default_build()),
             [StyleKey::Bellows, StyleKey::Gust, StyleKey::BothBarrels]
         );
         assert_eq!(
-            StyleKey::weapon_keys(3),
+            StyleKey::build_keys(&WeaponKind::Tumbler.default_build()),
             [StyleKey::Tumbler, StyleKey::Breach, StyleKey::Gravewell]
         );
-        // Every weapon mode's attack scores under its own slot's keys.
-        for w in crate::sim::Weapon::ALL {
-            let keys = StyleKey::weapon_keys(w.slot());
-            assert_eq!(StyleKey::from_attack(w.primary()), Some(keys[0]));
-            assert_eq!(StyleKey::from_attack(w.alt(0)), Some(keys[1]));
-            assert_eq!(StyleKey::from_attack(w.alt(1)), Some(keys[2]));
-        }
+        // Every primary and ability has its own key, and the labels are distinct.
+        let mut keys: Vec<StyleKey> = WeaponKind::ALL.map(StyleKey::primary).to_vec();
+        keys.extend(Ability::ALL.map(StyleKey::ability));
+        let n = keys.len();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), n);
+        assert_eq!(n + 4, StyleKey::COUNT, "+ fist, slam, parry, thorn");
+        let mut labels: Vec<&str> = StyleKey::ALL.iter().map(|k| k.label()).collect();
+        labels.sort();
+        labels.dedup();
+        assert_eq!(labels.len(), StyleKey::COUNT);
+    }
+
+    #[test]
+    fn freshness_is_sparse_on_the_wire() {
+        let encode = |v: &StyleView| crate::protocol::encode(v);
+        let fresh = StyleView::default();
+        assert_eq!(
+            encode(&fresh).len(),
+            4,
+            "rank, meter, empty mask, no values"
+        );
+        let mut v = fresh;
+        v.freshness[0] = 0;
+        v.freshness[17] = 140;
+        v.freshness[StyleKey::COUNT - 1] = 254;
+        let bytes = encode(&v);
+        let back: StyleView = crate::protocol::decode_server_message(&bytes).unwrap();
+        assert_eq!(back, v);
+        // Rank, meter, the mask (bit 32 set: a 9-byte varint), the count and three values.
+        assert_eq!(bytes.len(), 2 + 9 + 1 + 3);
     }
 
     #[test]

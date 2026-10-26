@@ -131,23 +131,23 @@ front, facing them; no collision of its own) and it:
 
 - **smothers the wick**: 16 dmg/s in 0.25 s ticks (`Attack::Enemy { kind: 26, attack: 0 }`),
   all of it **hard damage** (the part the pipeline doesn't already make hard is added);
-- **slows the victim**: their horizontal speed is held to 0.6 × `movement.ground_speed` after
-  their movement step (≈ 70–77 % of a free run: tested), never a root, never while dashing;
+- **slows the victim** to 72 % of their speeds (a free run of 16 m in a second becomes
+  11.5 m: tested) through the movement state's predicted slow (`MoveState::slow_time` /
+  `slow_scale`, the arsenal's Pinned slow), refreshed every tick for 0.25 s, so it eases off
+  right after it lets go; a longer, stronger slow (a Pinning Arrow) wins; never a root;
 - lets go when **punched** by the victim (the `Punched` event of that tick: thrown off along the
   punch at 11 m/s + up, stunned 1.6 s with its cap knocked open, 30 counter damage on top of the
   punch itself), when they **dash** (shaken off backwards, stunned 1 s), when they die, go down
-  or become untargetable, after 6 s, or when the world freezes.
+  or become untargetable, after 6 s, when the world freezes, or when a **Pinning Arrow** pins
+  it (it stays rooted where it was hit, its victim free).
 
 Other players can shoot it off their friend (it dies on them like anywhere else). Only one
 Snuffer latches onto a player at a time; the others `nip`.
 
 **Prediction.** The latch state is replicated on the Snuffer (the client knows it is on you:
-`LATCHED` + `owner`). The slow is a server-side velocity cap between movement steps, like
-knockback, so the owning client sees it through reconciliation (`net/prediction.rs`: a
-smoothed correction of ~0.1–0.2 m per snapshot while running latched) rather than predicting
-it; that is why it is a modest cap and not a root. If the arsenal's PINNED player slow lands as
-a predicted movement modifier, the latch should use it instead (one place:
-`SimWorld::step_latched`).
+`LATCHED` + `owner`). The slow lives in the victim's `MoveState` (sent in their own state), so
+their client predicts it like the Pinned slow: only the moments it takes hold and lets go are
+corrected (one round trip each).
 
 Client: a clank and a puff on latching; for the victim the Snuffer is drawn clinging to their
 chest from the camera (its replicated position trails the predicted view): the cap clamped
@@ -228,8 +228,11 @@ impl EnemyRegistry {
 }
 ```
 
-`spawn_enemy` / `spawn_enemy_scaled` are unchanged (they call `spawn_enemy_with`). A
-boss-grade elite is an elite with a larger `health_scale`. Flyers are placed by their feet
+`spawn_enemy` / `spawn_enemy_scaled` are unchanged (they call `spawn_enemy_with`). The game
+modes' `SimWorld::spawn_pve_enemy` (encounters and grind, `difficulty.rs`) spawns through it
+with the difficulty's health and elite roll; dev `/spawn` uses the same difficulty health. A
+boss-grade elite is an elite with a larger `health_scale` (grind: `boss_health` ×4, then the
+elite bonus). Flyers are placed by their feet
 (the encounter code converts hover-centre spawn points; grind should too).
 
 ## AI (`ai.rs`, server only)
@@ -508,8 +511,10 @@ cargo run -p client --release --example models_view -- --only gaoler   # model p
   its distance; 15 damage on the bell (×2) mid-wind-up cancels the toll (stunned, nobody
   frenzied), two 10s add up, body hits and 20 on the bell don't; a Snuffer latches on (LATCHED,
   `owner` = victim, on the chest), smothers 16/s all of it hard damage, follows its victim,
-  holds a run to ~77 % of a free one, is thrown off by a punch (stunned, flung along the punch,
-  ≥ 30 damage, no more smothering), shaken off by a dash, lets go of the dead and after 6 s,
+  slows a run to 72 % of a free one through the predicted movement slow (gone right after a
+  dash shakes it off), is thrown off by a punch (stunned, flung along the punch, ≥ 30 damage,
+  no more smothering), shaken off by a dash, pinned off by a Pinning Arrow, lets go of the dead
+  and after 6 s,
   and a second one never latches the same player but nips; a pour lays its line with the
   wind-up (66 ticks before ignition, aimed through the target and past it, replicated as a
   telegraph with its width), nothing burns before ignition, then 22/s to the player on it and
@@ -547,8 +552,6 @@ arena 4 of the campaign ("ARENA LOCKED", "WAVE 1/2 - 5 LEFT", the Gaoler on the 
 
 ## Known limitations / next steps
 
-* The latch's slow is applied by the server between movement steps (see "The latch"): the
-  victim's client corrects towards it instead of predicting it.
 * The Bellwether tolls without line of sight (it only needs a target and an ally in reach), on
   purpose: it is the one you have to hunt down. Its bell hitbox doesn't follow the swing (the
   weak point is fixed on its yoke; the model keeps the bell near it).

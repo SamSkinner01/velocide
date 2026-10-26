@@ -5,6 +5,14 @@ Riveter / Cinderbox + Prism; Husk / Spitter / Gnat / Bastion), whose line-up map
 closely onto other games' signature designs. Everything here is meant to be **original**: the
 names, the silhouettes, the mechanics combos, the sounds.
 
+> **The expansion** (`docs/expansion.md`) turns these four weapons into the first entries of a
+> ten-weapon arsenal with loadouts, builds (two abilities per weapon from its class's pool) and
+> PvE / PvP balance profiles; the returning Lancet, Thresher, Riveter and Cinderbox come back
+> redesigned, with a bow and an ember sprayer. **`docs/arsenal.md` is the arsenal reference**
+> from now on (weapons, abilities, numbers, wire ids, balance); the weapon sections below remain
+> the as-built notes of the second-generation four and their abilities, which are unchanged.
+> Slots are now loadout slots (`PlayerInput::weapon` = slot index into the player's loadout).
+
 This file is the design contract between the areas. Numbers are starting values (they live in
 `assets/tuning.ron` / `assets/enemies/*.ron` and are tuned in play); names, net kinds, slots,
 part names and the behaviour described here are the contract. If an implementation has to

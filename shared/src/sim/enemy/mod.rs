@@ -997,6 +997,27 @@ mod tests {
         assert!(!waves.contains(&"effigy"));
     }
 
+    /// The game modes' spawn (encounters, grind) makes the elites it rolls.
+    #[test]
+    fn pve_spawns_make_the_rolled_elites() {
+        let level = crate::sim::builtin_level(crate::sim::BUILTIN_LEVEL).unwrap();
+        let mut w = SimWorld::new(crate::sim::BUILTIN_LEVEL, Arc::new(level), 60);
+        let elite = w
+            .spawn_pve_enemy("gnawer", Vec3::ZERO, 0.0, 2.0, true)
+            .unwrap();
+        let plain = w
+            .spawn_pve_enemy("gnawer", Vec3::X * 4.0, 0.0, 2.0, false)
+            .unwrap();
+        let (e, p) = (&w.enemies[&elite], &w.enemies[&plain]);
+        assert!(e.elite && e.aware && !p.elite && p.aware);
+        assert_eq!((e.max_health, p.max_health), (45.0 * 2.0 * 2.5, 90.0));
+        // A training dummy is never an elite.
+        let dummy = w
+            .spawn_pve_enemy("effigy", Vec3::Z * 4.0, 0.0, 1.0, true)
+            .unwrap();
+        assert!(!w.enemies[&dummy].elite);
+    }
+
     #[test]
     fn local_offsets_follow_yaw() {
         let def = Arc::new(EnemyDef::default());

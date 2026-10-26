@@ -36,6 +36,17 @@ fn attack_index(a: &Arena, def: &str, name: &str) -> u8 {
         .unwrap() as u8
 }
 
+/// Sets the difficulty scaling the AI acts with. The game mode recomputes
+/// `SimWorld::enemy_scale` from the difficulty tuning every tick (`difficulty.rs`), so the
+/// test arena's difficulty tables are set to give exactly `scale`.
+fn set_scale(a: &mut Arena, scale: EnemyScale) {
+    let d = &mut a.tuning.difficulty;
+    d.damage = [scale.damage; 5];
+    d.aggression = [scale.aggression; 5];
+    d.projectile_speed = [scale.projectile_speed; 5];
+    a.world.enemy_scale = scale;
+}
+
 /// Ticks until `pred` holds (at most `max`); returns the events of those ticks, or `None`.
 fn until(a: &mut Arena, max: u32, pred: impl Fn(&Arena) -> bool) -> Option<Vec<SimEvent>> {
     let mut all = Vec::new();
@@ -290,6 +301,25 @@ fn a_latched_victim_is_slowed_not_rooted() {
         slowed > free * 0.55 && slowed < free * 0.8,
         "a modest slow: {slowed} of {free}"
     );
+    // Through the movement state's slow, which the victim's client predicts.
+    let m = &a.world.players[&p].movement;
+    assert!(m.slow_time > 0.0 && (m.slow_scale - 0.72).abs() < 1e-6);
+    // Shaken off, the slow eases off within a moment.
+    a.tap(p, Buttons::DASH, 30);
+    assert_ne!(state(&a, s), AiState::Latched);
+    assert_eq!(a.world.players[&p].movement.slow_time, 0.0);
+}
+
+#[test]
+fn a_pinning_arrow_pins_a_snuffer_off_its_victim() {
+    let (mut a, p, s) = latched_duel();
+    god(&mut a, p);
+    let t = a.tuning.clone();
+    a.world
+        .apply_pin(&t, Owner::Player(PlayerId(1)), HitTarget::Entity(s));
+    a.ticks(2);
+    assert_ne!(state(&a, s), AiState::Latched, "pinned off");
+    assert_eq!(a.world.enemies[&s].latched, None);
 }
 
 #[test]
@@ -515,7 +545,7 @@ fn the_effigy_stands_flinches_and_heals_but_never_fights_or_dies() {
 /// Ticks between consecutive bites of a gnawer on a standing (god) player.
 fn bite_interval(scale: EnemyScale, elite: bool) -> (u32, u32, f32) {
     let mut a = Arena::coop();
-    a.world.enemy_scale = scale;
+    set_scale(&mut a, scale);
     let p = a.player(0, Vec3::ZERO, 0.0);
     god(&mut a, p);
     let id = a
@@ -634,7 +664,13 @@ fn enemy_scale_sets_damage_aggression_and_projectile_speed() {
     // Projectile speed: the Heron's needle.
     let needle_speed = |scale: f32| {
         let mut a = Arena::coop();
-        a.world.enemy_scale.projectile_speed = scale;
+        set_scale(
+            &mut a,
+            EnemyScale {
+                projectile_speed: scale,
+                ..Default::default()
+            },
+        );
         let p = a.player(0, Vec3::ZERO, 0.0);
         god(&mut a, p);
         spawn(&mut a, "heron", Vec3::new(0.0, 0.0, -30.0));
@@ -660,7 +696,13 @@ fn enemy_scale_sets_damage_aggression_and_projectile_speed() {
     // Lobs fly faster (a flatter arc) and still land on the target.
     let lob = |scale: f32| {
         let mut a = Arena::coop();
-        a.world.enemy_scale.projectile_speed = scale;
+        set_scale(
+            &mut a,
+            EnemyScale {
+                projectile_speed: scale,
+                ..Default::default()
+            },
+        );
         let p = a.player(0, Vec3::ZERO, 0.0);
         god(&mut a, p);
         spawn(&mut a, "censer", Vec3::new(0.0, 0.0, -20.0));
@@ -701,7 +743,13 @@ fn enemy_scale_sets_damage_aggression_and_projectile_speed() {
 #[test]
 fn frenzy_stacks_on_the_difficulty_scale() {
     let mut a = Arena::coop();
-    a.world.enemy_scale.damage = 2.0;
+    set_scale(
+        &mut a,
+        EnemyScale {
+            damage: 2.0,
+            ..Default::default()
+        },
+    );
     let p = a.player(0, Vec3::ZERO, 0.0);
     let id = spawn(&mut a, "gnawer", Vec3::new(0.0, 0.0, -2.0));
     let tick = a.world.tick;
