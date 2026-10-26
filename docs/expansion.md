@@ -305,6 +305,14 @@ Add `grind_spawns` to **every** arena (the three existing ones too). The hub (Ve
 (`bellwether`, `snuffer`, `smelter`) and keep the level loadable without them only if the loader
 needs it; coordinate through this file.
 
+As built (**maps**): the arenas' grind spawns sit in **Mould gates** (baffled chambers behind
+the outer walls, out of sight of every player spawn, room for a Gaoler; `docs/levels.md`). The
+Drowned Chandlery places the new Moulds through a stand-in table
+(`level_gen/drowned_chandlery.rs`: bellwether → censer, snuffer → gnawer, smelter → gaoler) so it
+plays before the enemies merge; one constant swaps the real ones in. Format addition:
+`LevelDef::secrets: Vec<Volume>` (hidden places; entering one finds it), data for a results line
+— nothing reads it yet.
+
 ## Enemies (area **enemies**)
 
 New Moulds (net kinds 25–28; `assets/enemies/*.ron`, models, sounds, AI):
