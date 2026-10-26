@@ -35,16 +35,30 @@ impl ScoreColumn {
 /// The score columns of a mode, in display order.
 pub fn columns_for(mode: GameMode) -> Vec<ScoreColumn> {
     match mode {
-        GameMode::Deathmatch | GameMode::GunGame => vec![
+        GameMode::GunGame => vec![
+            ScoreColumn::new("TIER", 84.0),
+            ScoreColumn::new("KILLS", 40.0),
+            ScoreColumn::new("DEATHS", 48.0),
+            ScoreColumn::new("RANK", 70.0),
+            ScoreColumn::new("STYLE", 44.0),
+        ],
+        GameMode::Deathmatch => vec![
             ScoreColumn::new("FRAGS", 40.0),
             ScoreColumn::new("KILLS", 40.0),
             ScoreColumn::new("DEATHS", 48.0),
             ScoreColumn::new("RANK", 70.0),
             ScoreColumn::new("STYLE", 44.0),
         ],
-        GameMode::Campaign | GameMode::Grind => vec![
+        GameMode::Campaign => vec![
             ScoreColumn::new("KILLS", 40.0),
             ScoreColumn::new("DEATHS", 48.0),
+            ScoreColumn::new("RANK", 70.0),
+            ScoreColumn::new("STYLE", 44.0),
+        ],
+        GameMode::Grind => vec![
+            ScoreColumn::new("KILLS", 40.0),
+            ScoreColumn::new("DEATHS", 48.0),
+            ScoreColumn::new("REVIVES", 54.0),
             ScoreColumn::new("RANK", 70.0),
             ScoreColumn::new("STYLE", 44.0),
         ],

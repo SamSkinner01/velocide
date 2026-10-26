@@ -1,6 +1,6 @@
-//! Main menu: SINGLE PLAYER (level select), HOST GAME (mode, level, port, max players), JOIN
-//! GAME (address, name), SETTINGS, QUIT. HOST and JOIN continue in the lobby screen
-//! (`menus::lobby`). A level renders behind it; messages (disconnect reasons,
+//! Main menu: SINGLE PLAYER (campaign / grind, difficulty, level), HOST GAME (mode, level, port,
+//! max players), JOIN GAME (address, name), SETTINGS, QUIT. HOST and JOIN continue in the lobby
+//! screen (`menus::lobby`). A level renders behind it; messages (disconnect reasons,
 //! connection errors) appear in a modal box.
 //!
 //! Adding a page: add a [`Page`] variant, a menu item in `root_items`, and a `fn xxx_page`
@@ -11,7 +11,7 @@ use engine::render::Renderer;
 use engine::ui::{Rect, TextFilter, TextStyle, Ui, UiDrawExt};
 use glam::{Vec4, vec2};
 use shared::level::LevelDef;
-use shared::lobby::{GameMode, LevelInfo};
+use shared::lobby::{Difficulty, GameMode, LevelInfo};
 
 use super::backdrop::Backdrop;
 use super::settings_menu::{self, SettingsMenu};
@@ -42,8 +42,11 @@ pub struct MainMenu {
     /// Root item to focus when coming back from a page.
     return_focus: Option<&'static str>,
     message: Option<String>,
+    /// Single-player page: levels of the chosen mode, the selected one, mode and difficulty.
     levels: Vec<String>,
     level: usize,
+    sp_mode: GameMode,
+    difficulty: Difficulty,
     /// Host page: levels with their kinds, the chosen mode and level name.
     catalog: Vec<LevelInfo>,
     host_mode: GameMode,
@@ -81,6 +84,8 @@ impl MainMenu {
         menu.port = s.host_port.to_string();
         menu.max_players = s.host_max_players as f32;
         menu.host_mode = s.host_mode;
+        menu.sp_mode = s.sp_mode;
+        menu.difficulty = s.difficulty;
         menu.host_level = s.last_level.clone();
         menu.address = s.last_join_address.clone();
         menu
@@ -95,6 +100,8 @@ impl MainMenu {
             message: None,
             levels: level_list(),
             level: 0,
+            sp_mode: GameMode::Campaign,
+            difficulty: Difficulty::Normal,
             catalog: Vec::new(),
             host_mode: GameMode::Campaign,
             host_level: String::new(),
@@ -126,6 +133,10 @@ impl MainMenu {
         if page == Page::SinglePlayer || page == Page::Host {
             self.levels = level_list();
             self.level = self.level.min(self.levels.len().saturating_sub(1));
+        }
+        if page == Page::SinglePlayer {
+            self.catalog = shared::lobby::scan_levels();
+            self.fit_sp_levels();
         }
         if page == Page::Host {
             self.catalog = shared::lobby::scan_levels();
@@ -317,6 +328,30 @@ impl MainMenu {
             .clamp(1.0, self.host_mode.max_players() as f32);
     }
 
+    /// Single-player modes: the campaign, or grind on an arena.
+    const SP_MODES: [GameMode; 2] = [GameMode::Campaign, GameMode::Grind];
+
+    /// The single-player list for the chosen mode: its own levels, then the sandboxes; the
+    /// selection stays on the same level if it is still listed.
+    fn fit_sp_levels(&mut self) {
+        let current = self.levels.get(self.level).cloned();
+        let mode = self.sp_mode;
+        let mut levels: Vec<String> = self
+            .catalog
+            .iter()
+            .filter(|l| mode.accepts(l) && !l.any_mode())
+            .chain(self.catalog.iter().filter(|l| l.any_mode()))
+            .map(|l| l.name.clone())
+            .collect();
+        if levels.is_empty() {
+            levels = level_list();
+        }
+        self.level = current
+            .and_then(|c| levels.iter().position(|l| *l == c))
+            .unwrap_or(0);
+        self.levels = levels;
+    }
+
     fn level_name(&self) -> String {
         self.levels
             .get(self.level)
@@ -336,8 +371,24 @@ impl MainMenu {
             // rows made it unclear which one PLAY starts).
             let focus_selected = ui.state().focused().is_none();
             ui.default_focus();
+            // Game modes: campaign or grind (arenas), and the difficulty of both.
+            let modes = ["CAMPAIGN", "GRIND"];
+            let mut mode = Self::SP_MODES
+                .iter()
+                .position(|m| *m == self.sp_mode)
+                .unwrap_or(0);
+            if ui.choice("MODE", &mut mode, &modes) {
+                self.sp_mode = Self::SP_MODES[mode.min(Self::SP_MODES.len() - 1)];
+                self.fit_sp_levels();
+            }
+            let names = Difficulty::ALL.map(Difficulty::title);
+            let mut difficulty = self.difficulty.index();
+            if ui.choice("DIFFICULTY", &mut difficulty, &names) {
+                self.difficulty = Difficulty::ALL[difficulty.min(Difficulty::ALL.len() - 1)];
+            }
             ui.heading("SELECT LEVEL");
-            let h = ui.available_rect().height() - 40.0;
+            let grind = self.sp_mode == GameMode::Grind;
+            let h = ui.available_rect().height() - if grind { 52.0 } else { 40.0 };
             let mut chosen = None;
             ui.scroll_area("levels", h, |ui| {
                 for (i, name) in self.levels.iter().enumerate() {
@@ -354,6 +405,14 @@ impl MainMenu {
                 }
             });
             ui.spacing(2.0);
+            if grind {
+                let best = settings.best_grind_wave(&self.level_name(), self.difficulty);
+                let text = best.map_or_else(
+                    || "BEST: NO RUN YET".to_string(),
+                    |w| format!("BEST: WAVE {w}"),
+                );
+                ui.text(&text, &TextStyle::new(ui.theme().bone_dim));
+            }
             ui.row(2, |ui| {
                 if ui.button("PLAY") {
                     chosen = Some(self.level);
@@ -365,6 +424,8 @@ impl MainMenu {
             if chosen.is_some() {
                 let level = self.level_name();
                 settings.last_level = level.clone();
+                settings.sp_mode = self.sp_mode;
+                settings.difficulty = self.difficulty;
                 result = Some(PageResult::Start(Transition::Start(
                     StartMode::SinglePlayer { level: Some(level) },
                 )));

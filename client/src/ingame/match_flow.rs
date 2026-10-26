@@ -74,6 +74,18 @@ impl InGame {
         }
     }
 
+    /// The results reveal starts over from `now` (after the play of the game, `replay.rs`).
+    pub(super) fn restart_results_reveal(&mut self, now: f64) {
+        if self.match_ui.results_since.is_some() {
+            self.match_ui.results_since = Some(now);
+        }
+        if let Some(screen) = self.modes.results.take() {
+            let screen =
+                crate::menus::results::ResultsScreen::new(screen.results, screen.local, now);
+            self.modes.results = Some(screen);
+        }
+    }
+
     /// The running session (tools / tests send server commands through it).
     pub fn session(&self) -> Option<&crate::net::Session> {
         self.session.as_ref()
@@ -135,11 +147,24 @@ impl InGame {
     }
 
     fn score_title(&self) -> String {
-        let mode = if self.kind == SessionKind::SinglePlayer {
-            hud_mode_name(self.kind)
+        let kind = self.match_mode();
+        let mut mode = if self.kind == SessionKind::SinglePlayer {
+            hud_mode_name(self.kind).to_string()
         } else {
-            self.match_mode().title()
+            kind.title().to_string()
         };
+        // Game modes: solo grind, and the difficulty of the PvE modes.
+        if self.kind == SessionKind::SinglePlayer && kind == GameMode::Grind {
+            mode.push_str(" GRIND");
+        }
+        if let Some(board) = self
+            .modes
+            .scoreboard
+            .as_ref()
+            .filter(|_| kind.has_difficulty())
+        {
+            mode = format!("{mode}  //  {}", board.rules.difficulty.title());
+        }
         format!("{}  //  {mode}", self.world.name().to_uppercase())
     }
 

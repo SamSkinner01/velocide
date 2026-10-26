@@ -113,6 +113,13 @@ pub struct Settings {
     pub show_viewmodel: bool,
     pub fullscreen: bool,
     pub accessibility: Accessibility,
+    /// Mode last picked on the single-player page (campaign, or grind on an arena).
+    pub sp_mode: shared::lobby::GameMode,
+    /// PvE difficulty last picked (single-player page, hosting).
+    pub difficulty: shared::lobby::Difficulty,
+    /// Grind records: the best wave reached per arena and difficulty
+    /// ([`Settings::best_grind_wave`]).
+    pub grind_best: std::collections::BTreeMap<String, u32>,
 }
 
 impl Default for Settings {
@@ -145,9 +152,15 @@ impl Default for Settings {
             show_viewmodel: true,
             fullscreen: false,
             accessibility: Accessibility::default(),
+            sp_mode: shared::lobby::GameMode::Campaign,
+            difficulty: shared::lobby::Difficulty::Normal,
+            grind_best: Default::default(),
         }
     }
 }
+
+/// Most grind records kept (a hand-edited file can't grow without bound).
+const MAX_GRIND_RECORDS: usize = 256;
 
 fn finite_or(v: f32, default: f32) -> f32 {
     if v.is_finite() { v } else { default }
@@ -253,6 +266,41 @@ impl Settings {
         r.color_bits = r.color_bits.clamp(2, 8);
         self.accessibility.color_vision = self.accessibility.color_vision.sanitized();
         self.bindings.fill_missing();
+        self.grind_best.retain(|k, _| k.len() <= 96);
+        while self.grind_best.len() > MAX_GRIND_RECORDS {
+            self.grind_best.pop_last();
+        }
+    }
+
+    fn grind_key(level: &str, difficulty: shared::lobby::Difficulty) -> String {
+        format!("{level}/{}", difficulty.id())
+    }
+
+    /// Best grind wave reached on `level` at `difficulty` on this machine.
+    pub fn best_grind_wave(
+        &self,
+        level: &str,
+        difficulty: shared::lobby::Difficulty,
+    ) -> Option<u32> {
+        self.grind_best
+            .get(&Self::grind_key(level, difficulty))
+            .copied()
+    }
+
+    /// Records a grind run; true if `wave` beats the previous best (the caller saves).
+    pub fn record_grind_wave(
+        &mut self,
+        level: &str,
+        difficulty: shared::lobby::Difficulty,
+        wave: u32,
+    ) -> bool {
+        let best = self
+            .grind_best
+            .entry(Self::grind_key(level, difficulty))
+            .or_insert(0);
+        let new = wave > *best;
+        *best = (*best).max(wave);
+        new
     }
 
     /// What the renderer gets: the retro options plus the colour-vision correction (which is

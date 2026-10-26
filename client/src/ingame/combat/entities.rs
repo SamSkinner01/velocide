@@ -113,6 +113,16 @@ pub fn projectile_model(k: u16) -> Option<ModelId> {
         ProjectileKind::Wisp => ModelId::Wisp,
         ProjectileKind::EmberBomb => ModelId::EmberBomb,
         ProjectileKind::Needle => ModelId::Needle,
+        // Stand-ins until the expansion arsenal has its own models (arsenal-client).
+        ProjectileKind::Arrow
+        | ProjectileKind::PinArrow
+        | ProjectileKind::BrandArrow
+        | ProjectileKind::Rivet => ModelId::Needle,
+        ProjectileKind::EmberArrow | ProjectileKind::Flare => ModelId::EmberBomb,
+        ProjectileKind::CinderRocket
+        | ProjectileKind::FlakShell
+        | ProjectileKind::Limpet
+        | ProjectileKind::MortarShell => ModelId::Bomb,
     })
 }
 

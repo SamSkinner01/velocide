@@ -26,6 +26,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 
 use server::{NetSimConfig, ServerConfig, ServerHandle};
+use shared::lobby::{Difficulty, GameMode};
 
 use super::{ClientConfig, NetClient};
 
@@ -49,9 +50,19 @@ pub enum JoinTarget {
 /// How to start a session.
 #[derive(Clone, Debug)]
 pub enum SessionSpec {
-    SinglePlayer { level: String },
-    Host { server: Box<ServerConfig> },
-    Join { target: JoinTarget },
+    /// `mode`: a mode other than the level's natural one (solo grind on an arena); the
+    /// difficulty applies to the PvE modes.
+    SinglePlayer {
+        level: String,
+        mode: Option<GameMode>,
+        difficulty: Difficulty,
+    },
+    Host {
+        server: Box<ServerConfig>,
+    },
+    Join {
+        target: JoinTarget,
+    },
 }
 
 /// A running game session: the client plus, when hosting, the in-process server.
@@ -67,6 +78,8 @@ impl Session {
         Self::start(
             SessionSpec::SinglePlayer {
                 level: level.to_string(),
+                mode: None,
+                difficulty: Difficulty::Normal,
             },
             ClientConfig::new(name),
         )
@@ -96,8 +109,17 @@ impl Session {
     /// General form (client options such as the network simulator go in `client`).
     pub fn start(spec: SessionSpec, client: ClientConfig) -> anyhow::Result<Session> {
         match spec {
-            SessionSpec::SinglePlayer { level } => {
-                let server = ServerHandle::spawn(ServerConfig::single_player(&level))?;
+            SessionSpec::SinglePlayer {
+                level,
+                mode,
+                difficulty,
+            } => {
+                let mut config = ServerConfig::single_player(&level);
+                config.lobby.settings.difficulty = difficulty;
+                if let Some(mode) = mode {
+                    config.lobby.settings.mode = mode;
+                }
+                let server = ServerHandle::spawn(config)?;
                 let net = NetClient::connect(server.connect_addr(), client)?;
                 Ok(Session {
                     kind: SessionKind::SinglePlayer,
