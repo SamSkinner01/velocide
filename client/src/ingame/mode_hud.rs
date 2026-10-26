@@ -1,8 +1,9 @@
 //! Game-mode state on the client and its HUD: the scoreboard (Tab columns), checkpoint
 //! banners, co-op downed / revive (world markers over downed teammates with the revive
 //! prompt and progress, the local "DOWNED" panel, the reviver's progress bar), team wipes,
-//! the extraction countdown, the deathmatch clock and frag counter, and the results screen
-//! when the match ends.
+//! the extraction countdown, the grind wave block (wave, Moulds left, breather countdown, the
+//! local best wave), the deathmatch clock and frag counter, the difficulty tag, and the results
+//! screen when the match ends.
 //!
 //! Fed by `GameEvent::Mode` ([`ModeEvent`], broadcast by the server) and the replicated
 //! `player_flags::DOWNED`; countdowns are computed from server ticks with
@@ -19,7 +20,7 @@ use glam::{Vec2, Vec3, vec2};
 use shared::lobby::GameMode;
 use shared::protocol::{EntityState, PlayerInfo, player_flags};
 use shared::sim::style::rank_name;
-use shared::sim::{LifeState, MatchPhase, ModeEvent, PlayerId, Scoreboard};
+use shared::sim::{GrindEvent, LifeState, MatchPhase, ModeEvent, PlayerId, Scoreboard};
 
 use super::InGame;
 use super::cues;
@@ -49,6 +50,8 @@ pub struct ModeHudInfo<'a> {
     /// Display name of the USE binding ("E").
     pub use_key: &'a str,
     pub time: f64,
+    /// Grind: the best wave reached on this arena and difficulty (local record).
+    pub best_wave: Option<u32>,
 }
 
 /// Mode state mirrored from the server's events.
@@ -204,6 +207,7 @@ impl ModeHud {
                     now,
                 );
             }
+            ModeEvent::Grind(g) => self.on_grind_event(g, t, hud, audio, now),
             ModeEvent::Scoreboard(board) => {
                 let new_match = self.scoreboard.as_ref().is_some_and(|old| {
                     old.start_tick != board.start_tick
@@ -218,13 +222,16 @@ impl ModeHud {
                         fx.match_restarted = true;
                     }
                 }
-                // Anyone the server no longer lists as downed is up again.
+                // Anyone the server no longer lists as downed is up again (grind: back at the
+                // next wave without a revive).
                 self.downed.retain(|id, _| {
                     board
                         .rows
                         .iter()
                         .any(|r| r.player == *id && r.life == LifeState::Downed)
                 });
+                let downed = &self.downed;
+                self.reviving.retain(|id, _| downed.contains_key(id));
                 if board.rows.iter().all(|r| r.life == LifeState::Alive) {
                     self.wipe = None;
                 }
@@ -285,6 +292,20 @@ impl ModeHud {
                     self.draw_team(list, t, info, board, &secs_until);
                 }
             }
+        }
+        if board.rules.kind == GameMode::Grind {
+            // Breather countdown: a beep for each of the last three seconds.
+            if let Some(whole) = self.draw_grind(list, t, info, board, &secs_until, c)
+                && self.last_beep != Some(whole)
+            {
+                self.last_beep = Some(whole);
+                audio.play(
+                    Sfx::Countdown,
+                    PlayParams::default().with_pitch(if whole == 1 { 1.5 } else { 1.0 }),
+                );
+            }
+        } else if board.rules.kind.has_difficulty() {
+            draw_difficulty_tag(list, t, board, c);
         }
 
         // Extraction countdown (co-op).
@@ -461,6 +482,123 @@ impl ModeHud {
         }
     }
 
+    /// Grind banners and sounds: waves starting (HEAVY / BOSS waves louder and lower), waves
+    /// cleared, the overrun.
+    fn on_grind_event(
+        &mut self,
+        e: &GrindEvent,
+        t: &Theme,
+        hud: &mut Hud,
+        audio: &mut Audio,
+        now: f64,
+    ) {
+        match e {
+            GrindEvent::WaveStarted {
+                wave, heavy, boss, ..
+            } => {
+                let (text, col, pitch) = if *boss {
+                    (format!("BOSS WAVE {wave}"), t.crimson_bright, 0.7)
+                } else if *heavy {
+                    (format!("HEAVY WAVE {wave}"), t.crimson_bright, 0.85)
+                } else {
+                    (format!("WAVE {wave}"), t.bone, 1.0)
+                };
+                hud.banner(text, col, now);
+                audio.play(Sfx::WaveStart, PlayParams::default().with_pitch(pitch));
+                self.last_beep = None;
+            }
+            GrindEvent::WaveCleared { wave, .. } => {
+                hud.banner(format!("WAVE {wave} CLEARED"), t.stamina, now);
+                audio.play_2d(Sfx::EncounterClear);
+                self.last_beep = None;
+            }
+            GrindEvent::Overrun { .. } => {
+                // Nobody is left to revive anyone.
+                self.downed.clear();
+                self.reviving.clear();
+                hud.banner("OVERRUN", t.crimson_bright, now);
+                audio.play_2d(Sfx::Death);
+            }
+        }
+    }
+
+    /// Grind block, top centre: the wave and the Moulds left (HEAVY / BOSS tags), or the
+    /// breather countdown to the next wave; difficulty and the local best wave under it.
+    /// Returns the countdown's whole second while it is in its last three (the beeps).
+    fn draw_grind(
+        &self,
+        list: &mut UiDrawList,
+        t: &Theme,
+        info: &ModeHudInfo,
+        board: &Scoreboard,
+        secs_until: &dyn Fn(u32) -> Option<f64>,
+        c: Rect,
+    ) -> Option<i64> {
+        let g = board.grind?;
+        let outline = fade(t.ink, 0.9);
+        let cx = c.center().x;
+        let y = 28.0;
+        let mut sub = vec![board.rules.difficulty.title().to_string()];
+        let mut beep = None;
+        if let Some(at) = g.next_wave_tick
+            && g.overrun_tick.is_none()
+        {
+            let left = secs_until(at).unwrap_or(0.0);
+            let whole = left.ceil() as i64;
+            if (1..=3).contains(&whole) {
+                beep = Some(whole);
+            }
+            let urgent = whole <= 3;
+            list.text(
+                vec2(cx, y),
+                &format!("WAVE {} IN {}", g.wave + 1, whole.max(1)),
+                &TextStyle::new(if urgent { t.crimson_bright } else { t.bone })
+                    .scale(2.0)
+                    .centered()
+                    .outline(outline),
+            );
+            if g.wave > 0 {
+                sub.push(format!("WAVE {} CLEARED", g.wave));
+            }
+        } else if g.wave > 0 {
+            let (tag, col) = if g.boss {
+                ("  BOSS", t.crimson_bright)
+            } else if g.heavy {
+                ("  HEAVY", t.crimson_bright)
+            } else {
+                ("", t.bone)
+            };
+            let style = TextStyle::new(t.bone).scale(2.0).outline(outline);
+            let main = format!("WAVE {}", g.wave);
+            let w =
+                engine::ui::text::line_width(&main, 2.0) + engine::ui::text::line_width(tag, 1.0);
+            let r = list.text(vec2((cx - w * 0.5).round(), y), &main, &style);
+            if !tag.is_empty() {
+                list.text(
+                    vec2(r.max.x, y + 7.0),
+                    tag,
+                    &TextStyle::new(col).outline(outline),
+                );
+            }
+            sub.push(if g.overrun_tick.is_some() {
+                "OVERRUN".to_string()
+            } else if g.next_wave_tick.is_some() {
+                format!("WAVE {} CLEARED", g.wave)
+            } else {
+                format!("{} LEFT", g.left)
+            });
+        }
+        if let Some(best) = info.best_wave.filter(|b| *b > 0) {
+            sub.push(format!("BEST: WAVE {best}"));
+        }
+        list.text(
+            vec2(cx, y + 18.0),
+            &sub.join("  //  "),
+            &TextStyle::new(t.bone_dim).centered().outline(outline),
+        );
+        beep
+    }
+
     /// Markers over downed teammates: DOWNED, time left, revive progress, the prompt.
     fn draw_downed_markers(
         &self,
@@ -585,6 +723,7 @@ impl ModeHud {
                     .centered()
                     .outline(outline),
             );
+            let grind = board.rules.kind == GameMode::Grind;
             let line = match self.reviving.get(&me) {
                 Some((r, start, done)) => {
                     let frac = progress(info, *start, *done);
@@ -598,6 +737,7 @@ impl ModeHud {
                     format!("{} IS REVIVING YOU", name_of(info.players, *r))
                 }
                 None => match secs_until(*tick) {
+                    Some(s) if grind => format!("OUT IN {:.0}  -  HOLD ON FOR A REVIVE", s.ceil()),
                     Some(s) => format!("CHECKPOINT IN {:.0}  -  HOLD ON FOR A REVIVE", s.ceil()),
                     None => "HOLD ON FOR A REVIVE".into(),
                 },
@@ -606,6 +746,21 @@ impl ModeHud {
                 vec2(c.center().x, y + 17.0),
                 &line,
                 &TextStyle::new(t.bone).centered().outline(outline),
+            );
+        } else if info.local_dead
+            && board.rules.kind == GameMode::Grind
+            && let Some(g) = board.grind.filter(|g| g.overrun_tick.is_none())
+        {
+            // Out until the next wave starts.
+            let text = match g.next_wave_tick {
+                Some(_) => format!("BACK FOR WAVE {}", g.wave + 1),
+                None if board.rows.len() > 1 => "OUT UNTIL THE WAVE IS CLEARED".into(),
+                None => "OUT".into(),
+            };
+            list.text(
+                vec2(c.center().x, y + 10.0),
+                &text,
+                &TextStyle::new(t.bone_dim).centered().outline(outline),
             );
         } else if info.local_dead && board.rules.kind == GameMode::Campaign && self.wipe.is_none() {
             let text = if board.rows.len() <= 1 {
@@ -657,6 +812,18 @@ impl InGame {
         let empty = BTreeMap::new();
         let players = net.map_or(&empty, NetClient::players);
         let local = net.and_then(NetClient::local_player_id);
+        // Grind: the local record for this arena and difficulty (the results show the old one
+        // and NEW BEST).
+        let mut previous_best = None;
+        if let ModeEvent::Ended(r) = e
+            && let Some(run) = r.grind
+            && let Some(level) = net.and_then(NetClient::world).map(|w| w.level_name.clone())
+        {
+            let s = &mut common.settings;
+            previous_best = Some(s.best_grind_wave(&level, r.rules.difficulty).unwrap_or(0));
+            s.record_grind_wave(&level, r.rules.difficulty, run.wave);
+            common.settings_save = true;
+        }
         let fx = self.modes.on_event(
             e,
             &common.theme,
@@ -670,6 +837,9 @@ impl InGame {
             // The results screen owns the cursor and the keys now.
             self.resume();
             self.chat.close();
+            if let Some(screen) = &mut self.modes.results {
+                screen.previous_best_wave = previous_best;
+            }
         }
         if fx.match_restarted {
             self.style.reset();
@@ -736,6 +906,17 @@ impl InGame {
             .settings
             .bindings
             .display(crate::controls::Action::Use);
+        let best_wave = self
+            .modes
+            .scoreboard
+            .as_ref()
+            .filter(|b| b.rules.kind == GameMode::Grind)
+            .zip(net.world())
+            .and_then(|(b, w)| {
+                common
+                    .settings
+                    .best_grind_wave(&w.level_name, b.rules.difficulty)
+            });
         let info = ModeHudInfo {
             local,
             server_tick: net.server_tick_estimate(),
@@ -748,6 +929,7 @@ impl InGame {
             revive_range: tuning.modes.revive_range,
             use_key: &use_key,
             time: now,
+            best_wave,
         };
         self.modes
             .draw(list, &common.theme, &info, &mut common.audio);
@@ -770,13 +952,13 @@ impl InGame {
     }
 
     /// Fills the score cells (columns from `scoreboard::columns_for`: FRAGS, KILLS, DEATHS,
-    /// RANK, STYLE) and the status of one row from the server's scoreboard.
+    /// REVIVES, RANK, STYLE) and the status of one row from the server's scoreboard.
     pub(super) fn fill_score_row(&self, columns: &[ScoreColumn], row: &mut ScoreRow, id: PlayerId) {
-        let Some(e) = self
+        let Some((board, e)) = self
             .modes
             .scoreboard
             .as_ref()
-            .and_then(|b| b.rows.iter().find(|r| r.player == id))
+            .and_then(|b| Some((b, b.rows.iter().find(|r| r.player == id)?)))
         else {
             return;
         };
@@ -792,6 +974,7 @@ impl InGame {
                 }
                 "KILLS" => e.kills.to_string(),
                 "DEATHS" => e.deaths.to_string(),
+                "REVIVES" => e.revives.to_string(),
                 "RANK" => {
                     row.cell_colors[i] = Some(rank_text_color(&theme, e.rank, self.time));
                     rank_name(e.rank).to_string()
@@ -805,6 +988,7 @@ impl InGame {
         }
         match e.life {
             LifeState::Downed => row.status = "DOWNED".into(),
+            LifeState::Dead if board.rules.kind == GameMode::Grind => row.status = "OUT".into(),
             LifeState::Dead => row.status = "DEAD".into(),
             LifeState::Alive => {}
         }
@@ -844,6 +1028,17 @@ impl InGame {
         let sounds = screen.draw(ui, now);
         Some((sounds.first().copied(), screen.finished(now)))
     }
+}
+
+/// The PvE difficulty under the level timer (campaign; grind shows it in its wave block).
+fn draw_difficulty_tag(list: &mut UiDrawList, t: &Theme, board: &Scoreboard, c: Rect) {
+    list.text(
+        vec2(c.center().x, 30.0),
+        board.rules.difficulty.title(),
+        &TextStyle::new(t.bone_dim)
+            .centered()
+            .outline(fade(t.ink, 0.9)),
+    );
 }
 
 fn ordinal(n: usize) -> &'static str {

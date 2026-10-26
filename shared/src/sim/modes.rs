@@ -17,6 +17,11 @@
 //!   shortly after being hit frags the hitter instead: `knockoff_credit`), respawn after
 //!   `combat.respawn_delay` at the spawn point farthest from other players with
 //!   `combat.spawn_protection`; frag / time limit → match end.
+//! * **Grind** (`grind.rs`): endless waves on an arena; co-op downed / revive as in the
+//!   campaign, but whoever is out comes back at the next wave, and everyone down at once ends
+//!   the run.
+//! * **Difficulty** (`difficulty.rs`): PvE modes scale the Moulds and the downed time / revive
+//!   health by difficulty × player count.
 //!
 //! Network: [`ModeEvent`]s go to everyone (`GameEvent::Mode`), the scoreboard is re-broadcast
 //! (throttled) whenever something on it changes, and downed players carry `DOWNED` in their
@@ -31,11 +36,14 @@ use super::combat::{
     Attack, CombatRules, DamageFlags, KillInfo, Owner, PlayerCombat, secs_to_ticks,
 };
 use super::encounter::EncounterPhase;
+use super::grind::{GrindEvent, GrindResult, GrindState, GrindStatus};
 use super::style::{StyleBonus, StyleEvent};
 use super::{HitTarget, PlayerId, SimEvent, SimWorld, WeaponState};
 use crate::input::Buttons;
 use crate::level::{LevelDef, SpawnPoint};
-use crate::lobby::{DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS, GameMode, MatchSettings};
+use crate::lobby::{
+    DEFAULT_FRAG_LIMIT, DEFAULT_TIME_LIMIT_SECS, Difficulty, GameMode, MatchSettings,
+};
 use crate::movement::MoveState;
 use crate::protocol::{EntityState, player_flags};
 use crate::tuning::{ModeTuning, Tuning};
@@ -50,6 +58,8 @@ pub struct ModeRules {
     pub frag_limit: u32,
     /// Deathmatch: the match ends after this many seconds (0 = no limit).
     pub time_limit_secs: f32,
+    /// PvE modes: how hard the Moulds are (`sim::difficulty`).
+    pub difficulty: Difficulty,
 }
 
 impl ModeRules {
@@ -58,6 +68,7 @@ impl ModeRules {
             kind: GameMode::Campaign,
             frag_limit: 0,
             time_limit_secs: 0.0,
+            difficulty: Difficulty::Normal,
         }
     }
 
@@ -66,6 +77,16 @@ impl ModeRules {
             kind: GameMode::Deathmatch,
             frag_limit,
             time_limit_secs: time_limit_secs.max(0.0),
+            difficulty: Difficulty::Normal,
+        }
+    }
+
+    /// Endless co-op waves on an arena (`sim::grind`).
+    pub fn grind(difficulty: Difficulty) -> Self {
+        Self {
+            kind: GameMode::Grind,
+            difficulty,
+            ..Self::campaign()
         }
     }
 
@@ -86,6 +107,7 @@ impl ModeRules {
         match settings.mode {
             GameMode::Campaign | GameMode::Grind => Self {
                 kind: settings.mode,
+                difficulty: settings.difficulty,
                 ..Self::campaign()
             },
             GameMode::Deathmatch | GameMode::GunGame => Self {
@@ -171,6 +193,8 @@ pub struct ScoreEntry {
     /// Style points earned.
     pub style: u32,
     pub life: LifeState,
+    /// Co-op: teammates revived.
+    pub revives: u32,
 }
 
 /// The scoreboard and match clock (broadcast whenever something on it changes, throttled).
@@ -183,6 +207,8 @@ pub struct Scoreboard {
     /// Campaign: index of the last checkpoint reached.
     pub checkpoint: Option<u8>,
     pub rows: Vec<ScoreEntry>,
+    /// Grind: wave, Moulds left, breather (HUD, late joiners).
+    pub grind: Option<GrindStatus>,
 }
 
 /// A results grade.
@@ -305,6 +331,8 @@ pub enum EndReason {
     TimeLimit,
     /// Ended by the host / lobby.
     Host,
+    /// Grind: everyone was down or dead at once.
+    Overrun,
 }
 
 /// One player's line on the results screen.
@@ -338,10 +366,12 @@ pub struct MatchResults {
     pub team_kills: u32,
     /// Campaign: player id order. Deathmatch: final standings (best first).
     pub players: Vec<PlayerResult>,
-    /// Campaign: average of the players' overall grades.
+    /// Campaign / grind: average of the players' overall grades.
     pub team_grade: Option<Grade>,
     /// Deathmatch winner.
     pub winner: Option<PlayerId>,
+    /// Grind: the wave reached and its grade.
+    pub grind: Option<GrindResult>,
 }
 
 /// Game-mode events (all broadcast as `GameEvent::Mode`).
@@ -381,6 +411,8 @@ pub enum ModeEvent {
     Scoreboard(Scoreboard),
     /// The match is over.
     Ended(Box<MatchResults>),
+    /// Grind: waves started / cleared, the overrun.
+    Grind(GrindEvent),
 }
 
 /// The whole mode state (`SimWorld::mode`).
@@ -405,6 +437,8 @@ pub struct ModeState {
     /// resets an encounter takes them back, so re-fighting it doesn't count twice).
     encounter_kills: BTreeMap<u16, Vec<PlayerId>>,
     encounter_spawns: BTreeMap<u16, u32>,
+    /// Grind: waves, the Moulds of the current one, the overrun (`grind.rs`).
+    pub grind: GrindState,
     pub results: Option<MatchResults>,
     scoreboard_dirty: bool,
     last_scoreboard: Option<u32>,
@@ -425,6 +459,7 @@ impl ModeState {
             enemies_spawned: 0,
             encounter_kills: BTreeMap::new(),
             encounter_spawns: BTreeMap::new(),
+            grind: GrindState::default(),
             results: None,
             scoreboard_dirty: true,
             last_scoreboard: None,
@@ -461,17 +496,14 @@ impl ModeState {
 }
 
 impl SimWorld {
-    /// Enemies this level's encounters spawn for the current player count (co-op scaling).
-    pub fn expected_enemies(&self) -> u32 {
-        if !self.rules.coop_enemy_scaling {
-            return authored_enemies(&self.level);
-        }
-        let players = self.coop_player_count();
+    /// Enemies this level's encounters spawn for the difficulty and the current player count.
+    pub fn expected_enemies(&self, t: &Tuning) -> u32 {
+        let scaling = self.pve_scaling(t);
         self.level
             .encounters
             .iter()
             .flat_map(|e| &e.waves)
-            .map(|w| super::encounter::scaled_count(w.spawns.len(), players) as u32)
+            .map(|w| scaling.scaled_count(w.spawns.len()) as u32)
             .sum()
     }
 }
@@ -509,11 +541,14 @@ impl SimWorld {
     }
 
     /// End-of-tick game-mode step (pipeline step 6): stats and style from this tick's events,
-    /// checkpoints, revives, team wipes, the exit, deathmatch limits, the scoreboard.
+    /// checkpoints, revives, team wipes, the exit, grind waves, deathmatch limits, the
+    /// scoreboard.
     pub(crate) fn step_modes(&mut self, t: &Tuning) {
         // This tick's events so far; everything emitted below is appended after them.
         let events = std::mem::take(&mut self.events);
         self.sync_mode_players(Some(t));
+        // Difficulty × players for the AI (players joining / leaving change it at once).
+        self.update_enemy_scale(t);
         if self.frozen && self.mode.is_playing() {
             // Frozen from outside (the server's results phase): the match is over.
             self.end_match(t, EndReason::Host);
@@ -527,11 +562,15 @@ impl SimWorld {
                 self.push_style(e);
             }
             match self.mode.rules.kind {
-                GameMode::Campaign | GameMode::Grind => {
+                GameMode::Campaign => {
                     self.tick_checkpoints();
                     self.tick_revives(t);
                     self.check_team_wipe(t);
                     self.tick_exit(t);
+                }
+                GameMode::Grind => {
+                    self.tick_revives(t);
+                    self.step_grind(t);
                 }
                 GameMode::Deathmatch | GameMode::GunGame => self.tick_deathmatch(t),
             }
@@ -554,7 +593,7 @@ impl SimWorld {
         self.events.push(SimEvent::Style(e));
     }
 
-    fn push_mode(&mut self, e: ModeEvent) {
+    pub(crate) fn push_mode(&mut self, e: ModeEvent) {
         self.events.push(SimEvent::Mode(e));
     }
 
@@ -592,7 +631,9 @@ impl SimWorld {
             self.style.player(id);
             self.mode.touch();
             let move_them = match self.mode.rules.kind {
-                GameMode::Campaign | GameMode::Grind => self.mode.checkpoint.is_some(),
+                GameMode::Campaign => self.mode.checkpoint.is_some(),
+                // Away from the Moulds.
+                GameMode::Grind => self.players.len() > 1,
                 GameMode::Deathmatch | GameMode::GunGame => self.players.len() > 1,
             };
             if late
@@ -710,19 +751,17 @@ impl SimWorld {
         let rate = self.tick_rate;
         let void = kill.attack == Attack::World || kill.flags.contains(DamageFlags::ENVIRONMENT);
         let solo = self.is_solo();
-        let (secs, life) = match (self.mode.rules.kind, self.mode.phase) {
+        let secs = |s: f32| secs_to_ticks(s, rate, 1);
+        let (ticks, life) = match (self.mode.rules.kind, self.mode.phase) {
             (_, MatchPhase::Ended) | (GameMode::Deathmatch | GameMode::GunGame, _) => {
-                (t.combat.respawn_delay, LifeState::Dead)
+                (secs(t.combat.respawn_delay), LifeState::Dead)
             }
-            (GameMode::Campaign | GameMode::Grind, _) if solo => {
-                (t.modes.sp_death_time, LifeState::Dead)
-            }
-            (GameMode::Campaign | GameMode::Grind, _) if void => {
-                (t.modes.fall_respawn_time, LifeState::Dead)
-            }
-            (GameMode::Campaign | GameMode::Grind, _) => (t.modes.downed_time, LifeState::Downed),
+            (GameMode::Campaign, _) if solo => (secs(t.modes.sp_death_time), LifeState::Dead),
+            (GameMode::Campaign, _) if void => (secs(t.modes.fall_respawn_time), LifeState::Dead),
+            // Grind: out until the next wave (nothing to revive / nobody to revive you).
+            (GameMode::Grind, _) if solo || void => (self.grind_wait_ticks(), LifeState::Dead),
+            (GameMode::Campaign | GameMode::Grind, _) => (self.downed_ticks(t), LifeState::Downed),
         };
-        let ticks = secs_to_ticks(secs, rate, 1);
         if let Some(p) = self.players.get_mut(&id) {
             p.combat.dead = true;
             p.combat.respawn_in = ticks;
@@ -755,6 +794,15 @@ impl SimWorld {
     /// team wipe first puts the level back to its checkpoint state.
     pub(crate) fn mode_respawn_player(&mut self, t: &Tuning, id: PlayerId) {
         let was_dead = self.players.get(&id).is_some_and(|p| p.combat.dead);
+        if self.mode.rules.kind == GameMode::Grind
+            && self.mode.phase == MatchPhase::Playing
+            && was_dead
+        {
+            // Grind: the downed timer ran out (or the wait did): out until the next wave
+            // starts, which brings everyone back (grind.rs).
+            self.grind_hold(id);
+            return;
+        }
         if self.mode.rules.kind == GameMode::Campaign
             && self.mode.phase == MatchPhase::Playing
             && ((was_dead && self.is_solo()) || self.mode.wipe.take().is_some())
@@ -766,7 +814,7 @@ impl SimWorld {
 
     /// Moves a player to the mode's spawn point as a fresh, protected body and emits
     /// `Respawned`.
-    fn place_at_spawn(&mut self, t: &Tuning, id: PlayerId) {
+    pub(crate) fn place_at_spawn(&mut self, t: &Tuning, id: PlayerId) {
         let spawn = self.mode_spawn_point(id);
         let rate = self.tick_rate;
         let Some(p) = self.players.get_mut(&id) else {
@@ -795,9 +843,15 @@ impl SimWorld {
     }
 
     /// Where the mode puts `id` when it (re)spawns: deathmatch → the spawn point farthest from
-    /// the other living players; campaign → the last checkpoint, or the player's level start.
+    /// the other living players; campaign → the last checkpoint, or the player's level start;
+    /// grind → the spawn point farthest from the Moulds.
     pub fn mode_spawn_point(&self, id: PlayerId) -> SpawnPoint {
         let level = &self.level;
+        if self.mode.rules.kind == GameMode::Grind
+            && let Some(spawn) = self.grind_spawn_for(id)
+        {
+            return spawn;
+        }
         match self.mode.rules.kind {
             GameMode::Deathmatch | GameMode::GunGame => self.farthest_spawn(id),
             GameMode::Campaign | GameMode::Grind => {
@@ -968,9 +1022,10 @@ impl SimWorld {
         }
     }
 
-    /// Gets a downed player back up where they lie.
+    /// Gets a downed player back up where they lie (with the difficulty's revive health).
     fn revive(&mut self, t: &Tuning, id: PlayerId, by: PlayerId) {
         let rate = self.tick_rate;
+        let revive_health = self.pve_scaling(t).revive_health;
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
@@ -978,7 +1033,7 @@ impl SimWorld {
         c.dead = false;
         c.respawn_in = 0;
         c.hard = 0.0;
-        c.damage = (t.combat.max_health - t.modes.revive_health).max(0.0);
+        c.damage = (t.combat.max_health - revive_health).max(0.0);
         c.protection = secs_to_ticks(t.combat.spawn_protection, rate, 0);
         c.last_attacker = Owner::World;
         let (position, yaw) = (p.movement.position, p.yaw);
@@ -1112,9 +1167,17 @@ impl SimWorld {
         let end = self.mode.end_tick.unwrap_or(self.tick);
         let duration_secs =
             end.wrapping_sub(self.mode.start_tick) as f32 / self.tick_rate.max(1) as f32;
-        let total_enemies = self.expected_enemies().max(self.mode.enemies_spawned);
+        let total_enemies = match rules.kind {
+            GameMode::Grind => self.mode.enemies_spawned,
+            _ => self.expected_enemies(t).max(self.mode.enemies_spawned),
+        };
         let exit = self.level.exit;
         let n = self.players.len();
+        let grind = (rules.kind == GameMode::Grind).then(|| GrindResult {
+            wave: self.mode.grind.wave,
+            cleared: self.mode.grind.cleared,
+            grade: Grade::at_least(self.mode.grind.wave as f32, &t.grind.grade_wave),
+        });
         let mut players: Vec<PlayerResult> = self
             .players
             .values()
@@ -1127,8 +1190,8 @@ impl SimWorld {
                 let feet = p.movement.position;
                 let extracted = !p.combat.dead
                     && exit.is_some_and(|e| e.contains(feet) || e.contains(feet + Vec3::Y * 0.9));
-                let grades = (rules.kind == GameMode::Campaign).then(|| {
-                    grade_player(
+                let grades = match (rules.kind, grind) {
+                    (GameMode::Campaign, _) => Some(grade_player(
                         &t.modes,
                         duration_secs,
                         self.level.par_time,
@@ -1137,8 +1200,27 @@ impl SimWorld {
                         stats.damage_taken,
                         total_enemies,
                         n,
-                    )
-                });
+                    )),
+                    // Grind: no par time; the wave reached counts towards everyone's overall.
+                    (GameMode::Grind, Some(run)) => {
+                        let mut g = grade_player(
+                            &t.modes,
+                            duration_secs,
+                            0.0,
+                            stats.kills,
+                            style_points,
+                            stats.damage_taken,
+                            total_enemies,
+                            n,
+                        );
+                        g.overall = Grade::average(
+                            [run.grade, g.style, g.damage].into_iter().chain(g.kills),
+                        )
+                        .unwrap_or(Grade::D);
+                        Some(g)
+                    }
+                    _ => None,
+                };
                 PlayerResult {
                     player: p.id,
                     name: p.name.clone(),
@@ -1183,6 +1265,7 @@ impl SimWorld {
             players,
             team_grade,
             winner,
+            grind,
         }
     }
 
@@ -1207,6 +1290,7 @@ impl SimWorld {
                     best_rank,
                     style,
                     life: self.mode.life(id),
+                    revives: s.revives,
                 }
             })
             .collect();
@@ -1216,6 +1300,7 @@ impl SimWorld {
             start_tick: self.mode.start_tick,
             checkpoint: self.mode.checkpoint.map(|c| c.min(u8::MAX as usize) as u8),
             rows,
+            grind: (self.mode.rules.kind == GameMode::Grind).then(|| self.mode.grind.status()),
         }
     }
 

@@ -197,6 +197,11 @@ impl Difficulty {
         let t = text.trim().to_ascii_lowercase();
         Self::ALL.into_iter().find(|d| d.id() == t)
     }
+
+    /// Position in [`Difficulty::ALL`] (the index into the tuning's per-difficulty tables).
+    pub fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// A level the server can run (its catalog is sent to clients so the lobby can offer levels
@@ -370,7 +375,8 @@ impl MatchSettings {
         self.clamp();
     }
 
-    /// One-line summary, e.g. `DEATHMATCH // CISTERN NINE // 20 FRAGS // 10 MIN`.
+    /// One-line summary, e.g. `DEATHMATCH // CISTERN NINE // 20 FRAGS // 10 MIN` or
+    /// `GRIND // KNELL YARD // HARD`.
     pub fn summary(&self, levels: &[LevelInfo]) -> String {
         let level = levels
             .iter()
@@ -383,6 +389,9 @@ impl MatchSettings {
                 frag_limit_text(self.frag_limit),
                 time_limit_text(self.time_limit_secs)
             ));
+        }
+        if self.mode.has_difficulty() {
+            s.push_str(&format!(" // {}", self.difficulty.title()));
         }
         s
     }
@@ -617,6 +626,14 @@ mod tests {
             s.summary(&catalog()),
             "DEATHMATCH // CISTERN NINE // 20 FRAGS // 10 MIN"
         );
+        let mut s = MatchSettings::new(GameMode::Grind, "cistern_nine");
+        s.difficulty = Difficulty::Hard;
+        assert_eq!(s.summary(&catalog()), "GRIND // CISTERN NINE // HARD");
+        assert_eq!(Difficulty::parse(" Inferno"), Some(Difficulty::Inferno));
+        assert_eq!(Difficulty::parse("nightmare"), None);
+        for (i, d) in Difficulty::ALL.iter().enumerate() {
+            assert_eq!(d.index(), i);
+        }
     }
 
     #[test]

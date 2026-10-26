@@ -132,8 +132,10 @@ impl MatchFlow {
         settings.level = config.level.clone();
         let info = LevelInfo::from_def(&config.level, level);
         // Without a lobby (single-player, tests) the level's kind decides the mode, so arenas
-        // keep PvP rules; with one, the configured mode wins if the level allows it.
-        if !lobby.enabled || !settings.mode.accepts(&info) {
+        // keep PvP rules, unless a mode no level kind implies was asked for (solo grind); with
+        // one, the configured mode wins if the level allows it.
+        let explicit = !matches!(settings.mode, GameMode::Campaign | GameMode::Deathmatch);
+        if (!lobby.enabled && !explicit) || !settings.mode.accepts(&info) {
             settings.mode = GameMode::for_level_kind(info.kind);
         }
         settings.max_players = config.max_players.clamp(1, u8::MAX as usize) as u8;

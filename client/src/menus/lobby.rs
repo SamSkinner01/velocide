@@ -136,6 +136,7 @@ impl LobbyScreen {
                 let mut server = ServerConfig::host(port, &level, max as usize);
                 server.lobby.autostart = common.launch.autostart;
                 server.lobby.settings.mode = common.launch.mode.unwrap_or(s.host_mode);
+                server.lobby.settings.difficulty = common.launch.difficulty.unwrap_or(s.difficulty);
                 (
                     SessionSpec::Host {
                         server: Box::new(server),
@@ -930,6 +931,9 @@ fn settings_rows(ui: &mut Ui, s: &MatchSettings, levels: &[LevelInfo]) {
     if s.mode.has_friendly_fire() {
         ui.value_row("FRIENDLY FIRE", if s.friendly_fire { "ON" } else { "OFF" });
     }
+    if s.mode.has_difficulty() {
+        ui.value_row("DIFFICULTY", s.difficulty.title());
+    }
 }
 
 /// The host's editable settings. Returns true if anything changed.
@@ -989,6 +993,15 @@ fn host_settings(ui: &mut Ui, s: &mut MatchSettings, levels: &[LevelInfo]) -> bo
     }
     if s.mode.has_friendly_fire() {
         changed |= ui.toggle("FRIENDLY FIRE", &mut s.friendly_fire);
+    }
+    if s.mode.has_difficulty() {
+        use shared::lobby::Difficulty;
+        let names = Difficulty::ALL.map(Difficulty::title);
+        let mut index = s.difficulty.index();
+        if ui.choice("DIFFICULTY", &mut index, &names) {
+            s.difficulty = Difficulty::ALL[index.min(Difficulty::ALL.len() - 1)];
+            changed = true;
+        }
     }
     changed
 }

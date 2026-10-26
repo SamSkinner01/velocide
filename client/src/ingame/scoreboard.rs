@@ -42,9 +42,16 @@ pub fn columns_for(mode: GameMode) -> Vec<ScoreColumn> {
             ScoreColumn::new("RANK", 70.0),
             ScoreColumn::new("STYLE", 44.0),
         ],
-        GameMode::Campaign | GameMode::Grind => vec![
+        GameMode::Campaign => vec![
             ScoreColumn::new("KILLS", 40.0),
             ScoreColumn::new("DEATHS", 48.0),
+            ScoreColumn::new("RANK", 70.0),
+            ScoreColumn::new("STYLE", 44.0),
+        ],
+        GameMode::Grind => vec![
+            ScoreColumn::new("KILLS", 40.0),
+            ScoreColumn::new("DEATHS", 48.0),
+            ScoreColumn::new("REVIVES", 54.0),
             ScoreColumn::new("RANK", 70.0),
             ScoreColumn::new("STYLE", 44.0),
         ],

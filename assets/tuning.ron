@@ -314,4 +314,63 @@
         grade_style: (120.0, 85.0, 60.0, 35.0),   // style points per enemy share
         grade_damage: (1.0, 3.0, 6.0, 10.0),      // damage taken per enemy share, at most
     ),
+    // PvE difficulty and co-op scaling (shared/src/sim/difficulty.rs, docs/style_modes.md):
+    // campaign encounters and grind waves. Tables are per difficulty:
+    // (EASY, NORMAL, HARD, BRUTAL, INFERNO); NORMAL with one player is the reference.
+    difficulty: (
+        health: (0.7, 1.0, 1.3, 1.65, 2.1),             // enemy health at spawn
+        count: (0.75, 1.0, 1.2, 1.4, 1.6),              // enemies per wave
+        damage: (0.6, 1.0, 1.25, 1.5, 1.85),            // damage enemies deal
+        aggression: (0.8, 1.0, 1.15, 1.3, 1.5),         // cooldowns / recoveries divided by this
+        projectile_speed: (0.85, 1.0, 1.1, 1.2, 1.3),
+        elite_chance: (0.0, 0.02, 0.06, 0.12, 0.2),     // per spawned Mould
+        downed_time: (1.5, 1.0, 0.8, 0.65, 0.5),        // x modes.downed_time
+        revive_health: (1.5, 1.0, 0.85, 0.7, 0.55),     // x modes.revive_health
+        // Every extra player: x (1 + value (players - 1)). Four players on NORMAL: health and
+        // count x2.8, damage x1.3, aggression x1.24 (the old rule was x2.5 / x2.5 only).
+        player_health: 0.6,
+        player_count: 0.6,
+        player_damage: 0.1,
+        player_aggression: 0.08,
+        player_elite_chance: 0.02,  // added per extra player
+        player_downed_time: 0.1,    // downed time x (1 - value (players - 2)) from the 3rd on
+        min_downed_time: 4.0,
+    ),
+    // Grind: endless waves on an arena until everyone is down (shared/src/sim/grind.rs).
+    grind: (
+        first_delay: 5.0,           // before wave 1
+        breather: 6.0,              // between waves; whoever is out comes back after it
+        // Wave budget in enemy cost units: base + per_wave (w - 1) + per_wave_sq (w - 1)^2,
+        // x difficulty count x players. Wave 1 = 6 Gnawers, wave 10 = 32.5, wave 20 = 73.
+        budget_base: 6.0,
+        budget_per_wave: 2.4,
+        budget_per_wave_sq: 0.06,
+        health_per_wave: 0.03,      // enemy health x (1 + value (w - 1)) on top of difficulty
+        heavy_every: 5,             // heavy wave: budget x heavy_budget, guaranteed heavies ...
+        heavy_budget: 1.25,
+        heavy_elite_chance: 0.15,   // ... and more elites
+        boss_every: 10,             // a boss-grade elite (a heavy with boss_health x health)
+        boss_health: 4.0,
+        max_alive: 14,              // wave Moulds alive at once ...
+        alive_per_player: 5,        // ... + this per extra player; the rest wait their turn
+        spawn_burst: 6,             // a wave opens with this many ...
+        spawn_interval: 0.35,       // ... then one more every this many seconds
+        max_wave_enemies: 150,
+        min_spawn_distance: 14.0,   // Moulds appear at least this far from every player
+        end_delay: 2.5,             // everyone down -> results after this
+        grade_wave: (20.0, 15.0, 10.0, 5.0),    // wave reached for S, A, B, C
+        // cost: budget per Mould; from_wave: first normal wave; weight: pick weight; heavy:
+        // brought by heavy waves (from heavy_every waves before from_wave) and bosses.
+        // Moulds the server doesn't have are skipped.
+        roster: [
+            (enemy: "gnawer", cost: 1.0, from_wave: 1, weight: 10.0, heavy: false),
+            (enemy: "harrier", cost: 1.5, from_wave: 2, weight: 4.0, heavy: false),
+            (enemy: "censer", cost: 2.0, from_wave: 3, weight: 5.0, heavy: false),
+            (enemy: "snuffer", cost: 1.5, from_wave: 4, weight: 4.0, heavy: false),
+            (enemy: "heron", cost: 3.0, from_wave: 6, weight: 3.0, heavy: false),
+            (enemy: "bellwether", cost: 4.0, from_wave: 7, weight: 2.0, heavy: false),
+            (enemy: "gaoler", cost: 6.0, from_wave: 8, weight: 2.0, heavy: true),
+            (enemy: "smelter", cost: 6.0, from_wave: 12, weight: 2.0, heavy: true),
+        ],
+    ),
 )

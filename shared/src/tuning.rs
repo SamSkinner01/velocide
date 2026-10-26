@@ -19,6 +19,10 @@ pub struct Tuning {
     // docs/style_modes.md).
     pub style: StyleTuning,
     pub modes: ModeTuning,
+    // PvE difficulty / co-op scaling and the grind mode (`sim::difficulty`, `sim::grind`,
+    // docs/style_modes.md).
+    pub difficulty: DifficultyTuning,
+    pub grind: GrindTuning,
 }
 
 /// Player movement. Distances in metres, speeds in m/s, accelerations in m/s², times in
@@ -913,6 +917,190 @@ impl Default for ModeTuning {
     }
 }
 
+/// PvE difficulty and co-op scaling (`sim::difficulty`): what EASY .. INFERNO and every extra
+/// player do to the Moulds and to the co-op rules, in campaign encounters and grind waves.
+/// The per-difficulty tables are in `Difficulty::ALL` order (EASY, NORMAL, HARD, BRUTAL,
+/// INFERNO); NORMAL with one player is the reference (1.0 = the enemy definitions and the
+/// `modes` values as written). See `docs/style_modes.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DifficultyTuning {
+    /// Enemy health at spawn.
+    pub health: [f32; 5],
+    /// Enemies per encounter wave / grind wave budget.
+    pub count: [f32; 5],
+    /// Damage enemies deal (`EnemyScale::damage`).
+    pub damage: [f32; 5],
+    /// Attack cooldowns and recoveries are divided by this (`EnemyScale::aggression`;
+    /// wind-ups keep their length).
+    pub aggression: [f32; 5],
+    /// Enemy projectile speed (`EnemyScale::projectile_speed`).
+    pub projectile_speed: [f32; 5],
+    /// Chance (0..1) that a spawned Mould is an elite.
+    pub elite_chance: [f32; 5],
+    /// Multipliers on `modes.downed_time` and `modes.revive_health`.
+    pub downed_time: [f32; 5],
+    pub revive_health: [f32; 5],
+    /// Per extra player (co-op): health, count, damage and aggression are multiplied by
+    /// `1 + x (players − 1)` ...
+    pub player_health: f32,
+    pub player_count: f32,
+    pub player_damage: f32,
+    pub player_aggression: f32,
+    /// ... the elite chance grows by `x (players − 1)` ...
+    pub player_elite_chance: f32,
+    /// ... and from the third player on the downed time shrinks, `× (1 − x (players − 2))`
+    /// (more teammates to revive you), never below `min_downed_time` seconds.
+    pub player_downed_time: f32,
+    pub min_downed_time: f32,
+}
+
+impl Default for DifficultyTuning {
+    fn default() -> Self {
+        Self {
+            health: [0.7, 1.0, 1.3, 1.65, 2.1],
+            count: [0.75, 1.0, 1.2, 1.4, 1.6],
+            damage: [0.6, 1.0, 1.25, 1.5, 1.85],
+            aggression: [0.8, 1.0, 1.15, 1.3, 1.5],
+            projectile_speed: [0.85, 1.0, 1.1, 1.2, 1.3],
+            elite_chance: [0.0, 0.02, 0.06, 0.12, 0.2],
+            downed_time: [1.5, 1.0, 0.8, 0.65, 0.5],
+            revive_health: [1.5, 1.0, 0.85, 0.7, 0.55],
+            player_health: 0.6,
+            player_count: 0.6,
+            player_damage: 0.1,
+            player_aggression: 0.08,
+            player_elite_chance: 0.02,
+            player_downed_time: 0.1,
+            min_downed_time: 4.0,
+        }
+    }
+}
+
+/// One Mould of the grind table ([`GrindTuning::roster`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GrindEnemy {
+    /// Enemy definition name (`assets/enemies/<enemy>.ron`). Names the server doesn't know are
+    /// skipped, so the table can list Moulds that arrive later.
+    pub enemy: String,
+    /// What it takes out of the wave budget.
+    pub cost: f32,
+    /// First (normal) wave it appears in.
+    pub from_wave: u32,
+    /// Relative pick weight among the unlocked Moulds.
+    pub weight: f32,
+    /// A heavy: heavy waves bring some (from `heavy_every` waves before its own unlock), and
+    /// the boss-grade elites are heavies.
+    pub heavy: bool,
+}
+
+impl Default for GrindEnemy {
+    fn default() -> Self {
+        Self {
+            enemy: String::new(),
+            cost: 1.0,
+            from_wave: 1,
+            weight: 1.0,
+            heavy: false,
+        }
+    }
+}
+
+impl GrindEnemy {
+    fn new(enemy: &str, cost: f32, from_wave: u32, weight: f32, heavy: bool) -> Self {
+        Self {
+            enemy: enemy.into(),
+            cost,
+            from_wave,
+            weight,
+            heavy,
+        }
+    }
+}
+
+/// Grind (`sim::grind`): endless waves on an arena until everyone is down at once. Wave
+/// sizes come from a budget in enemy cost units; the difficulty and the player count scale it
+/// like the campaign encounters (`difficulty.count`, `difficulty.player_count`). See
+/// `docs/style_modes.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GrindTuning {
+    /// Seconds before wave 1 ...
+    pub first_delay: f32,
+    /// ... and between waves (the breather: dead players are back when it ends).
+    pub breather: f32,
+    /// Wave budget: `budget_base + budget_per_wave (w − 1) + budget_per_wave_sq (w − 1)²`,
+    /// times the difficulty × player count factor.
+    pub budget_base: f32,
+    pub budget_per_wave: f32,
+    pub budget_per_wave_sq: f32,
+    /// Enemy health `× (1 + health_per_wave (w − 1))` on top of the difficulty.
+    pub health_per_wave: f32,
+    /// Every `heavy_every`th wave is a heavy wave: budget × `heavy_budget`, `1 + (w − 1) /
+    /// boss_every` heavies guaranteed, elite chance + `heavy_elite_chance`.
+    pub heavy_every: u32,
+    pub heavy_budget: f32,
+    pub heavy_elite_chance: f32,
+    /// Every `boss_every`th wave also brings a boss-grade elite: a heavy with `boss_health` ×
+    /// its health.
+    pub boss_every: u32,
+    pub boss_health: f32,
+    /// Most wave enemies alive at once (the rest wait their turn): `max_alive +
+    /// alive_per_player (players − 1)`.
+    pub max_alive: u32,
+    pub alive_per_player: u32,
+    /// A wave opens with `spawn_burst` Moulds, then one more every `spawn_interval` seconds.
+    pub spawn_burst: u32,
+    pub spawn_interval: f32,
+    /// Most Moulds one wave holds (budget beyond this is dropped).
+    pub max_wave_enemies: u32,
+    /// Moulds appear at least this far (m) from every living player when the arena allows.
+    pub min_spawn_distance: f32,
+    /// Seconds from everyone being down to the results (the last death sinks in).
+    pub end_delay: f32,
+    /// Results grade for the wave reached: thresholds for S, A, B, C (at least).
+    pub grade_wave: [f32; 4],
+    /// The Moulds a wave is built from.
+    pub roster: Vec<GrindEnemy>,
+}
+
+impl Default for GrindTuning {
+    fn default() -> Self {
+        Self {
+            first_delay: 5.0,
+            breather: 6.0,
+            budget_base: 6.0,
+            budget_per_wave: 2.4,
+            budget_per_wave_sq: 0.06,
+            health_per_wave: 0.03,
+            heavy_every: 5,
+            heavy_budget: 1.25,
+            heavy_elite_chance: 0.15,
+            boss_every: 10,
+            boss_health: 4.0,
+            max_alive: 14,
+            alive_per_player: 5,
+            spawn_burst: 6,
+            spawn_interval: 0.35,
+            max_wave_enemies: 150,
+            min_spawn_distance: 14.0,
+            end_delay: 2.5,
+            grade_wave: [20.0, 15.0, 10.0, 5.0],
+            roster: vec![
+                GrindEnemy::new("gnawer", 1.0, 1, 10.0, false),
+                GrindEnemy::new("harrier", 1.5, 2, 4.0, false),
+                GrindEnemy::new("censer", 2.0, 3, 5.0, false),
+                GrindEnemy::new("snuffer", 1.5, 4, 4.0, false),
+                GrindEnemy::new("heron", 3.0, 6, 3.0, false),
+                GrindEnemy::new("bellwether", 4.0, 7, 2.0, false),
+                GrindEnemy::new("gaoler", 6.0, 8, 2.0, true),
+                GrindEnemy::new("smelter", 6.0, 12, 2.0, true),
+            ],
+        }
+    }
+}
+
 // ---- range checks ([`Tuning::sanitize`]) ------------------------------------------------------
 //
 // Tuning comes from a file anyone can edit and, on clients, from the server. Absurd values
@@ -1173,6 +1361,71 @@ impl ModeTuning {
     }
 }
 
+/// Clamps every entry of a per-difficulty table (NaN → the default entry).
+fn clamp_table(values: &mut [f32; 5], defaults: [f32; 5], lo: f32, hi: f32) {
+    for (v, d) in values.iter_mut().zip(defaults) {
+        *v = clamped(*v, lo, hi, d);
+    }
+}
+
+impl DifficultyTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        for (values, defaults) in [
+            (&mut self.health, d.health),
+            (&mut self.count, d.count),
+            (&mut self.damage, d.damage),
+            (&mut self.aggression, d.aggression),
+            (&mut self.projectile_speed, d.projectile_speed),
+            (&mut self.downed_time, d.downed_time),
+            (&mut self.revive_health, d.revive_health),
+        ] {
+            clamp_table(values, defaults, 0.01, MAX_MULT);
+        }
+        clamp_table(&mut self.elite_chance, d.elite_chance, 0.0, 1.0);
+        clamp!(self, d, 0.0, MAX_MULT; player_health, player_count, player_damage,
+            player_aggression);
+        clamp!(self, d, 0.0, 1.0; player_elite_chance, player_downed_time);
+        clamp!(self, d, 0.0, MAX_TIME; min_downed_time);
+    }
+}
+
+/// Longest grind table / enemy name accepted (a server's tuning is untrusted on clients).
+const MAX_GRIND_ROSTER: usize = 64;
+const MAX_ENEMY_NAME: usize = 64;
+
+impl GrindTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; first_delay, breather, spawn_interval, end_delay);
+        clamp!(self, d, 0.0, MAX_POINTS; budget_base, budget_per_wave, budget_per_wave_sq);
+        clamp!(self, d, 0.0, MAX_MULT; health_per_wave, heavy_budget, boss_health);
+        clamp!(self, d, 0.0, 1.0; heavy_elite_chance);
+        clamp!(self, d, 0.0, MAX_DIST; min_spawn_distance);
+        self.heavy_every = self.heavy_every.min(10_000);
+        self.boss_every = self.boss_every.min(10_000);
+        self.max_alive = self.max_alive.clamp(1, 256);
+        self.alive_per_player = self.alive_per_player.min(256);
+        self.spawn_burst = self.spawn_burst.min(256);
+        self.max_wave_enemies = self.max_wave_enemies.clamp(1, 10_000);
+        for (v, default) in self.grade_wave.iter_mut().zip(d.grade_wave) {
+            *v = clamped(*v, 0.0, MAX_POINTS, default);
+        }
+        self.roster.truncate(MAX_GRIND_ROSTER);
+        let fallback = GrindEnemy::default();
+        for (i, e) in self.roster.iter_mut().enumerate() {
+            let de = d.roster.get(i).unwrap_or(&fallback);
+            // Costs below 0.1 would let one wave hold thousands of Moulds.
+            e.cost = clamped(e.cost, 0.1, MAX_POINTS, de.cost);
+            e.weight = clamped(e.weight, 0.0, MAX_POINTS, de.weight);
+            e.from_wave = e.from_wave.min(10_000);
+            if e.enemy.len() > MAX_ENEMY_NAME {
+                e.enemy = e.enemy.chars().take(MAX_ENEMY_NAME).collect();
+            }
+        }
+    }
+}
+
 impl Tuning {
     pub fn default_path() -> PathBuf {
         crate::assets_dir().join("tuning.ron")
@@ -1190,6 +1443,8 @@ impl Tuning {
         self.net.sanitize();
         self.style.sanitize();
         self.modes.sanitize();
+        self.difficulty.sanitize();
+        self.grind.sanitize();
         *self != before
     }
 
@@ -1292,8 +1547,17 @@ mod tests {
             &mut expected.combat.bellows.both_pellets,
             &mut expected.combat.arclash.chain_jumps,
             &mut expected.combat.tumbler.bomb_contacts,
+            &mut expected.grind.heavy_every,
+            &mut expected.grind.boss_every,
+            &mut expected.grind.max_alive,
+            &mut expected.grind.alive_per_player,
+            &mut expected.grind.spawn_burst,
+            &mut expected.grind.max_wave_enemies,
         ] {
             *n = 3;
+        }
+        for e in &mut expected.grind.roster {
+            e.from_wave = 3;
         }
         assert_eq!(t, expected);
 

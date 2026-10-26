@@ -135,11 +135,24 @@ impl InGame {
     }
 
     fn score_title(&self) -> String {
-        let mode = if self.kind == SessionKind::SinglePlayer {
-            hud_mode_name(self.kind)
+        let kind = self.match_mode();
+        let mut mode = if self.kind == SessionKind::SinglePlayer {
+            hud_mode_name(self.kind).to_string()
         } else {
-            self.match_mode().title()
+            kind.title().to_string()
         };
+        // Game modes: solo grind, and the difficulty of the PvE modes.
+        if self.kind == SessionKind::SinglePlayer && kind == GameMode::Grind {
+            mode.push_str(" GRIND");
+        }
+        if let Some(board) = self
+            .modes
+            .scoreboard
+            .as_ref()
+            .filter(|_| kind.has_difficulty())
+        {
+            mode = format!("{mode}  //  {}", board.rules.difficulty.title());
+        }
         format!("{}  //  {mode}", self.world.name().to_uppercase())
     }
 
