@@ -229,14 +229,14 @@ fn main() -> anyhow::Result<()> {
     h.shot("game_debug");
     h.common.debug_overlay = false;
 
-    // Effects + feedback API: blood, sparks, gibs, smoke, a shockwave and a damage flash in
-    // front of the camera.
+    // Effects + feedback API: molten wax, sparks, wax lumps, smoke, a shockwave and a damage
+    // flash in front of the camera.
     if let Some(state) = game.net().and_then(|n| n.local_state()).copied() {
         let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
         let p = state.position + fwd * 6.0 + glam::Vec3::Y * 1.2;
-        game.effects.blood(p, -fwd + glam::Vec3::Y, 3.0);
+        game.effects.wax_spray(p, -fwd + glam::Vec3::Y, 3.0);
         game.effects.sparks(p + glam::Vec3::X, -fwd, 16);
-        game.effects.gibs(p - glam::Vec3::X, 6);
+        game.effects.lumps(p - glam::Vec3::X, 6);
         game.effects.smoke(p + glam::Vec3::Y, 4);
         game.effects.shockwave(state.position + fwd * 9.0, 6.0);
         game.effects.muzzle_flash(p, fwd);

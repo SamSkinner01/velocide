@@ -621,9 +621,9 @@ mod veins {
     pub const TILE: Mat = Mat("tile", [0.86, 0.68, 0.62]);
     pub const GRATE: Mat = Mat("grate", [0.85, 0.74, 0.64]);
     /// Set wax (pillars, ribs).
-    pub const WAX: Mat = Mat("bone", [0.96, 0.9, 0.74]);
+    pub const WAX: Mat = Mat("waxstone", [0.96, 0.9, 0.74]);
     /// Wax weeping down the walls in sheets.
-    pub const WAX_DRAPE: Mat = Mat("bone", [1.0, 0.84, 0.6]);
+    pub const WAX_DRAPE: Mat = Mat("wax", [1.0, 0.84, 0.6]);
     /// Molten slag (the `lava` material).
     pub const SLAG: Mat = Mat("lava", [1.0, 1.0, 1.0]);
     pub const HAZARD: Mat = Mat("hazard", [1.0, 0.82, 0.4]);

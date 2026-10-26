@@ -279,12 +279,12 @@ impl Scene {
             tint: Vec4::new(1.0, 1.0, 1.0, 0.99),
             unlit: false,
         });
-        // Organic columns: flesh cylinder wrapped by bone rings.
-        let mut flesh = meshgen::cylinder(0.9, 6.0, 10, Vec4::ONE);
-        flesh.transform(Mat4::from_translation(Vec3::new(9.0, 3.0, 7.0)));
+        // Wax columns: a poured-wax cylinder wrapped by wax-stone rings.
+        let mut wax = meshgen::cylinder(0.9, 6.0, 10, Vec4::ONE);
+        wax.transform(Mat4::from_translation(Vec3::new(9.0, 3.0, 7.0)));
         level.push(StaticDraw {
-            mesh: r.create_mesh(&flesh.build()),
-            texture: materials["flesh"],
+            mesh: r.create_mesh(&wax.build()),
+            texture: materials["wax"],
             tint: Vec4::ONE,
             unlit: false,
         });
@@ -304,7 +304,7 @@ impl Scene {
         ribs.append_builder(&horn, Mat4::IDENTITY);
         level.push(StaticDraw {
             mesh: r.create_mesh(&ribs.build()),
-            texture: materials["bone"],
+            texture: materials["waxstone"],
             tint: Vec4::ONE,
             unlit: false,
         });
@@ -490,7 +490,7 @@ impl Demo {
             });
         }
 
-        // Blood burst with gravity (alpha), looping every 1.6 s.
+        // Molten wax spray with gravity (alpha), looping every 1.6 s.
         let burst_t = t % 1.6;
         let burst_origin = Vec3::new(3.0, 1.4, 4.0);
         for i in 0..14 {
@@ -509,19 +509,19 @@ impl Demo {
                 position: p,
                 size: Vec2::splat(0.22 + hash01(i, 5) * 0.2),
                 color: Vec4::ONE,
-                texture: s.sprites[&SpriteTex::Blood],
+                texture: s.sprites[&SpriteTex::WaxDrops],
                 uv_rect: Vec4::new(0.0, 0.0, 1.0, 1.0),
                 rotation: hash01(i, 6) * TAU + t * 3.0,
                 additive: false,
             });
         }
-        // Gibs resting on the floor.
+        // Wax lumps resting on the floor.
         for i in 0..4 {
             d.sprites.push(Sprite {
                 position: Vec3::new(2.2 + i as f32 * 0.5, 0.2, 4.6 + hash01(i, 9) * 0.6),
                 size: Vec2::splat(0.4),
                 color: Vec4::ONE,
-                texture: s.sprites[&SpriteTex::Gib],
+                texture: s.sprites[&SpriteTex::Lump],
                 uv_rect: Vec4::new(0.0, 0.0, 1.0, 1.0),
                 rotation: hash01(i, 10) * TAU,
                 additive: false,
@@ -595,14 +595,14 @@ impl Demo {
                 Vec3::Y,
                 2.6,
                 0.4,
-                SpriteTex::BloodSplat,
+                SpriteTex::WaxSplat,
             ),
             (
                 Vec3::new(-2.5, 0.0, 7.0),
                 Vec3::Y,
                 1.5,
                 2.0,
-                SpriteTex::BloodSplat,
+                SpriteTex::WaxSplat,
             ),
             (
                 Vec3::new(1.5, 0.0, 9.0),
@@ -616,7 +616,7 @@ impl Demo {
                 Vec3::Z,
                 2.4,
                 1.0,
-                SpriteTex::BloodSplat,
+                SpriteTex::WaxSplat,
             ),
             (
                 Vec3::new(-20.0, 1.5, 6.0),
@@ -704,7 +704,7 @@ impl Demo {
             let kinds = [
                 SpriteTex::Glow,
                 SpriteTex::Smoke,
-                SpriteTex::Blood,
+                SpriteTex::WaxDrops,
                 SpriteTex::Spark,
             ];
             for i in 0..3000u32 {

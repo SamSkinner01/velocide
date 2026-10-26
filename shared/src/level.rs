@@ -62,7 +62,7 @@ pub struct Brush {
     pub max: Vec3,
     #[serde(default)]
     pub rotation: Vec3,
-    /// Procedural texture name (e.g. "concrete", "brick", "metal", "grate", "flesh", "lava").
+    /// Procedural texture name (e.g. "concrete", "brick", "metal", "grate", "wax", "lava").
     #[serde(default = "default_material")]
     pub material: String,
     /// Colour multiplied with the texture.

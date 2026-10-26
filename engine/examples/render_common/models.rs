@@ -6,7 +6,7 @@ use engine::assets::procedural;
 use engine::gfx::MeshData;
 use engine::glam::{Mat4, Quat, Vec3, Vec4};
 
-/// The "Warden": a faceted bone orb ringed with rusted spikes and a glowing eye (original
+/// The "Warden": a faceted wax-stone orb ringed with rusted spikes and a glowing eye (original
 /// design, used as the demo's spinning glTF model).
 pub fn warden_parts() -> Vec<ModelPart> {
     let mut body = meshgen::icosphere(0.7, 1, Vec4::ONE);
@@ -45,7 +45,7 @@ pub fn warden_parts() -> Vec<ModelPart> {
         ModelPart {
             name: "warden_body".into(),
             mesh: body.build(),
-            texture: Some(procedural::material_texture("bone")),
+            texture: Some(procedural::material_texture("waxstone")),
             base_color: Vec4::new(1.0, 0.95, 0.9, 1.0),
         },
         ModelPart {

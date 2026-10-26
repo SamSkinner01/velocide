@@ -48,7 +48,7 @@ const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
 const ENEMIES: [&str; 5] = ["gnawer", "censer", "harrier", "gaoler", "heron"];
 const MATERIALS: [&str; 14] = [
-    "concrete", "brick", "metal", "rust", "grate", "flesh", "bone", "lava", "tile", "wood",
+    "concrete", "brick", "metal", "rust", "grate", "wax", "waxstone", "lava", "tile", "wood",
     "hazard", "glass", "dirt", "panel",
 ];
 const MAX_BRUSHES: usize = 600;

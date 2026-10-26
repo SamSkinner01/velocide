@@ -168,7 +168,7 @@ pub struct DrawItem {
     pub unlit: bool,
 }
 
-/// Camera-facing billboard (muzzle flash, blood, gibs, projectiles, particles).
+/// Camera-facing billboard (muzzle flash, embers, wax lumps, projectiles, particles).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sprite {
     pub position: Vec3,
@@ -183,7 +183,7 @@ pub struct Sprite {
     pub additive: bool,
 }
 
-/// A flat quad stuck to a surface (blood splatters, scorch marks).
+/// A flat quad stuck to a surface (wax splats, scorch marks).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Decal {
     pub position: Vec3,

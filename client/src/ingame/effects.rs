@@ -5,8 +5,8 @@
 //! ```ignore
 //! fx.muzzle_flash(muzzle_pos, aim_dir);
 //! fx.sparks(hit_point, hit_normal, 12);
-//! fx.blood(hit_point, shot_dir, 1.0);          // spray + splatter decals where it lands
-//! fx.gibs(enemy_center, 8);
+//! fx.wax_spray(hit_point, shot_dir, 1.0);      // molten wax; drops that land set as splats
+//! fx.lumps(enemy_center, 8);                   // wax / slag lumps + embers (a Mould breaking)
 //! fx.smoke(pos, 3);
 //! fx.shockwave(pos, radius);                    // slam / explosion ring
 //! fx.decal(point, normal, 0.8, DecalKind::Scorch);
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Particles optionally collide with the level (a ray per particle per frame, only for those
-//! with `collide`); blood that hits a surface leaves a splatter decal.
+//! with `collide`); molten wax that hits a surface sets as a wax splat decal.
 
 use engine::assets::procedural::{SpriteTex, sprite_texture};
 use engine::gfx::{Decal, Sprite, TextureId};
@@ -31,19 +31,22 @@ pub const MAX_DECALS: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FxTex {
     MuzzleFlash,
-    Blood,
+    /// Molten wax droplets (pale; tint with the wax colour).
+    WaxDrop,
     Spark,
     Smoke,
     Glow,
     Ring,
     Shard,
-    Gib,
+    /// A lump of wax or slag with a glowing crack (tint it).
+    Lump,
 }
 
 /// Decal textures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecalKind {
-    Blood,
+    /// Molten wax that hit a surface and set.
+    Wax,
     Scorch,
 }
 
@@ -104,7 +107,7 @@ impl Default for Particle {
 
 struct Textures {
     sprites: [TextureId; 8],
-    blood_splat: TextureId,
+    wax_splat: TextureId,
     scorch: TextureId,
 }
 
@@ -124,20 +127,20 @@ impl Effects {
         let mut make = |t| renderer.create_texture(&sprite_texture(t));
         let sprites = [
             make(SpriteTex::MuzzleFlash),
-            make(SpriteTex::Blood),
+            make(SpriteTex::WaxDrops),
             make(SpriteTex::Spark),
             make(SpriteTex::Smoke),
             make(SpriteTex::Glow),
             make(SpriteTex::Ring),
             make(SpriteTex::Shard),
-            make(SpriteTex::Gib),
+            make(SpriteTex::Lump),
         ];
-        let blood_splat = make(SpriteTex::BloodSplat);
+        let wax_splat = make(SpriteTex::WaxSplat);
         let scorch = make(SpriteTex::Scorch);
         let mut fx = Self::headless();
         fx.tex = Some(Textures {
             sprites,
-            blood_splat,
+            wax_splat,
             scorch,
         });
         fx
@@ -160,7 +163,7 @@ impl Effects {
             for id in t.sprites {
                 renderer.free_texture(id);
             }
-            renderer.free_texture(t.blood_splat);
+            renderer.free_texture(t.wax_splat);
             renderer.free_texture(t.scorch);
         }
     }
@@ -234,7 +237,7 @@ impl Effects {
             return;
         };
         let texture = match kind {
-            DecalKind::Blood => tex.blood_splat,
+            DecalKind::Wax => tex.wax_splat,
             DecalKind::Scorch => tex.scorch,
         };
         self.push_decal(position, normal, size, kind, texture);
@@ -253,7 +256,7 @@ impl Effects {
         }
         let rotation = self.rand() * std::f32::consts::TAU;
         let color = match kind {
-            DecalKind::Blood => Vec4::new(0.75, 0.06, 0.05, 0.95),
+            DecalKind::Wax => Vec4::new(0.86, 0.82, 0.74, 0.95),
             DecalKind::Scorch => Vec4::new(1.0, 1.0, 1.0, 0.85),
         };
         let d = Decal {
@@ -314,16 +317,24 @@ impl Effects {
         }
     }
 
-    /// Blood spray along `dir` (`amount` ~1 for a normal hit); drops that land leave decals.
-    pub fn blood(&mut self, position: Vec3, dir: Vec3, amount: f32) {
+    /// Molten wax thrown along `dir` (`amount` ~1 for a normal hit), with a few glowing drops;
+    /// every third drop that lands sets as a wax splat decal.
+    pub fn wax_spray(&mut self, position: Vec3, dir: Vec3, amount: f32) {
         let n = (amount * 10.0).clamp(1.0, 60.0) as usize;
         for i in 0..n {
             let v = self.rand_cone(dir, 0.7) * self.rand_range(2.0, 7.0) + Vec3::Y * 1.5;
-            let size = self.rand_range(0.12, 0.3);
-            let splat = if i % 3 == 0 {
-                OnHit::Splat(DecalKind::Blood, self.rand_range(0.5, 1.1))
+            let size = self.rand_range(0.1, 0.24);
+            let (collide, color, additive) = if i % 3 == 0 {
+                (
+                    OnHit::Splat(DecalKind::Wax, self.rand_range(0.4, 0.9)),
+                    Vec4::new(0.9, 0.86, 0.76, 1.0),
+                    false,
+                )
+            } else if i % 3 == 1 {
+                (OnHit::Die, Vec4::new(0.86, 0.8, 0.68, 1.0), false)
             } else {
-                OnHit::Die
+                // Still molten: glows on the way out.
+                (OnHit::Die, Vec4::new(1.0, 0.62, 0.25, 1.0), true)
             };
             let rotation = self.rand() * std::f32::consts::TAU;
             let p = Particle {
@@ -334,23 +345,31 @@ impl Effects {
                 max_life: self.rand_range(0.5, 1.0),
                 size: Vec2::splat(size),
                 end_scale: 0.6,
-                color: Vec4::new(0.7, 0.04, 0.04, 1.0),
+                color,
                 end_alpha: 0.6,
-                texture: FxTex::Blood,
+                texture: if additive { FxTex::Glow } else { FxTex::WaxDrop },
+                additive,
                 rotation,
                 spin: self.rand_range(-4.0, 4.0),
-                collide: Some(splat),
+                collide: Some(collide),
                 ..Default::default()
             };
             self.spawn(p);
         }
     }
 
-    /// Chunks that bounce around and leave blood where they land.
-    pub fn gibs(&mut self, position: Vec3, count: usize) {
-        for _ in 0..count {
+    /// A Mould breaking apart: lumps of wax and slag that bounce around, a fountain of embers
+    /// and molten wax that sets where it lands.
+    pub fn lumps(&mut self, position: Vec3, count: usize) {
+        for k in 0..count {
             let v = self.rand_cone(Vec3::Y, 1.0) * self.rand_range(4.0, 10.0);
             let rotation = self.rand() * std::f32::consts::TAU;
+            // Mostly pale wax, every third one dark slag.
+            let color = if k % 3 == 2 {
+                Vec4::new(0.42, 0.38, 0.35, 1.0)
+            } else {
+                Vec4::new(0.9, 0.86, 0.78, 1.0)
+            };
             let p = Particle {
                 position,
                 velocity: v,
@@ -358,18 +377,36 @@ impl Effects {
                 drag: 0.3,
                 max_life: self.rand_range(1.5, 3.0),
                 size: Vec2::splat(self.rand_range(0.2, 0.4)),
-                end_scale: 1.0,
-                color: Vec4::new(0.85, 0.75, 0.7, 1.0),
+                end_scale: 0.8,
+                color,
                 end_alpha: 0.0,
-                texture: FxTex::Gib,
+                texture: FxTex::Lump,
                 rotation,
                 spin: self.rand_range(-8.0, 8.0),
-                collide: Some(OnHit::Bounce(0.35)),
+                collide: Some(OnHit::Bounce(0.25)),
                 ..Default::default()
             };
             self.spawn(p);
         }
-        self.blood(position, Vec3::Y, 2.0);
+        for _ in 0..count * 2 {
+            let v = self.rand_cone(Vec3::Y, 0.8) * self.rand_range(2.0, 6.0);
+            let p = Particle {
+                position,
+                velocity: v,
+                gravity: -1.0,
+                drag: 1.2,
+                max_life: self.rand_range(0.6, 1.4),
+                size: Vec2::splat(0.08),
+                end_scale: 0.3,
+                color: Vec4::new(1.0, 0.7, 0.3, 1.0),
+                end_alpha: 0.0,
+                texture: FxTex::Spark,
+                additive: true,
+                ..Default::default()
+            };
+            self.spawn(p);
+        }
+        self.wax_spray(position, Vec3::Y, 2.0);
     }
 
     pub fn smoke(&mut self, position: Vec3, count: usize) {
@@ -545,7 +582,7 @@ impl Effects {
             });
         }
         for (d, age) in &self.decals {
-            // Splatters "land" with a quick grow.
+            // Splats "land" with a quick grow.
             let grow = (age / 0.08).clamp(0.4, 1.0);
             decals.push(Decal {
                 size: d.size * grow,
@@ -567,7 +604,7 @@ mod tests {
                 Vec3::new(i as f32, 0.0, 0.0),
                 Vec3::Y,
                 1.0,
-                DecalKind::Blood,
+                DecalKind::Wax,
             );
         }
         assert_eq!(fx.decal_count(), MAX_DECALS);
@@ -585,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn blood_lands_as_decals() {
+    fn molten_wax_sets_as_decals() {
         let mut world = CollisionWorld::new();
         world.add_box(
             Vec3::new(0.0, -0.5, 0.0),
@@ -595,13 +632,13 @@ mod tests {
             0,
         );
         let mut fx = Effects::headless();
-        fx.blood(Vec3::new(0.0, 1.0, 0.0), Vec3::NEG_Y, 3.0);
+        fx.wax_spray(Vec3::new(0.0, 1.0, 0.0), Vec3::NEG_Y, 3.0);
         for _ in 0..120 {
             fx.update(1.0 / 60.0, Some(&world));
         }
         assert!(
             fx.decal_count() > 0,
-            "blood drops should splat on the floor"
+            "wax drops should set on the floor"
         );
         assert_eq!(fx.particle_count(), 0);
     }

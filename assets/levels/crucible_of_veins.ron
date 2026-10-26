@@ -258,25 +258,25 @@
         // R2 pad ring
         (min: (-2.6, 0.0, -128.6), max: (2.6, 0.06, -123.4), material: "hazard", tint: (1.0, 0.82, 0.4)),
         // R2 cloister pillar
-        (min: (-11.0, 0.0, -101.0), max: (-9.0, 14.0, -99.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (-11.0, 0.0, -101.0), max: (-9.0, 14.0, -99.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 cloister pillar
-        (min: (9.0, 0.0, -101.0), max: (11.0, 14.0, -99.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (9.0, 0.0, -101.0), max: (11.0, 14.0, -99.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 cloister pillar
-        (min: (-11.0, 0.0, -109.0), max: (-9.0, 14.0, -107.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (-11.0, 0.0, -109.0), max: (-9.0, 14.0, -107.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 cloister pillar
-        (min: (9.0, 0.0, -109.0), max: (11.0, 14.0, -107.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (9.0, 0.0, -109.0), max: (11.0, 14.0, -107.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 arch beam
-        (min: (-10.4, 10.0, -107.0), max: (-9.6, 11.0, -101.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (-10.4, 10.0, -107.0), max: (-9.6, 11.0, -101.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 arch beam
-        (min: (9.6, 10.0, -107.0), max: (10.4, 11.0, -101.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (9.6, 10.0, -107.0), max: (10.4, 11.0, -101.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R2 wax drape W
-        (min: (-30.0, 3.0, -104.0), max: (-29.6, 12.0, -100.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (-30.0, 3.0, -104.0), max: (-29.6, 12.0, -100.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R2 wax drape E
-        (min: (29.6, 3.0, -104.0), max: (30.0, 12.0, -100.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (29.6, 3.0, -104.0), max: (30.0, 12.0, -100.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R2 wax drape W
-        (min: (-30.0, 3.0, -129.0), max: (-29.6, 12.0, -125.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (-30.0, 3.0, -129.0), max: (-29.6, 12.0, -125.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R2 wax drape E
-        (min: (29.6, 3.0, -129.0), max: (30.0, 12.0, -125.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (29.6, 3.0, -129.0), max: (30.0, 12.0, -125.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // ==== C3 Vein Stair (climbing corridor through the ore) ====
         // C3 ceiling
         (min: (-27.0, 17.0, -172.0), max: (-18.0, 18.0, -142.0), material: "rust", tint: (0.64, 0.52, 0.46)),
@@ -490,13 +490,13 @@
         // R4 bridge S
         (min: (89.5, -0.2427, -202.2017), max: (92.5, 0.3573, -198.0394), rotation: (18.4349, 0.0, 0.0), material: "metal", tint: (0.82, 0.78, 0.76)),
         // R4 wax column
-        (min: (76.5, 0.0, -196.5), max: (79.5, 18.0, -193.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (76.5, 0.0, -196.5), max: (79.5, 18.0, -193.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R4 wax column
-        (min: (102.5, 0.0, -196.5), max: (105.5, 18.0, -193.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (102.5, 0.0, -196.5), max: (105.5, 18.0, -193.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R4 wax column
-        (min: (76.5, 0.0, -222.5), max: (79.5, 18.0, -219.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (76.5, 0.0, -222.5), max: (79.5, 18.0, -219.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R4 wax column
-        (min: (102.5, 0.0, -222.5), max: (105.5, 18.0, -219.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (102.5, 0.0, -222.5), max: (105.5, 18.0, -219.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R4 corner platform
         (min: (106.0, 0.0, -233.0), max: (116.0, 4.0, -223.0), material: "concrete", tint: (0.9, 0.82, 0.76)),
         // R4 corner platform lip
@@ -514,13 +514,13 @@
         // R4 crucible chain
         (min: (94.8, 14.5, -204.2), max: (95.2, 18.0, -203.8), material: "metal", tint: (0.56, 0.52, 0.52), no_collide: true),
         // R4 wax seep W
-        (min: (66.0, 2.0, -199.0), max: (66.4, 14.0, -193.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (66.0, 2.0, -199.0), max: (66.4, 14.0, -193.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R4 wax seep E
-        (min: (115.6, 6.0, -199.0), max: (116.0, 14.0, -193.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (115.6, 6.0, -199.0), max: (116.0, 14.0, -193.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R4 wax seep W
-        (min: (66.0, 2.0, -223.0), max: (66.4, 14.0, -217.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (66.0, 2.0, -223.0), max: (66.4, 14.0, -217.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R4 wax seep E
-        (min: (115.6, 6.0, -223.0), max: (116.0, 14.0, -217.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (115.6, 6.0, -223.0), max: (116.0, 14.0, -217.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // ==== C5 Pipe Run (slide under / hop over) ====
         // C5 floor
         (min: (87.0, -1.0, -262.0), max: (95.0, 0.0, -234.0), material: "concrete", tint: (0.8, 0.72, 0.68)),
@@ -600,21 +600,21 @@
         // R5 aisle slag pool
         (min: (112.0, -3.0, -300.0), max: (120.0, -2.0, -290.0), material: "lava", tint: (1.0, 1.0, 1.0)),
         // R5 wax colonnade pillar
-        (min: (71.0, 0.0, -273.0), max: (73.0, 28.0, -271.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (71.0, 0.0, -273.0), max: (73.0, 28.0, -271.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (71.0, 0.0, -285.0), max: (73.0, 28.0, -283.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (71.0, 0.0, -285.0), max: (73.0, 28.0, -283.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (71.0, 0.0, -307.0), max: (73.0, 28.0, -305.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (71.0, 0.0, -307.0), max: (73.0, 28.0, -305.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (71.0, 0.0, -319.0), max: (73.0, 28.0, -317.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (71.0, 0.0, -319.0), max: (73.0, 28.0, -317.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (109.0, 0.0, -273.0), max: (111.0, 28.0, -271.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (109.0, 0.0, -273.0), max: (111.0, 28.0, -271.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (109.0, 0.0, -285.0), max: (111.0, 28.0, -283.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (109.0, 0.0, -285.0), max: (111.0, 28.0, -283.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (109.0, 0.0, -307.0), max: (111.0, 28.0, -305.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (109.0, 0.0, -307.0), max: (111.0, 28.0, -305.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax colonnade pillar
-        (min: (109.0, 0.0, -319.0), max: (111.0, 28.0, -317.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (109.0, 0.0, -319.0), max: (111.0, 28.0, -317.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 gallery W
         (min: (60.0, 7.4, -322.0), max: (71.0, 8.0, -268.0), material: "metal", tint: (0.82, 0.78, 0.76)),
         // R5 gallery E
@@ -658,28 +658,28 @@
         // R5 chandelier chain
         (min: (90.8, 19.0, -283.2), max: (91.2, 28.0, -282.8), material: "metal", tint: (0.56, 0.52, 0.52), no_collide: true),
         // R5 ceiling rib
-        (min: (60.0, 26.8, -276.5), max: (122.0, 28.0, -275.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (60.0, 26.8, -276.5), max: (122.0, 28.0, -275.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 ceiling rib
-        (min: (60.0, 26.8, -296.5), max: (122.0, 28.0, -295.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (60.0, 26.8, -296.5), max: (122.0, 28.0, -295.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 ceiling rib
-        (min: (60.0, 26.8, -316.5), max: (122.0, 28.0, -315.5), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (60.0, 26.8, -316.5), max: (122.0, 28.0, -315.5), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // R5 wax drape W
-        (min: (60.0, 10.0, -282.0), max: (60.4, 24.0, -274.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (60.0, 10.0, -282.0), max: (60.4, 24.0, -274.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R5 wax drape E
-        (min: (121.6, 10.0, -282.0), max: (122.0, 24.0, -274.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (121.6, 10.0, -282.0), max: (122.0, 24.0, -274.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R5 wax drape W
-        (min: (60.0, 10.0, -312.0), max: (60.4, 24.0, -304.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (60.0, 10.0, -312.0), max: (60.4, 24.0, -304.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // R5 wax drape E
-        (min: (121.6, 10.0, -312.0), max: (122.0, 24.0, -304.0), material: "bone", tint: (1.0, 0.84, 0.6)),
+        (min: (121.6, 10.0, -312.0), max: (122.0, 24.0, -304.0), material: "wax", tint: (1.0, 0.84, 0.6)),
         // ==== C6 Ascension Hall + exit ====
         // C6 floor
         (min: (87.0, 3.0, -351.0), max: (95.0, 4.0, -331.0), material: "concrete", tint: (0.9, 0.82, 0.76)),
         // C6 ceiling
         (min: (86.0, 11.0, -351.0), max: (96.0, 12.0, -331.0), material: "metal", tint: (0.56, 0.52, 0.52)),
         // C6 wall W 
-        (min: (86.0, 3.0, -351.0), max: (87.0, 11.0, -331.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (86.0, 3.0, -351.0), max: (87.0, 11.0, -331.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // C6 wall E 
-        (min: (95.0, 3.0, -351.0), max: (96.0, 11.0, -331.0), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (95.0, 3.0, -351.0), max: (96.0, 11.0, -331.0), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // Exit floor
         (min: (81.0, 3.0, -372.0), max: (101.0, 4.0, -352.0), material: "concrete", tint: (0.9, 0.82, 0.76)),
         // Exit ceiling
@@ -701,13 +701,13 @@
         // Exit dais
         (min: (86.0, 4.0, -367.0), max: (96.0, 4.3, -357.0), material: "panel", tint: (0.78, 0.72, 0.74)),
         // Exit pillar
-        (min: (83.25, 4.0, -355.75), max: (84.75, 20.0, -354.25), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (83.25, 4.0, -355.75), max: (84.75, 20.0, -354.25), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // Exit pillar
-        (min: (97.25, 4.0, -355.75), max: (98.75, 20.0, -354.25), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (97.25, 4.0, -355.75), max: (98.75, 20.0, -354.25), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // Exit pillar
-        (min: (83.25, 4.0, -369.75), max: (84.75, 20.0, -368.25), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (83.25, 4.0, -369.75), max: (84.75, 20.0, -368.25), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // Exit pillar
-        (min: (97.25, 4.0, -369.75), max: (98.75, 20.0, -368.25), material: "bone", tint: (0.96, 0.9, 0.74)),
+        (min: (97.25, 4.0, -369.75), max: (98.75, 20.0, -368.25), material: "waxstone", tint: (0.96, 0.9, 0.74)),
         // Exit halo
         (min: (86.0, 18.0, -367.0), max: (96.0, 19.0, -357.0), material: "lava", tint: (1.0, 1.0, 1.0)),
     ],

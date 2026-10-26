@@ -260,7 +260,7 @@ fn main() -> anyhow::Result<()> {
     });
     h.shot("combat_both_barrels");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
-    h.shot("combat_gibs");
+    h.shot("combat_heat_release");
 
     // Arclash: a held stream of zaps chaining through a pack.
     game.send_chat("/killall");

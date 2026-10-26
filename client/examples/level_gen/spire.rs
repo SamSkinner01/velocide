@@ -23,9 +23,9 @@ mod pal {
     /// Floor flags.
     pub const TILE: Mat = Mat("tile", [0.6, 0.62, 0.7]);
     /// Fresh ivory wax.
-    pub const WAX: Mat = Mat("bone", [1.0, 0.95, 0.82]);
+    pub const WAX: Mat = Mat("wax", [1.0, 0.95, 0.82]);
     /// Old, yellowed wax (drips, effigies, candle stubs).
-    pub const WAX_OLD: Mat = Mat("bone", [0.86, 0.78, 0.62]);
+    pub const WAX_OLD: Mat = Mat("wax", [0.86, 0.78, 0.62]);
     /// Bell bronze.
     pub const BRONZE: Mat = Mat("metal", [0.86, 0.64, 0.42]);
     pub const BRASS: Mat = Mat("metal", [1.0, 0.84, 0.5]);

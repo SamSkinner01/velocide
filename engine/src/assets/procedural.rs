@@ -10,17 +10,22 @@ use crate::gfx::TextureData;
 
 /// Names accepted by [`material_texture`] (anything else gets a checkerboard).
 pub const MATERIALS: &[&str] = &[
-    "concrete", "brick", "metal", "rust", "grate", "flesh", "bone", "lava", "tile", "wood",
+    "concrete", "brick", "metal", "rust", "grate", "wax", "waxstone", "lava", "tile", "wood",
     "hazard", "glass", "dirt", "panel",
 ];
+
+/// Old material names still accepted by [`material_texture`] (level files written before the
+/// wax re-theme): `(old, current)`.
+pub const MATERIAL_ALIASES: &[(&str, &str)] = &[("flesh", "wax"), ("bone", "waxstone")];
 
 /// Sprite / decal textures (with alpha).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SpriteTex {
     MuzzleFlash,
-    Blood,
-    /// Floor/wall decal.
-    BloodSplat,
+    /// A spatter of molten wax droplets, pale ivory (tint it).
+    WaxDrops,
+    /// Floor/wall decal: a splat of hardened wax with a raised rim, pale ivory (tint it).
+    WaxSplat,
     Spark,
     Smoke,
     /// Soft radial glow, white (tint it; draw additive).
@@ -29,7 +34,8 @@ pub enum SpriteTex {
     Ring,
     /// Mirrored ricochet shard.
     Shard,
-    Gib,
+    /// An irregular lump of wax or slag with a glowing crack, neutral grey (tint it).
+    Lump,
     /// Burn mark decal.
     Scorch,
 }
@@ -37,14 +43,14 @@ pub enum SpriteTex {
 impl SpriteTex {
     pub const ALL: [SpriteTex; 10] = [
         SpriteTex::MuzzleFlash,
-        SpriteTex::Blood,
-        SpriteTex::BloodSplat,
+        SpriteTex::WaxDrops,
+        SpriteTex::WaxSplat,
         SpriteTex::Spark,
         SpriteTex::Smoke,
         SpriteTex::Glow,
         SpriteTex::Ring,
         SpriteTex::Shard,
-        SpriteTex::Gib,
+        SpriteTex::Lump,
         SpriteTex::Scorch,
     ];
 }
@@ -228,8 +234,8 @@ pub fn material_texture(name: &str) -> TextureData {
         "metal" => metal(),
         "rust" => rust(),
         "grate" => grate(),
-        "flesh" => flesh(),
-        "bone" => bone(),
+        "wax" | "flesh" => wax(),
+        "waxstone" | "bone" => waxstone(),
         "lava" => lava(),
         "tile" => tile(),
         "wood" => wood(),
@@ -401,47 +407,54 @@ fn grate() -> TextureData {
     c.into_texture()
 }
 
-fn flesh() -> TextureData {
+/// Poured wax (drapes, sheets, candles, effigies): smooth ivory with soft vertical drip runs,
+/// rounded drip ends, a dull sheen and the odd pit. Pale so level tints colour it.
+fn wax() -> TextureData {
     const SEED: u32 = 67;
-    let stops = [
-        hex(0x3a0610),
-        hex(0x6e0f1c),
-        hex(0x9c2430),
-        hex(0xc4505a),
-        hex(0xe08a8c),
-    ];
+    let stops = [hex(0xb8aa8c), hex(0xd4c8aa), hex(0xe8dec6), hex(0xf6efdc)];
     let mut c = Canvas::new(64, 64);
     c.fill(|x, y, u, v| {
-        let n = fbm(u, v, 4, 4, SEED);
-        let vein = (fbm(u, v, 3, 4, SEED + 3) - 0.5).abs();
-        let mut color = ramp(n, &stops);
-        if vein < 0.025 {
-            color = hex(0x3c0a2a) * (0.8 + n * 0.4);
-        } else if vein < 0.04 {
-            color *= 0.75;
+        let n = fbm(u, v, 3, 3, SEED);
+        // Drip runs: noise stretched along v, each run ending in a slightly darker bead.
+        let run = value_noise2(u, v, 12, 2, SEED + 3);
+        let ripple = value_noise2(u, v, 12, 6, SEED + 4);
+        let mut color = ramp(n * 0.55 + 0.35 + (run - 0.5) * 0.35, &stops);
+        if run > 0.62 {
+            color *= 1.0 - (run - 0.62) * 0.5 - (ripple - 0.5).abs() * 0.12;
         }
-        let gloss = rand01(x, y, SEED + 5);
-        if gloss < 0.025 && n > 0.5 {
-            color = hex(0xf0b0b0);
+        if rand01(x, y, SEED + 5) < 0.012 && n < 0.5 {
+            color *= 0.78; // pits
+        }
+        if rand01(x, y, SEED + 6) < 0.02 && n > 0.62 {
+            color = color * 0.5 + hex(0xfffaf0) * 0.5; // sheen
         }
         opaque(color)
     });
     c.into_texture()
 }
 
-fn bone() -> TextureData {
+/// Set wax-stone (pillars, ribs, columns): wax poured in layers and hardened pale and hard,
+/// with faint pour lines, hairline cracks and pits.
+fn waxstone() -> TextureData {
     const SEED: u32 = 71;
-    let stops = [hex(0x8c7b5c), hex(0xb8a682), hex(0xd8cba8), hex(0xece2c8)];
+    let stops = [hex(0x8c7e62), hex(0xb6a886), hex(0xd6caaa), hex(0xebe2c8)];
     let mut c = Canvas::new(64, 64);
     c.fill(|x, y, u, v| {
         let n = fbm(u, v, 4, 4, SEED);
         let crack = (fbm(u, v, 2, 4, SEED + 2) - 0.5).abs();
         let mut color = ramp(n * 0.8 + 0.25, &stops);
-        if crack < 0.012 {
-            color *= 0.55;
+        // Pour lines: four wavering horizontal layers.
+        let layer = (v * 4.0 + (value_noise(u, 0.5, 4, SEED + 3) - 0.5) * 0.25).fract();
+        if layer < 0.035 {
+            color *= 0.82;
+        } else if layer < 0.07 {
+            color *= 1.06;
         }
-        if rand01(x, y, SEED + 1) < 0.05 {
-            color *= 0.8; // pores
+        if crack < 0.01 {
+            color *= 0.6;
+        }
+        if rand01(x, y, SEED + 1) < 0.03 {
+            color *= 0.84; // pits
         }
         opaque(color)
     });
@@ -649,14 +662,14 @@ fn panel() -> TextureData {
 pub fn sprite_texture(kind: SpriteTex) -> TextureData {
     match kind {
         SpriteTex::MuzzleFlash => muzzle_flash(),
-        SpriteTex::Blood => blood(),
-        SpriteTex::BloodSplat => blood_splat(),
+        SpriteTex::WaxDrops => wax_drops(),
+        SpriteTex::WaxSplat => wax_splat(),
         SpriteTex::Spark => spark(),
         SpriteTex::Smoke => smoke(),
         SpriteTex::Glow => glow(),
         SpriteTex::Ring => ring(),
         SpriteTex::Shard => shard(),
-        SpriteTex::Gib => gib(),
+        SpriteTex::Lump => lump(),
         SpriteTex::Scorch => scorch(),
     }
 }
@@ -710,7 +723,8 @@ fn blobs(size: u32, seed: u32, count: i32, spread: f32, radius: (f32, f32)) -> V
         .collect()
 }
 
-fn blood() -> TextureData {
+/// Molten wax droplets: round beads with a glossy highlight and a slightly darker skin.
+fn wax_drops() -> TextureData {
     const SEED: u32 = 223;
     let size = 32;
     let drops = blobs(size, SEED, 7, 0.55, (0.12, 0.3));
@@ -724,42 +738,54 @@ fn blood() -> TextureData {
         if best > 1.0 {
             return Vec4::ZERO;
         }
-        let highlight = best < 0.45 && p.x + p.y < 0.0;
+        let highlight = best < 0.4 && p.x + p.y < 0.0;
         let color = if highlight {
-            hex(0xc8202a)
+            hex(0xfffaf0)
         } else {
-            hex(0x8a0a14) * (1.1 - best * 0.4)
+            hex(0xe2d8c4) * (1.08 - best * 0.3)
         };
         color.extend(1.0)
     });
     c.into_texture()
 }
 
-fn blood_splat() -> TextureData {
+/// A splat of wax that hit a surface and set: a lumpy pool with a raised, darker rim, a few
+/// satellite beads, a dull sheen and the odd skin wrinkle. No spatter streaks.
+fn wax_splat() -> TextureData {
     const SEED: u32 = 227;
     let size = 64;
-    let drops = blobs(size, SEED, 14, 0.85, (0.03, 0.08));
+    let beads = blobs(size, SEED, 9, 0.8, (0.04, 0.09));
     let mut c = Canvas::new(size, size);
     c.fill(|x, y, u, v| {
         let p = centered(x, y, size);
         let r = p.length();
         let a = p.y.atan2(p.x);
-        let edge = 0.42 + value_noise(a / std::f32::consts::TAU + 0.5, 0.0, 9, SEED) * 0.22;
+        let edge = 0.48 + value_noise(a / std::f32::consts::TAU + 0.5, 0.0, 6, SEED) * 0.2;
         let n = fbm(u, v, 4, 3, SEED + 1);
         let px = Vec2::new(x as f32 - 31.5, y as f32 - 31.5);
-        let in_drop = drops.iter().any(|(c, rad)| px.distance(*c) < *rad);
-        // Radial streaks.
-        let streak = (a * 5.0).cos().abs() > 0.97 && r < 0.8 && n > 0.4;
-        if r < edge || in_drop || streak {
-            let color = ramp(n, &[hex(0x4a0408), hex(0x7a0a12), hex(0x9c1620)]);
-            let alpha = if r < edge - 0.08 || in_drop {
-                1.0
-            } else {
-                0.75
-            };
-            return color.extend(alpha);
+        let bead = beads
+            .iter()
+            .map(|(c, rad)| px.distance(*c) / rad)
+            .fold(f32::MAX, f32::min);
+        if r >= edge && bead >= 1.0 {
+            return Vec4::ZERO;
         }
-        Vec4::ZERO
+        let mut color = ramp(n, &[hex(0xb4a994), hex(0xd2c8b2), hex(0xece4d0)]);
+        if r < edge {
+            // The rim cools first and stands proud; a wrinkle ring sits just inside it.
+            let rim = (r - (edge - 0.07)).max(0.0) / 0.07;
+            color *= 1.0 - rim * 0.3;
+            if (r - (edge - 0.13)).abs() < 0.012 && n > 0.45 {
+                color *= 0.85;
+            }
+            // Dull sheen towards the top-left.
+            if (p - Vec2::new(-0.15, -0.15)).length() < 0.12 + n * 0.08 {
+                color = color * 0.6 + hex(0xfffaf0) * 0.4;
+            }
+            color.extend(1.0)
+        } else {
+            (color * (1.05 - bead * 0.2)).extend(1.0)
+        }
     });
     c.into_texture()
 }
@@ -844,31 +870,31 @@ fn shard() -> TextureData {
     c.into_texture()
 }
 
-fn gib() -> TextureData {
+/// A lump of wax or slag broken off a Mould: a faceted, irregular blob, lit from the top, with
+/// a thin glowing crack where the heat still shows.
+fn lump() -> TextureData {
     const SEED: u32 = 251;
     let size = 32;
     let mut c = Canvas::new(size, size);
     c.fill(|x, y, u, v| {
         let p = centered(x, y, size);
         let a = p.y.atan2(p.x);
-        let edge = 0.6 + value_noise(a / std::f32::consts::TAU + 0.5, 0.0, 7, SEED) * 0.3;
+        let edge = 0.58 + value_noise(a / std::f32::consts::TAU + 0.5, 0.0, 5, SEED) * 0.32;
         let r = p.length();
-        // Bone stub sticking out to the upper right.
-        let bone = (p - Vec2::new(0.45, -0.45)).length() < 0.2
-            || (p.x - p.y > 0.0 && (p.x + p.y).abs() < 0.12 && r < 0.75);
-        if bone {
-            return hex(0xe6dcc0).extend(1.0);
-        }
         if r > edge {
             return Vec4::ZERO;
         }
         if r > edge - 0.1 {
-            return hex(0x3a0408).extend(1.0);
+            return hex(0x2c2824).extend(1.0);
         }
         let n = fbm(u, v, 4, 2, SEED + 1);
+        let crack = (fbm(u, v, 2, 2, SEED + 2) - 0.5).abs();
+        if crack < 0.03 && r < edge - 0.18 {
+            return hex(0xffb868).extend(1.0);
+        }
         ramp(
-            n + (0.3 - p.y * 0.3),
-            &[hex(0x5a0810), hex(0x9c1c28), hex(0xd05060)],
+            n * 0.6 + (0.45 - p.y * 0.35),
+            &[hex(0x4c4842), hex(0x8a847a), hex(0xd0c8b8)],
         )
         .extend(1.0)
     });
@@ -928,6 +954,15 @@ mod tests {
             // Sprites have transparent borders and some opaque-ish content.
             assert_eq!(t.rgba[3], 0, "{kind:?} corner should be transparent");
             assert!(t.rgba.chunks(4).any(|p| p[3] > 128), "{kind:?} is empty");
+        }
+    }
+
+    #[test]
+    fn old_material_names_still_load() {
+        for &(old, current) in MATERIAL_ALIASES {
+            assert!(MATERIALS.contains(&current), "{current}");
+            assert!(!MATERIALS.contains(&old), "{old}");
+            assert_eq!(material_texture(old).rgba, material_texture(current).rgba, "{old}");
         }
     }
 
