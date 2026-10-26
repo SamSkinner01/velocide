@@ -782,10 +782,11 @@ impl InGame {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
+                let held = *self.combat.predictor.state();
                 self.viewmodel.draw(
                     lib,
-                    self.controls.weapons.current,
-                    self.controls.weapons.mode(),
+                    crate::models::WeaponKind::for_weapon(held.current()).index(),
+                    held.mode,
                     team,
                     self.camera.dip(),
                     self.camera.roll(),
