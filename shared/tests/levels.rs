@@ -60,6 +60,10 @@ const SHIPPED: [&str; 8] = [
 const PLAYGROUNDS: [&str; 1] = ["movement_test"];
 /// The roster (docs/roster.md); a campaign finale uses all of it.
 const ENEMIES: [&str; 5] = ["gnawer", "censer", "harrier", "gaoler", "heron"];
+/// The third roster's Moulds (`docs/enemies.md`): any campaign may use them, introduced before
+/// its finale like the rest. (The Effigy, the warm-up dummy, appears only in the warm-up hub's
+/// range.)
+const NEW_MOULDS: [&str; 3] = ["bellwether", "snuffer", "smelter"];
 const MATERIALS: [&str; 14] = [
     "concrete", "brick", "metal", "rust", "grate", "wax", "waxstone", "lava", "tile", "wood",
     "hazard", "glass", "dirt", "panel",
@@ -178,6 +182,8 @@ fn capsule_at(feet: Vec3, height: f32, radius: f32) -> (Vec3, f32) {
 fn enemy_size(name: &str) -> (f32, f32) {
     match name {
         "gaoler" => (1.45, 4.0),
+        "smelter" => (1.25, 3.7),
+        "bellwether" => (0.8, 3.3),
         "heron" => (0.6, 3.6),
         "censer" => (0.7, 2.7),
         "harrier" => (1.0, 1.6),
@@ -238,7 +244,9 @@ fn every_level_parses_with_consistent_markup() {
                     // The warm-up hub's range also stands training dummies.
                     let hub_only = level.kind == LevelKind::Hub && s.enemy == "effigy";
                     assert!(
-                        ENEMIES.contains(&s.enemy.as_str()) || hub_only,
+                        ENEMIES.contains(&s.enemy.as_str())
+                            || NEW_MOULDS.contains(&s.enemy.as_str())
+                            || hub_only,
                         "{name}: unknown enemy {:?}",
                         s.enemy
                     );
@@ -403,6 +411,11 @@ fn campaign_structure() {
         assert!(last.waves.len() >= 3, "{name}: finale has 3+ waves");
         for k in ENEMIES {
             assert!(kinds(last).contains(k), "{name}: finale includes {k}");
+        }
+        // The finale brings nothing new: every Mould in it (the new ones too) was met before.
+        for k in kinds(last) {
+            let first = first_encounter_with(&level, &k).expect("in the finale");
+            assert!(first < n - 1, "{name}: {k} first appears in the finale");
         }
         let total: usize = level
             .encounters
@@ -677,11 +690,18 @@ fn enemy_spawns_are_valid() {
                                 panic!("{what}: ledge too shallow for a censer (no floor at {q})");
                             }
                         }
-                        // Room to circle a 1.3 m heavy: level floor 4 m around it.
-                        "gaoler" => {
+                        // Room to circle a heavy (and for the Smelter to pour its slag): level
+                        // floor 4 m around it.
+                        "gaoler" | "smelter" => {
                             if let Err(q) = floor_all_around(world, p, 4.0, 0.6) {
-                                panic!("{what}: no room to circle the gaoler (no floor at {q})");
+                                panic!("{what}: no room to circle the heavy (no floor at {q})");
                             }
+                        }
+                        // The Bellwether hangs back behind its pack (14-26 m): it starts well
+                        // away from the rally point.
+                        "bellwether" => {
+                            let d = p.distance(rally);
+                            assert!(d >= 14.0, "{what}: only {d:.1} m from the rally point");
                         }
                         // Snipers get a long sightline: ≥ 20 m from the rally point, which
                         // they can see from their lens.

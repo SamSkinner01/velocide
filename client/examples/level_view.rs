@@ -17,7 +17,8 @@
 //!
 //! Overlay colours: encounter triggers orange, checkpoints green, exit white, kill volumes red,
 //! doors (closed red / open green), player spawns cyan (with facing), jump pads cyan with
-//! their ballistic arc, enemies: gnawer yellow, censer magenta, harrier light blue, gaoler red, heron white;
+//! their ballistic arc, enemies: gnawer yellow, censer magenta, harrier light blue, gaoler red, heron white,
+//! bellwether amber, snuffer green, smelter rust;
 //! grind spawns pink posts with a ring, secrets yellow boxes.
 
 use std::path::{Path, PathBuf};
@@ -138,6 +139,9 @@ fn enemy_color(name: &str) -> Vec4 {
         "harrier" => Vec4::new(0.5, 0.8, 1.0, 1.0),
         "gaoler" => Vec4::new(1.0, 0.15, 0.1, 1.0),
         "heron" => Vec4::new(1.0, 1.0, 1.0, 1.0),
+        "bellwether" => Vec4::new(1.0, 0.65, 0.1, 1.0),
+        "snuffer" => Vec4::new(0.3, 1.0, 0.4, 1.0),
+        "smelter" => Vec4::new(0.7, 0.25, 0.05, 1.0),
         _ => Vec4::ONE,
     }
 }
@@ -155,6 +159,9 @@ fn overlay(level: &LevelDef) -> Vec<DebugLine> {
                 let c = enemy_color(&s.enemy);
                 let (h, r) = match s.enemy.as_str() {
                     "gaoler" => (3.7, 1.3),
+                    "smelter" => (3.4, 1.1),
+                    "bellwether" => (3.1, 0.7),
+                    "snuffer" => (1.4, 0.7),
                     "heron" => (3.4, 0.5),
                     "censer" => (2.5, 0.6),
                     "harrier" => (1.3, 0.7),
