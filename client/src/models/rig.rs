@@ -12,7 +12,7 @@
 //! With every local = identity the model is drawn in its bind pose. Pose functions only ever
 //! rotate / translate / scale parts around their pivots.
 
-use engine::gfx::{DrawItem, MeshId, TextureId};
+use engine::gfx::{DrawItem, MeshData, MeshId, TextureId};
 use engine::glam::{Mat4, Quat, Vec3, Vec4};
 
 /// How a part is tinted and lit.
@@ -81,6 +81,13 @@ pub struct Tint {
     /// Emissive colours are not clamped before the framebuffer, so values > 1 push towards
     /// white.
     pub glow: Vec4,
+    /// Replaces the colours of [`Shade::Glow`] parts (colour-blind palette roles, e.g.
+    /// `palette().telegraph`): the part is drawn from a greyscale copy of its mesh in this
+    /// colour, at the brightness of `Pose::glow x glow` capped at full, so the hue survives
+    /// instead of washing out to white. `None` = the model's own colours.
+    pub glow_color: Option<Vec4>,
+    /// Same for [`Shade::Core`] parts (weak points), brightness from `Pose::core`.
+    pub core_color: Option<Vec4>,
 }
 
 /// The Shrikes' default colour (single-player / co-op): ember red.
@@ -92,6 +99,8 @@ impl Default for Tint {
             body: Vec4::ONE,
             team: DEFAULT_TEAM_COLOR,
             glow: Vec4::ONE,
+            glow_color: None,
+            core_color: None,
         }
     }
 }
@@ -184,6 +193,31 @@ pub struct RigPart {
     pub shade: Shade,
     /// Material base colour from the glTF (alpha < 1 = translucent part).
     pub base_color: Vec4,
+    /// Greyscale copy of an emissive part's mesh ([`neutral_mesh`]), drawn instead of `mesh`
+    /// when [`Tint::glow_color`] / [`Tint::core_color`] recolours it.
+    pub recolour_mesh: Option<MeshId>,
+}
+
+/// A copy of `mesh` with every vertex colour replaced by its brightness, the brightest vertex
+/// at 1 (alpha kept): the shape of an emissive part's glow without its hue, for recolouring.
+pub fn neutral_mesh(mesh: &MeshData) -> MeshData {
+    let luma = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let max = mesh
+        .vertices
+        .iter()
+        .map(|v| luma(v.color))
+        .fold(0.0f32, f32::max);
+    let mut out = mesh.clone();
+    for v in &mut out.vertices {
+        let g = if max > 1e-6 { luma(v.color) / max } else { 1.0 };
+        v.color = [g, g, g, v.color[3]];
+    }
+    out
+}
+
+/// A colour's brightness as a 0..1 level (largest channel, capped).
+fn level(v: Vec4) -> f32 {
+    v.truncate().max_element().clamp(0.0, 1.0)
 }
 
 /// A drawable model: parts with pivots and parents (static models have root parts only).
@@ -217,6 +251,7 @@ impl Rig {
                     bind: Mat4::from_translation(j.pivot - parent_pivot),
                     shade: j.shade,
                     base_color,
+                    recolour_mesh: None,
                 }
             })
             .collect();
@@ -268,6 +303,26 @@ impl Rig {
             let local = pose.locals.get(i).copied().unwrap_or(Mat4::IDENTITY);
             world[i] = parent * part.bind * local;
             if pose.is_hidden(i) {
+                continue;
+            }
+            // Palette recolouring (colour-blind modes): a greyscale copy in the role colour.
+            let recolour = match part.shade {
+                Shade::Glow => tint.glow_color.map(|c| (c, level(pose.glow) * level(tint.glow))),
+                Shade::Core => tint.core_color.map(|c| (c, level(pose.core))),
+                _ => None,
+            };
+            if let (Some((hue, brightness)), Some(mesh)) = (recolour, part.recolour_mesh) {
+                let alpha = part.base_color.w * tint.body.w * match part.shade {
+                    Shade::Glow => pose.glow.w * tint.glow.w,
+                    _ => pose.core.w,
+                };
+                out.push(DrawItem {
+                    mesh,
+                    texture: part.texture,
+                    transform: world[i],
+                    tint: (hue.truncate() * brightness).extend(alpha),
+                    unlit: true,
+                });
                 continue;
             }
             let color = part.base_color * tint.body;
@@ -325,6 +380,70 @@ mod tests {
 
     fn rig() -> Rig {
         Rig::new(&JOINTS, |i| (MeshId(i as u32), TextureId(0), Vec4::ONE))
+    }
+
+    #[test]
+    fn palette_recolouring_swaps_emissive_parts_only() {
+        let mut r = rig();
+        r.parts[2].base_color = Vec4::new(1.0, 0.2, 0.1, 0.8);
+        r.parts[2].recolour_mesh = Some(MeshId(99));
+        let mut pose = r.rest_pose();
+        pose.glow = Vec4::splat(2.5);
+        let draw = |r: &Rig, tint: &Tint| {
+            let mut out = Vec::new();
+            r.draw(&pose, Mat4::IDENTITY, tint, &mut out);
+            out
+        };
+        // No override: the model's own colours, exactly as before.
+        let own = draw(&r, &Tint::default());
+        assert_eq!(own[2].mesh, MeshId(2));
+        assert_eq!(own[2].tint, Vec4::new(1.0, 0.2, 0.1, 0.8) * 2.5);
+        // Override: the greyscale copy in the role colour, brightness capped at full (the hue
+        // survives the 2.5x wind-up flare), alpha kept; the other parts are untouched.
+        let blue = Vec4::new(0.3, 0.4, 1.0, 1.0);
+        let tint = Tint {
+            glow_color: Some(blue),
+            glow: Vec4::new(1.0, 1.0, 1.0, 0.5),
+            ..Default::default()
+        };
+        let swapped = draw(&r, &tint);
+        assert_eq!(swapped[2].mesh, MeshId(99));
+        assert!(swapped[2].unlit);
+        assert!((swapped[2].tint - Vec4::new(0.3, 0.4, 1.0, 0.8 * 2.5 * 0.5)).length() < 1e-5);
+        assert_eq!(swapped[0], own[0]);
+        assert_eq!(swapped[1], own[1]);
+        // A dim strobe phase dims the role colour.
+        let dim = draw(&r, &Tint {
+            glow: Vec4::splat(0.3),
+            ..tint
+        });
+        assert!((dim[2].tint.truncate() - blue.truncate() * 0.3).length() < 1e-5);
+        // Parts without a greyscale copy keep their own colours.
+        r.parts[2].recolour_mesh = None;
+        let plain = Tint {
+            glow_color: None,
+            ..tint
+        };
+        assert_eq!(draw(&r, &tint)[2], draw(&r, &plain)[2]);
+    }
+
+    #[test]
+    fn neutral_mesh_keeps_brightness_not_hue() {
+        let v = |c: [f32; 4]| engine::gfx::Vertex {
+            color: c,
+            ..Default::default()
+        };
+        let mesh = MeshData {
+            vertices: vec![v([1.0, 0.85, 0.45, 1.0]), v([1.0, 0.62, 0.18, 0.5]), v([0.0; 4])],
+            indices: vec![0, 1, 2],
+        };
+        let n = neutral_mesh(&mesh);
+        assert_eq!(n.vertices[0].color, [1.0, 1.0, 1.0, 1.0], "brightest = 1");
+        let g = n.vertices[1].color;
+        assert!(g[0] > 0.6 && g[0] < 0.9 && g[0] == g[1] && g[1] == g[2], "{g:?}");
+        assert_eq!(g[3], 0.5, "alpha kept");
+        assert_eq!(n.vertices[2].color, [0.0; 4]);
+        assert_eq!(n.indices, mesh.indices);
     }
 
     #[test]
