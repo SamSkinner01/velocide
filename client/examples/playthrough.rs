@@ -5,6 +5,8 @@
 //!   stops); arena 1 (doors lock, waves, enemies hit back, cleared → doors open); checkpoint;
 //!   death in arena 2 → death view → back at the checkpoint with the encounter reset; instant
 //!   restart; the exit → graded results → MAIN MENU.
+//! * **Grind** (single player): SINGLE PLAYER → MODE GRIND → HARD → an arena; wave 1 away from
+//!   the player, cleared → breather → wave 2, a death → OVERRUN results, the best wave saved.
 //! * **Co-op** (host + a guest behind `--netsim 60,10,1`): lobby, start, rally pull, downed (low
 //!   view, no weapon) → revive with USE, team wipe → checkpoint, extraction → co-op results →
 //!   CONTINUE TO LOBBY → a second match.
@@ -41,7 +43,7 @@ use glam::{Vec2, Vec3};
 use server::ServerCommand;
 use server::lobby::LobbyCommand;
 use shared::input::look_dir;
-use shared::lobby::{GameMode, MatchSettings};
+use shared::lobby::{Difficulty, GameMode, MatchSettings};
 use shared::protocol::{NetId, encounter_flags, enemy_flags, kind, player_flags};
 use shared::sim::PlayerId;
 
@@ -641,6 +643,118 @@ fn single_player(rig: &mut Rig) {
 }
 
 // ---- co-op -----------------------------------------------------------------------------------------
+
+// ---- grind ---------------------------------------------------------------------------------------
+
+/// The grind status on the client's scoreboard.
+fn grind_status(c: &Client) -> Option<shared::sim::GrindStatus> {
+    c.game_ref()?.modes.scoreboard.as_ref()?.grind
+}
+
+/// Solo grind from the single-player page: MODE GRIND, DIFFICULTY HARD, the first arena; wave
+/// 1 spawns away from the player; clearing it starts the breather and wave 2; a death is the
+/// overrun and the grind results; the best wave is saved.
+fn grind(rig: &mut Rig) {
+    println!("\n== grind: single player from the menu, HARD ==");
+    let mut c = rig.client("Grinder", LaunchOptions::default());
+    rig.run(&mut [&mut c], 20);
+    c.keys = vec![UiKey::Enter];
+    rig.run(&mut [&mut c], 10);
+    // From the focused level: up to DIFFICULTY and MODE, GRIND, HARD, back down to the list.
+    for key in [
+        UiKey::Up,
+        UiKey::Up,
+        UiKey::Right,
+        UiKey::Down,
+        UiKey::Right,
+        UiKey::Down,
+    ] {
+        c.keys = vec![key];
+        rig.run(&mut [&mut c], 3);
+    }
+    rig.shot(&mut c, "grind_01_menu");
+    c.keys = vec![UiKey::Enter];
+    rig.run(&mut [&mut c], 2);
+    let ok = wait_playing(rig, &mut [&mut c], 20.0);
+    rig.check(
+        ok,
+        "grind: SINGLE PLAYER -> GRIND -> HARD -> Enter starts a run",
+    );
+    let rules = c
+        .game_ref()
+        .and_then(|g| g.modes.scoreboard.as_ref())
+        .map(|b| b.rules);
+    rig.check(
+        rules == Some(shared::sim::ModeRules::grind(Difficulty::Hard)),
+        &format!("grind: grind rules on HARD ({rules:?})"),
+    );
+    let level = c.level();
+    rig.check(
+        level
+            .as_ref()
+            .is_some_and(|l| l.kind == shared::level::LevelKind::Arena),
+        "grind: on an arena",
+    );
+    let ok = rig.until(&mut [&mut c], 10.0, |cs| {
+        grind_status(cs[0]).is_some_and(|g| g.wave == 1) && !cs[0].enemies().is_empty()
+    });
+    rig.check(ok, "grind: wave 1 starts after the breather");
+    let feet = c.feet().unwrap_or_default();
+    let nearest = c
+        .enemies()
+        .iter()
+        .map(|e| Vec2::new(e.x - feet.x, e.z - feet.z).length())
+        .fold(f32::INFINITY, f32::min);
+    rig.check(
+        nearest > 8.0,
+        &format!("grind: Moulds appear away from the player (nearest {nearest:.1} m)"),
+    );
+    rig.run(&mut [&mut c], 20);
+    rig.shot(&mut c, "grind_02_wave");
+    let mut cleared = false;
+    for _ in 0..40 {
+        c.command(ServerCommand::KillAllEnemies);
+        rig.run(&mut [&mut c], 15);
+        if grind_status(&c).is_some_and(|g| g.next_wave_tick.is_some() && g.wave == 1) {
+            cleared = true;
+            break;
+        }
+    }
+    rig.check(cleared, "grind: clearing wave 1 starts the breather");
+    rig.shot(&mut c, "grind_03_breather");
+    let ok = rig.until(&mut [&mut c], 10.0, |cs| {
+        grind_status(cs[0]).is_some_and(|g| g.wave == 2)
+    });
+    rig.check(ok, "grind: wave 2 follows");
+    // A solo death is the end of the run.
+    c.chat("/kill");
+    let ok = rig.until(&mut [&mut c], 8.0, |cs| {
+        cs[0].game_ref().is_some_and(InGame::results_open)
+    });
+    rig.check(ok, "grind: dying ends the run (results)");
+    rig.run(&mut [&mut c], 240);
+    rig.shot(&mut c, "grind_04_results");
+    let run = c
+        .game_ref()
+        .and_then(|g| g.modes.results.as_ref())
+        .and_then(|r| r.results.grind);
+    rig.check(
+        run.is_some_and(|r| r.wave == 2 && r.cleared == 1),
+        &format!("grind: results show wave 2 reached ({run:?})"),
+    );
+    let name = c
+        .game_ref()
+        .and_then(InGame::net)
+        .and_then(|n| n.world())
+        .map(|w| w.level_name.clone())
+        .unwrap_or_default();
+    let best = c.common.settings.best_grind_wave(&name, Difficulty::Hard);
+    rig.check(
+        best == Some(2),
+        &format!("grind: best wave saved for {name} on HARD ({best:?})"),
+    );
+    rig.leave(&mut c);
+}
 
 fn lobby_ready(c: &Client, players: usize) -> bool {
     c.lobby_ref()
@@ -1618,6 +1732,9 @@ fn main() -> anyhow::Result<()> {
     let want = |s: &str| only.is_empty() || only.split(',').any(|o| o == s);
     if want("sp") {
         single_player(&mut rig);
+    }
+    if want("grind") {
+        grind(&mut rig);
     }
     if want("coop") {
         coop(&mut rig);
