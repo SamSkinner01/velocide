@@ -196,7 +196,7 @@ NetEvent::Game(GameEvent::Parried { .. }) => {
     common.audio.play_2d(Sfx::Parry);
 }
 NetEvent::Game(GameEvent::Killed { killer, victim, .. }) => {
-    self.hud.event(format!("{killer} > {victim}"), t.blood_bright, now);
+    self.hud.event(format!("{killer} > {victim}"), t.crimson_bright, now);
 }
 ```
 

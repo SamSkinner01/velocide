@@ -25,16 +25,16 @@ CONTROLS (rebind them in Settings -> Controls)
   Ctrl or C        slide on the ground, slam in the air
   Left mouse       fire             Right mouse  alt fire
   1 2 3 4          weapons (press the same number again to switch alt mode)
-  F punch / parry  Q throw prism    E use / revive a teammate
+  F punch / parry  Q throw thorn    E use / revive a teammate
   Tab scoreboard   T chat           Esc pause      F11 fullscreen
   Gamepads work too.
 
 TIPS
   Never stop moving: slides keep their speed, and slide-jumps and dash-jumps carry momentum.
   Slam (crouch in the air), then jump right after landing for a huge bounce.
-  Hits make enemies bleed. Stand in the blood to heal.
+  Every hit sheds embers. Stay close and your wick draws them in: that is how you heal.
   Punch an incoming projectile just before it hits you: it flies back at double damage and
-  heals you.
-  Throw a prism and shoot it: the shot ricochets to the nearest enemy.
+  your wick flares back to full.
+  Throw a thorn and shoot it with the Quill: the shot ricochets to the nearest enemy.
 
 Settings are saved in %APPDATA%\velocide (Windows) or ~/.config/velocide (Linux).

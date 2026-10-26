@@ -90,8 +90,8 @@ list.text_in(rect, "CENTRED", &TextStyle::new(theme.bone).centered()); // v-cent
 | field | use |
 |---|---|
 | `blood` `#A8121C` | accent: title bars, selected tabs, slider fill, active fire mode |
-| `blood_bright` `#EE262C` | focus bar, `>` marker, text cursor, warnings |
-| `blood_dark` `#46080C` | pressed buttons, title bar backing, coloured shadows |
+| `crimson_bright` `#EE262C` | focus bar, `>` marker, text cursor, warnings |
+| `crimson_dark` `#46080C` | pressed buttons, title bar backing, coloured shadows |
 | `bone` `#EEE4CE` / `bone_dim` `#AA9C88` / `ash` `#665A54` | primary / secondary / disabled text |
 | `ink`, `panel` (86% alpha), `panel_edge`, `widget`, `widget_hover`, `focus_bg`, `shadow` | surfaces |
 | `health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty` | HUD |
@@ -101,7 +101,7 @@ Metrics: `row_height` 14, `spacing` 3, `padding` 12, `title_height` 15, `label_f
 (label column width in label + control rows), `blink_period` 0.8 s.
 
 The game doesn't use `Theme::default()` as is: `client::palette::Palette::theme()` swaps the HUD
-colours (`health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty`, `blood_bright`,
+colours (`health`, `health_low`, `hard_damage`, `stamina`, `stamina_empty`, `crimson_bright`,
 `rank_colors`) for the player's colour-vision mode; the standard palette gives exactly the
 default theme. See [Accessibility](#accessibility-colour-blind-palette-and-shape-cues).
 
@@ -304,7 +304,7 @@ UI theme. `player_color(id)` returns `palette().team(id)`.
 | `flash_damage` | hit flash | #E60D0A | #FF4C00 | #F23300 | #E60D0A |
 | `flash_parry` / `_shield` / `_death` / `_heal` | other flashes | white / pale blue / dark red / faint red (like damage) | same, death #803300, heal gold #FFCC33 | as protan | same, heal #FFCC73 |
 | `hard_damage` | smothered capacity (hatched) | #781018 | #965AFF | #965AFF | #3C8CC8 |
-| `health_low` / `warning` | low health, DOWNED, LOCKED (`blood_bright`) | #EE262C | #FF6E28 | #F03C1E | #FF2828 |
+| `health_low` / `warning` | low health, DOWNED, LOCKED (`crimson_bright`) | #EE262C | #FF6E28 | #F03C1E | #FF2828 |
 | `stamina` | dash pips, good news (READY, CLEARED) | #60C8FF | #60C8FF | #60C8FF | #60C8FF |
 | `ranks[8]` | style ranks | grey, brass, orange, hot orange, red, magenta, bright red, white-hot | grey, brass, gold, orange, blue, ice, pink, white | same as protan | grey, brass, orange, red, green, magenta, ember, white |
 
