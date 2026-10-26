@@ -256,7 +256,7 @@ impl Effects {
         }
         let rotation = self.rand() * std::f32::consts::TAU;
         let color = match kind {
-            DecalKind::Wax => Vec4::new(0.86, 0.82, 0.74, 0.95),
+            DecalKind::Wax => Vec4::new(0.82, 0.8, 0.7, 0.95),
             DecalKind::Scorch => Vec4::new(1.0, 1.0, 1.0, 0.85),
         };
         let d = Decal {
@@ -347,7 +347,11 @@ impl Effects {
                 end_scale: 0.6,
                 color,
                 end_alpha: 0.6,
-                texture: if additive { FxTex::Glow } else { FxTex::WaxDrop },
+                texture: if additive {
+                    FxTex::Glow
+                } else {
+                    FxTex::WaxDrop
+                },
                 additive,
                 rotation,
                 spin: self.rand_range(-4.0, 4.0),
@@ -600,12 +604,7 @@ mod tests {
     fn decals_are_a_ring_buffer() {
         let mut fx = Effects::headless();
         for i in 0..(MAX_DECALS + 10) {
-            fx.decal(
-                Vec3::new(i as f32, 0.0, 0.0),
-                Vec3::Y,
-                1.0,
-                DecalKind::Wax,
-            );
+            fx.decal(Vec3::new(i as f32, 0.0, 0.0), Vec3::Y, 1.0, DecalKind::Wax);
         }
         assert_eq!(fx.decal_count(), MAX_DECALS);
     }
@@ -636,10 +635,7 @@ mod tests {
         for _ in 0..120 {
             fx.update(1.0 / 60.0, Some(&world));
         }
-        assert!(
-            fx.decal_count() > 0,
-            "wax drops should set on the floor"
-        );
+        assert!(fx.decal_count() > 0, "wax drops should set on the floor");
         assert_eq!(fx.particle_count(), 0);
     }
 

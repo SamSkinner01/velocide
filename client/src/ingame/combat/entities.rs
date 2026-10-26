@@ -983,7 +983,7 @@ fn thorn_transform(e: &EntityState, f: &EntityFrame, time: f64) -> (Quat, Vec3) 
 /// heal reads the same in every colour-vision mode) lifting off a faint warm glow, over a
 /// wisp of grey smoke.
 fn ember_puff(effects: &mut Effects, rng: &mut Rng, center: Vec3, radius: f32, big: bool) {
-    let ember = crate::palette::palette().heal;
+    let ember = palette().heal;
     let r = radius.max(0.5);
     let p = center + rng.dir() * r * 0.3;
     for _ in 0..if big { 4 } else { 3 } {

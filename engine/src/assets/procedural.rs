@@ -962,7 +962,11 @@ mod tests {
         for &(old, current) in MATERIAL_ALIASES {
             assert!(MATERIALS.contains(&current), "{current}");
             assert!(!MATERIALS.contains(&old), "{old}");
-            assert_eq!(material_texture(old).rgba, material_texture(current).rgba, "{old}");
+            assert_eq!(
+                material_texture(old).rgba,
+                material_texture(current).rgba,
+                "{old}"
+            );
         }
     }
 

@@ -1101,7 +1101,7 @@ pub fn thorn_shatter(ctx: &mut FxCtx, p: Vec3) {
 /// chest lantern (`to`), in the palette's heal colour. `flare` also brightens the lantern
 /// (other players; your own heal shows as the screen flash instead).
 pub fn heal_streak(ctx: &mut FxCtx, from: Vec3, to: Vec3, amount: f32, flare: bool) {
-    let color = crate::palette::palette().heal;
+    let color = palette().heal;
     let n = (amount * 0.8).clamp(5.0, 18.0) as usize;
     // Every spark reaches the lantern within `time` and goes out there; staggering their starts
     // along the path draws the burst out into a stream instead of one puff.

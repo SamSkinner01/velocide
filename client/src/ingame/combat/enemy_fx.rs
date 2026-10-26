@@ -16,7 +16,7 @@ use glam::{Quat, Vec2, Vec3, Vec4};
 use shared::protocol::{EntityState, enemy_flags, kind, player_flags};
 use shared::sim::{EnemyDef, EnemyRegistry, HitPart, HitShape};
 
-use super::super::effects::{Effects, FxTex, OnHit, Particle};
+use super::super::effects::{DecalKind, Effects, FxTex, OnHit, Particle};
 use super::Rng;
 use crate::models::EnemyKind;
 use crate::palette::palette;
@@ -184,12 +184,18 @@ pub fn laser_end(
 
 // ---- particles -----------------------------------------------------------------------------
 
-/// A hit cracks a Mould: pale wax droplets flying off along the shot, molten droplets and
-/// sparks (`amount` ~1 for a normal hit).
+/// A hit cracks a Mould: pale wax droplets flying off along the shot (some set as wax splats
+/// where they land), molten droplets and sparks (`amount` ~1 for a normal hit).
 pub fn wax_hit(effects: &mut Effects, rng: &mut Rng, at: Vec3, dir: Vec3, amount: f32, wax: Vec4, heat: Vec4) {
     let n = (amount * 5.0).clamp(2.0, 18.0) as usize;
-    for _ in 0..n {
+    for k in 0..n {
         let v = (dir + rng.dir() * 0.8).normalize_or(Vec3::Y) * rng.range(2.5, 7.0) + Vec3::Y * 2.0;
+        // Every fourth drop sets where it lands: a wax splat on the floor or wall.
+        let (texture, collide) = if k % 4 == 0 {
+            (FxTex::WaxDrop, OnHit::Splat(DecalKind::Wax, rng.range(0.25, 0.5)))
+        } else {
+            (FxTex::Glow, OnHit::Die)
+        };
         effects.spawn(Particle {
             position: at,
             velocity: v,
@@ -200,8 +206,8 @@ pub fn wax_hit(effects: &mut Effects, rng: &mut Rng, at: Vec3, dir: Vec3, amount
             end_scale: 0.7,
             color: wax,
             end_alpha: 0.6,
-            texture: FxTex::Glow,
-            collide: Some(OnHit::Die),
+            texture,
+            collide: Some(collide),
             ..Default::default()
         });
     }
@@ -227,8 +233,8 @@ pub fn wax_hit(effects: &mut Effects, rng: &mut Rng, at: Vec3, dir: Vec3, amount
     effects.glow(at, heat * Vec4::new(1.0, 1.0, 1.0, 0.6), 0.5, 0.1);
 }
 
-/// A dead Mould releases its heat: a flash, a fountain of embers, wax chunks and smoke.
-/// `size` ~1 for a Gnawer, ~2 for the Gaoler.
+/// A dead Mould releases its heat: a flash, a fountain of embers, wax chunks and smoke, and a
+/// scorch mark on the floor under it. `size` ~1 for a Gnawer, ~2 for the Gaoler.
 pub fn ember_burst(effects: &mut Effects, rng: &mut Rng, center: Vec3, size: f32, wax: Vec4, heat: Vec4) {
     effects.glow(center, Vec4::new(1.0, 0.75, 0.4, 1.0), 2.2 * size, 0.35);
     let embers = (26.0 * size) as usize;
@@ -270,6 +276,16 @@ pub fn ember_burst(effects: &mut Effects, rng: &mut Rng, center: Vec3, size: f32
         });
     }
     effects.smoke(center, (4.0 * size) as usize);
+    // An invisible drop straight down leaves the scorch where it meets the floor.
+    effects.spawn(Particle {
+        position: center,
+        velocity: Vec3::NEG_Y * 6.0,
+        gravity: 30.0,
+        max_life: 1.5,
+        color: Vec4::ZERO,
+        collide: Some(OnHit::Splat(DecalKind::Scorch, 1.6 * size)),
+        ..Default::default()
+    });
 }
 
 /// The corpse melting: wisps of smoke and the odd rising ember (call a few times a second).

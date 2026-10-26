@@ -510,6 +510,53 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_low_health");
 
+    // Kindling: walk up to a Mould, punch it and draw its embers into the wick (a stream of
+    // sparks into the chest lantern + the heal flash), then its heat release on the kill.
+    // Turn away from the wall; space the commands out (the chat flood limit).
+    game.controls.yaw += std::f32::consts::PI;
+    game.controls.pitch = 0.0;
+    h.frames(&mut game, 90, |g, _| hold(g, Buttons::NONE));
+    game.send_chat("/god");
+    h.frames(&mut game, 90, |g, _| hold(g, Buttons::NONE));
+    spawn(&mut game, 1);
+    let damage = |g: &InGame| {
+        g.net()
+            .and_then(|n| n.own_combat())
+            .map(|c| c.combat.damage)
+    };
+    let mut healed = false;
+    for _ in 0..400 {
+        let before = damage(&game);
+        let target = nearest_enemy(&game, false);
+        let close = match (target, eye(&game)) {
+            (Some(t), Some(me)) => {
+                aim_at(&mut game, t);
+                t.distance(me) < 2.4
+            }
+            _ => false,
+        };
+        game.controls.override_move = Some(if close {
+            (0.0, 0.0, Buttons::PUNCH)
+        } else {
+            (1.0, 0.0, Buttons::NONE)
+        });
+        h.frame(&mut game);
+        if let (Some(b), Some(a)) = (before, damage(&game))
+            && a < b
+        {
+            healed = true;
+            break;
+        }
+    }
+    println!("kindling heal seen: {healed}");
+    h.frames(&mut game, 2, |g, _| hold(g, Buttons::NONE));
+    h.shot("combat_kindling");
+    h.frames(&mut game, 4, |g, _| hold(g, Buttons::NONE));
+    h.shot("combat_kindling_2");
+    game.send_chat("/killall");
+    h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
+    game.send_chat("/god");
+
     // Death screen.
     game.send_chat("/kill");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
