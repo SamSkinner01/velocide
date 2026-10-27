@@ -92,9 +92,10 @@ pub(crate) fn match_parts(
         .collect()
 }
 
-/// An enemy model's root with its drawn scale (`EnemyKind::scale`, about the model origin).
+/// An enemy model's root with its drawn scale (`EnemyKind::scale`, about the model origin) and
+/// the crouch / leap / melt squash of its state (`enemies::body_transform`).
 fn enemy_root(anim: &EnemyAnim, root: Mat4) -> Mat4 {
-    root * Mat4::from_scale(Vec3::splat(anim.kind.scale()))
+    root * enemies::body_transform(anim) * Mat4::from_scale(Vec3::splat(anim.kind.scale()))
 }
 
 fn texture_key(t: &TextureData) -> u64 {

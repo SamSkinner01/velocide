@@ -253,6 +253,7 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | Smelter (3.43 m) | `enemy_smelter.gltf` | body, head, mouth[head] *Core*, crucible[body] (tips about its front lip), hatch[crucible] *Core*, slag[crucible] *Glow*, arm_l/r[body], fore_l/r, thigh_l/r, shin_l/r |
 | Effigy (2.27 m) | `enemy_effigy.gltf` | post, figure[post] (rocks about its lashing), binds[figure] *Glow*, sigil[figure] *Core*, head[figure], wick[head] *Core* |
 | slag line | `fx_slag_strip.gltf` | strip *Glow* (molten cells), rims *Glow* (edge lines: the telegraph): a unit strip 1 m wide, 1 m along −Z, scaled per floor segment |
+| wax puddle | `fx_wax_puddle.gltf` | pool (lumpy flattened lobes, tinted with the Mould's wax), heart *Glow* (the molten middle and a drip run): 1 m in radius at the origin, scaled per Mould under a melting / re-forming one (`docs/enemies.md` "Leaps, pads, melting") |
 | Quill | `weapon_quill.gltf` | body, channel *Glow* (barrel flanks, nib slit), quill_0..4 (crest quills, each folds about its socket), tip_0..4[quill_i] *Glow* |
 | Bellows | `weapon_bellows.gltf` | body, board (lower bellows board, hinged at the front), pleats (squashed vertically about the hinge), glow *Glow* (gauge face, throat rings, vents) |
 | Arclash | `weapon_arclash.gltf` | body, glass (translucent capacitor), crawl *Glow* (filaments, turn about the bore), tips *Glow* (prong tips, strap spark, lamps, charge eye on the back), arcs *Glow* (hidden unless charging / on a strong shot) |

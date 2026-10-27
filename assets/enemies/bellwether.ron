@@ -100,4 +100,10 @@
         parry: (1.0, 0.9, 0.1),
     ),
     death_time: 1.2,
+    // Getting there (docs/enemies.md "Leaps, pads, melting"): the bell on its back keeps its
+    // hops short (5 m, 2 m up, a 0.45 s crouch); pads; stranded for 6 s it melts and re-forms
+    // 12-24 m from its target, out of sight.
+    leap: Some((distance: 5.0, up: 2.0, down: 6.0, crouch: 0.45)),
+    pads: true,
+    melt: (after: 6.0, sink: 0.6, rise: 0.8, near: 12.0, far: 24.0),
 )

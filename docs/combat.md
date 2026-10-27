@@ -392,6 +392,9 @@ Every field has a default. Local offsets: +X right, +Y up, −Z forward, from th
 | `drops` | `(heat, heat_radius)`: heal pool and radius of the death burst (old files: `blood_pool`, `blood_radius`) |
 | `colors` | `body` (wax), `accent`, `glow` (the heat: weak points, hit sprays, death bursts), `telegraph`, `parry` (sRGB) |
 | `death_time` | corpse duration (Dying state) |
+| `leap` | `Some((distance, up, down, crouch))`: leaps on its nav path across gaps / water and up and down ledges within those limits, after a `crouch` (s); `None` = never (default) |
+| `pads` | rides jump pads on its nav path (default true) |
+| `melt` | `(after, sink, rise, near, far)`: stranded for `after` s (0 = never) it melts (`sink` s) and re-forms (`rise` s) `near`..`far` m from its target (`docs/enemies.md` "Leaps, pads, melting") |
 
 `AttackDef`: `name`, `kind` (`Melee` / `Projectile` / `Slam` / `Dive`), `range`, `min_range`,
 `arc` (melee cone), `damage`, `knockback`, `knockback_up` (upward bias), `windup`, `strike`,
@@ -420,7 +423,9 @@ enemies hold their band and may strafe; stop at 60 % of melee range) → first u
 `track_target`, or tracks its aim laser; creeps at `windup_move_scale`) → `Strike` (melee arc /
 leap / dive / slam radius damage, or the projectile burst; ≥ `strike` s, a leap or dive ends
 early on the level) → `Recover` → `Chase`. `Stunned` (parry) → `Chase`. `Dying` (corpse, no
-hitboxes) → removed after `death_time`. Details per type: `docs/enemies.md`.
+hitboxes) → removed after `death_time`. Getting there: `Leap` (a jump on the nav path: a
+crouch, then airborne) → `Chase`; stranded → `Melt` → (moved) `Reform` → `Chase`. Details per
+type: `docs/enemies.md`.
 
 Targeting (every `retarget_interval`): a player who dealt ≥ `aggro_switch_fraction` of max
 health in the last 2 s; else keep the current target unless another visible one is closer
@@ -587,7 +592,7 @@ commands are disabled on this server" and never broadcast. Each command costs a 
 
 
 `/spawn <enemy> [count]` (8 m in front, on the ground, facing you), `/enemies`, `/killall`,
-`/god`, `/notarget`, `/give` (full health, no hard damage, thorns, cooldowns), `/kill`,
+`/melt` (every ground Mould melts and re-forms near its target), `/god`, `/notarget`, `/give` (full health, no hard damage, thorns, cooldowns), `/kill`,
 `/hurt <hp>`, `/ff [on|off]`, `/needle [distance]` (alias `/orb`: a Heron needle slowed to
 22 m/s flies at you: parry practice), `/ember [distance]` (an ember bomb is lobbed onto you),
 `/encounter <n>`, `/encounters`, `/tp <x> <y> <z>`, `/goto <exit|start|checkpoint

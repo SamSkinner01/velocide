@@ -338,6 +338,11 @@ its index, so generation is deterministic.
     line ignites or a Smelter's crucible spills; `SmelterSwingWindup` / `SmelterSwing` (the
     heave); `SmelterStep` (2 variants) footfalls with a slosh. `EffigyHit` (2 variants) a thunk
     into packed wax and the post creaking (instead of `EnemyHurt` on the training dummy).
+    Getting there (`docs/enemies.md` "Leaps, pads, melting"): `MouldMelt` (2 variants) a wet
+    sag falling away, the heat hissing into the floor and the wax bubbling as a stranded Mould
+    slumps into its puddle; `MouldRise` (2 variants) bubbling welling up, a wet groan climbing
+    and a slap as it stands out of a new one (both pitched by the Mould's size); a leap takes
+    off with `Jump` and lands with `Land` (`HeavyLand` for the heavies), pitched down.
 - **Feel** (`docs/feel.md`). `ShotPunch` (3 variants) is layered under every own shot with a
   kick of 0.3 or more, at 0.4 + 0.6 × kick volume: a 150 → 52 Hz kick-drum thump, a snap and a
   low noise body, driven, so light guns still land with weight. `ParryImpact` (−11) goes under

@@ -17,16 +17,16 @@ replication basics are in `docs/combat.md`.
 | `shared::sim::enemy::def` | `EnemyDef` format: `AttackKind::{Melee, Projectile, Slam, Dive, Toll, Pour}`, lunges / pounces, lobs, `AimLaser`, `jumpable`, `parry_strike`, `parry_reach`, `ai.reposition`, `Toll` / `Frenzy`, `Pour`, `Latch`, `Interrupt`, `Dummy`, `EliteDef` |
 | `shared::sim::enemy::special` | the toll (frenzy), the latch (cling, smother, slow, punched / dashed off), pours laying their line, interrupts, training dummies |
 | `shared::sim::enemy::hazard` | slag lines (`SlagLine`, `SimWorld::enemy_hazards`, `trace_floor`, burning, `kind::SLAG_LINE`) |
-| `shared::sim::enemy::ai` | the state machine, targeting (`is_targetable` hook), attacks (leap, dive, lob, laser), `move_enemy` (capsule collide-and-slide), push-apart, kill volumes, `frozen` handling, `SimWorld::build_nav`, `lob_velocity` |
-| `shared::sim::enemy::steer` | ground path following (`NavAgent`), edge guard, flight steering, `AiWorld` (nav grid + A* buffers + stats on `SimWorld::ai`) |
-| `shared::sim::nav` | `NavGrid`: build, agent classes (`NavClass` = footprint + headroom), `node_at`, `nearest_node`, `find_path` (A*), `walkable_line`, `smooth`, `ground_ok` |
+| `shared::sim::enemy::ai` | the state machine, targeting (`is_targetable` hook), attacks (leap, dive, lob, laser), getting there (nav leaps and pad rides, prowling, vantage points, stranded bookkeeping, melting and re-forming, `melt_enemies`), `move_enemy` (capsule collide-and-slide), push-apart, kill volumes, `frozen` handling, `SimWorld::build_nav`, `lob_velocity` |
+| `shared::sim::enemy::steer` | ground path following (`NavAgent`: routes with jumps, `Reach`), edge guard, flight steering (with detours), the re-form and vantage searches (`reform_site`, `vantage_site`), `AiWorld` (nav grid + A* buffers + stats on `SimWorld::ai`) |
+| `shared::sim::nav` | `NavGrid`: build, agent classes (`NavClass` = footprint + headroom + leap limits + pads), jump links (`NavJump`: leaps, pad rides), the leap arc (`leap_point`, `leap_velocity`), `node_at`, `nearest_node`, `find_path` (A*), `search` (Dijkstra, forward or over the reverse links), `walkable_line`, `smooth_route`, `ground_ok` |
 | `shared::sim::encounter` | encounter states (`SimWorld::encounters`), triggers, waves, co-op scaling, doors, rally teleport, reset hooks, `kind::ENCOUNTER` replication |
 | `server::combat` | routes `EncounterStarted` / `WaveStarted` / `EncounterCleared` (reliable, everyone) and `Fx::EnemySpawned` |
 | `server::commands` | dev `/spawn`, `/encounter <n>`, `/encounters`, `/needle`, `/ember`, `/killall`... |
-| `client::models::enemies` | the nine rigs and their pure pose functions (`docs/models.md`), the slag strip |
-| `client::ingame::combat::enemy_fx` | names / sizes / sounds per kind, the Heron's aim laser, wax-and-ember effects, the third roster's effects (toll, frenzy, elites, latch view, slag lines) |
+| `client::models::enemies` | the nine rigs and their pure pose functions (`docs/models.md`), the getting-there states (`Crouch`, `Airborne`, `Melt`, `Reform`, `body_transform`), the slag strip, the wax puddle (`puddle.rs`) |
+| `client::ingame::combat::enemy_fx` | names / sizes / sounds per kind, the Heron's aim laser, wax-and-ember effects, the third roster's effects (toll, frenzy, elites, latch view, slag lines), leap dust, melting and rising (`melt_burst`, `rise_burst`, `draw_puddle`) |
 | `client::ingame::encounter_hud` | banners + sounds for the encounter events, "WAVE 2/3 - 5 LEFT" readout |
-| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type, the nine-Mould lineup, its hit shapes drawn over it, elites, an arena encounter, spectating a teammate |
+| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type, the nine-Mould lineup, its hit shapes drawn over it, elites, an arena encounter, spectating a teammate, leaps and melting (`--getting-there`) |
 
 ## The five Moulds
 
@@ -313,6 +313,9 @@ thin ones (Gnawer, Harrier, Snuffer, the Heron's stilts) most of all. So every M
                                └── Latched (a latching leap reached someone) ──(punched / dashed: Stunned; let go: Recover)
  any state ──(killed)──▶ Dying (corpse, no hitboxes, death_time) ──▶ removed
  Windup ──(its interrupt weak point took enough damage)──▶ Stunned (the attack on cooldown)
+ Chase ──(on a jump's takeoff)──▶ Leap (crouch, then airborne) ──(lands)──▶ Chase
+ Chase ──(stranded for MeltDef::after)──▶ Melt (slumps into a puddle) ──▶ Reform (rises near
+       its target) ──▶ Chase
 ```
 
 * **Targeting** (every `retarget_interval`, or at once when the target became invalid): a player
@@ -341,11 +344,14 @@ thin ones (Gnawer, Harrier, Snuffer, the Heron's stilts) most of all. So every M
   (iterated), capped at `speed`; bursts fan evenly across `spread`. Lasers: `track_aim` turns
   `Enemy::aim` towards the target (chest + optional lead) at `track_rate`, locks for the last
   `lock` seconds; the projectile flies along `aim`.
-* **Chase movement**: melee enemies walk the nav grid to the target and stop at 60 % of their
-  shortest non-leap melee reach. Ranged enemies (Censer, Heron) walk until they see the target
-  within their band's max, then hold it: back off when closer than the min (if there is room),
-  strafe sideways, flip direction when blocked, when the strafe would break line of sight, every
-  ~2.5 s, and (`ai.reposition`, the Heron) after every ranged strike. Harriers circle (below).
+* **Chase movement**: melee enemies walk the nav grid to the target (leaping and riding pads
+  on the way: "Leaps, pads, melting" below) and stop at 60 % of their shortest non-leap melee
+  reach; with the target unreachable they **prowl** the end of their partial path. Ranged
+  enemies (Censer, Heron, Bellwether) walk until they see the target within their band's max
+  (to a **vantage point** when walking at it doesn't bring it into sight), then hold it: back
+  off when closer than the min (if there is room), strafe sideways, flip direction when
+  blocked, when the strafe would break line of sight, every ~2.5 s, and (`ai.reposition`, the
+  Heron) after every ranged strike. Harriers circle (below).
 * **Movement** (`move_enemy`): accelerate towards the desired velocity (ground: horizontal +
   gravity), capsule collide-and-slide against `MASK_MOVEMENT` with step-up (0.45 m), walkable
   hits followed like the player controller, ground snap, the capsule kept just outside the sweep
@@ -360,7 +366,8 @@ thin ones (Gnawer, Harrier, Snuffer, the Heron's stilts) most of all. So every M
   the nav column ~r + 0.35 m ahead: lava or a drop deeper than allowed (paths: 5.5 m;
   strafing, backing off, leaps, fallback steering: a step) makes it turn up to ±90° or stop; its
   own momentum is stopped dead at the edge. Knockback is exempt (launching enemies into lava is
-  a feature); so is a swatted Harrier falling.
+  a feature); so is a swatted Harrier falling, and so is the last 1.5 m onto a jump's takeoff
+  (the node itself is the guard: it sits right at the edge).
 * **Kill volumes**: an enemy whose feet enter one (or that falls below the level) dies through
   the damage pipeline (`Attack::World`, `Owner::World`).
 * **`SimWorld::frozen`** (results screen): living enemies drop their target and attack, idle and
@@ -378,6 +385,122 @@ along / pushes it off walls; the orbit turns round when a wall is close **or str
 (flipping under a roof made flyers dither in place). Flight uses the same collide-and-slide (no
 gravity), so it can't clip the level. While stunned (swatted) or dead it falls like a ground
 body.
+
+**Detours** (`steer::find_detour`): once the target has been out of sight for 0.75 s (or the
+orbit flips at a wall a second time within 1.7 s: dithering), the Harrier looks for a point
+that sees the target's chest and that a sphere sweep reaches from where it is — straight up
+first (3 / 6 / 9 m, no higher than its hover band allows: over a low wall), then 7 m out to
+either side of the line to the target at 60° / 100° / 140°, its orbit's side first, at its
+height or 3 m up (round a pillar) — and flies to it (≥ 0.6 × its speed, the feelers still
+active) until it is there, the target is back in sight, or 2 s pass; then it circles on from
+there. At most one search per Harrier every 0.5 s (≤ 15 ray + sweep pairs). Without a point
+it closes in as before. A Harrier hovering behind a 20 m pillar from its target is never blind
+for more than 55 ticks (one detour; without detours: up to 626 ticks, 10.4 s, nosing into the
+pillar).
+
+### Leaps, pads, melting (getting there)
+
+Players found the Moulds' movement lacking ("especially when they get stuck or don't cross
+water"): the grid had no links across gaps or for pads, drops were one-way, deep water is a
+kill volume, so a player on a floe, across a flooded break or on a pad-only gallery was out of
+reach, Moulds piled up at the water's edge or under a ledge, and one knocked onto a ledge it
+couldn't leave stayed there (stalling an arena or a grind wave). Now:
+
+| | leaps across / up / down | crouch | pads | melts after | re-forms (m from target) |
+|---|---|---|---|---|---|
+| Gnawer | 8 / 3.5 / 8 m | 0.3 s | yes | 6 s | 8–18 |
+| Snuffer | 8 / 4 / 8 m | 0.25 s | yes | 6 s | 8–16 |
+| Censer | 4.5 / 2 / 6 m | 0.45 s | yes | 6 s | 14–28 |
+| Heron | 7 / 2.5 / 7 m | 0.4 s | yes | 6 s | 20–40 |
+| Bellwether | 5 / 2 / 6 m | 0.45 s | yes | 6 s | 12–24 |
+| Gaoler, Smelter | — | — | yes | 6 s | 8–16, 8–18 |
+| Harrier | flies (detours, above) | | — | never | |
+
+(`EnemyDef::{leap, pads, melt}`; `leap: None` = never leaps.) The pack crawler that already
+pounces 8 m leaps furthest; the spidery Snuffer climbs highest; the robed Censer and the
+Bellwether with a bell on its back only hop; the Heron's stilts bound far but not high; the
+heavies don't leap at all — a 3.7 m Gaoler or a Smelter with a full crucible in the air would
+read wrong, and their wide footprint rarely has landings — but they ride pads and re-form.
+
+* **Leaps** (`AiState::Leap`): on its jump's takeoff the Mould faces the landing and
+  **crouches** (`LeapDef::crouch`; progress replicated, no telegraph glow: it isn't an attack),
+  then leaves the ground with `nav::leap_velocity` from where it actually stands to the landing
+  (the arc the nav build swept) and flies it ballistically (`move_enemy`, gravity). If a wall or
+  a lip steals more than half its horizontal speed, the flight is re-aimed at the landing with
+  the time left (≤ 1.5× the planned speed), so a grazed lip doesn't drop it back. Other Moulds
+  never shove a leaper off its arc (the push-apart skips it). A landing somebody stands on (or
+  is flying to) holds the crouch up to 0.75 s, then it picks another way. A stagger during the
+  crouch calls it off; knockback in the air is not corrected (knock it into the water). Landed
+  on the planned spot it follows its route on; anywhere else it re-plans.
+* **Pad rides**: it walks onto the floor under the pad and is launched there with the pad's
+  velocity (set, as for players), no crouch. Moulds only ride a pad on purpose (a route through
+  its link): walking over a pad plate doesn't throw them (players' pads fire on any overlap).
+* **Prowling**: a melee Mould at the end of a partial path (its target unreachable) paces side
+  to side across the line to its target at 45 % speed, facing it, turning at walls, ledges and
+  lava, every ~1.5 s and 2.5 m from where its path ended, instead of standing still.
+* **Vantage points** (`steer::vantage_site`): a ranged Mould whose target is out of sight (for
+  1.5 s while walking at it) or unreachable searches forward from its node (Dijkstra over its
+  links, ≤ 40 m of path, ≤ 3000 nodes) for nodes whose eye is within its band of the target's
+  chest, scores them by walking cost + distance from the band's middle, tests the sight lines
+  of the best 24 (≥ 1.5 m apart) and walks to the first that sees the target (given up after 4
+  s; one search a second per Mould). A Censer under a 5 m plateau backs off ~9 m and lobs.
+* **Stranded** bookkeeping, every tick of `Chase`: a Mould **in a fight** — ranged: seeing its
+  target within its band; melee: within 1.5 m of its reach, about level — isn't stranded
+  (neither is one winding up, striking or recovering). Otherwise it counts: a target that is
+  `Unreachable` counts every tick (prowling included); `Full` / `Far` count only while it isn't
+  getting anywhere (it moved < 1 m in the last 2 s window), and reset when it is; `OffGrid`
+  (standing on no node of its class: a prop, a beam) counts **three times** as fast while it
+  isn't moving. At `MeltDef::after` (6 s; 2 s off the grid) it **melts**.
+* **Melting** (`AiState::Melt`, `sink` 0.6 s): it slumps and sinks into a wax puddle where it
+  stands — no attacks, its pour line (if any) dropped, knockback ignored (a puddle doesn't
+  fly). It stays **hittable**: its hit shapes sink with its model (below), so a player who sees
+  it going can still finish it; killed, it dies as usual. Then it is moved to its re-form site,
+  facing its target, and **re-forms** (`AiState::Reform`, `rise` 0.8 s) — rising out of a new
+  puddle, equally hittable — and chases on.
+* **The re-form site** (`steer::reform_site`), searched once at the start of the melt (one
+  search a tick for all enemies; the next tick otherwise): back from the target's node over
+  the **reverse links** (doors as they are now — so never in a room the target can't be reached
+  from), ≤ 6000 nodes and 2.5 × `far` + 20 m of path, the nodes of its class from which the
+  target is reachable, never deadly or at a hazard edge, never with the feet in a kill volume,
+  at least 3 m from the target, not on another Mould (or another's re-form site), inside its
+  encounter's arena while the target fights there; scored by how far outside `near`..`far`
+  they are (×2) plus 5 % of the path cost; the first of the best 24 that is **out of the
+  target's sight** (eye to the Mould's eye) wins, else the best one. **No site** (an isolated
+  target: a pillar nothing reaches) → no melt; it prowls on and tries again in 3 s. A target
+  standing where this class can't (a floe too small for a Gaoler) while the Mould is already
+  within `far` → no melt either: re-forming wouldn't bring it closer, it waits at the edge.
+* **Wading: no** (decided from the level data). The only water is deep water in The Drowned
+  Chandlery, and every pool there is a pit with sheer sides: the beds lie 2.4 m (the C1 sluice)
+  to 6.4 m (the Great Wick's well) under the surface and the surface 0.5–1 m under the floors
+  round it (`docs/levels.md`). A wading Mould would have to drop 2.9–7 m into the pit and climb
+  that far back out, and the water is over the head of every Mould but the four tallest in the
+  shallowest pool (the sluice, which a leap crosses anyway). So wading would have changed
+  nothing but put tall Moulds at the bottom of pits; leaps carry Moulds over the water (onto
+  floes, across the breaks) and re-forming covers the rest. The level format stays as it is;
+  water still quenches a Mould knocked into it (all kill volumes kill enemies).
+* `/melt` (dev): every ground Mould melts on its next chasing tick, stranded or not
+  (`SimWorld::melt_enemies`).
+
+**Hit shapes while melting** (`Enemy::hitbox`): at melt depth *d* (`enemy::melt_depth`: the
+first three quarters of `Melt` sink it, the last three quarters of `Reform` raise it) every
+shape is sagged to `1 − 0.35 d` of its height about the feet and sunk `0.75 d` of the drawn
+height into the floor (`MELT_SAG`, `MELT_SINK`); the client draws the model with the same
+numbers, so what shows above the floor is what can be shot, down to the puddle (lag
+compensation records them like any hitbox).
+
+**Client** (`entities.rs`, `enemy_fx.rs`, `models::enemies`): `Leap` without `AIRBORNE` is
+drawn as `EnemyState::Crouch` (the Gnawer's pounce coil, the Snuffer's bunched legs, the others
+squashed down and out), with `AIRBORNE` as `Airborne` (the pounce / latch strike or a
+mid-stride, stretched at takeoff and tilted along the flight); grit and dust at takeoff and
+landing (`Jump` / `Land`, `HeavyLand` for the heavies, pitched by size). `Melt` / `Reform` use
+the kind's death slump at the melt depth, sagged and sunk into the floor (`body_transform`), over
+the **wax puddle** model (`ModelId::WaxPuddle`, `fx_wax_puddle.gltf`: lumpy lobes of the
+Mould's wax with its molten heart glowing in its heat colour; it spreads as the body sinks and
+drains away at the end of the slump, wells up first where it re-forms and is drawn back into the
+body as it rises — zero at both ends of the move, so the teleport never shows); molten wax
+slopping out (setting into wax splats) and steam as it melts (`MouldMelt`: a wet sag, a hiss,
+bubbling), wax bubbling up as it re-forms (`MouldRise`: bubbling, a rising groan, a slap) and
+a splash ring when it stands. Replays and spectating draw the same entities.
 
 ## Navigation grid (`shared::sim::nav`)
 
@@ -399,19 +522,68 @@ Built once per level from the collision world: by the server at startup
   so A*, straight-walk tests and string pulling all respect them: the Censer (2.6 m) walks under
   a 3 m lintel, the 3.4 m Heron goes round it (tested), the Gaoler needs the wide footprint and
   3.8 m.
-* **Links** (8 directions): step (≤ 0.45 m), continuous ramp (≤ 1.2 m per cell, midpoint on the
-  slope) or one-way **drop** (≤ 5.5 m), nothing in the way at knee / chest height. Diagonals
-  only where both orthogonal routes agree. **Jump pads and gaps have no links.**
-* **Doors**: nodes near a door brush are impassable while it is closed.
-* **Queries**: `node_at`, `nearest_node`, `walkable_line`, `find_path` (A*, octile-ish
-  heuristic ×1.1, costs distance + 0.5 × |Δy| + hazard, generation-stamped buffers, `max_expand`
-  budget → `Partial` path), `smooth` (string pulling), `ground_ok` (edge guard).
+* **Walking links** (8 directions): step (≤ 0.45 m), continuous ramp (≤ 1.2 m per cell,
+  midpoint on the slope) or one-way **drop** (≤ 5.5 m), nothing in the way at knee / chest
+  height. Diagonals only where both orthogonal routes agree.
+* **Jump links** (`NavJump`, one-way, built last; see below): **leaps** across gaps — over
+  lava and deep water too — and up / down ledges, and **pad rides**.
+* **Doors**: nodes near a door brush are impassable while it is closed; so is a jump whose arc
+  passes a door brush.
+* **Queries**: `node_at`, `nearest_node`, `walkable_line` (walking links only), `find_path`
+  (A* over walking links and the jumps the class may take, octile-ish heuristic ×1.1, costs
+  distance + 0.5 × |Δy| + hazard, a leap + `LEAP_COST` 5, a pad ride + `PAD_COST` 3,
+  generation-stamped buffers, `max_expand` budget → `Partial` path; `NavScratch::
+  last_budget_hit` tells a budget stop from an unreachable goal), `search` (Dijkstra forward
+  or over the **reverse links**, `for_each_predecessor`: every node it settles can reach the
+  start), `smooth_route` (string pulling that never skips across a jump: its takeoff and
+  landing stay waypoints, the landing carrying the jump), `ground_ok` (edge guard).
+
+**Jump links.** *Leaps* start from **edge nodes** (walkable, not deadly, some walking link
+missing): rays every 22.5° within ~25° of a missing link, marched in 0.5 m steps from 1 m to
+`LEAP_MAX_DISTANCE` 8 m; the first floor past a gap (a column with no floor at our level), or
+above / below the step and drop limits (up to `LEAP_MAX_UP` 4 m, down to `LEAP_MAX_DOWN` 8
+m), that isn't already a walking neighbour is a candidate (≤ 2 per ray). A candidate becomes a
+leap when
+
+* its **landing is safe**: walkable, not deadly, and 0.75 m further along the leap there is
+  floor at most 1 m lower that isn't deadly, or a wall to bump into — never a drop, lava or
+  water just past it (so a 1 m island in lava gets none; a 2.8 m floe does);
+* the **arc is clear**: the leap flies a fixed parabola (`leap_point`: through both ends, its
+  apex `leap_apex` = the higher end + 0.5 m + 15 % of the distance; its shape doesn't depend on
+  gravity, so the nav build sweeps exactly what the agent flies), checked first against the
+  grid's own columns (a floor inside the capsule's span or a measured headroom that ends in it
+  fails) and then by **capsule sweeps** along it in ~3 m chords (≤ ~10 cm under the arc),
+  riding 0.25 m above the feet: the tall clearance capsule (r 0.48 × 3.5 m: `jump_clear::TALL`,
+  Censer, Heron, Bellwether) first, and when that doesn't fit the narrow one (r 0.48 × 2 m:
+  `NARROW`, Gnawer, Snuffer); heavies don't leap (`WIDE` only on pad rides);
+* the feet **never pass through a kill volume** anywhere along the arc;
+* climbs that hit the lip from the wall's foot are retried with a **run-up** from up to two
+  cells further back (a 3 m ledge is taken from 1–2 m out, so the arc clears it).
+
+*Pad rides*: from the walkable floor under each pad's trigger, the launch (the pad *sets* the
+velocity, as `movement::step` does for players) is flown at 60 Hz with collide-and-slide for
+each clearance capsule (r 0.6 × 2 m, r 0.6 × 3.5 m, r 1.3 × 3.8 m, gravity
+`MovementTuning::default().gravity`) until it lands on a floor that class can stand on; one
+link per landing, carrying the capsules that got there. Duplicates (takeoff, landing) merge.
+The links are stored sorted by takeoff with a reverse index by landing.
+
+**Agent classes** (`NavClass`) carry their leap limits (`with_leaps(distance, up, down)` from
+`EnemyDef::leap`) and whether they ride pads (`EnemyDef::pads`); `can_jump` checks a link's
+clearance bit and those limits, A* checks the landing's passability (headroom, the wide
+footprint) and its door like any node.
 
 **Path following** (`NavAgent`, `steer::ground_velocity`): straight walk when `walkable_line`
 allows it; otherwise A* (at most **4 searches per tick** for all enemies, ≤ 3000 nodes each),
 string-pulled waypoints, re-planned every `repath_interval` (staggered), when the goal moved
-> 1.5 m + 20 %, or when stuck (< 0.5 m in 0.5 s → re-plan + side-step). A partial path ends at
-the closest reachable point and the enemy waits there (ranged enemies still shoot).
+> 1.5 m + 20 %, or when stuck (< 0.5 m in 0.5 s → re-plan + side-step). Each plan records its
+**`Reach`**: `Full` (a path or a straight walk), `Far` (the search hit its budget: progress
+decides), `Unreachable` (the open set ran dry: the partial path ends as close as it gets),
+`OffGrid` (the agent stands on no node of its class). A waypoint reached by a jump is never
+passed by proximity: the agent walks onto the jump's takeoff node (slowing down within 1.5 m,
+trusted by the edge guard) and within 0.3 m on the ground hands the jump to the AI
+(`NavAgent::jump_ready`); after landing on the planned spot it follows the route on from the
+landing (`NavAgent::landed`), anywhere else it re-plans. At the end of a partial path melee
+enemies prowl and ranged ones look for a vantage point (below).
 
 ### Measurements (release build)
 
@@ -422,8 +594,55 @@ the closest reachable point and the enemy waits there (ranged enemies still shoo
 | `movement_test` | 202 × 262 | 53 824 | 50 384 / 45 028 / 0 / 480 | 382 308 | 25 ms | 50 384 / 50 384 / 50 384 / 45 008 |
 
 On the campaign 13 950 walkable nodes are reachable from the spawns / checkpoints / enemy
-spawns, 1 687 columns have stacked walkable floors and 320 walkable floors lie over lava. A*
-start → exit: 0.15 ms; an arena spawn → its rally point: 2 µs.
+spawns (walking links), 1 687 columns have stacked walkable floors and 320 walkable floors lie
+over lava. A* start → exit: 0.15 ms; an arena spawn → its rally point: 2 µs.
+
+**Jump links and build time** (release, `enemies_nav -- --nocapture`, measured on a 16-core
+machine loaded by parallel builds, load ~14–20; "before" = the grid without jump links, same
+machine at the start of the work):
+
+| level | build before → after | of which jump links | leaps (over lava / water) | pad rides | arc chord sweeps |
+|---|---|---|---|---|---|
+| `crucible_of_veins` | 33.0 → 57.2 ms | 30.7 ms | 7 306 (1 304) | 7 | 41 868 |
+| `spire_of_wicks` | 28.0 → 60.3 ms | 38.1 ms | 4 495 (343) | 5 | 32 189 |
+| `drowned_chandlery` | 18.0 → 38.6 ms | 24.3 ms | 4 674 (1 008) | 5 | 25 852 |
+| `cistern_nine` | 16.8 → 37.5 ms | 23.2 ms | 6 642 (264) | 2 | 36 561 |
+| `knell_yard` | 15.0 → 38.5 ms | 25.9 ms | 4 010 (616) | 12 | 26 320 |
+| `ingot_run` | 14.7 → 37.8 ms | 26.0 ms | 6 093 (204) | 2 | 36 656 |
+| `furnace_ring` | 44.1 → 96.7 ms | 61.0 ms | 6 088 (56) | 4 | 47 283 |
+| `tallow_works` | 17.8 → 35.7 ms | 21.7 ms | 2 948 (307) | 6 | 20 874 |
+| `wickmarket` | 22.4 → 55.8 ms | 38.9 ms | 5 053 (48) | 4 | 34 289 |
+| `vestry` | 5.9 → 15.7 ms | 10.9 ms | 2 833 (0) | 3 | 15 604 |
+| `movement_test` | 29.4 → 60.1 ms | 37.0 ms | 15 750 (92) | 1 | 70 760 |
+
+The grid is built once per level (at server start, reused across matches on the same level,
+`server::lobby`); the Furnace Ring's octagonal tiers (many turned boxes) make its sweeps the
+dearest. Cuts that got it here: rays only within ~25° of a missing link, at most 2 candidates
+per ray, the tall capsule swept first (in the open it clears for both), ~3 m chords, and the
+grid's own columns rejecting most blocked arcs before any physics.
+
+**Reachability** (`enemies_nav reachability_per_class_on_every_level`): how much of the floor
+players can reach (approximated by walking + every leap + every pad from the player spawns and
+checkpoints, doors open; players do more) each ground Mould reaches from there, counted over
+the part of it the Mould fits on, walking only (before) → with its leaps and pads (after):
+
+| level | player floor (nodes) | Gnawer | Snuffer | Censer | Heron | Bellwether | Gaoler | Smelter |
+|---|---|---|---|---|---|---|---|---|
+| Crucible of Veins | 14 017 | 86 → 100 % | 86 → 100 % | 86 → 100 % | 86 → 100 % | 86 → 100 % | 87 → 100 % | 87 → 100 % |
+| Spire of Wicks | 8 256 | 98 → 100 % | 98 → 100 % | 98 → 100 % | 98 → 100 % | 98 → 100 % | 96 → 97 % | 96 → 97 % |
+| The Drowned Chandlery | 6 249 | 93 → 100 % | 93 → 100 % | 94 → 99 % | 94 → 99 % | 94 → 99 % | 96 → 98 % | 96 → 98 % |
+| Cistern Nine | 5 292 | 95 → 100 % | 95 → 100 % | 95 → 99 % | 95 → 99 % | 95 → 99 % | 98 → 98 % | 98 → 98 % |
+| Knell Yard | 2 600 | 93 → 100 % | 93 → 100 % | 93 → 100 % | 93 → 100 % | 93 → 100 % | 84 → 84 % | 84 → 84 % |
+| Ingot Run | 4 028 | 92 → 98 % | 92 → 100 % | 92 → 98 % | 92 → 98 % | 92 → 98 % | 93 → 94 % | 93 → 94 % |
+| Furnace Ring | 7 052 | 97 → 100 % | 97 → 100 % | 97 → 98 % | 97 → 100 % | 97 → 98 % | 49 → 49 % | 49 → 49 % |
+| Tallow Works | 3 764 | 93 → 100 % | 93 → 100 % | 93 → 99 % | 93 → 100 % | 93 → 99 % | 96 → 98 % | 96 → 98 % |
+| Wickmarket | 5 583 | 91 → 95 % | 91 → 100 % | 91 → 93 % | 90 → 94 % | 90 → 93 % | 87 → 93 % | 87 → 93 % |
+| The Vestry | 2 353 | 70 → 100 % | 70 → 100 % | 70 → 99 % | 70 → 100 % | 70 → 100 % | 82 → 82 % | 82 → 82 % |
+
+What is still out of reach is out of reach for good reasons: the narrow classes miss only
+floors beyond their own limits (the Censer's 2 m climbs, Wickmarket's awnings), the heavies
+everything only a leap reaches (half of the Furnace Ring's tiers for the wide footprint from the
+spawns) — that is what re-forming is for.
 
 **Per-tick AI cost** (`shared/tests/enemies_perf.rs`): 4 players running and jumping around the
 Furnace Cathedral (arena 5) against **67 aware enemies of all eight fighting types** (every
@@ -437,6 +656,17 @@ preempted ticks up to ~4 ms). ~0.7 A* searches per tick (≈155 nodes each, 14 %
 deferred by the budget), ~2.8 straight-walk plans per tick.
 No enemy fell into the chasm or the lava pools (pouncing Gnawers did, before the leap checked
 its whole airborne arc).
+
+With leaps, prowling, vantage points, detours and melting (release, the same machine and
+load as the build times above): the campaign crowd **avg 0.227 → 0.190 ms, p99 0.409 → 0.313
+ms, max 0.575 → 0.424 ms** (noise dominates: no jumps fall in that arena; 63 vantage searches,
+5 detours in 15 s), and a new scenario, **the Great Wick finale** (`the_great_wick_finale_
+with_players_on_the_floes`: all three waves of the Chandlery's encounter 4 plus a copy of every
+Mould, 54 enemies, two players out on wax floes in the flooded well, one on a gallery, one
+running the floor ring): **avg 0.226 ms, p99 0.383 ms, max 0.518 ms** with 106 leaps (onto and
+between the floes), 37 Harrier detours and 5 heavies that chose not to melt (their targets on
+floes they can't stand on) in 15 s; nobody drowned (a Gnawer did, mid-leap, before leapers were
+exempt from the push-apart and waited for a free landing). All far under the 2 ms budget.
 
 ## Arena encounters (`shared::sim::encounter`)
 
@@ -518,25 +748,40 @@ The expansion (protocol 8, `docs/expansion.md`): enemy kinds `BELLWETHER` 25, `S
 `state` = width in cm, `aux` = ignition tick, `flags` = `slag_flags::{LIVE, COOLING}`; 141–143
 free); enemy projectile kinds 82–95 are unused (no new enemy projectiles).
 
+Getting there (**`PROTOCOL_VERSION` 10**): three new `AiState` values in the enemy entity's
+`state`, nothing else on the wire (no new flags, no new fields, the player's own state
+untouched):
+
+| state | value | `aux` progress (bits 0–7) | flags | what the client draws |
+|---|---|---|---|---|
+| `Leap` | 9 | through the crouch (`LeapDef::crouch`), then through the planned flight | `AIRBORNE` clear while crouching, set in the air (as for any airborne enemy) | the crouch, then the flight tilted along `velocity` |
+| `Melt` | 10 | through the slump (`MeltDef::sink`) | — | sinking into its puddle (`melt_depth`) |
+| `Reform` | 11 | through the rise (`MeltDef::rise`) | — | rising out of a new puddle |
+
+The move from the melt to the re-form site happens between a `Melt` and a `Reform` snapshot;
+the puddle is drawn at zero size at both ends of it, so whether the client snaps it (moved
+more than 3 m a tick: `client::net::interpolation::TELEPORT_SPEED`) or interpolates a short
+move, nothing visible slides. Older clients refuse to connect (protocol 9 ≠ 10).
+
 ## Dev commands
 
 `/spawn gnawer 4`, `/spawn censer 2`, `/spawn harrier 3`, `/spawn gaoler`, `/spawn heron`,
 `/spawn bellwether`, `/spawn snuffer 2`, `/spawn smelter`, `/spawn effigy` (8 m in front,
 facing you; add `elite` for elites: `/spawn gaoler 1 elite`), `/enemies`, `/killall`, `/needle [dist]` (alias `/orb`: a needle
 slowed to 22 m/s flies at you, parry practice), `/ember [dist]` (an ember bomb is lobbed onto
-you), `/encounter <n>` starts arena encounter *n*, `/encounters` lists their phases, `/god`,
-`/notarget` as before.
+you), `/encounter <n>` starts arena encounter *n*, `/encounters` lists their phases, `/melt`
+(every ground Mould melts now and re-forms near its target), `/god`, `/notarget` as before.
 
 ## Tests
 
 ```text
 cargo test -p shared --test enemies_ai -- --nocapture    # behaviour per type in test arenas
 cargo test -p shared --test enemies_expansion -- --nocapture   # toll, latch, pour, Effigy, elites, scaling
-cargo test -p shared --test enemies_nav -- --nocapture   # grid on every level, classes, connectivity, lava
-cargo test -p shared --test enemies_perf -- --nocapture  # 55 enemies on the campaign, per-tick cost
+cargo test -p shared --test enemies_nav -- --nocapture   # grid on every level, classes, connectivity, lava, leaps, reachability
+cargo test -p shared --test enemies_perf -- --nocapture  # 67 enemies on the campaign, the Great Wick finale: per-tick cost
 cargo test -p shared --test combat_enemy --test combat_parry --test combat_replication
 cargo test -p server --test encounter_crucible           # encounters end to end (real server + clients)
-cargo run -p client --release --example enemy_shots -- out/   # screenshots (--third: only the third roster, --spectate: only spectating)
+cargo run -p client --release --example enemy_shots -- out/   # screenshots (--third: only the third roster, --spectate: only spectating, --getting-there: leaps and melting)
 cargo run -p client --release --example models_view -- --only gaoler   # model pose sheets
 ```
 
@@ -597,9 +842,34 @@ cargo run -p client --release --example models_view -- --only gaoler   # model p
   every class has room, player spawns on the grid; on the campaign every gnawer / gaoler spawn
   has a path for its own class to its arena centre and both ways to the rally point, censer
   spawns are on the grid; every path node is outside kill volumes and the route never crosses
-  lava; stacked floors and bridges over lava exist and are safe; no link climbs more than a
-  ramp; unit tests for classes vs headroom / footprint, walls/gaps, a ramp to a platform and the
-  one-way drop.
+  lava; stacked floors and bridges over lava exist and are safe; no walking link climbs more
+  than a ramp; on every shipped level no jump lands on (or takes off from) a deadly node or in a
+  kill volume, and no leap's arc passes through one; the reachability per class (above). Unit
+  tests: classes vs headroom / footprint, walls/gaps, a ramp to a platform and the one-way drop;
+  the leap arc passes both ends and its apex and `leap_velocity` flies exactly it at any
+  gravity; leaps across a 6 m water strip within the class limits (8 m yes, 4.5 m no, walking
+  no; nothing on the arc or the path in the water); walking round a bridge beats a leap that
+  saves little, far from the bridge the leap wins; no leap under a low block, and under a 4 m
+  overhang the narrow class leaps where the tall one can't; a wide class never leaps; no leap
+  onto an island with lava right past it; a 3 m ledge climbed with a run-up (3.5 m climber yes,
+  2 m no), nobody onto a 7.5 m one but a leaper comes down it; pad rides land where the pad
+  throws (on the platform, the wide capsule too) and only riders use them; every successor
+  link has its reverse among the predecessors.
+* **Getting there** (`enemies_ai.rs`): a Gnawer crosses the Drowned Chandlery's flooded break
+  (C2 Spool Walk) in 1.95 s with a leap and bites; a Gnawer and a Snuffer leap onto the player's
+  floe in the Wax Press (1.9 / 2.8 s) while a Gaoler waits at the water's edge (< 9 m) without
+  melting; a leaping Gnawer punched back over the water mid-air falls in and is quenched (no
+  guiding a knocked leap); a Gaoler rides a pad up onto a 6 m ledge; a Gaoler stranded on a 7 m block prowls
+  the edge (16.5 m paced), melts after 6.6 s (0.6 s alert + 6 s), the slump takes 36 ticks, it
+  rises on the floor 8.5 m from the player (in its 8–16 m band) and attacks; a Gnawer flung by
+  a blast onto a 10 m block re-forms on the floor 6.4 s after landing and reaches the player;
+  six Moulds stranded on pillars all re-form, none in the lava, the water (or within 1 m of
+  either), the closed room or on another; a Censer under a 5 m plateau backs off to a vantage
+  point and lobs (never melting); a Harrier behind a 20 m pillar is never blind for more than
+  55 ticks (626 without detours). Every leap in them: the Mould never in a kill volume.
+  `client::models` `getting_there_states_squash_sink_and_rise`: every Mould crouches, stretches,
+  sinks below the floor at full melt and stands again, the crouch without telegraph glow, the
+  puddle zero at both ends.
 * **Combat** (`combat_enemy.rs`, `combat_parry.rs`, `combat_replication.rs`): the Gnawer chases
   and bites (14, `GNAWER [BITE]`, 24-tick telegraph) and replicates its telegraph; line of
   sight; targeting and aggro; co-op scaling; punches knock Gnawers back; enemies don't hurt each
@@ -620,6 +890,13 @@ refit: the lineup at its new sizes with the hit shapes over it from the front an
 weak point on its part: jaws, braziers, the heart, helm and lantern, the lens, the bell, the
 wick, hatch and head, the Effigy's head and sigil; the padded shapes past every silhouette),
 the latched Snuffer at its old size in the victim's view, and spectating (`docs/style_modes.md`).
+Getting there (`--getting-there`): two Gnawers in the air arms up over the edge of the 3 m
+block, then landed on it; on the Drowned Chandlery a Gnawer crouched at the water's edge (the
+hazard kerb in front of it), in the air over the water towards the floe, landed on it; the
+lineup of seven ground Moulds as `/melt` takes them (one already flat), the Smelter and the
+Gaoler sunk to their waists in dark wax puddles with orange hearts, the puddles alone, a Censer's
+lantern coming up out of one, and all of them standing again inside splash rings (the Smelter
+already pouring at the player).
 
 ## Known limitations / next steps
 
@@ -631,15 +908,23 @@ the latched Snuffer at its old size in the victim's view, and spectating (`docs/
 * A Snuffer latched onto a player rides through walls with them (no collision while latched;
   it depenetrates when it lets go).
 
-* **No nav links for jump pads / gaps**: walkers never use pads; pad-only ledges only hold the
-  ranged enemies that spawn there.
-* Drops are one-way and up to 5.5 m; enemies knocked onto a ledge they can't leave stay there.
+* Leaps are linked from edge nodes along 16 ray directions only: a landing reachable only at
+  an odd angle from a long edge may be missed (re-forming covers it). The tall clearance
+  capsule is r 0.48 × 3.5 m; the r 0.7 Snuffer / Bellwether rely on the guided flight for the
+  last 0.2 m.
+* Moulds don't ride a pad by walking over it (only on purpose, on a route through its link),
+  unlike players; and they don't wade (above).
+* Re-forming prefers a spot out of the target's sight; in a wide open arena there is none in
+  the band and they rise in plain view. A target nothing can reach (a pillar top) makes melee
+  Moulds prowl below indefinitely (ranged ones still shoot).
+* The leap links cost 10–60 ms of nav build per level (once per level; above).
 * The grid is 1 m and the narrow clearance capsule is r 0.5: the r 0.6 Gnawer / Censer rely on
   collide-and-slide in 1 m gaps; the wide class is an erosion of the grid, not a real r 1.3
   capsule test.
 * Players and enemies don't block each other (player movement must stay predictable).
-* Harriers have no pathfinding: one with no line of sight flies straight at its target and
-  relies on the feeler sweeps. A pillar exactly on its circle makes it turn back and forth.
+* Harriers have no pathfinding: with no line of sight they look for a detour point (straight
+  up, or 7 m to the side) and otherwise fly straight at the target relying on the feeler sweeps;
+  a maze of walls can still hold one.
 * The aim laser is clipped by remote players' approximate capsules and by the camera, not by
   enemies standing in the way (the needle isn't either: enemy projectiles never hit enemies).
 * Enemy projectiles already in flight when the world freezes still land.

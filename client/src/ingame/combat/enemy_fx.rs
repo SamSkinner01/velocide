@@ -1182,3 +1182,136 @@ impl SlagView {
         }
     }
 }
+
+// ---- getting there: leaps, melting and re-forming (docs/enemies.md) -------------------------
+
+/// Dust and grit thrown up where a Mould takes off on a leap or lands from one (`size`: about
+/// its body radius).
+pub fn leap_dust(effects: &mut Effects, rng: &mut Rng, feet: Vec3, size: f32) {
+    for _ in 0..8 {
+        let a = rng.angle();
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        effects.spawn(Particle {
+            position: feet + dir * size * 0.6 + Vec3::Y * 0.12,
+            velocity: dir * rng.range(1.5, 3.5) + Vec3::Y * rng.range(0.3, 1.2),
+            gravity: 1.5,
+            drag: 2.5,
+            max_life: rng.range(0.35, 0.6),
+            size: Vec2::splat(rng.range(0.3, 0.5) * size.max(0.6)),
+            end_scale: 2.2,
+            color: Vec4::new(0.5, 0.46, 0.42, 0.45),
+            end_alpha: 0.0,
+            texture: FxTex::Smoke,
+            rotation: rng.angle(),
+            ..Default::default()
+        });
+    }
+}
+
+/// A Mould slumping into its puddle (`AiState::Melt` starting): molten wax slopping out over
+/// the floor (setting into splats), its heat steaming off.
+pub fn melt_burst(effects: &mut Effects, rng: &mut Rng, feet: Vec3, size: f32, wax: Vec4) {
+    for _ in 0..10 {
+        let a = rng.angle();
+        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+        effects.spawn(Particle {
+            position: feet + Vec3::Y * rng.range(0.3, 1.2),
+            velocity: dir * rng.range(1.0, 3.0) + Vec3::Y * rng.range(0.5, 2.0),
+            gravity: 14.0,
+            max_life: 1.2,
+            size: Vec2::splat(rng.range(0.07, 0.14)),
+            color: wax,
+            end_alpha: 1.0,
+            texture: FxTex::WaxDrop,
+            collide: Some(OnHit::Splat(DecalKind::Wax, rng.range(0.3, 0.6) * size)),
+            ..Default::default()
+        });
+    }
+    melt_steam(effects, rng, feet, size);
+}
+
+/// Steam and heat leaving a melting or rising Mould (call a few times a second).
+pub fn melt_steam(effects: &mut Effects, rng: &mut Rng, feet: Vec3, size: f32) {
+    effects.spawn(Particle {
+        position: feet
+            + Vec3::new(
+                rng.range(-size, size) * 0.7,
+                0.15,
+                rng.range(-size, size) * 0.7,
+            ),
+        velocity: Vec3::new(0.0, rng.range(0.6, 1.4), 0.0),
+        gravity: -0.6,
+        drag: 1.2,
+        max_life: rng.range(0.7, 1.2),
+        size: Vec2::splat(rng.range(0.35, 0.6)),
+        end_scale: 2.4,
+        color: Vec4::new(0.78, 0.76, 0.72, 0.3),
+        end_alpha: 0.0,
+        texture: FxTex::Smoke,
+        rotation: rng.angle(),
+        ..Default::default()
+    });
+}
+
+/// The puddle welling up where a Mould re-forms (`AiState::Reform` starting): wax bubbling up
+/// out of the floor.
+pub fn rise_burst(effects: &mut Effects, rng: &mut Rng, feet: Vec3, size: f32, wax: Vec4) {
+    for _ in 0..8 {
+        let a = rng.angle();
+        let r = rng.range(0.1, 0.8) * size;
+        effects.spawn(Particle {
+            position: feet + Vec3::new(a.cos() * r, 0.05, a.sin() * r),
+            velocity: Vec3::new(0.0, rng.range(1.5, 3.5), 0.0),
+            gravity: 12.0,
+            max_life: 0.6,
+            size: Vec2::splat(rng.range(0.06, 0.12)),
+            color: wax,
+            end_alpha: 1.0,
+            texture: FxTex::WaxDrop,
+            ..Default::default()
+        });
+    }
+    melt_steam(effects, rng, feet, size);
+}
+
+/// Radius (m) of the wax puddle under a Mould melting / re-forming at `progress` of its state
+/// (`melt` true for `Melt`), for a Mould whose body is `size` across (its hit radius): it
+/// spreads as the body sinks and drains away at the very end of the slump; where it re-forms it
+/// wells up first and is drawn back into the body as it rises. Zero at both ends of the
+/// teleport between the two, so the move never shows.
+pub fn puddle_radius(melt: bool, progress: f32, size: f32) -> f32 {
+    let s = |t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let p = progress.clamp(0.0, 1.0);
+    let k = if melt {
+        s(p / 0.6) * (1.0 - s((p - 0.86) / 0.14))
+    } else {
+        s(p / 0.22) * (1.0 - s((p - 0.55) / 0.45))
+    };
+    k * size * 1.8
+}
+
+/// Draws the wax puddle under a melting / re-forming Mould: tinted with its wax, its molten
+/// heart in its heat colour (dimmer as the body has sunk away from it).
+pub fn draw_puddle(lib: &ModelLibrary, e: &EntityState, radius: f32, draws: &mut Vec<DrawItem>) {
+    if radius < 0.02 {
+        return;
+    }
+    let spin = (e.id.0 as f32 * 2.399).rem_euclid(std::f32::consts::TAU);
+    let root = glam::Mat4::from_scale_rotation_translation(
+        Vec3::new(radius, radius.min(1.0), radius),
+        Quat::from_rotation_y(spin),
+        e.position + Vec3::Y * 0.02,
+    );
+    let heat = heat_color(e.kind);
+    let p = palette();
+    let tint = Tint {
+        body: wax_color(e.kind),
+        glow: Vec4::new(heat.x * 1.6, heat.y * 1.6, heat.z * 1.6, 1.0),
+        glow_color: p.model_glow(p.weak_point),
+        ..Default::default()
+    };
+    lib.draw_model(ModelId::WaxPuddle, root, &tint, draws);
+}

@@ -546,6 +546,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             pose.rotate_move(HEAD, head, Vec3::new(0.35 * m, -0.4 * m, -0.3 * m));
         }
         EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
     }
 
     pose.set(

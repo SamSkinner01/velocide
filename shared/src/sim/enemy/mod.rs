@@ -119,6 +119,14 @@ pub enum AiState {
     /// Clinging to a player (a Snuffer's latch; `owner` = the victim, progress over the
     /// latch's `max_time`).
     Latched = 8,
+    /// A jump on its nav path: the crouch (progress over `LeapDef::crouch`, on the ground),
+    /// then airborne (`AIRBORNE` flag; progress over the planned flight) until it lands. A pad
+    /// ride skips the crouch.
+    Leap = 9,
+    /// Stranded: slumping into a wax puddle (progress over `MeltDef::sink`); no attacks.
+    Melt = 10,
+    /// Rising out of a puddle where it re-formed (progress over `MeltDef::rise`); no attacks.
+    Reform = 11,
 }
 
 impl AiState {
@@ -133,9 +141,53 @@ impl AiState {
             6 => AiState::Stunned,
             7 => AiState::Dying,
             8 => AiState::Latched,
+            9 => AiState::Leap,
+            10 => AiState::Melt,
+            11 => AiState::Reform,
             _ => return None,
         })
     }
+}
+
+/// A melting Mould at depth `d` ([`melt_depth`]) has sunk `MELT_SINK × d` of its drawn height
+/// into the floor and sagged to `1 − MELT_SAG × d` of its height (about its feet): fully
+/// melted, only a puddle shows. Its hit shapes (`Enemy::hitbox`) and its drawn model
+/// (`client::models::enemies::body_transform`) follow the same numbers.
+pub const MELT_SINK: f32 = 0.75;
+pub const MELT_SAG: f32 = 0.35;
+
+/// How far into its puddle a Mould is from its replicated state and progress (0 = standing, 1
+/// = only the puddle left): the slump takes the first three quarters of `Melt`, the rise the
+/// last three quarters of `Reform`. Its hit shapes sink with it (`Enemy::hitbox`); clients
+/// draw the same curve.
+pub fn melt_depth(state: AiState, progress: f32) -> f32 {
+    let smooth = |t: f32| {
+        let t = t.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    match state {
+        AiState::Melt => smooth(progress / 0.75),
+        AiState::Reform => 1.0 - smooth((progress - 0.25) / 0.75),
+        _ => 0.0,
+    }
+}
+
+/// A jump on the nav path being made (`AiState::Leap`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LeapPlan {
+    /// The jump link (`NavGrid::jump`) and the index of the waypoint it lands on.
+    pub jump: u32,
+    pub waypoint: usize,
+    /// Landing feet.
+    pub to: Vec3,
+    /// A pad ride (`LevelDef::jump_pads` index) instead of a leap.
+    pub pad: Option<u16>,
+    /// Left the ground (the crouch is over).
+    pub launched: bool,
+    /// Planned horizontal speed of the flight (m/s).
+    pub speed: f32,
+    /// Knocked about in the air: no more guiding it onto the landing.
+    pub knocked: bool,
 }
 
 /// The parryable phase of a telegraphed attack (ticks, inclusive) and its sequence number.
@@ -228,6 +280,30 @@ pub struct Enemy {
     pub last_hurt_tick: u32,
     /// The slag line of the pour being wound up (removed if the pour never happens).
     pub pour_line: Option<NetId>,
+
+    // ---- getting there: leaps, melting, vantage points, detours (docs/enemies.md) ----
+    /// The jump being made (`AiState::Leap`).
+    pub leap: Option<LeapPlan>,
+    /// Where it re-forms (feet) once its melt is over (`AiState::Melt`).
+    pub reform_at: Option<Vec3>,
+    /// Stranded time (ticks; off the nav grid counts triple): melts at `MeltDef::after`.
+    pub stranded: u32,
+    /// Progress check: where it stood when the current window started, ticks left in it, and
+    /// whether the last window moved it (≥ 1 m).
+    pub progress_from: Vec3,
+    pub progress_in: u32,
+    pub progressing: bool,
+    /// Ranged enemies without sight of their target: a spot (feet) to walk to that has it, and
+    /// the tick to give up on it.
+    pub vantage: Option<(Vec3, u32)>,
+    /// Tick of the next vantage / detour search allowed.
+    pub search_after: u32,
+    /// Flyers: a detour point (hover centre) to fly to round or over what hides the target,
+    /// and the tick to give up on it; the tick of the last orbit flip at a wall.
+    pub detour: Option<(Vec3, u32)>,
+    pub last_flip: u32,
+    /// Melt on its next chasing tick, stranded or not (dev `/melt`, `SimWorld::melt_enemies`).
+    pub melt_now: bool,
 }
 
 impl Enemy {
@@ -286,7 +362,32 @@ impl Enemy {
             latch_tick_in: 0,
             last_hurt_tick: 0,
             pour_line: None,
+            leap: None,
+            reform_at: None,
+            stranded: 0,
+            progress_from: position,
+            progress_in: 0,
+            progressing: true,
+            vantage: None,
+            search_after: 0,
+            detour: None,
+            last_flip: 0,
+            melt_now: false,
         }
+    }
+
+    /// Progress (0..1) through the current timed state (0 for untimed states).
+    pub fn state_progress(&self) -> f32 {
+        if self.state_len > 0 {
+            (self.state_ticks as f32 / self.state_len as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// How far into its puddle it is ([`melt_depth`]).
+    pub fn melt_depth(&self) -> f32 {
+        melt_depth(self.state, self.state_progress())
     }
 
     /// Frenzied by a toll at `tick`.
@@ -333,9 +434,14 @@ impl Enemy {
         self.position
     }
 
-    /// Navigation size class (ground enemies).
+    /// Navigation class (ground enemies): its size, its leap limits (`EnemyDef::leap`) and
+    /// whether it rides pads.
     pub fn nav_class(&self) -> NavClass {
-        NavClass::for_size(self.def.radius, self.def.height)
+        let class = NavClass::for_size(self.def.radius, self.def.height).with_pads(self.def.pads);
+        match self.def.leap {
+            Some(l) => class.with_leaps(l.distance, l.up, l.down),
+            None => class,
+        }
     }
 
     /// Relative weight when enemies push each other apart (a training dummy doesn't budge).
@@ -380,10 +486,25 @@ impl Enemy {
     }
 
     /// Body capsule + extra body shapes + weak point spheres (`HitPart::Weak(i)`), sized to
-    /// the drawn model rather than the movement capsule ([`EnemyDef::hitbox`]).
+    /// the drawn model rather than the movement capsule ([`EnemyDef::hitbox`]). A melting /
+    /// re-forming Mould stays hittable, its shapes sinking with it into the floor as its model
+    /// does ([`MELT_SINK`], [`MELT_SAG`]): what is still above the floor can be shot, down to
+    /// the puddle.
     pub fn hitbox(&self) -> Hitbox {
-        self.def
-            .hitbox(HitTarget::Entity(self.id), self.feet(), self.yaw)
+        let mut hitbox = self
+            .def
+            .hitbox(HitTarget::Entity(self.id), self.feet(), self.yaw);
+        let depth = self.melt_depth();
+        if depth > 0.0 {
+            let sag = 1.0 - MELT_SAG * depth;
+            let sink = MELT_SINK * depth * self.def.height * self.def.draw_scale();
+            let feet = self.feet().y;
+            for s in &mut hitbox.shapes {
+                s.a.y = feet + (s.a.y - feet) * sag - sink;
+                s.b.y = feet + (s.b.y - feet) * sag - sink;
+            }
+        }
+        hitbox
     }
 
     /// Changes state. The last attack's parry window survives Strike/Recover/Chase: a lagging
@@ -1007,6 +1128,36 @@ mod tests {
             .spawn_pve_enemy("effigy", Vec3::Z * 4.0, 0.0, 1.0, true)
             .unwrap();
         assert!(!w.enemies[&dummy].elite);
+    }
+
+    /// A melting Mould stays hittable while its hit shapes sink with it: part of it above the
+    /// floor halfway down, only the puddle's height at the bottom, all of it again once risen.
+    #[test]
+    fn hit_shapes_sink_into_the_puddle() {
+        let r = EnemyRegistry::builtin();
+        for name in ["gnawer", "gaoler", "heron", "smelter"] {
+            let def = r.get(name).unwrap();
+            let mut e = Enemy::new(NetId(1024), def.clone(), Vec3::ZERO, 0.0, 10.0, 0);
+            let top = |e: &Enemy| {
+                e.hitbox()
+                    .shapes
+                    .iter()
+                    .map(|s| s.a.y.max(s.b.y) + s.radius)
+                    .fold(f32::MIN, f32::max)
+            };
+            let standing = top(&e);
+            e.set_state(AiState::Melt, 36);
+            e.state_ticks = 12;
+            let sinking = top(&e);
+            e.state_ticks = 36;
+            let puddle = top(&e);
+            e.set_state(AiState::Reform, 48);
+            e.state_ticks = 48;
+            let risen = top(&e);
+            assert!(sinking < standing && sinking > 0.5, "{name}: {sinking}");
+            assert!(puddle < 0.4 * standing && puddle < 1.4, "{name}: {puddle}");
+            assert!((risen - standing).abs() < 1e-4, "{name}");
+        }
     }
 
     #[test]

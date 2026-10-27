@@ -203,6 +203,11 @@ Moulds are drawn big and their hit shapes reach past the model, so your shots la
 look like they should. Any Mould can come as an **elite** (more health, faster attacks, a searing glow). The Vestry's
 **Effigies** are training dummies: they show your hits and never die.
 
+Moulds come after you: they leap gaps, ledges and deep water (a crouch, then the leap), ride
+jump pads, pace the edge when they can't reach you, and one stranded for a few seconds melts
+into a wax puddle and rises out of a new one near you. Water and lava still kill them: knock
+them in.
+
 ### Modes
 
 - **Campaign** (1–4 players): Crucible of Veins, Spire of Wicks, The Drowned Chandlery.
@@ -248,7 +253,7 @@ over parryable enemies, +/− health popups).
 - **Local multiplayer test:** `scripts/local_test.sh --netsim 100,20,2` starts a dedicated
   server plus two clients with one command.
 - **Dev chat commands** (in a match; in hosted games only the host can use them):
-  `/spawn gnawer 5`, `/spawn gaoler 1 elite`, `/enemies`, `/god`, `/give`, `/killall`,
+  `/spawn gnawer 5`, `/spawn gaoler 1 elite`, `/enemies`, `/god`, `/give`, `/killall`, `/melt`,
   `/loadout longwick:pinning,ember kiln trimmer knack:snare`, `/needle` or `/ember` (parry practice),
   `/encounter 1`, `/goto exit`, `/goto checkpoint 3`, `/tp x y z`, `/help`.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which

@@ -2,31 +2,45 @@
 //!
 //! * **ground**: path following on the nav grid ([`crate::sim::nav`]): direct when a straight
 //!   walk is possible, else A* (budgeted per tick, cached, re-planned when the goal moves or the
-//!   agent gets stuck) with string-pulled waypoints; direct steering as the fallback when the
-//!   agent is off the grid or there is no path;
+//!   agent gets stuck) with string-pulled waypoints; a jump on the route (a leap or a pad ride)
+//!   is walked up to precisely and handed to the AI (`NavAgent::jump_ready`); direct steering
+//!   as the fallback when the agent is off the grid or there is no path;
 //! * the **edge guard** ([`guard`]): never step towards lava / kill volumes or off a ledge
 //!   deeper than allowed (paths may drop down, strafing never does);
 //! * **flying** ([`fly_velocity`]): circle the target at the preferred range, hover 4–8 m above
-//!   the ground (or the target's level), avoid walls with feeler sweeps;
+//!   the ground (or the target's level), avoid walls with feeler sweeps; with the target hidden
+//!   it flies to a detour point that sees it (over or round the obstacle) instead of dithering;
+//! * the searches for a **re-form site** ([`reform_site`]: a stranded Mould melts and rises
+//!   near its target) and a **vantage point** ([`vantage_site`]: a ranged Mould with no sight
+//!   of its target walks to a spot that has it);
 //! * [`AiWorld`]: the shared AI state on `SimWorld` (nav grid, A* buffers, budget, stats).
 
 use std::sync::Arc;
 
-use engine::physics::{CollisionWorld, MASK_MOVEMENT};
+use engine::physics::{CollisionWorld, MASK_MOVEMENT, MASK_SHOTS};
 use glam::Vec3;
 
 use super::Enemy;
 use super::ai::PlayerView;
-use crate::level::LevelCollision;
-use crate::sim::nav::{MAX_DROP, NavGrid, NavScratch, PathResult, STEP_UP};
+use crate::level::{LevelCollision, LevelDef, Volume};
+use crate::sim::nav::{
+    MAX_DROP, NavClass, NavGrid, NavScratch, PathResult, STEP_UP, Waypoint, node_flags,
+};
 
 /// A* searches allowed per tick (all enemies together); the rest keep their old path one more
 /// tick. Straight-line checks are not budgeted (cheap).
 pub const PATHS_PER_TICK: u32 = 4;
+/// Re-form and vantage searches allowed per tick (all enemies together; a flyer's detour
+/// search is throttled per flyer instead).
+pub const SEARCHES_PER_TICK: u32 = 1;
 /// Node expansions per A* search before it gives up with a partial path.
 pub const MAX_EXPAND: usize = 3000;
 /// A waypoint counts as reached within this horizontal distance.
 const WAYPOINT_RADIUS: f32 = 0.7;
+/// A jump starts once the agent stands this close to its takeoff node (horizontal); within
+/// [`APPROACH`] of it the agent slows down and the edge guard trusts the node.
+const TAKEOFF_RADIUS: f32 = 0.3;
+const APPROACH: f32 = 1.5;
 /// Re-plan when the goal moved more than this (+ 20 % of the distance to it).
 const GOAL_MOVED: f32 = 1.5;
 /// Stuck check period (ticks) and minimum progress (m) expected in it.
@@ -49,12 +63,28 @@ pub enum PathMode {
     Fallback,
 }
 
+/// Can the last plan reach its goal?
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reach {
+    /// Not planned yet.
+    #[default]
+    Unknown,
+    /// A full path (or a straight walk) to the goal.
+    Full,
+    /// The search hit its node budget first: far, maybe reachable (progress decides).
+    Far,
+    /// Unreachable from here: the partial path ends as close as it gets.
+    Unreachable,
+    /// The agent isn't on the nav grid.
+    OffGrid,
+}
+
 /// Path following state of one enemy.
 #[derive(Clone, Debug, Default)]
 pub struct NavAgent {
     pub mode: PathMode,
-    /// String-pulled waypoints (floor points).
-    pub waypoints: Vec<Vec3>,
+    /// String-pulled waypoints (floor points; a jump's landing carries the jump).
+    pub waypoints: Vec<Waypoint>,
     pub next: usize,
     /// Goal the current plan was made for.
     pub goal: Vec3,
@@ -66,12 +96,32 @@ pub struct NavAgent {
     pub stuck: bool,
     /// Ticks of side-stepping left (unsticking).
     pub sidestep: u16,
+    /// Whether the last plan reaches the goal.
+    pub reach: Reach,
+    /// Steering onto a jump's takeoff from close by this tick (the edge guard trusts it).
+    pub approaching: bool,
+    /// Standing on the takeoff of a jump: (jump index, index of its landing waypoint). The AI
+    /// takes it and starts the leap / pad ride.
+    pub jump_ready: Option<(u32, usize)>,
 }
 
 impl NavAgent {
     /// Forget the plan (target changed, teleported...).
     pub fn reset(&mut self) {
         *self = NavAgent::default();
+    }
+
+    /// At the end of a partial path: as close to an unreachable goal as it gets.
+    pub fn at_partial_end(&self) -> bool {
+        self.mode == PathMode::Partial && self.next >= self.waypoints.len()
+    }
+
+    /// Landed from the jump onto waypoint `landing`: follow the route on from there.
+    pub fn landed(&mut self, landing: usize) {
+        self.next = landing + 1;
+        self.stuck = false;
+        self.sidestep = 0;
+        self.repath_in = self.repath_in.min(6);
     }
 }
 
@@ -88,6 +138,14 @@ pub struct AiStats {
     pub expanded: u64,
     /// Plans postponed because the per-tick budget was used up.
     pub deferred: u64,
+    /// Leaps and pad rides started; melts (re-forms) and stranded Moulds that found no
+    /// re-form site; vantage and flyer detour searches.
+    pub leaps: u64,
+    pub pad_rides: u64,
+    pub melts: u64,
+    pub melt_no_site: u64,
+    pub vantage_searches: u64,
+    pub detours: u64,
 }
 
 /// Shared AI state on `SimWorld` (`SimWorld::ai`).
@@ -110,6 +168,8 @@ pub(crate) struct NavCtx {
     pub doors: Vec<bool>,
     pub scratch: NavScratch,
     pub paths_left: u32,
+    /// Re-form / vantage searches left this tick.
+    pub searches_left: u32,
     pub stats: AiStats,
     pub tick: u32,
 }
@@ -127,6 +187,7 @@ impl AiWorld {
             doors,
             scratch: std::mem::take(&mut self.scratch),
             paths_left: PATHS_PER_TICK,
+            searches_left: SEARCHES_PER_TICK,
             stats: std::mem::take(&mut self.stats),
             tick,
         }
@@ -159,8 +220,11 @@ pub(crate) fn ground_velocity(
 ) -> (Vec3, f32) {
     let pos = e.feet();
     let id = e.id.0;
+    e.nav.approaching = false;
+    e.nav.jump_ready = None;
     let Some(nav) = cx.nav.clone() else {
         e.nav.mode = PathMode::Fallback;
+        e.nav.reach = Reach::Unknown;
         return (horizontal(goal - pos).normalize_or_zero() * speed, MAX_DROP);
     };
     let class = e.nav_class();
@@ -204,6 +268,7 @@ pub(crate) fn ground_velocity(
                 if nav.walkable_line(s, g, class, &cx.doors) {
                     cx.stats.direct += 1;
                     a.mode = PathMode::Direct;
+                    a.reach = Reach::Full;
                     a.waypoints.clear();
                 } else if cx.paths_left > 0 {
                     cx.paths_left -= 1;
@@ -212,21 +277,32 @@ pub(crate) fn ground_velocity(
                     cx.stats.expanded += cx.scratch.last_expanded as u64;
                     match result {
                         PathResult::Found(p) => {
-                            a.waypoints = nav.smooth(&p, class, &cx.doors);
+                            a.waypoints = nav.smooth_route(&p, class, &cx.doors);
                             if near_goal(nav.nodes[g as usize].pos) {
-                                a.waypoints.push(goal);
+                                a.waypoints.push(Waypoint {
+                                    pos: goal,
+                                    node: g,
+                                    jump: None,
+                                });
                             }
                             a.mode = PathMode::Path;
+                            a.reach = Reach::Full;
                         }
                         PathResult::Partial(p) => {
                             cx.stats.partial += 1;
-                            a.waypoints = nav.smooth(&p, class, &cx.doors);
+                            a.waypoints = nav.smooth_route(&p, class, &cx.doors);
                             a.mode = PathMode::Partial;
+                            a.reach = if cx.scratch.last_budget_hit {
+                                Reach::Far
+                            } else {
+                                Reach::Unreachable
+                            };
                         }
                         PathResult::NotFound => {
                             cx.stats.failed += 1;
                             a.waypoints.clear();
                             a.mode = PathMode::Fallback;
+                            a.reach = Reach::Unreachable;
                         }
                     }
                 } else {
@@ -237,9 +313,14 @@ pub(crate) fn ground_velocity(
                     }
                 }
             }
-            _ => {
+            (start, _) => {
                 a.mode = PathMode::Fallback;
                 a.waypoints.clear();
+                a.reach = if start.is_none() {
+                    Reach::OffGrid
+                } else {
+                    Reach::Unreachable
+                };
             }
         }
         if deferred {
@@ -263,27 +344,53 @@ pub(crate) fn ground_velocity(
         );
     }
 
+    let mut speed = speed;
     let target = match a.mode {
         PathMode::None | PathMode::Direct | PathMode::Fallback => goal,
         PathMode::Path | PathMode::Partial => {
+            // Reached walking waypoints are passed; a jump's landing only by the jump itself.
             while a.next < a.waypoints.len()
-                && horizontal(a.waypoints[a.next] - pos).length() < WAYPOINT_RADIUS
+                && a.waypoints[a.next].jump.is_none()
+                && horizontal(a.waypoints[a.next].pos - pos).length() < WAYPOINT_RADIUS
             {
                 a.next += 1;
             }
-            // Look-ahead shortcut (string pulling from where we actually are).
-            if a.next + 1 < a.waypoints.len() && (cx.tick + id).is_multiple_of(8) {
+            // Look-ahead shortcut (string pulling from where we actually are), never across a
+            // jump.
+            if a.next + 1 < a.waypoints.len()
+                && a.waypoints[a.next].jump.is_none()
+                && a.waypoints[a.next + 1].jump.is_none()
+                && (cx.tick + id).is_multiple_of(8)
+            {
                 let here = nav.node_at(pos, 1.0, class, &cx.doors);
-                let there = nav.node_at(a.waypoints[a.next + 1], 0.5, class, &cx.doors);
-                if let (Some(h), Some(t)) = (here, there)
-                    && nav.walkable_line(h, t, class, &cx.doors)
+                let there = a.waypoints[a.next + 1].node;
+                if let Some(h) = here
+                    && nav.walkable_line(h, there, class, &cx.doors)
                 {
                     a.next += 1;
                 }
             }
             match a.waypoints.get(a.next) {
-                Some(&w) => w,
-                // Reached the end of a partial path: wait there.
+                // The next stretch is a jump: walk onto its takeoff precisely, slowing down
+                // (the edge guard trusts the node), then hand it to the AI.
+                Some(&Waypoint { jump: Some(j), .. }) => {
+                    let Some(takeoff) = nav.jump(j).map(|l| nav.nodes[l.from as usize].pos) else {
+                        a.mode = PathMode::None;
+                        return (Vec3::ZERO, STEP_UP);
+                    };
+                    let d = horizontal(takeoff - pos).length();
+                    if d <= TAKEOFF_RADIUS && on_ground {
+                        a.jump_ready = Some((j, a.next));
+                        return (Vec3::ZERO, STEP_UP);
+                    }
+                    if d < APPROACH {
+                        a.approaching = true;
+                        speed *= (d / APPROACH).clamp(0.25, 1.0);
+                    }
+                    takeoff
+                }
+                Some(w) => w.pos,
+                // Reached the end of a partial path: the AI prowls there.
                 None if a.mode == PathMode::Partial => return (Vec3::ZERO, STEP_UP),
                 None => goal,
             }
@@ -344,16 +451,67 @@ pub(crate) fn heading_off_edge(nav: Option<&NavGrid>, e: &Enemy, max_drop: f32, 
     !nav.ground_ok(look, pos.y, max_drop)
 }
 
+/// A point (hover centre) from which a flyer at `pos` (radius `r`) sees `chest`, and that a
+/// sphere sweep reaches from where it is: straight up first (over a low wall), no higher than
+/// `top` above it, then to either side of the line to the target (round a pillar), its
+/// orbit's side first, at its height or a little higher. `None`: nothing nearby sees it.
+fn find_detour(
+    world: &CollisionWorld,
+    pos: Vec3,
+    r: f32,
+    chest: Vec3,
+    top: f32,
+    side: f32,
+) -> Option<Vec3> {
+    let ceiling = world
+        .cast_ray(pos, Vec3::Y, 40.0, MASK_MOVEMENT)
+        .map_or(40.0, |h| h.distance)
+        - r
+        - 0.5;
+    let top = top.min(ceiling);
+    let sees = |p: Vec3| !world.line_blocked(p, chest, MASK_SHOTS);
+    let reach = |p: Vec3| {
+        world
+            .cast_sphere(pos, r + 0.1, p - pos, MASK_MOVEMENT)
+            .is_none()
+    };
+    for up in [3.0, 6.0, 9.0] {
+        if up > top {
+            break;
+        }
+        let p = pos + Vec3::Y * up;
+        if sees(p) && reach(p) {
+            return Some(p);
+        }
+    }
+    let to = horizontal(chest - pos).normalize_or(Vec3::Z);
+    for deg in [60.0f32, 100.0, 140.0] {
+        for s in [side, -side] {
+            for dh in [0.0f32, 3.0] {
+                let dir = glam::Quat::from_rotation_y((deg * s).to_radians()) * to;
+                let p = pos + dir * 7.0 + Vec3::Y * dh.min(top.max(0.0));
+                if sees(p) && reach(p) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Flight steering for a flying enemy: circle `tp` inside the preferred range band, hover
 /// between `min_height` and `max_height` above the ground (or the target's level when that is
-/// higher), dodge walls and ceilings with feeler sweeps. `scale` slows the horizontal part
-/// (wind-ups).
+/// higher), dodge walls and ceilings with feeler sweeps. With the target out of sight for a
+/// moment (or the orbit turning back and forth at a wall) it flies to a detour point that sees
+/// it ([`find_detour`]: over or round the obstacle) and circles on from there. `scale` slows
+/// the horizontal part (wind-ups).
 pub(crate) fn fly_velocity(
     world: &CollisionWorld,
     e: &mut Enemy,
     tp: &PlayerView,
     now: u32,
     scale: f32,
+    stats: &mut AiStats,
 ) -> Vec3 {
     let def = e.def.clone();
     let (min_h, max_h) = match def.locomotion {
@@ -378,40 +536,59 @@ pub(crate) fn fly_velocity(
         e.ground_check_in -= 1;
     }
 
-    // Horizontal: orbit inside the band, close in when the target stays out of sight.
-    let (rmin, rmax) = def.ai.preferred_range.unwrap_or((5.0, 12.0));
-    let mid = (rmin + rmax) * 0.5;
-    let away = horizontal(pos - tp.position);
-    let dist = away.length();
-    let out = if dist > 1e-3 {
-        away / dist
-    } else {
-        Vec3::new(e.yaw.sin(), 0.0, e.yaw.cos())
-    };
-    let tangent = Vec3::new(-out.z, 0.0, out.x) * e.strafe_sign;
+    // Detour: hidden for a moment (or dithering at a wall, below): fly to a point that sees
+    // the target instead of nosing into what is in the way. Dropped once there, once the
+    // target is back in sight, or after 2 s.
     let hidden = e.unseen_ticks > 45;
-    let radial = if hidden {
-        -1.0
-    } else {
-        ((mid - dist) / ((rmax - rmin) * 0.5).max(1.0)).clamp(-1.0, 1.0)
-    };
-    let orbit = if def.ai.strafe && !hidden { 0.85 } else { 0.0 };
-    let mut v = (tangent * orbit + out * radial).normalize_or_zero() * speed * scale;
+    if let Some((point, until)) = e.detour
+        && (now >= until || pos.distance(point) < 1.5 || e.unseen_ticks == 0)
+    {
+        e.detour = None;
+    }
+    if e.detour.is_none() && hidden && now >= e.search_after {
+        e.search_after = now + 30;
+        let top = e.ground_y + max_h + 1.0 - pos.y;
+        e.detour = find_detour(world, pos, r, tp.chest, top, e.strafe_sign).map(|p| (p, now + 120));
+        stats.detours += e.detour.is_some() as u64;
+    }
 
-    // Altitude: hover band above the ground, or above the target when it stands higher.
-    let base = e.ground_y.max(tp.position.y);
-    let bob = ((now as f32 * 0.03) + e.id.0 as f32).sin() * 0.8;
-    let want = (base + (min_h + max_h) * 0.5 + bob)
-        .clamp(base + min_h, base + max_h)
-        .max(e.ground_y + min_h);
-    let mut vy = ((want - pos.y) * 1.5).clamp(-speed * 0.5, speed * 0.5);
+    let mut v = if let Some((point, _)) = e.detour {
+        (point - pos).normalize_or_zero() * speed * scale.max(0.6)
+    } else {
+        // Horizontal: orbit inside the band, close in when the target stays out of sight.
+        let (rmin, rmax) = def.ai.preferred_range.unwrap_or((5.0, 12.0));
+        let mid = (rmin + rmax) * 0.5;
+        let away = horizontal(pos - tp.position);
+        let dist = away.length();
+        let out = if dist > 1e-3 {
+            away / dist
+        } else {
+            Vec3::new(e.yaw.sin(), 0.0, e.yaw.cos())
+        };
+        let tangent = Vec3::new(-out.z, 0.0, out.x) * e.strafe_sign;
+        let radial = if hidden {
+            -1.0
+        } else {
+            ((mid - dist) / ((rmax - rmin) * 0.5).max(1.0)).clamp(-1.0, 1.0)
+        };
+        let orbit = if def.ai.strafe && !hidden { 0.85 } else { 0.0 };
+        let mut v = (tangent * orbit + out * radial).normalize_or_zero() * speed * scale;
+
+        // Altitude: hover band above the ground, or above the target when it stands higher.
+        let base = e.ground_y.max(tp.position.y);
+        let bob = ((now as f32 * 0.03) + e.id.0 as f32).sin() * 0.8;
+        let want = (base + (min_h + max_h) * 0.5 + bob)
+            .clamp(base + min_h, base + max_h)
+            .max(e.ground_y + min_h);
+        v.y = ((want - pos.y) * 1.5).clamp(-speed * 0.5, speed * 0.5);
+        v
+    };
     if world
         .cast_ray(pos, Vec3::Y, r + 1.5, MASK_MOVEMENT)
         .is_some()
     {
-        vy = vy.min(-2.0);
+        v.y = v.y.min(-2.0);
     }
-    v.y = vy;
 
     // Feelers: sweep ahead; slide along / push off what is in the way.
     let ahead = v * 0.45;
@@ -433,15 +610,154 @@ pub(crate) fn fly_velocity(
         v += n * speed * (1.0 - hit.fraction) * 0.8;
         // Walls turn the orbit round (when close, or when it heads straight at one: a pillar
         // on its circle would otherwise hold it in place); a ceiling or floor just deflects it
-        // (flipping under a roof made flyers dither in place).
+        // (flipping under a roof made flyers dither in place). A second flip soon after the
+        // last one is dithering: it looks for a way over or round instead.
         let wall = n.y.abs() < 0.5;
-        if wall && (hit.fraction < 0.4 || head_on) && e.strafe_flip_in == 0 {
-            e.strafe_sign = -e.strafe_sign;
+        if wall && (hit.fraction < 0.4 || head_on) && e.strafe_flip_in == 0 && e.detour.is_none() {
+            if now.saturating_sub(e.last_flip) < 100 && now >= e.search_after {
+                e.search_after = now + 30;
+                let top = e.ground_y + max_h + 1.0 - pos.y;
+                e.detour = find_detour(world, pos, r, tp.chest, top, e.strafe_sign)
+                    .map(|p| (p, now + 120));
+                stats.detours += e.detour.is_some() as u64;
+            }
+            if e.detour.is_none() {
+                e.strafe_sign = -e.strafe_sign;
+            }
             e.strafe_flip_in = 40;
+            e.last_flip = now;
         }
     }
     e.strafe_flip_in = e.strafe_flip_in.saturating_sub(1);
     v
+}
+
+/// What a re-form / vantage search looks for ([`reform_site`], [`vantage_site`]).
+pub(crate) struct SiteQuery<'a> {
+    pub class: NavClass,
+    pub doors: &'a [bool],
+    /// The target's feet and eye (re-form) or chest (vantage).
+    pub target: Vec3,
+    pub target_eye: Vec3,
+    /// Preferred distance band from the target (metres; horizontal for a re-form, eye to
+    /// chest for a vantage point).
+    pub band: (f32, f32),
+    /// The Mould's eye height and radius.
+    pub eye_height: f32,
+    pub radius: f32,
+    /// Other enemies (feet, radius) not to rise on top of.
+    pub others: &'a [(Vec3, f32)],
+    /// Stay inside this volume (an encounter's arena while the fight is on).
+    pub arena: Option<Volume>,
+}
+
+/// Where a stranded Mould re-forms (docs/enemies.md "Melting and re-forming"): searching back
+/// from its target's node over the reverse links (doors as they are now, so never in a room
+/// cut off from the target), a node of its class from which the target is reachable — never
+/// deadly or at a hazard edge, never in a kill volume, never on another Mould, at least 3 m
+/// from the target, preferably in the band, and the first of the best 24 that is out of the
+/// target's sight (else the best one).
+pub(crate) fn reform_site(
+    nav: &NavGrid,
+    scratch: &mut NavScratch,
+    world: &CollisionWorld,
+    level: &LevelDef,
+    q: &SiteQuery,
+) -> Option<Vec3> {
+    let goal = nav
+        .node_at(q.target, 3.0, q.class, q.doors)
+        .or_else(|| nav.nearest_node(q.target, 6, q.class, q.doors))?;
+    let (near, far) = q.band;
+    let mut cands: Vec<(f32, u32)> = Vec::new();
+    nav.search(
+        scratch,
+        goal,
+        q.class,
+        q.doors,
+        true,
+        far * 2.5 + 20.0,
+        6000,
+        |n, cost| {
+            let node = &nav.nodes[n as usize];
+            let p = node.pos;
+            let d = horizontal(p - q.target).length();
+            let ok = !node.is(node_flags::HAZARD)
+                && !node.is(node_flags::DEADLY)
+                && d >= 3.0
+                && !level
+                    .kill_volumes
+                    .iter()
+                    .any(|v| v.contains(p + Vec3::Y * 0.1))
+                && q.arena.is_none_or(|a| a.contains(p + Vec3::Y * 0.1))
+                && !q
+                    .others
+                    .iter()
+                    .any(|(o, r)| horizontal(*o - p).length() < r + q.radius + 0.4);
+            if ok {
+                let miss = (near - d).max(0.0) + (d - far).max(0.0);
+                cands.push((miss * 2.0 + cost * 0.05, n));
+            }
+            true
+        },
+    );
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let eye = |n: u32| nav.nodes[n as usize].pos + Vec3::Y * q.eye_height;
+    cands
+        .iter()
+        .take(24)
+        .find(|(_, n)| world.line_blocked(q.target_eye, eye(*n), MASK_SHOTS))
+        .or(cands.first())
+        .map(|(_, n)| nav.nodes[*n as usize].pos)
+}
+
+/// A spot a ranged Mould standing on `start` can walk to (forward over its links) from which
+/// it sees the target's chest (`q.target`) within its band (eye to chest): candidates scored by
+/// walking cost plus their distance from the band's middle, the sight lines of the best 24
+/// tested (at least 1.5 m apart, so a row of blind spots doesn't use them all up). Not a
+/// hazard edge.
+pub(crate) fn vantage_site(
+    nav: &NavGrid,
+    scratch: &mut NavScratch,
+    world: &CollisionWorld,
+    start: u32,
+    q: &SiteQuery,
+) -> Option<Vec3> {
+    let (min, max) = q.band;
+    let mid = (min + max) * 0.5;
+    let mut cands: Vec<(f32, u32)> = Vec::new();
+    nav.search(
+        scratch,
+        start,
+        q.class,
+        q.doors,
+        false,
+        40.0,
+        3000,
+        |n, cost| {
+            let node = &nav.nodes[n as usize];
+            let d = (node.pos + Vec3::Y * q.eye_height).distance(q.target);
+            if !node.is(node_flags::HAZARD) && d >= min && d <= max {
+                cands.push((cost + (d - mid).abs(), n));
+            }
+            true
+        },
+    );
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut tested: Vec<Vec3> = Vec::new();
+    for (_, n) in cands {
+        let p = nav.nodes[n as usize].pos;
+        if tested.iter().any(|t| t.distance(p) < 1.5) {
+            continue;
+        }
+        if !world.line_blocked(p + Vec3::Y * q.eye_height, q.target, MASK_SHOTS) {
+            return Some(p);
+        }
+        tested.push(p);
+        if tested.len() >= 24 {
+            break;
+        }
+    }
+    None
 }
 
 /// Can a ground enemy strafe along `dir` (unit, horizontal) from where it is: nothing solid

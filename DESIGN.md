@@ -290,6 +290,16 @@ redesigned LOADOUT screen with a turning 3D weapon and explained abilities (`doc
 balance harness that measures the real sim and a rebalance of every weapon, ability and knack,
 with tests that hold the bands (`docs/balance.md`). `PROTOCOL_VERSION` 9.
 
+### Moulds that get there
+The nav grid links leaps (across gaps, lava and deep water, up and down ledges, per-Mould
+limits) and pad rides; ground Moulds crouch and leap or ride pads along their paths, prowl
+the nearest edge or find a sight line when their target is out of reach, and when stranded
+for 6 s melt into a wax puddle and re-form near their target (never in a kill volume or a room
+cut off from it), so arenas and grind waves never stall; Harriers fly round or over what hides
+their target. No wading (the shipped water is sheer-sided pits over the Moulds' heads). New
+replicated states `AiState::{Leap, Melt, Reform}`, dev `/melt`, the measurements in
+`docs/enemies.md` "Leaps, pads, melting". `PROTOCOL_VERSION` 10.
+
 ### Deliberate deviations from the spec
 - **Netcode transport.** Connection authentication uses `renet_netcode`'s types
   (`ServerAuthentication`, `ClientAuthentication`, `ServerConfig`). The netcode.io state machine

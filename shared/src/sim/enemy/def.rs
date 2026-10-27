@@ -340,6 +340,61 @@ impl Default for Dummy {
     }
 }
 
+/// How a ground Mould leaps along its nav path (`EnemyDef::leap`; the nav grid's leap links,
+/// `sim::nav`): its limits, within the grid's (`nav::LEAP_MAX_DISTANCE` / `LEAP_MAX_UP` /
+/// `LEAP_MAX_DOWN`), and the crouch that telegraphs it. `None` = never leaps (the heavies).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LeapDef {
+    /// Longest leap across (horizontal metres).
+    pub distance: f32,
+    /// Highest ledge it leaps up onto and deepest it leaps down (metres).
+    pub up: f32,
+    pub down: f32,
+    /// Seconds it crouches before leaving the ground (the readable tell).
+    pub crouch: f32,
+}
+
+impl Default for LeapDef {
+    fn default() -> Self {
+        Self {
+            distance: 6.0,
+            up: 2.5,
+            down: 7.0,
+            crouch: 0.35,
+        }
+    }
+}
+
+/// Melting and re-forming (`EnemyDef::melt`): a ground Mould that has been stranded (its
+/// target unreachable) or stuck (no progress) for `after` seconds slumps into a wax puddle
+/// (`sink` s) and rises out of a new one (`rise` s) on a node near its target from which the
+/// target is reachable, preferably `near`..`far` metres away and out of its sight. Off the nav
+/// grid it melts three times as soon.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MeltDef {
+    /// Seconds stranded before it melts (0 = never).
+    pub after: f32,
+    pub sink: f32,
+    pub rise: f32,
+    /// Preferred distance band (metres, horizontal) of the new spot from the target.
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Default for MeltDef {
+    fn default() -> Self {
+        Self {
+            after: 6.0,
+            sink: 0.6,
+            rise: 0.8,
+            near: 8.0,
+            far: 18.0,
+        }
+    }
+}
+
 /// What an elite of this type gets (any Mould can spawn as an elite, `SpawnOptions::elite`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -681,6 +736,12 @@ pub struct EnemyDef {
     pub dummy: Option<Dummy>,
     /// What an elite of this type gets.
     pub elite: EliteDef,
+    /// Leaps along its nav path (gaps, water, ledges); `None` = never (ground enemies).
+    pub leap: Option<LeapDef>,
+    /// Rides jump pads on its nav path (ground enemies).
+    pub pads: bool,
+    /// Melts and re-forms near its target when stranded (ground enemies).
+    pub melt: MeltDef,
 }
 
 impl Default for EnemyDef {
@@ -712,6 +773,9 @@ impl Default for EnemyDef {
             death_time: 0.6,
             dummy: None,
             elite: EliteDef::default(),
+            leap: None,
+            pads: true,
+            melt: MeltDef::default(),
         }
     }
 }

@@ -456,6 +456,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             legs = [(1.2 * e, -1.8 * e); 2];
         }
         EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
     }
     // The slag brims brighter as it tips.
     if pour {

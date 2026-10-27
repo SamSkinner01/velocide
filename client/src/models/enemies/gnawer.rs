@@ -590,6 +590,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             }
         }
         EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
     }
 
     // Melting: the body squashes towards the floor and spreads a little.

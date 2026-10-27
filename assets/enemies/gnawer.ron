@@ -93,4 +93,10 @@
         parry: (1.0, 0.9, 0.1),
     ),
     death_time: 0.9,
+    // Getting there (docs/enemies.md "Leaps, pads, melting"): on its nav path it leaps gaps,
+    // deep water and ledges (a 0.3 s crouch, then the arc), rides pads, and when stranded for
+    // 6 s it melts into a puddle and re-forms 8-18 m from its target, out of its sight.
+    leap: Some((distance: 8.0, up: 3.5, down: 8.0, crouch: 0.3)),
+    pads: true,
+    melt: (after: 6.0, sink: 0.6, rise: 0.8, near: 8.0, far: 18.0),
 )

@@ -54,4 +54,7 @@
     ),
     death_time: 0.6,
     dummy: Some((regen_delay: 3.0, regen_rate: 400.0)),
+    // Bound to its post: it never moves, leaps, rides pads or melts.
+    pads: false,
+    melt: (after: 0.0),
 )
