@@ -49,7 +49,8 @@ The full design (silhouettes, behaviour, net kinds) is `docs/roster.md`.
 Shots should feel generous; being shot should feel fair. Every **player-owned** attack (each
 weapon mode, splinters, arc chains, ricochet legs, projectile sweeps, explosion distances, the
 fist, thorn hits) tests against hit shapes inflated by `combat.hit_assist`: enemy bodies
-+0.2 m, enemy weak points +0.1 m, and in PvP player bodies +0.12 m, heads +0.06 m. A ray that
++0.35 m, enemy weak points +0.15 m (on top of hit shapes already sized past the drawn Moulds,
+`docs/enemies.md` "Sizes and hit shapes"), and in PvP player bodies +0.12 m, heads +0.06 m. A ray that
 hits the plain shapes keeps that result (the padding never turns a headshot into a body hit).
 **Enemy attacks** use the plain shapes. The padding is added at test time; the
 lag-compensation history keeps the plain shapes.
