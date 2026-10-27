@@ -24,6 +24,7 @@ use shared::protocol::{
 use shared::sim::PlayerId;
 
 use crate::models::shrike::REMOTE_SCALE;
+use crate::models::weapons::melee::{self, Swing};
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
 use engine::gfx::DrawItem;
 
@@ -51,6 +52,8 @@ pub struct PlayerVisual {
     pub firing: f32,
     /// Punch progress 0..1 (combat starts it at a small value; advances here).
     pub punching: f32,
+    /// A melee swing (combat starts it with `melee::Swing::start`; advances here).
+    pub swing: Swing,
     pub downed: bool,
     pub dead: bool,
     /// World-space head of the last drawn pose (name tags).
@@ -94,6 +97,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
         cycle: v.cycle,
         cosmetics: look,
         unarmed: !player_armed(e.state),
+        swing: v.swing,
     }
 }
 
@@ -148,6 +152,10 @@ impl RemotePlayers {
                 if v.punching >= 1.0 {
                     v.punching = 0.0;
                 }
+            }
+            match melee::of_id(player_weapon(e.state).0.id()) {
+                Some(m) => v.swing.advance(m, dt),
+                None => v.swing = Swing::default(),
             }
             v.seen = true;
             let Some(lib) = lib else {

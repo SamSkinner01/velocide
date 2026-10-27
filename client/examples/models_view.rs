@@ -1118,6 +1118,267 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
     shots
 }
 
+/// Melee (docs/refit.md): the Trimmer and the Tamper in first person through their swings, at
+/// real scale, hurled, and the knacks' things.
+fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
+    use client::models::knacks;
+    use client::models::weapons::melee::{self, MeleeWeapon, Swing, SwingKind};
+    let mut shots = Vec::new();
+    let swing = |kind: SwingKind, progress: f32, left: bool| Swing {
+        kind,
+        progress,
+        left,
+    };
+    let idle = Swing::default();
+    let cases = [
+        ("TRIMMER REST", MeleeWeapon::Trimmer, idle),
+        (
+            "TRIMMER SLASH R: WIND",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Slash, 0.07, false),
+        ),
+        (
+            "TRIMMER SLASH R: MID",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Slash, 0.2, false),
+        ),
+        (
+            "TRIMMER SLASH R: IMPACT",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Slash, 0.3, false),
+        ),
+        (
+            "TRIMMER SLASH L: MID",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Slash, 0.2, true),
+        ),
+        (
+            "TRIMMER LUNGE",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Lunge, 0.4, false),
+        ),
+        (
+            "TRIMMER WHIRL",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Whirl, 0.35, false),
+        ),
+        (
+            "TRIMMER HURL: RELEASE",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Hurl, 0.33, false),
+        ),
+        (
+            "TRIMMER UPSWING",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Upswing, 0.28, false),
+        ),
+        ("TAMPER REST", MeleeWeapon::Tamper, idle),
+        (
+            "TAMPER SLAM: WIND",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Slash, 0.09, false),
+        ),
+        (
+            "TAMPER SLAM: FALLING",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Slash, 0.15, false),
+        ),
+        (
+            "TAMPER SLAM: IMPACT",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Slash, 0.19, false),
+        ),
+        (
+            "TAMPER SLAM: RECOVER",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Slash, 0.65, false),
+        ),
+        (
+            "TAMPER LUNGE",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Lunge, 0.4, false),
+        ),
+        (
+            "TAMPER WHIRL",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Whirl, 0.35, false),
+        ),
+        (
+            "TAMPER UPSWING",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Upswing, 0.3, false),
+        ),
+    ];
+    let color = Vec3::new(1.0, 0.55, 0.25);
+    for (i, (name, weapon, s)) in cases.into_iter().enumerate() {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.7, 7.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            75.0,
+        ));
+        let pose = melee::pose(weapon, color, s.flare(weapon), t);
+        melee::draw_view(
+            lib,
+            weapon,
+            &s,
+            &pose,
+            Vec3::ZERO,
+            &Tint::default(),
+            &mut shot.viewmodel,
+        );
+        shots.push((format!("melee_vm_{i:02}"), name.to_string(), shot));
+    }
+
+    // Real scale: the closed pair of shears and the hammer (side, three-quarter), the left
+    // blade in the hand position, hurled pieces, the knacks' things.
+    for (name, title, cam, yaw) in [
+        (
+            "melee_weapons",
+            "MELEE (SIDE)",
+            Vec3::new(0.0, 1.1, 1.9),
+            std::f32::consts::FRAC_PI_2,
+        ),
+        (
+            "melee_weapons_34",
+            "MELEE (3/4 FRONT)",
+            Vec3::new(0.0, 1.5, 1.8),
+            2.4,
+        ),
+    ] {
+        let mut shot = Shot::new(look_at(cam, Vec3::new(0.0, 1.0, 0.0), 50.0));
+        for (weapon, pos) in [
+            (MeleeWeapon::Trimmer, Vec3::new(-0.4, 0.95, 0.0)),
+            (MeleeWeapon::Tamper, Vec3::new(0.4, 0.75, 0.0)),
+        ] {
+            let root = Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), pos);
+            let pose = melee::pose(weapon, color, 0.0, t);
+            lib.get(melee::model(weapon))
+                .draw(&pose, root, &Tint::default(), &mut shot.draws);
+            shot.labels.push((
+                pos + Vec3::new(0.0, -0.3, 0.0),
+                format!("{weapon:?}").to_uppercase(),
+            ));
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.4, 3.2),
+        Vec3::new(0.0, 0.9, 0.0),
+        60.0,
+    ));
+    for (i, (weapon, spin)) in [
+        (MeleeWeapon::Trimmer, 0.0),
+        (MeleeWeapon::Trimmer, 1.6),
+        (MeleeWeapon::Tamper, 0.0),
+        (MeleeWeapon::Tamper, 2.2),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let pos = Vec3::new(-1.35 + i as f32 * 0.9, 1.1, 0.0);
+        melee::draw_hurled(
+            lib,
+            weapon,
+            pos,
+            Vec3::new(-1.0, 0.0, -0.4),
+            spin,
+            (color * 1.6).extend(1.0),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+        shot.labels
+            .push((pos + Vec3::new(0.0, -0.55, 0.0), "HURLED".into()));
+    }
+    shots.push(("melee_hurled".into(), "HURL".into(), shot));
+
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.5, 3.0),
+        Vec3::new(0.0, 0.5, 0.0),
+        60.0,
+    ));
+    let tilt = Quat::from_rotation_y(-0.6) * Quat::from_rotation_x(0.3);
+    lib.draw_model(
+        ModelId::KindleFlask,
+        Mat4::from_rotation_translation(tilt, Vec3::new(-1.3, 0.9, 0.0)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    lib.draw_model(
+        ModelId::SootPot,
+        Mat4::from_rotation_translation(tilt, Vec3::new(1.3, 0.9, 0.0)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    for (x, armed, sprung) in [(-0.5, 0.3, 0.0), (0.5, 1.0, 0.0), (0.0, 1.0, 1.0)] {
+        let z = if sprung > 0.0 { -0.9 } else { 0.0 };
+        lib.get(ModelId::Snare).draw(
+            &knacks::snare_pose(armed, sprung, t),
+            Mat4::from_rotation_translation(Quat::from_rotation_y(0.3), Vec3::new(x, 0.0, z)),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    for (p, label) in [
+        (Vec3::new(-1.3, 0.55, 0.0), "FLASK"),
+        (Vec3::new(1.3, 0.55, 0.0), "SOOT POT"),
+        (Vec3::new(-0.5, -0.1, 0.4), "ARMING"),
+        (Vec3::new(0.5, -0.1, 0.4), "ARMED"),
+        (Vec3::new(0.0, 0.5, -0.9), "SPRUNG"),
+    ] {
+        shot.labels.push((p, label.into()));
+    }
+    shots.push(("knack_props".into(), "KNACKS".into(), shot));
+
+    // Third person: Shrikes holding each weapon through its swing (three-quarter front).
+    for (name, title, id, poses) in [
+        (
+            "melee_3p_trimmer",
+            "TRIMMER (3RD PERSON): REST, SLASH R WIND / IMPACT, SLASH L, LUNGE",
+            10u8,
+            [
+                idle,
+                swing(SwingKind::Slash, 0.07, false),
+                swing(SwingKind::Slash, 0.3, false),
+                swing(SwingKind::Slash, 0.25, true),
+                swing(SwingKind::Lunge, 0.4, false),
+            ],
+        ),
+        (
+            "melee_3p_tamper",
+            "TAMPER (3RD PERSON): REST, WIND, IMPACT, UPSWING, HURL",
+            11u8,
+            [
+                idle,
+                swing(SwingKind::Slash, 0.09, false),
+                swing(SwingKind::Slash, 0.2, false),
+                swing(SwingKind::Upswing, 0.32, false),
+                swing(SwingKind::Hurl, 0.15, false),
+            ],
+        ),
+    ] {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.6, 1.7, 4.6),
+            Vec3::new(0.0, 1.15, 0.0),
+            60.0,
+        ));
+        for (s, x) in poses.into_iter().zip([-3.0f32, -1.5, 0.0, 1.5, 3.0]) {
+            lib.draw_player(
+                &PlayerAnim {
+                    yaw: FACE_CAMERA + 0.5,
+                    weapon: id,
+                    swing: s,
+                    ..player(t)
+                },
+                Vec3::new(x, 0.0, 0.0),
+                &Tint::default(),
+                &mut shot.draws,
+            );
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
+    shots
+}
+
 fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     let projectiles = [
         (ModelId::Bomb, "BOMB"),
@@ -1557,6 +1818,7 @@ fn main() -> anyhow::Result<()> {
     }
     shots.extend(viewmodel_shots(&lib));
     shots.extend(prop_shots(&lib, 2.0));
+    shots.extend(melee_shots(&lib, 2.0));
 
     for (name, title, shot) in &shots {
         if only.as_ref().is_some_and(|o| !name.starts_with(o.as_str())) {

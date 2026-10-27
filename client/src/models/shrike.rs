@@ -797,6 +797,8 @@ pub struct PlayerAnim {
     pub charge: f32,
     /// Holding no weapon (gun game's Fist tier).
     pub unarmed: bool,
+    /// A melee swing in progress (the Trimmer's slashes alternate hands; the abilities' moves).
+    pub swing: super::weapons::melee::Swing,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
     /// How this Shrike looks (mask, crest, cloak, emblem, paints: `models::cosmetics`).
@@ -1143,9 +1145,25 @@ pub fn pose_full(a: &PlayerAnim) -> (Pose, Drape) {
     pose.rotate(UPPER_ARM_R, Quat::from_rotation_y(0.32) * rx(upper_r));
     pose.rotate(FOREARM_R, rx(fore_r));
     pose.rotate(HAND_R, rx(hand_r));
+    // A melee weapon: both arms follow its swing (the Trimmer's left blade, the Tamper's
+    // second hand); a punch still takes the left arm.
+    let melee = super::weapons::melee::of_id(a.weapon).filter(|_| !a.unarmed);
+    if let Some(m) = melee {
+        let arms = super::weapons::melee::arms(m, &a.swing, target - chain, a.pitch);
+        pose.rotate(UPPER_ARM_R, arms.upper_r);
+        pose.rotate(FOREARM_R, rx(arms.fore_r));
+        pose.rotate(HAND_R, arms.hand_r);
+        if punch <= 0.0 && two_handed_or_blade(m, two_handed) {
+            pose.rotate(UPPER_ARM_L, arms.upper_l);
+            pose.rotate(FOREARM_L, rx(arms.fore_l));
+            pose.rotate(HAND_L, arms.hand_l);
+        }
+    }
 
     // Left arm: punch, support the weapon, or swing.
-    if punch > 0.0 {
+    if melee.is_some_and(|m| punch <= 0.0 && two_handed_or_blade(m, two_handed)) {
+        // Posed with the melee weapon above.
+    } else if punch > 0.0 {
         let target = std::f32::consts::FRAC_PI_2 + a.pitch.clamp(-1.0, 1.0) * 0.6 - chain;
         let up = arm_l.upper + (target - 0.05 - arm_l.upper) * punch;
         let lo = arm_l.lower + (0.05 - arm_l.lower) * punch;
@@ -1181,6 +1199,12 @@ pub fn pose_full(a: &PlayerAnim) -> (Pose, Drape) {
         tassel: (coat * 0.6 + flap * 2.0 - lean - torso_x - head_x).clamp(-1.6, 0.6),
     };
     (pose, drape)
+}
+
+/// The left hand is on a melee weapon: always the Trimmer's left blade; the Tamper's haft
+/// whenever the movement state leaves both hands free (as for two-handed guns).
+fn two_handed_or_blade(m: super::weapons::melee::MeleeWeapon, two_handed: bool) -> bool {
+    m == super::weapons::melee::MeleeWeapon::Trimmer || two_handed
 }
 
 fn dead_pose(mut pose: Pose) -> Pose {

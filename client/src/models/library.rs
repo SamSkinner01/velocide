@@ -214,11 +214,41 @@ impl ModelLibrary {
             time: anim.time,
             ..Default::default()
         });
+        let head = world[shrike::HEAD];
+        // Melee: the Trimmer's halves in both hands, the Tamper; the muzzle is the striking
+        // edge / foot (`weapons::melee`).
+        if let Some(m) = weapons::melee::of_id(anim.weapon).filter(|_| !anim.unarmed) {
+            let color = weapons::ability_color(ability).truncate();
+            let kick = anim.swing.flare(m).max(anim.firing);
+            let mut pose = weapons::melee::pose(m, color, kick, anim.time);
+            let left = world[shrike::HAND_L] * shrike::grip_transform();
+            if m == weapons::melee::MeleeWeapon::Trimmer {
+                pose.set(
+                    weapons::trimmer::BLADE_L,
+                    weapons::melee::left_blade_local(gun_root, left),
+                );
+            }
+            if !anim.dead {
+                self.get(weapons::melee::model(m))
+                    .draw(&pose, gun_root, tint, out);
+            }
+            let hand = if anim.swing.left && m == weapons::melee::MeleeWeapon::Trimmer {
+                left
+            } else {
+                gun_root
+            };
+            return PlayerDrawInfo {
+                muzzle: hand.transform_point3(weapons::melee::muzzle(m)),
+                muzzle_dir: hand
+                    .transform_vector3(Vec3::NEG_Z)
+                    .normalize_or(Vec3::NEG_Z),
+                head: head.transform_point3(Vec3::new(0.0, 0.16, 0.0)),
+            };
+        }
         let gun = self.get(weapon.model());
         if !anim.dead && !anim.unarmed {
             gun.draw(&gun_pose, gun_root, tint, out);
         }
-        let head = world[shrike::HEAD];
         PlayerDrawInfo {
             muzzle: gun_root.transform_point3(weapon.muzzle()),
             muzzle_dir: gun_root

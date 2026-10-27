@@ -19,9 +19,13 @@ pub mod fist;
 pub mod kiln;
 pub mod lancet;
 pub mod longwick;
+/// Melee (docs/refit.md): how the Trimmer and the Tamper are held and swung.
+pub mod melee;
 pub mod quill;
 pub mod riveter;
+pub mod tamper;
 pub mod thresher;
+pub mod trimmer;
 pub mod tumbler;
 
 use engine::gfx::DrawItem;
