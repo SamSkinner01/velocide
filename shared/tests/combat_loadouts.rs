@@ -10,12 +10,13 @@ mod weapon_support;
 use combat_support::*;
 use glam::Vec3;
 use shared::input::{Buttons, PlayerInput};
-use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponClass, WeaponKind};
 use shared::protocol::{NetFrame, NetId, player_flags, player_weapon};
 use shared::sim::{Attack, PlayerId, SimEvent, WeaponState, step_weapons};
 use weapon_support::*;
 
-/// Bow, salvo launcher, needle pistol, ember sprayer.
+/// Bow, salvo launcher, needle pistol, ember sprayer; Surge on Q (a knack allowed in PvP, so
+/// the loadout applies unchanged everywhere).
 fn bow_first() -> Loadout {
     Loadout {
         slots: [
@@ -24,11 +25,12 @@ fn bow_first() -> Loadout {
             Some(WeaponKind::Lancet.default_build()),
             Some(WeaponKind::Kiln.default_build()),
         ],
+        knack: Knack::Surge,
     }
 }
 
 fn kiln_only() -> Loadout {
-    Loadout::single(WeaponKind::Kiln.default_build())
+    Loadout::single(WeaponKind::Kiln.default_build()).with_knack(Knack::Surge)
 }
 
 #[test]
@@ -65,17 +67,17 @@ fn requests_apply_when_dead_in_warmup_or_fresh_else_at_respawn() {
     a.world.respawn_player(&a.tuning, p);
     a.ticks(2);
 
-    // Warm-up: at once, cooldowns afresh, thorns kept.
+    // Warm-up: at once, cooldowns afresh, the knack's charges kept (same knack).
     a.world.warmup = true;
     a.set_buttons(p, Buttons::FIRE | Buttons::THROW);
     a.ticks(2);
-    let thorns = a.world.players[&p].combat.weapons.thorns_used;
-    assert!(thorns > 0);
+    let used = a.world.players[&p].combat.weapons.knack_used;
+    assert!(used > 0);
     a.world.request_loadout(p, kiln_only());
     let w = a.world.players[&p].combat.weapons;
     assert_eq!(w.loadout, kiln_only());
     assert_eq!(w.primary_cooldown, [0; 4]);
-    assert_eq!(w.thorns_used, thorns);
+    assert_eq!(w.knack_used, used);
 }
 
 #[test]
@@ -92,15 +94,20 @@ fn requests_are_sanitised() {
             None,
             None,
         ],
+        knack: Knack::Snare,
     };
     a.world.request_loadout(p, bad);
     let l = a.world.loadout(p);
     assert!(l.is_valid(), "{l:?}");
     assert_eq!(l, bad.sanitized());
     assert_eq!(l.slot(1), None, "no weapon twice");
-    // Nothing at all: the default loadout.
-    a.world.request_loadout(p, Loadout { slots: [None; 4] });
-    assert_eq!(a.world.loadout(p), Loadout::default());
+    // Nothing at all: the default weapons (the knack is kept).
+    a.world
+        .request_loadout(p, Loadout::unarmed().with_knack(Knack::Snare));
+    assert_eq!(
+        a.world.loadout(p),
+        Loadout::default().with_knack(Knack::Snare)
+    );
 }
 
 #[test]
@@ -110,7 +117,7 @@ fn forced_loadouts_win_until_lifted() {
     a.select(p, 2, 1);
     a.set_buttons(p, Buttons::FIRE);
     a.ticks(5);
-    let bow = Loadout::single(WeaponKind::Longwick.default_build());
+    let bow = Loadout::single(WeaponKind::Longwick.default_build()).with_knack(Knack::Surge);
     a.world.force_loadout(p, Some(bow));
     let w = a.world.players[&p].combat.weapons;
     assert_eq!((w.loadout, w.slot), (bow, 0));
@@ -138,9 +145,11 @@ fn forced_loadouts_win_until_lifted() {
 fn only_a_forced_loadout_can_leave_a_player_unarmed() {
     let mut a = Arena::pvp();
     let p = a.player(0, Vec3::ZERO, 0.0);
+    // (PvP: the Thorn of these loadouts applies as Surge, the request keeps it.)
+    let in_pvp = |l: Loadout| l.with_knack(Knack::Surge);
     // A request for nothing (any client) is sanitised to the default loadout ...
     a.world.request_loadout(p, Loadout::unarmed());
-    assert_eq!(a.world.loadout(p), Loadout::default());
+    assert_eq!(a.world.loadout(p), in_pvp(Loadout::default()));
     assert_eq!(a.world.loadout_requests[&p], Loadout::default());
     // ... a forced one is kept: fists only, and through respawns.
     a.select(p, 2, 0);
@@ -149,7 +158,7 @@ fn only_a_forced_loadout_can_leave_a_player_unarmed() {
     assert!(w.is_unarmed() && w.held().is_none());
     a.world.kill_player(&a.tuning.clone(), p, Attack::Dev);
     a.world.respawn_player(&a.tuning.clone(), p);
-    assert_eq!(a.world.loadout(p), Loadout::unarmed());
+    assert_eq!(a.world.loadout(p), in_pvp(Loadout::unarmed()));
     // Replicated as unarmed (the weapon id sentinel); the charge level stays empty.
     let e = player_entity(&a, p);
     assert!(!shared::protocol::player_armed(e.state));
@@ -162,7 +171,7 @@ fn only_a_forced_loadout_can_leave_a_player_unarmed() {
     a.world.force_loadout(p, None);
     a.world.kill_player(&a.tuning.clone(), p, Attack::Dev);
     a.world.respawn_player(&a.tuning.clone(), p);
-    assert_eq!(a.world.loadout(p), Loadout::default());
+    assert_eq!(a.world.loadout(p), in_pvp(Loadout::default()));
     assert!(shared::protocol::player_armed(player_entity(&a, p).state));
 }
 
@@ -265,6 +274,7 @@ fn the_player_entity_carries_weapon_ability_and_draw() {
 fn seen(events: &[SimEvent], attack: Attack) -> bool {
     events.iter().any(|e| match e {
         SimEvent::Shot(s) => s.attack == attack,
+        SimEvent::Swing { attack: a, .. } => *a == attack,
         SimEvent::Damage(d) => d.info.attack == attack,
         SimEvent::Explosion { attack: x, .. } => *x == attack,
         SimEvent::Discharge { .. } => attack == Attack::Discharge,
@@ -285,7 +295,13 @@ fn every_weapon_and_ability_fires_in_a_live_world() {
             let p = a.player(0, Vec3::ZERO, 0.0);
             a.world.players.get_mut(&p).unwrap().combat.god = true;
             a.world.request_loadout(p, Loadout::single(build));
-            let target = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, 1.0e5);
+            // Melee: in reach.
+            let range = if w.class() == WeaponClass::Melee {
+                2.5
+            } else {
+                10.0
+            };
+            let target = dummy(&mut a, Vec3::new(0.0, 0.0, -range), 0.0, 1.0e5);
             let body = dummy_body(&a, target);
             a.aim(p, body);
             let mut events = Vec::new();

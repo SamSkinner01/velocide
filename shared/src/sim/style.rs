@@ -103,9 +103,10 @@ impl StyleBonus {
 }
 
 /// What freshness is tracked for: every weapon's primary fire and every ability (an ability
-/// is one key whichever weapon carries it), plus the fist, the slam, parries and thorns. The
-/// first sixteen are the second-generation set in its old order; the expansion's are appended
-/// (the index is the position in `StyleView::freshness`).
+/// is one key whichever weapon carries it), plus the fist, the slam, parries, thorns and
+/// snares (the knacks that deal damage). The first sixteen are the second-generation set in
+/// its old order; the expansion's and the refit's are appended (the index is the position in
+/// `StyleView::freshness`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StyleKey {
     Quill,
@@ -142,10 +143,18 @@ pub enum StyleKey {
     TripleNock,
     PinningArrow,
     EmberArrow,
+    // ---- refit (docs/refit.md): melee, the Snare knack ----
+    Trimmer,
+    Tamper,
+    Lunge,
+    Whirl,
+    Hurl,
+    Upswing,
+    Snare,
 }
 
 impl StyleKey {
-    pub const COUNT: usize = 33;
+    pub const COUNT: usize = 40;
     pub const ALL: [StyleKey; Self::COUNT] = [
         StyleKey::Quill,
         StyleKey::Brand,
@@ -180,6 +189,13 @@ impl StyleKey {
         StyleKey::TripleNock,
         StyleKey::PinningArrow,
         StyleKey::EmberArrow,
+        StyleKey::Trimmer,
+        StyleKey::Tamper,
+        StyleKey::Lunge,
+        StyleKey::Whirl,
+        StyleKey::Hurl,
+        StyleKey::Upswing,
+        StyleKey::Snare,
     ];
 
     pub fn index(self) -> usize {
@@ -221,6 +237,13 @@ impl StyleKey {
             Attack::TripleNock => StyleKey::TripleNock,
             Attack::PinningArrow => StyleKey::PinningArrow,
             Attack::EmberArrow => StyleKey::EmberArrow,
+            Attack::Trimmer => StyleKey::Trimmer,
+            Attack::Tamper => StyleKey::Tamper,
+            Attack::Lunge => StyleKey::Lunge,
+            Attack::Whirl => StyleKey::Whirl,
+            Attack::Hurl => StyleKey::Hurl,
+            Attack::Upswing => StyleKey::Upswing,
+            Attack::Snare => StyleKey::Snare,
             Attack::Enemy { .. } | Attack::World | Attack::Dev => return None,
         })
     }
@@ -288,6 +311,13 @@ impl StyleKey {
             StyleKey::TripleNock => "TRIPLE NOCK",
             StyleKey::PinningArrow => "PINNING ARROW",
             StyleKey::EmberArrow => "EMBER ARROW",
+            StyleKey::Trimmer => "TRIMMER",
+            StyleKey::Tamper => "TAMPER",
+            StyleKey::Lunge => "LUNGE",
+            StyleKey::Whirl => "WHIRL",
+            StyleKey::Hurl => "HURL",
+            StyleKey::Upswing => "UPSWING",
+            StyleKey::Snare => "SNARE",
         }
     }
 }
@@ -862,7 +892,7 @@ mod tests {
         keys.sort();
         keys.dedup();
         assert_eq!(keys.len(), n);
-        assert_eq!(n + 4, StyleKey::COUNT, "+ fist, slam, parry, thorn");
+        assert_eq!(n + 5, StyleKey::COUNT, "+ fist, slam, parry, thorn, snare");
         let mut labels: Vec<&str> = StyleKey::ALL.iter().map(|k| k.label()).collect();
         labels.sort();
         labels.dedup();

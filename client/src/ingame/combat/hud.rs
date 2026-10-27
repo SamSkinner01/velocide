@@ -343,12 +343,13 @@ impl CombatHud {
             );
         }
 
-        // Thorns above the weapon block (bottom right); none in PvP (the PvP balance has no
-        // thorns): no pips, no THORN label.
-        let charges = info.tuning.thorn.charges;
-        let avail = w.thorns(info.tuning);
-        let recharge =
-            (w.thorn_recharge as f32 / (info.tuning.thorn.recharge_time * rate).max(1.0)).min(1.0);
+        // The knack's charges above the weapon block (bottom right), labelled with its name
+        // (placeholder for the KNACK slot, arsenal-client: docs/refit.md).
+        let knack = w.knack();
+        let label = knack.name().to_uppercase();
+        let charges = knack.charges(info.tuning);
+        let avail = w.knack_charges(info.tuning);
+        let recharge = w.knack_recharge_fraction(info.tuning, rate.round() as u32);
         let pip = vec2(7.0, 4.0);
         let pw = hud::pips_width(pip, 3.0, charges);
         let px = c.max.x - 12.0 - pw;
@@ -365,7 +366,7 @@ impl CombatHud {
             );
             list.text(
                 vec2(px - 4.0, py - 2.0),
-                "THORN",
+                &label,
                 &TextStyle::new(t.bone_dim).right().outline(outline),
             );
         }

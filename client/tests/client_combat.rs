@@ -12,7 +12,7 @@ use engine::time::FixedTimestep;
 use server::{Server, ServerConfig};
 use shared::input::{Buttons, PlayerInput};
 use shared::protocol::Fx;
-use shared::sim::FireIntent;
+use shared::sim::{FireIntent, Knack};
 
 const STEP: Duration = Duration::from_millis(2);
 
@@ -140,13 +140,19 @@ fn weapon_prediction_matches_the_server() {
             .any(|i| matches!(i, FireIntent::Ability { .. }))
     );
     assert!(c.intents.iter().any(|i| matches!(i, FireIntent::Punch)));
-    // An arena runs the PvP balance profile: no Thorns, and the client predicts none either
-    // (it got the effective tuning). Thorn prediction itself: shared/tests/combat_weapons.rs.
-    assert_eq!(c.net.tuning().combat.thorn.charges, 0);
+    // An arena is PvP: no Thorns. The loadout's Thorn applies as Surge (`Knack::pvp_allowed`)
+    // and the client predicts Surges, never a Thorn. Thorn prediction itself:
+    // shared/tests/combat_weapons.rs.
+    assert_eq!(server_weapons.loadout.knack, Knack::Surge);
+    assert!(
+        c.intents
+            .iter()
+            .any(|i| matches!(i, FireIntent::Knack(Knack::Surge)))
+    );
     assert!(
         !c.intents
             .iter()
-            .any(|i| matches!(i, FireIntent::ThrowThorn))
+            .any(|i| matches!(i, FireIntent::Knack(Knack::Thorn)))
     );
     assert!(
         c.intents
