@@ -38,7 +38,7 @@ use super::super::viewmodel::Viewmodel;
 use super::Rng;
 use super::entities::EntityFrame;
 use super::fx::{Beams, FxCtx};
-use super::melee::{MeleeView, lunge_streak};
+use super::melee::lunge_streak;
 use crate::models::{ModelId, ModelLibrary, Tint, knacks as props};
 
 pub use shared::loadout::Knack;
@@ -811,16 +811,11 @@ impl KnackView {
 
     /// A predicted knack of the local player (`FireIntent::Knack`): the left hand throws its
     /// thing (a Thorn, the flask, the snare, the pot) or Tallow Skin / Surge start on you.
-    #[allow(clippy::too_many_arguments)]
     pub fn local_knack(
         &mut self,
         knack: Knack,
         viewmodel: &mut Viewmodel,
         audio: &mut Audio,
-        melee: &mut MeleeView,
-        me: Option<u16>,
-        feet: Option<Vec3>,
-        yaw: f32,
         t: &CombatTuning,
     ) {
         match knack {
@@ -837,13 +832,10 @@ impl KnackView {
                 self.tallow = (d, d);
                 audio.play_2d(Sfx::TallowSkin);
             }
+            // Felt, not watched: speed lines (others see the streak).
             Knack::Surge => {
                 self.surge = (0.35, 0.35);
                 audio.play_2d(Sfx::Surge);
-                if let Some(feet) = feet {
-                    let dir = shared::input::look_dir(yaw, 0.0);
-                    melee.streak(me, feet, dir * t.knacks.surge.speed, accent(Knack::Surge));
-                }
             }
         }
     }
@@ -1245,11 +1237,11 @@ impl KnackView {
         }
     }
 
-    /// Your Tallow Skin's sheen (`tallow`: [`KnackView::tallow_strength`]) and the Surge's
-    /// speed lines (the combat HUD calls it).
-    pub fn hud(&self, list: &mut UiDrawList, c: Rect, tallow: f32, now: f64) {
+    /// Your Tallow Skin's sheen (`tallow`: [`KnackView::tallow_strength`]) and the speed lines
+    /// of a Surge or a Lunge (`rush`: `MeleeView::rush`) (the combat HUD calls it).
+    pub fn hud(&self, list: &mut UiDrawList, c: Rect, tallow: f32, rush: f32, now: f64) {
         tallow_hud(list, c, tallow, now);
-        surge_hud(list, c, self.surge_self(), now);
+        surge_hud(list, c, self.surge_self().max(rush), now);
     }
 }
 
@@ -1308,6 +1300,54 @@ pub fn first_person_knack(vm: &mut Viewmodel, audio: &mut Audio, knack: Knack) {
             Knack::Surge => Sfx::Surge,
             _ => Sfx::ThornThrow,
         }),
+    }
+}
+
+/// A heal from a Kindle pool (`Fx::Heal` from the pool's centre, every quarter second while
+/// someone stands in it)?
+pub fn is_pool_heal(entities: &[EntityState], from: Vec3) -> bool {
+    entities
+        .iter()
+        .any(|e| e.kind == kind::KINDLE_POOL && e.position.distance(from) < 0.3)
+}
+
+/// A Kindle pool healing `player`: kindling drawn up from the floor at their feet into their
+/// lantern, a faint warm flash for you; quiet (the pool's own crackle carries the sound, a
+/// kindling chime every quarter second would drown everything).
+pub fn pool_heal(ctx: &mut FxCtx, player: PlayerId, pool: Vec3, amount: f32) {
+    use crate::models::shrike::{LANTERN_HEIGHT, REMOTE_SCALE};
+    let local = Some(player) == ctx.local;
+    let to = if local {
+        ctx.local_chest
+    } else {
+        ctx.entities
+            .iter()
+            .find(|e| e.id == NetId::player(player))
+            .map(|e| e.position + Vec3::Y * LANTERN_HEIGHT * REMOTE_SCALE)
+    };
+    let Some(to) = to else {
+        return;
+    };
+    let feet = Vec3::new(to.x, pool.y + 0.1, to.z);
+    let heal = accent(Knack::KindleFlask);
+    for _ in 0..4 {
+        let start = feet + Vec3::new(ctx.rng.range(-0.3, 0.3), 0.0, ctx.rng.range(-0.3, 0.3));
+        ctx.effects.spawn(Particle {
+            position: start,
+            velocity: (to - start) / 0.35,
+            max_life: 0.35,
+            size: Vec2::splat(0.07),
+            color: heal,
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+    if local {
+        ctx.feedback.flash(
+            crate::palette::palette().flash_heal,
+            (amount / 60.0).min(0.06),
+        );
     }
 }
 

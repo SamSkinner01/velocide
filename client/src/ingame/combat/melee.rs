@@ -277,6 +277,8 @@ pub struct MeleeView {
     staged: Vec<MeleePreview>,
     /// The Trimmer's next local slash is the left blade's.
     pub next_left: bool,
+    /// Your Lunge's rush (seconds left, total): the HUD's speed lines.
+    rush: (f32, f32),
     /// Replicated hurled pieces drawn last frame (id, piece, position, velocity).
     hurled: Vec<(NetId, MeleeWeapon, Vec3, Vec3)>,
     time: f64,
@@ -421,6 +423,7 @@ impl MeleeView {
     pub fn update(&mut self, ctx: &mut UpdateCtx, bodies: &dyn Fn(u16) -> Option<Vec3>) {
         let dt = ctx.dt.max(0.0);
         self.time += dt as f64;
+        self.rush.0 = (self.rush.0 - dt).max(0.0);
         for p in std::mem::take(&mut self.staged) {
             self.preview(p, ctx);
         }
@@ -549,6 +552,15 @@ impl MeleeView {
         self.trails.len()
     }
 
+    /// Your Lunge's rush (1 = just started → 0), for the HUD's speed lines.
+    pub fn rush(&self) -> f32 {
+        if self.rush.0 > 0.0 {
+            self.rush.0 / self.rush.1.max(0.01)
+        } else {
+            0.0
+        }
+    }
+
     /// A predicted intent of the local player. A melee one (a slash, a melee ability) starts
     /// the viewmodel's swing (the Trimmer alternating hands), its sound and its trail from the
     /// eye; returns whether it was one. The Hurl's piece is the server's projectile.
@@ -562,7 +574,6 @@ impl MeleeView {
         beams: &mut Beams,
         effects: &mut Effects,
         rng: &mut Rng,
-        me: Option<u16>,
         eye: Vec3,
         feet: Option<Vec3>,
         yaw: f32,
@@ -586,10 +597,9 @@ impl MeleeView {
         self.swing(weapon, kind, left, eye, yaw, pitch, color);
         let feet = feet.unwrap_or(eye - Vec3::Y * 1.6);
         match kind {
-            SwingKind::Lunge => {
-                let dir = shared::input::look_dir(yaw, 0.0);
-                self.streak(me, feet, dir * t.lunge.speed, color);
-            }
+            // Your own lunge is felt, not watched: speed lines at the screen's edges (others
+            // see its streak).
+            SwingKind::Lunge => self.rush = (0.4, 0.4),
             SwingKind::Whirl => whirl(effects, beams, rng, feet, t.whirl.radius),
             _ => {}
         }

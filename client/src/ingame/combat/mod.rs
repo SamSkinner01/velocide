@@ -765,7 +765,6 @@ impl InGame {
         let cam = *last_camera;
         let vm = viewmodel.last_draw();
         let body = net.local_state().map(|s| s.position + Vec3::Y * 0.9);
-        let me = net.local_player_id().map(|p| p.0 as u16);
         let feet = net.local_state().map(|s| s.position);
         for shot in shots {
             let input = &shot.input;
@@ -788,7 +787,6 @@ impl InGame {
                             &mut combat.beams,
                             effects,
                             &mut combat.rng,
-                            me,
                             cam.position,
                             feet,
                             input.yaw,
@@ -940,16 +938,11 @@ impl InGame {
                         common.audio.play_2d(Sfx::Punch);
                     }
                     // The knacks (knacks.rs): a throw, or Tallow Skin / Surge on you.
-                    FireIntent::Knack(knack) => combat.knacks.local_knack(
-                        *knack,
-                        viewmodel,
-                        &mut common.audio,
-                        &mut combat.melee,
-                        me,
-                        feet,
-                        input.yaw,
-                        t,
-                    ),
+                    FireIntent::Knack(knack) => {
+                        combat
+                            .knacks
+                            .local_knack(*knack, viewmodel, &mut common.audio, t)
+                    }
                 }
             }
         }
@@ -1316,7 +1309,8 @@ impl InGame {
         // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
         let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
         if !dead {
-            self.combat.knacks.hud(list, c, tallow, now);
+            let rush = self.combat.melee.rush();
+            self.combat.knacks.hud(list, c, tallow, rush, now);
         }
     }
 }
