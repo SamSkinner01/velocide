@@ -1,4 +1,4 @@
-VELOCIDE  (build @VERSION@)
+VELOCIDE  (version @VERSION@)
 ==========================
 
 START THE GAME

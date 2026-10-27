@@ -88,6 +88,10 @@ output lands in `dist/`:
 - `velocide-<version>-linux-x86_64.tar.gz`: the same for Linux. It runs on any distro with
   glibc ≥ 2.30, so about 2020 or newer.
 
+You don't have to do this by hand: every push to `main` (and every `v*` tag) makes the Forgejo
+instance build both packages and publish them as a release (`.forgejo/workflows/release.yml`,
+`docs/hosting.md` "Releases from CI"); `/sam/velocide/releases/latest` is always the newest.
+
 Friends unzip the package and run `velocide` (or `velocide.exe`). `PLAY.txt` inside explains
 the controls and how to join. `<version>` is the git commit, and everyone, including the
 server, must run the same one. On Windows, the first launch shows a SmartScreen warning

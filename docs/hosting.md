@@ -123,6 +123,60 @@ Stop the service before copying, otherwise the binary is busy and won't be repla
 Gameplay numbers can be changed live: edit `/opt/velocide/assets/tuning.ron` on the server. It
 is reloaded on save and pushed to every connected player.
 
+Or take the server from a CI release (below): the Linux package holds `velocide-server` and
+`assets/` already.
+
+```sh
+TAG=build-42   # the release to run, e.g. the newest one on the Releases page
+curl -LO http://192.168.0.100:3000/sam/velocide/releases/download/$TAG/velocide-$TAG-linux-x86_64.tar.gz
+```
+
+## Releases from CI
+
+`.forgejo/workflows/release.yml` builds and publishes the packages on the Forgejo instance, so
+nobody has to run `scripts/package.sh` by hand:
+
+| trigger | release |
+|---|---|
+| a push to `main` | `build-<n>` (`<n>`: the run number), titled with the commit; the newest 10 are kept |
+| a `v*` tag (`git tag v1.0 && git push origin v1.0`) | under that tag, kept |
+| *Run workflow* on the Actions page | as a push to `main` |
+
+Every release carries `velocide-<version>-linux-x86_64.tar.gz` and
+`velocide-<version>-windows-x86_64.zip`, where `<version>` is the release's tag (it is also what
+`PLAY.txt` shows: everyone must run the same one). `/sam/velocide/releases/latest` always opens
+the newest.
+
+A run has five stages, each a job in a fresh Ubuntu container on the `mac-studio-docker` runner:
+
+1. **check**: `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test --workspace`.
+   Nothing is released unless they pass.
+2. **draft**: a draft release for the version.
+3. **linux** (Ubuntu 20.04, for glibc 2.31) and **windows** (Ubuntu 24.04, MinGW): build their
+   package with `scripts/build_dist.sh` and attach it to the draft.
+4. **publish**: the draft becomes the release (its tag is created at the built commit), then
+   old `build-*` releases are pruned.
+5. **discard** (only after a failure): deletes the draft, so a failed run leaves nothing half
+   done.
+
+How it is built:
+
+- Every step is a script in the repo (`scripts/ci/setup.sh`: packages + rustup;
+  `scripts/build_dist.sh`: build + archive; `scripts/ci/forgejo_release.sh`: the release API),
+  so the workflow needs no actions from a registry: the runner only needs Ubuntu's archive,
+  rustup and crates.io. `scripts/package.sh` runs the same two build scripts in local
+  containers, so a local package and a CI one are built the same way.
+- The packages are always x86_64. A Mac's Docker runs arm64 Linux containers, so there the Linux
+  package is cross-compiled (`gcc-x86-64-linux-gnu` and the amd64 builds of ALSA, udev and
+  D-Bus from Ubuntu's amd64 archive); MinGW cross-compiles to Windows from either.
+- The toolchain is pinned by `RUST_VERSION` at the top of the workflow; bump it with the
+  machine you develop on.
+- The jobs use the run's automatic token (repository write: checkout, releases, tags). If an
+  instance restricts it, add a repository secret `RELEASE_TOKEN` (an access token with
+  repository write) and the workflow uses that instead.
+- Each run compiles from scratch (there's no cache): a few minutes per job on the Mac Studio.
+  With runner capacity 2, `linux` and `windows` build at the same time.
+
 ## Notes
 
 - **Size:** the smallest droplet is plenty. A server tick with 8 players costs about 0.1 ms, and
