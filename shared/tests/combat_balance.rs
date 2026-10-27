@@ -51,9 +51,10 @@ fn every_primary_sustains_damage_inside_the_band() {
 }
 
 /// Every Mould dies to every weapon's primary at NORMAL within 9 s (the big ones) and 1.5 s
-/// (the fodder) at the weapon's range, aiming at the body or the weak point, whichever is
-/// faster. The Gaoler from behind: its front is armoured on purpose (flank it, parry it, or
-/// shoot its head).
+/// (the fodder) at the weapon's range (melee at contact), aiming at the body or the weak
+/// point, whichever is faster. The Gaoler from behind: its front is armoured on purpose (flank
+/// it, parry it, or shoot its head). A hovering Harrier is out of a swing's reach (it comes
+/// down to dive): melee builds reach it with the Hurl.
 #[test]
 fn every_mould_dies_to_every_weapon_in_a_sane_time() {
     let base = Tuning::default();
@@ -62,18 +63,28 @@ fn every_mould_dies_to_every_weapon_in_a_sane_time() {
             let behind = m == "gaoler";
             let health = mould_health(&base, m, 1);
             let limit = if health >= 200.0 { 9.0 } else { 1.5 };
+            let melee = w.class() == shared::loadout::WeaponClass::Melee;
+            let (build, trigger, range) = if melee && m == "harrier" {
+                (build_with(w, Ability::Hurl), Trigger::Ability(0), 10.0)
+            } else {
+                (
+                    w.default_build(),
+                    Trigger::Primary,
+                    range_on(w, m, weapon_range(w)),
+                )
+            };
             let best = [Aim::Body, weak_of(m, behind)]
                 .into_iter()
                 .filter_map(|aim| {
                     on_mould(
                         &base,
                         Assume::default(),
-                        w.default_build(),
-                        Trigger::Primary,
+                        build,
+                        trigger,
                         m,
                         behind,
                         aim,
-                        weapon_range(w),
+                        range,
                         Stop::damage(health, limit + 0.5),
                     )
                     .time_to(health, None)

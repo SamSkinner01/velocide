@@ -554,12 +554,15 @@ impl SimWorld {
         let dir = motion.normalize_or(p.velocity.normalize_or(Vec3::NEG_Z));
 
         if p.kind.hits_targets() {
+            // Player projectiles are fatter against targets than against the level
+            // (`combat.projectile_hit_pad`): a visible graze counts, edges don't snag.
+            let target_radius = p.radius + projectile_target_pad(t, p.owner);
             let first = boxes
                 .iter()
                 .filter(|h| self.can_hit(p.owner, h.target))
                 .filter_map(|h| {
                     let pads = self.hit_pads(t, p.owner, h.target);
-                    h.sweep_sphere_padded(p.position, motion, p.radius, pads)
+                    h.sweep_sphere_padded(p.position, motion, target_radius, pads)
                         .map(|(f, part)| (f, h.target, part))
                 })
                 .filter(|(f, _, _)| *f <= world_f)
@@ -896,6 +899,13 @@ impl SimWorld {
             };
             let d = d.max(0.0);
             let is_direct = direct == Some(h.target) || d <= 0.05;
+            // A projectile that hit through `projectile_hit_pad` went off up to that much
+            // further out: its direct hit loses nothing for it.
+            let d = if is_direct && projectile.is_some() && direct == Some(h.target) {
+                (d - projectile_target_pad(t, owner)).max(0.0)
+            } else {
+                d
+            };
             if d > spec.radius && !is_direct {
                 continue;
             }
@@ -962,6 +972,16 @@ impl SimWorld {
             }
         }
         Some(id)
+    }
+}
+
+/// Extra radius a projectile of `owner` gets against *targets* (never the level): players'
+/// projectiles (a parried one included) get `combat.projectile_hit_pad`, enemies' none (enemy
+/// attacks test the real shapes).
+pub fn projectile_target_pad(t: &Tuning, owner: Owner) -> f32 {
+    match owner {
+        Owner::Player(_) => t.combat.projectile_hit_pad.max(0.0),
+        Owner::Enemy(_) | Owner::World => 0.0,
     }
 }
 

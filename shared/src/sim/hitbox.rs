@@ -224,8 +224,9 @@ impl Hitbox {
 
     /// [`Hitbox::sweep_sphere`] against the shapes inflated by `pads`. Like a ray, padding
     /// never turns a weak-point hit into a body hit: a padded *body* contact whose straight
-    /// course meets a plain weak point before a plain body shape counts as that weak point. The
-    /// contact itself stays where the padded shapes put it.
+    /// course (the centre line: `radius` may carry a forgiving pad of its own) meets a plain weak
+    /// point before a plain body shape counts as that weak point. The contact itself stays where
+    /// the padded shapes put it.
     pub fn sweep_sphere_padded(
         &self,
         origin: Vec3,
@@ -240,8 +241,7 @@ impl Hitbox {
         let len = motion.length();
         if part == HitPart::Body && len > 1e-6 {
             let at = origin + motion * f;
-            let ahead = motion / len * THROUGH_TARGET;
-            if let Some((_, plain)) = self.sweep_sphere(at, ahead, radius)
+            if let Some((_, plain)) = self.ray_hit(at, motion / len, THROUGH_TARGET)
                 && plain != HitPart::Body
             {
                 return Some((f, plain));

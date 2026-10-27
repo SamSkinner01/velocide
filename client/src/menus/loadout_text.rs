@@ -106,7 +106,8 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
         }
         Ability::BothBarrels => {
             "Both barrels at once: a dense, narrow blast that throws you backwards. Aim down \
-             to blast-jump. The normal shot waits after it."
+             to blast-jump. It is your next shot: it waits for the gun to be ready, and the \
+             normal shot waits after it."
         }
         Ability::Slug => {
             "One heavy, perfectly accurate slug in place of the pellets: the scattergun's \
@@ -126,7 +127,8 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
         }
         Ability::Volley => {
             "Dumps a burst of the weapon's own shots at once in a tight cone: rivets, chaining \
-             zaps or burning embers. The trigger waits after it."
+             zaps or burning embers. It is your next shot: it waits for the trigger to be ready, \
+             and the trigger waits after it."
         }
         Ability::Flare => {
             "Lobs a flare; where it lands, a patch of fire burns whatever stands in it. Deny a \
@@ -165,16 +167,16 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              takes a heavy blow. Close the gap and strike at once."
         }
         Ability::Whirl => {
-            "A spin that hits everything around you, front and back, and knocks it outward. \
-             Room to breathe when you're surrounded."
+            "A spin in place of your next swing that hits everything around you, front and \
+             back, and knocks it outward. Room to breathe when you're surrounded."
         }
         Ability::Hurl => {
             "Throws a spinning blade or hammer-head that hits hard on contact and drops a \
              little in flight: melee with reach."
         }
         Ability::Upswing => {
-            "A rising strike in your swing's arc: what it hits is launched into the air and \
-             you hop up with it. Follow it up in the air."
+            "A rising strike in place of your next swing: what it hits is launched into the \
+             air and you hop up with it. Follow it up in the air."
         }
     }
 }

@@ -15,10 +15,16 @@ use shared::level::LevelKind;
 use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::protocol::{NetFrame, NetId, kind};
 use shared::sim::{
-    Attack, DamageFlags, HitTarget, Owner, ParryTarget, PlayerId, ProjectileKind, SimEvent,
-    step_weapons,
+    Attack, DamageFlags, HitPart, HitTarget, Owner, ParryTarget, PlayerId, ProjectileKind,
+    SimEvent, step_weapons,
 };
+use shared::tuning::{CombatTuning, Tuning};
 use weapon_support::*;
+
+/// The shipped combat numbers (melee damage is the balance pass's to tune: docs/balance.md).
+fn c() -> CombatTuning {
+    Tuning::default().combat
+}
 
 /// A co-op arena: player 0 at the origin facing -Z, carrying only `build` (god mode, no
 /// Mould targets them).
@@ -89,7 +95,7 @@ fn the_trimmer_slashes_the_three_nearest_in_its_arc() {
     for d in near {
         let hits = hits_on(&ev, HitTarget::Entity(d));
         assert_eq!(hits.len(), 1, "{d:?}");
-        assert_eq!(hits[0].dealt, 30.0);
+        assert_eq!(hits[0].dealt, c().trimmer.damage);
         assert_eq!(hits[0].info.attack, Attack::Trimmer);
         assert!(hits[0].info.flags.contains(DamageFlags::MELEE));
     }
@@ -112,7 +118,7 @@ fn melee_ignores_weak_points() {
     let ev = a.tap(p, Buttons::FIRE, 1);
     let hits = hits_on(&ev, HitTarget::Entity(d));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].dealt, 30.0, "no head multiplier");
+    assert_eq!(hits[0].dealt, c().trimmer.damage, "no head multiplier");
     assert!(!hits[0].info.flags.contains(DamageFlags::HEADSHOT));
     assert!(!hits[0].info.flags.contains(DamageFlags::WEAK_POINT));
 
@@ -126,7 +132,7 @@ fn melee_ignores_weak_points() {
     let head = a.eye(v);
     a.aim(p, head);
     let ev = a.tap(p, Buttons::FIRE, 1);
-    assert_eq!(damage_to(&ev, HitTarget::Player(v)), 30.0);
+    assert_eq!(damage_to(&ev, HitTarget::Player(v)), c().trimmer.damage);
 }
 
 #[test]
@@ -164,7 +170,7 @@ fn swings_need_reach_the_arc_and_line_of_sight() {
     );
     assert_eq!(
         damage_to(&ev, HitTarget::Entity(close)),
-        30.0,
+        c().trimmer.damage,
         "at your feet"
     );
 
@@ -198,7 +204,7 @@ fn swings_hit_what_the_swinger_saw() {
         let ev = a.tap(p, Buttons::FIRE, 0);
         damage_to(&ev, HitTarget::Entity(d))
     };
-    assert_eq!(run(true), 30.0, "hit as seen");
+    assert_eq!(run(true), c().trimmer.damage, "hit as seen");
     assert_eq!(
         run(false),
         0.0,
@@ -227,7 +233,7 @@ fn the_tamper_hits_everything_in_its_arc_hard() {
     for d in &ds {
         let hits = hits_on(&ev, HitTarget::Entity(*d));
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].dealt, 75.0);
+        assert_eq!(hits[0].dealt, c().tamper.damage);
         let kb = hits[0].info.knockback;
         assert!((kb.length() - 16.0).abs() < 1e-3 && kb.z < 0.0, "{kb}");
     }
@@ -337,7 +343,11 @@ fn lunge_dashes_and_strikes_the_first_target_it_reaches() {
     assert_eq!(struck, vec![HitTarget::Entity(first)]);
     let hits = hits_on(&ev, HitTarget::Entity(first));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].dealt, 45.0, "1.5 x the Trimmer's 30");
+    assert_eq!(
+        hits[0].dealt,
+        c().trimmer.damage * c().lunge.damage_scale,
+        "1.5 x the Trimmer's swing"
+    );
     assert_eq!(hits[0].info.attack, Attack::Lunge);
     assert!(hits[0].info.flags.contains(DamageFlags::MELEE));
     assert_eq!(
@@ -352,12 +362,15 @@ fn lunge_dashes_and_strikes_the_first_target_it_reaches() {
     let ev = a.tap(p, Buttons::ALT_FIRE, 40);
     assert!(!ev.iter().any(|e| matches!(e, SimEvent::LungeStruck { .. })));
     assert!(a.world.melee.lunges.is_empty());
-    // On the Tamper it is 1.5 x 75.
+    // On the Tamper it is 1.5 x its swing.
     let (mut a, p) = holding(build(WeaponKind::Tamper, [Ability::Lunge, Ability::Whirl]));
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -4.0), 0.0, TOUGH);
     a.ticks(2);
     let ev = a.tap(p, Buttons::ALT_FIRE, 30);
-    assert_eq!(damage_to(&ev, HitTarget::Entity(d)), 112.5);
+    assert_eq!(
+        damage_to(&ev, HitTarget::Entity(d)),
+        c().tamper.damage * c().lunge.damage_scale
+    );
 }
 
 #[test]
@@ -374,23 +387,35 @@ fn whirl_hits_all_around_and_knocks_outward() {
     for (d, dir) in around {
         let hits = hits_on(&ev, HitTarget::Entity(d));
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].dealt, 90.0, "1.2 x the Tamper's 75");
+        assert_eq!(
+            hits[0].dealt,
+            c().tamper.damage * c().whirl.damage_scale,
+            "1.5 x the Tamper's swing"
+        );
         assert!(hits[0].info.knockback.dot(dir) > 8.0, "outward");
         assert!(hits[0].info.flags.contains(DamageFlags::MELEE));
     }
     assert_eq!(damage_to(&ev, HitTarget::Entity(far)), 0.0);
 
-    // On the Trimmer: 1.2 x 30.
+    // On the Trimmer: 1.5 x its swing.
     let (mut a, p) = holding(build(WeaponKind::Trimmer, [Ability::Whirl, Ability::Hurl]));
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, 2.0), 0.0, TOUGH);
     a.ticks(2);
     let ev = a.tap(p, Buttons::ALT_FIRE, 1);
-    assert_eq!(damage_to(&ev, HitTarget::Entity(d)), 36.0, "behind you too");
+    assert_eq!(
+        damage_to(&ev, HitTarget::Entity(d)),
+        c().trimmer.damage * c().whirl.damage_scale,
+        "behind you too"
+    );
 }
 
 #[test]
 fn hurl_throws_a_blade_or_a_hammer_head() {
-    for (weapon, damage) in [(WeaponKind::Trimmer, 45.0), (WeaponKind::Tamper, 112.5)] {
+    let scale = c().hurl.damage_scale;
+    for (weapon, damage) in [
+        (WeaponKind::Trimmer, c().trimmer.damage * scale),
+        (WeaponKind::Tamper, c().tamper.damage * scale),
+    ] {
         let (mut a, p) = holding(build(weapon, [Ability::Hurl, Ability::Lunge]));
         let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, TOUGH);
         a.ticks(2);
@@ -420,6 +445,17 @@ fn hurl_throws_a_blade_or_a_hammer_head() {
             hits[0].dealt
         );
         assert!(hits[0].info.flags.contains(DamageFlags::PROJECTILE));
+        // Aimed at the head it still strikes the body: melee has no weak points (a Tamper's
+        // Hurl to a PvP head was a one-shot).
+        let (mut a, p) = holding(build(weapon, [Ability::Hurl, Ability::Lunge]));
+        let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, TOUGH);
+        a.ticks(2);
+        a.aim(p, dummy_head(&a, d));
+        let ev = a.tap(p, Buttons::ALT_FIRE, 40);
+        let hits = hits_on(&ev, HitTarget::Entity(d));
+        assert_eq!(hits.len(), 1, "{weapon:?} at the head");
+        assert_eq!(hits[0].info.part, HitPart::Body);
+        assert!((hits[0].dealt - damage).abs() < 1e-3, "{}", hits[0].dealt);
     }
 }
 
@@ -434,7 +470,11 @@ fn upswing_launches_what_it_hits_and_hops_the_swinger() {
     assert_eq!(swings(&ev), vec![(Attack::Upswing, 1)]);
     let hits = hits_on(&ev, HitTarget::Entity(d));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].dealt, 60.0, "0.8 x 75");
+    assert_eq!(
+        hits[0].dealt,
+        c().tamper.damage * c().upswing.damage_scale,
+        "1.4 x the Tamper's swing"
+    );
     assert_eq!(hits[0].info.knockback, Vec3::Y * 14.0);
     let vy = a.world.players[&p].movement.velocity.y;
     assert!(vy >= 5.0 - 1e-3, "the hop: {vy}");
@@ -465,7 +505,7 @@ fn melee_kills_name_the_weapon_and_heal_at_the_melee_rate() {
     a.tap(p, Buttons::FIRE, 0);
     let pool: f32 = a.world.embers.values().map(|b| b.pool).sum();
     let f = a.tuning.combat.embers.melee_weapon_heal_fraction;
-    assert!((pool - 30.0 * f).abs() < 1e-3, "{pool}");
+    assert!((pool - c().trimmer.damage * f).abs() < 1e-3, "{pool}");
 }
 
 #[test]
@@ -476,7 +516,8 @@ fn ability_power_scales_melee_abilities_off_their_home_weapon() {
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -2.0), 0.0, TOUGH);
     a.ticks(2);
     let ev = a.tap(p, Buttons::ALT_FIRE, 1);
-    assert!((damage_to(&ev, HitTarget::Entity(d)) - 18.0).abs() < 1e-3);
+    let half = c().trimmer.damage * c().whirl.damage_scale * 0.5;
+    assert!((damage_to(&ev, HitTarget::Entity(d)) - half).abs() < 1e-3);
 }
 
 #[test]

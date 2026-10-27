@@ -122,7 +122,12 @@ pub fn projectile_model(k: u16) -> Option<ModelId> {
 }
 
 /// Velocity of a trajectory-replicated entity at `time_ticks`.
-fn replicated_velocity(e: &EntityState, time_ticks: f64, rate: u32, t: &CombatTuning) -> Vec3 {
+pub(crate) fn replicated_velocity(
+    e: &EntityState,
+    time_ticks: f64,
+    rate: u32,
+    t: &CombatTuning,
+) -> Vec3 {
     let g = if e.flags & projectile_flags::PARRIED != 0 {
         0.0
     } else {
@@ -198,8 +203,13 @@ pub struct EntityFrame<'a> {
     /// Muzzle minus eye of the local weapon: own projectiles leave the drawn barrel and blend
     /// onto their true (eye-based) path over their first ~0.15 s.
     pub own_offset: Vec3,
-    /// Camera position (nothing is drawn inside the camera).
+    /// Stand-ins for own projectiles the server hasn't reported yet, and the handovers of the
+    /// ones it just did (`stand_in.rs`).
+    pub stand_ins: Option<&'a super::stand_in::StandIns>,
+    /// Camera position (nothing is drawn inside the camera) ...
     pub camera: Vec3,
+    /// ... and where it looks (parryable projectiles flare in punch reach in front of it).
+    pub view: Vec3,
     /// The level (aim lasers stop at walls).
     pub world: Option<&'a CollisionWorld>,
 }
@@ -221,6 +231,12 @@ impl EntityFrame<'_> {
                     .iter()
                     .filter(|e| kind::is_projectile(e.kind))
                     .map(|e| {
+                        // Just handed over from a stand-in: drawn where the stand-in was,
+                        // easing onto its own path.
+                        if let Some((ahead, offset)) = self.stand_ins.and_then(|s| s.handover(e.id))
+                        {
+                            return (e, self.own_time + ahead, offset);
+                        }
                         let age =
                             ((self.own_time - e.aux as f64) / self.tick_rate.max(1) as f64) as f32;
                         let fresh = e.flags & projectile_flags::PARRIED == 0;
@@ -231,6 +247,11 @@ impl EntityFrame<'_> {
                         };
                         (e, self.own_time, self.own_offset * k)
                     }),
+            )
+            .chain(
+                self.stand_ins
+                    .into_iter()
+                    .flat_map(|s| s.drawn(self.own_time)),
             )
     }
 }
@@ -257,6 +278,16 @@ impl EntityView {
         self.embers.clear();
         self.thorns.clear();
         self.slag.clear();
+    }
+
+    /// Stand-ins handed over to the server's projectiles: their per-projectile state (trail,
+    /// age) carries over to the real id.
+    pub fn adopt(&mut self, claims: &[(NetId, NetId)]) {
+        for (from, to) in claims {
+            if let Some(v) = self.projectiles.remove(from) {
+                self.projectiles.insert(*to, v);
+            }
+        }
     }
 
     /// Last drawn position of a thorn.
@@ -620,6 +651,9 @@ impl EntityView {
         if e.flags & projectile_flags::PENDING != 0 || pos.distance(f.camera) < 1.0 {
             return;
         }
+        // Halo, core and streak: every projectile reads at a glance (docs/feel.md).
+        let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
+        projectile_glow(e, pos, vel, v.start, v.age, f, self.time, effects, beams);
         // The expansion arsenal's projectiles have their own trails (arsenal.rs).
         if e.flags & projectile_flags::PARRIED == 0 {
             let vel = replicated_velocity(e, time, f.tick_rate, f.tuning);
@@ -970,9 +1004,18 @@ impl EntityView {
             } else if e.kind == kind::GRAVEWELL && stuck {
                 tint.glow = Vec4::splat(1.6 + 0.8 * ((time * 9.0).sin() as f32));
             }
+            // Drawn bigger than life so they read in flight (docs/feel.md); needles mostly
+            // longer (a fat hexagon head-on would hide what's behind it).
+            let scale = if stuck { 1.3 } else { projectile_scale(e.kind) };
+            let scale = if parried { scale * 1.25 } else { scale };
+            let scale = if e.kind == kind::NEEDLE {
+                Vec3::new(scale * 0.7, scale * 0.7, scale)
+            } else {
+                Vec3::splat(scale)
+            };
             lib.draw_model(
                 model,
-                Mat4::from_rotation_translation(rot, pos),
+                Mat4::from_scale_rotation_translation(scale, rot, pos),
                 &tint,
                 draws,
             );
@@ -993,12 +1036,12 @@ impl EntityView {
                             pal.model_glow(pal.hostile_projectile),
                         )
                     };
-                    draw_beam(lib, pos - dir * len, pos, 0.06, tint, draws);
+                    draw_beam(lib, pos - dir * len, pos, 0.12, tint, draws);
                 }
             }
             let light = match e.kind {
-                _ if parried => Some((Vec3::new(1.5, 1.5, 1.4), 5.0)),
-                kind::BOMB => Some((Vec3::new(1.6, 0.8, 0.25), 3.5)),
+                _ if parried => Some((Vec3::new(2.2, 2.2, 2.0), 7.0)),
+                kind::BOMB => Some((Vec3::new(1.6, 0.8, 0.25), 4.5)),
                 kind::GRAVEWELL if stuck => Some((Vec3::new(0.5, 2.0, 0.7), 7.0)),
                 kind::GRAVEWELL => Some((Vec3::new(0.3, 1.2, 0.4), 3.0)),
                 kind::WISP => Some((Vec3::new(1.2, 0.8, 2.2), 6.0)),
@@ -1007,8 +1050,8 @@ impl EntityView {
                     6.5,
                 )),
                 kind::NEEDLE => Some((
-                    pal.light(Vec3::new(1.6, 0.5, 0.3), pal.hostile_projectile, 1.6),
-                    4.0,
+                    pal.light(Vec3::new(1.8, 0.6, 0.35), pal.hostile_projectile, 1.8),
+                    5.0,
                 )),
                 _ => None,
             };
@@ -1021,6 +1064,178 @@ impl EntityView {
             }
         }
     }
+}
+
+/// How big a projectile model is drawn (× life size) in flight: at least twice, more for the
+/// small fast ones (`docs/feel.md`). Stuck ones are drawn a little over life size.
+pub fn projectile_scale(k: u16) -> f32 {
+    match k {
+        kind::NEEDLE => 3.0,
+        kind::RIVET => 3.2,
+        kind::ARROW | kind::PIN_ARROW | kind::EMBER_ARROW | kind::BRAND_ARROW => 2.2,
+        kind::FLAK_SHELL | kind::LIMPET => 2.4,
+        _ => 2.0,
+    }
+}
+
+/// How a projectile glows in flight: colour (standard palette), halo diameter (m) and how many
+/// seconds of its flight its streak shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectileLook {
+    pub color: Vec4,
+    pub halo: f32,
+    pub streak: f32,
+}
+
+/// The glow of a projectile kind (`parried`: white-hot, bigger, a long streak).
+pub fn projectile_look(k: u16, parried: bool) -> ProjectileLook {
+    let look = |r: f32, g: f32, b: f32, halo: f32, streak: f32| ProjectileLook {
+        color: Vec4::new(r, g, b, 1.0),
+        halo,
+        streak,
+    };
+    if parried {
+        return look(1.0, 0.97, 0.9, 1.6, 0.09);
+    }
+    match k {
+        kind::BOMB => look(1.0, 0.55, 0.15, 1.0, 0.03),
+        kind::GRAVEWELL => look(0.45, 1.0, 0.55, 1.1, 0.04),
+        kind::WISP => look(0.75, 0.5, 1.0, 1.5, 0.08),
+        kind::EMBER_BOMB => look(1.0, 0.55, 0.15, 1.5, 0.05),
+        kind::NEEDLE => look(1.0, 0.35, 0.2, 1.0, 0.07),
+        kind::ARROW => look(1.0, 0.8, 0.42, 0.9, 0.05),
+        kind::PIN_ARROW => look(0.55, 0.75, 1.0, 0.9, 0.05),
+        kind::EMBER_ARROW => look(1.0, 0.55, 0.16, 1.1, 0.06),
+        kind::BRAND_ARROW => look(1.0, 0.25, 0.45, 1.0, 0.05),
+        kind::RIVET => look(1.0, 0.42, 0.18, 0.8, 0.035),
+        kind::CINDER_ROCKET => look(1.0, 0.6, 0.25, 1.1, 0.06),
+        kind::FLAK_SHELL => look(1.0, 0.42, 0.68, 1.0, 0.04),
+        kind::LIMPET => look(0.95, 1.0, 0.3, 0.8, 0.03),
+        kind::MORTAR_SHELL => look(0.82, 0.6, 1.0, 1.3, 0.05),
+        kind::FLARE => look(1.0, 0.28, 0.2, 1.7, 0.05),
+        _ => look(1.0, 0.85, 0.5, 0.8, 0.04),
+    }
+}
+
+/// Is a projectile one the local player can parry (an enemy's parryable kind, not yet
+/// deflected)?
+fn parryable_by_me(e: &EntityState, local: Option<u16>) -> bool {
+    let theirs = Some(e.owner) != local;
+    theirs
+        && e.flags & projectile_flags::PARRIED == 0
+        && ProjectileKind::from_net_kind(e.kind).is_some_and(|k| k.parryable())
+}
+
+/// Seconds a "now in punch reach" flare takes to build (it pulses while it lasts).
+const REACH_FLARE: f32 = 0.08;
+
+/// One frame of a projectile's glow: a halo and a white-hot core (one-frame billboards, so
+/// they follow it exactly and hitstop can't stack them), a streak back along its flight (never
+/// past where it was first seen), and for a parryable one a ring in the parry colour that
+/// flares and tightens once it is in punch reach in front of you.
+#[allow(clippy::too_many_arguments)]
+fn projectile_glow(
+    e: &EntityState,
+    pos: Vec3,
+    vel: Vec3,
+    start: Vec3,
+    age: f32,
+    f: &EntityFrame,
+    time: f64,
+    effects: &mut Effects,
+    beams: &mut Beams,
+) {
+    let pal = palette();
+    let parried = e.flags & projectile_flags::PARRIED != 0;
+    let stuck = e.flags & projectile_flags::STUCK != 0;
+    let hostile = e.flags & projectile_flags::ENEMY != 0 && !parried;
+    let look = projectile_look(e.kind, parried);
+    let color = if parried {
+        pal.effect(look.color, pal.deflected, 1.0)
+    } else if hostile {
+        pal.effect(enemy_projectile_color(e.kind), pal.hostile_projectile, 1.0)
+    } else {
+        look.color
+    };
+    let distance = pos.distance(f.camera);
+    // Never smaller than a few pixels far away.
+    let halo = look.halo.max(distance * 0.022) * if stuck { 0.5 } else { 1.0 };
+    let flicker = 0.85 + 0.15 * ((time * 31.0 + e.id.0 as f64 * 0.7).sin() as f32);
+    effects.billboard(
+        pos,
+        halo * flicker,
+        (color.truncate() * 0.9).extend(0.55),
+        FxTex::Glow,
+        0.0,
+    );
+    let white = color.truncate().lerp(Vec3::ONE, 0.6) * 1.6;
+    effects.billboard(pos, halo * 0.36, white.extend(1.0), FxTex::Glow, 0.0);
+
+    // The streak: how far it flew in the last `look.streak` seconds, back along its velocity.
+    let speed = vel.length();
+    if !stuck && speed > 2.0 {
+        let back = -vel / speed;
+        let flown = (pos - start).dot(-back).max(0.0);
+        // Never reaching back into the camera, and faded when seen end-on (a streak flying
+        // straight away from you or at you would otherwise be a disc over the target).
+        let mut len = (speed * look.streak).min(flown).min(9.0);
+        let to_camera = (f.camera - pos).normalize_or_zero();
+        if back.dot(to_camera) > 0.0 {
+            len = len.min((distance - 2.0).max(0.0));
+        }
+        let side = ((1.0 - back.dot(to_camera).abs()) / 0.3).clamp(0.0, 1.0);
+        if len > 0.15 && side > 0.02 {
+            let tail = pos + back * len;
+            let width = 0.05 + 0.08 * look.halo;
+            let core = color.truncate().lerp(Vec3::ONE, 0.45) * 2.0;
+            beams.frame_beam(tail, pos, width, core.extend(0.9 * side.max(0.35)));
+            beams.frame_beam(
+                tail,
+                pos,
+                width * 3.0,
+                (color.truncate() * 1.3).extend(0.3 * side),
+            );
+        }
+    }
+
+    // Parryable: a ring in the parry colour; in punch reach in front of you it flares (bigger,
+    // brighter, a fast pulse) — "punch now".
+    if parryable_by_me(e, f.local_owner) && !stuck {
+        let to = pos - f.camera;
+        let d = to.length();
+        let t = f.tuning;
+        let in_front = to.normalize_or_zero().dot(f.view.normalize_or(Vec3::NEG_Z));
+        let half_cone = (t.parry_cone_degrees * 0.5).to_radians().cos();
+        let reach = (d <= t.parry_range && in_front >= half_cone)
+            || (d <= t.parry_close_range && in_front > 0.0);
+        // A little early, so the cue leads the window rather than trailing it.
+        let soon = d <= t.parry_range + speed * REACH_FLARE && in_front >= half_cone;
+        let ring = pal.parry_window;
+        let (size, alpha, pulse_hz) = if reach || soon {
+            (halo * 1.25, 1.0, 18.0)
+        } else {
+            (halo * 1.6, 0.75, 4.0)
+        };
+        let pulse = 0.8 + 0.2 * ((time * pulse_hz).sin() as f32);
+        let level = if reach { 2.4 } else { 1.5 };
+        effects.billboard(
+            pos,
+            size * pulse,
+            (ring.truncate() * level).extend(alpha),
+            FxTex::Ring,
+            (time * 3.0) as f32,
+        );
+        if reach {
+            effects.billboard(
+                pos,
+                halo * 0.8,
+                Vec4::new(2.2, 2.2, 2.0, 0.9),
+                FxTex::Glow,
+                0.0,
+            );
+        }
+    }
+    let _ = age;
 }
 
 /// Tint of an aim laser: red while tracking, white-hot and pulsing once locked. The

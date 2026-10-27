@@ -8,12 +8,13 @@ mod combat_support;
 mod weapon_support;
 
 use balance_support::{
-    Aim, Assume, Side, Stop, Trigger, build_with, on_player, per_trigger, per_use, weapon_range,
+    Aim, Assume, Side, Stop, Trigger, build_with, duel, on_player, per_trigger, per_use,
+    weapon_range,
 };
 use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
-use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::lobby::GameMode;
 use shared::protocol::{NetFrame, NetId, enemy_flags, kind, player_flags};
 use shared::sim::combat::secs_to_ticks;
@@ -880,6 +881,8 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
         (WeaponKind::Thresher, Ability::BothBarrels),
         (WeaponKind::Riveter, Ability::Volley),
         (WeaponKind::Arclash, Ability::Volley),
+        (WeaponKind::Tamper, Ability::Whirl),
+        (WeaponKind::Tamper, Ability::Upswing),
     ] {
         let t = on_player(
             &base,
@@ -913,4 +916,32 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
             "{w:?}: {secs:?} s"
         );
     }
+}
+
+/// PvP knacks are choices, not a must-pick (`balance_support::duel`: real 100 HP, every primary
+/// held at the opponent's body at its range, the opponent's knack used just before). Tallow
+/// Skin at half damage for 3 s won every even duel (on average 1.9x every time to kill); at
+/// 0.7 for 2 s (the PvP override) it's a strong defensive pick, at most 1.6x on average. The
+/// Kindle Flask's pool matters against the steady, slower killers (a bow's second draw).
+#[test]
+fn pvp_knacks_are_choices_not_a_must_pick() {
+    let base = Tuning::default();
+    let mut slowdowns = Vec::new();
+    let mut flask_helps = false;
+    for w in balance_support::weapons() {
+        let b = w.default_build();
+        let r = weapon_range(w);
+        let plain = duel(&base, b, None, r).expect("a kill");
+        let tallow = duel(&base, b, Some(Knack::TallowSkin), r).expect("a kill with Tallow");
+        let flask = duel(&base, b, Some(Knack::KindleFlask), r).expect("a kill with a flask");
+        assert!(tallow >= plain && flask >= plain, "{w:?}");
+        slowdowns.push(tallow / plain);
+        flask_helps |= flask > plain + 0.1;
+    }
+    let mean = slowdowns.iter().sum::<f32>() / slowdowns.len() as f32;
+    assert!(
+        mean <= 1.6,
+        "Tallow Skin: {mean:.2}x on average ({slowdowns:?})"
+    );
+    assert!(flask_helps, "the Kindle Flask never changed a duel");
 }

@@ -119,6 +119,35 @@ fn a_tap_between_ticks_still_reaches_the_simulation() {
 }
 
 #[test]
+fn a_click_between_ticks_aims_where_the_crosshair_was_on_its_frame() {
+    // Fire is clicked (gamepad right trigger) at view A; the view keeps turning to B before
+    // the tick: the shot's input aims at A, the next input at the latest view again.
+    let s = Settings::default();
+    let mut c = Controls::new();
+    let mut input = InputState::new();
+    c.set_view(0.5, 0.1);
+    input.handle_gamepad_event(GamepadEvent::Axis(GamepadAxis::RightTrigger, 1.0));
+    c.latch(&input, &s.bindings);
+    input.end_frame();
+    c.set_view(0.8, 0.2);
+    c.latch(&input, &s.bindings);
+    let shot = c.build(&input, &s.bindings, true);
+    assert!(shot.buttons.contains(Buttons::FIRE));
+    assert_eq!((shot.yaw, shot.pitch), (0.5, 0.1));
+    let held = c.build(&input, &s.bindings, true);
+    assert!(held.buttons.contains(Buttons::FIRE));
+    assert_eq!((held.yaw, held.pitch), (0.8, 0.2));
+    // Clearing the latch (a menu opened) forgets the click's aim too.
+    input.handle_gamepad_event(GamepadEvent::Axis(GamepadAxis::RightTrigger, 0.0));
+    input.end_frame();
+    input.handle_gamepad_event(GamepadEvent::Axis(GamepadAxis::RightTrigger, 1.0));
+    c.latch(&input, &s.bindings);
+    c.clear_latched();
+    c.set_view(1.0, 0.0);
+    assert_eq!(c.build(&input, &s.bindings, true).yaw, 1.0);
+}
+
+#[test]
 fn build_uses_latest_view_sticks_and_selection() {
     let s = Settings::default();
     let mut c = Controls::new();

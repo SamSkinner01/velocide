@@ -149,7 +149,7 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | 5 | Thresher | Scatter | 7 × 7.5 dmg, 11°, 45 m, 0.42 s, automatic while held |
 | 6 | Riveter | Rapid | rivet projectile 90 m/s, gravity 6, 7 dmg, 1.2° spread, 0.09 s (5 ticks: 12/s at 60 Hz; 11/s is not a whole number of ticks) |
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
-| 8 | Longwick | Draw | hold to draw (0.75 s to full), release: arrow 45–120 m/s, 22–105 dmg by draw, gravity 14, 0.25 s before the next draw; a tap looses a weak, slow arrow |
+| 8 | Longwick | Draw | hold to draw (0.62 s to full), release: arrow 55–135 m/s, 22–105 dmg by draw, gravity 10, 0.25 s before the next draw; a tap looses a weak, slow arrow (handling: `docs/feel.md`) |
 | 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 20° cone: 4 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
 | 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 30 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
 | 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16 |
@@ -435,7 +435,7 @@ party). Times to kill and per-pull damage below are measured in play by the bala
 | Kiln | damage 0.9 | 3.6 / 5 ticks + 15 dps burn | 1.75 s inside 13 m, and the 3 s burn keeps going (45) — the counterplay is breaking contact (PvE spray went 3 → 4: the same 3.6 here) |
 | Tumbler | damage 0.9 | 65 a direct bomb | 2 direct: 0.98 s at 5 m; splash kills take three (PvE bombs went 65 → 72: the same 65 here) |
 | Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.47 s at 5 m, 1.7 s at 15 m; three 32s (96) were a body one-shot in 0.16 s with any brand |
-| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.64 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (96) is not; body: 2 full draws, 1.6 s |
+| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.53 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (48) is not; body: 2 full draws, 1.27 s |
 | Both Barrels | damage 0.25 | 24 × 2 = 48 (96 to the head) | at 0.4 (77) a 5° cone at the head was a one-shot (154), and fired on the same tick as a blast it was a body one-shot (144) — it now takes the blast's shot; it stays the blast-jump |
 | Wisp | damage 0.5 | 5.5 a zap | it aims itself: 40 dps of free damage was too much (PvE zaps went 8 → 11: about the same 5.6 as before here) |
 | Discharge | damage 0.9 | 22.5–72 | no one-shot even with a hit before it |

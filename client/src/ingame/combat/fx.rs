@@ -70,7 +70,7 @@ pub struct Beams {
 /// Most tracers alive at once (oldest replaced).
 const MAX_BEAMS: usize = 256;
 const MAX_RINGS: usize = 16;
-const MAX_FRAME_BEAMS: usize = 96;
+const MAX_FRAME_BEAMS: usize = 320;
 const MAX_TEMP_LIGHTS: usize = 8;
 /// Segments of a ring.
 const RING_SEGMENTS: usize = 28;
@@ -738,6 +738,97 @@ pub fn thorn_plant(ctx: &mut FxCtx, p: Vec3) {
     ctx.audio.play(Sfx::ThornPlant, PlayParams::at(p));
 }
 
+/// A muzzle flash (`docs/feel.md`): a big star-shaped flash, a white-hot core, a tongue of
+/// flame along the shot, a few sparks thrown forward and a bright, short light. `carry` is the
+/// shooter's velocity (the flash rides along with the gun); `size` the flash's width (m).
+pub fn muzzle_flash(
+    effects: &mut Effects,
+    beams: &mut Beams,
+    rng: &mut Rng,
+    muzzle: Vec3,
+    aim: Vec3,
+    carry: Vec3,
+    size: f32,
+) {
+    let aim = aim.normalize_or(Vec3::NEG_Z);
+    let carry = if carry.is_finite() { carry } else { Vec3::ZERO };
+    effects.spawn(Particle {
+        position: muzzle + aim * 0.06,
+        velocity: carry,
+        max_life: 0.06,
+        size: Vec2::splat(size * 0.85),
+        end_scale: 1.4,
+        color: Vec4::new(1.0, 0.85, 0.55, 1.0),
+        texture: FxTex::MuzzleFlash,
+        additive: true,
+        rotation: rng.angle(),
+        ..Default::default()
+    });
+    effects.spawn(Particle {
+        position: muzzle + aim * (0.06 + size * 0.4),
+        velocity: carry + aim * 3.0,
+        max_life: 0.05,
+        size: Vec2::splat(size * 0.55),
+        end_scale: 1.6,
+        color: Vec4::new(1.0, 0.7, 0.35, 0.9),
+        texture: FxTex::MuzzleFlash,
+        additive: true,
+        rotation: rng.angle(),
+        ..Default::default()
+    });
+    effects.spawn(Particle {
+        position: muzzle + aim * 0.04,
+        velocity: carry,
+        max_life: 0.05,
+        size: Vec2::splat(size * 0.45),
+        end_scale: 0.6,
+        color: Vec4::new(1.8, 1.7, 1.4, 1.0),
+        texture: FxTex::Glow,
+        additive: true,
+        ..Default::default()
+    });
+    for _ in 0..3 {
+        effects.spawn(Particle {
+            position: muzzle + aim * 0.08,
+            velocity: carry + (aim + rng.dir() * 0.35) * rng.range(7.0, 13.0),
+            gravity: 9.0,
+            drag: 2.0,
+            max_life: rng.range(0.08, 0.16),
+            size: Vec2::splat(0.05),
+            end_scale: 0.4,
+            color: Vec4::new(1.0, 0.85, 0.45, 1.0),
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+    beams.light(muzzle + aim * 0.3, Vec3::new(2.4, 1.6, 0.9), 6.5, 0.08);
+}
+
+/// A hitscan tracer from `muzzle` to `end` in `style`: a bright core and a wide faint glow
+/// around it (`docs/feel.md`: thicker and longer-lived than they were). `local`: the shooter's
+/// own, which starts right in front of the camera, so its first metres stay thin.
+pub fn tracer(beams: &mut Beams, muzzle: Vec3, end: Vec3, style: &super::AttackStyle, local: bool) {
+    if style.beam_width <= 0.0 {
+        return;
+    }
+    let along = (end - muzzle).normalize_or_zero();
+    let length = (end - muzzle).length();
+    let mid = if local {
+        muzzle + along * length.min(3.0)
+    } else {
+        muzzle
+    };
+    let (w, c, life) = (style.beam_width, style.beam_color, style.beam_life);
+    if local {
+        beams.beam(muzzle, mid, w.min(0.03), c, life);
+    }
+    beams.beam(mid, end, w, c, life);
+    // The glow: wider, faint, a little shorter-lived.
+    let glow = (c.truncate() * 0.8).extend(c.w * 0.28);
+    beams.beam(mid, end, w * 2.8, glow, life * 0.8);
+}
+
 /// Impact on a body (a Mould or a Shrike): sparks and a puff of ash.
 pub fn body_impact(effects: &mut Effects, p: Vec3, dir: Vec3, amount: f32) {
     let n = (4.0 + amount * 8.0).min(16.0) as usize;
@@ -798,8 +889,20 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             if *attack == Attack::Arc {
                 ctx.effects.glow(muzzle, ARC_COLOR, 0.3, 0.06);
             } else {
-                ctx.effects.muzzle_flash(muzzle, dir);
-                ctx.beams.light(muzzle, Vec3::new(1.6, 1.1, 0.6), 4.0, 0.06);
+                let carry = ctx
+                    .entities
+                    .iter()
+                    .find(|e| e.id == id)
+                    .map_or(Vec3::ZERO, |e| e.velocity);
+                muzzle_flash(
+                    ctx.effects,
+                    ctx.beams,
+                    ctx.rng,
+                    muzzle,
+                    dir,
+                    carry,
+                    style.flash,
+                );
             }
             for end in ends {
                 let end = q(*end);
@@ -813,13 +916,7 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                         ctx.rng,
                     );
                 } else {
-                    ctx.beams.beam(
-                        muzzle,
-                        end,
-                        style.beam_width,
-                        style.beam_color,
-                        style.beam_life,
-                    );
+                    tracer(ctx.beams, muzzle, end, &style, false);
                 }
                 world_impact(ctx.effects, ctx.world, muzzle, end, 4);
             }

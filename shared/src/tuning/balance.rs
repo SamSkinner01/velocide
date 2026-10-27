@@ -160,7 +160,7 @@ impl Default for BalanceTuning {
             (Ability::Skewer, scale(0.58)),
             (Ability::Flurry, scale(0.6)),
             (Ability::Flak, scale(0.8)),
-            (Ability::Volley, scale(0.65)),
+            (Ability::Volley, scale(0.75)),
             (Ability::Limpet, scale(0.75)),
             (
                 Ability::Mortar,

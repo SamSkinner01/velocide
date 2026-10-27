@@ -179,25 +179,34 @@ fn view_offset(w: WeaponKind) -> Vec3 {
     }
 }
 
-/// Extra view rotation: the Longwick is canted so its long limbs cross the screen instead of
-/// filling it.
-fn view_rotation(w: WeaponKind) -> Quat {
-    match w {
-        WeaponKind::Longwick => longwick::view_rotation(),
+/// Extra view rotation: the Longwick is canted so its limbs lean away from the crosshair, and
+/// turns to point its arrow at it as it is drawn.
+fn view_rotation(anim: &ViewmodelAnim) -> Quat {
+    match anim.weapon {
+        WeaponKind::Longwick => longwick::view_rotation(smoothstep(anim.draw)),
         _ => Quat::IDENTITY,
+    }
+}
+
+/// Extra first-person scale (× [`VIEWMODEL_SCALE`]): the Longwick is drawn smaller so it
+/// never covers the centre of the screen.
+fn view_scale(w: WeaponKind) -> f32 {
+    match w {
+        WeaponKind::Longwick => longwick::VIEW_SCALE,
+        _ => 1.0,
     }
 }
 
 /// Recoil at full kick: (pull back in metres before scaling, muzzle climb in radians).
 fn kick_amount(w: WeaponKind) -> (f32, f32) {
     match w {
-        WeaponKind::Quill => (0.04, 0.2),
+        WeaponKind::Quill => (0.055, 0.26),
         WeaponKind::Bellows => (0.085, 0.45),
         WeaponKind::Arclash => (0.016, 0.05),
         WeaponKind::Tumbler => (0.09, 0.32),
-        WeaponKind::Lancet => (0.03, 0.11),
+        WeaponKind::Lancet => (0.038, 0.14),
         WeaponKind::Thresher => (0.07, 0.3),
-        WeaponKind::Riveter => (0.022, 0.05),
+        WeaponKind::Riveter => (0.03, 0.07),
         WeaponKind::Cinderbox => (0.05, 0.16),
         // The string snaps forward and the bow rocks towards the target.
         WeaponKind::Longwick => (-0.035, -0.06),
@@ -498,8 +507,12 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
         0.045 - sway.x * 0.025 + 0.05 * punch,
         kick_pitch * kick - 0.7 * lowered + sway.y * 0.02 - 0.1 * punch,
         -0.04 * s * bob - 0.2 * lowered,
-    ) * view_rotation(w);
-    Mat4::from_scale_rotation_translation(Vec3::splat(VIEWMODEL_SCALE), rotation, offset)
+    ) * view_rotation(anim);
+    Mat4::from_scale_rotation_translation(
+        Vec3::splat(VIEWMODEL_SCALE * view_scale(w)),
+        rotation,
+        offset,
+    )
 }
 
 /// Throw curve: wind up (raise) for the first half, flick forward, then drop away.
@@ -559,7 +572,7 @@ fn draw_fists(
     out: &mut Vec<DrawItem>,
 ) -> ViewmodelDrawInfo {
     let raise = Mat4::from_translation(Vec3::new(-0.02, 0.05, 0.0)) * Mat4::from_rotation_x(0.35);
-    let right = gun * Mat4::from_quat(view_rotation(anim.weapon).inverse()) * raise;
+    let right = gun * Mat4::from_quat(view_rotation(anim).inverse()) * raise;
     lib.get(ModelId::ArmRight).draw_static(right, tint, out);
     let left = fist_transform(anim).unwrap_or_else(|| {
         let bob = gun.w_axis.truncate() - view_offset(anim.weapon);
@@ -597,7 +610,7 @@ pub(crate) fn draw_viewmodel(
     let pose = weapon_pose(&held);
     lib.get(w.model()).draw(&pose, gun, tint, out);
     // The arm doesn't follow a weapon's cant (the bow's): it still runs down off the screen.
-    let arm = gun * Mat4::from_quat(view_rotation(w).inverse());
+    let arm = gun * Mat4::from_quat(view_rotation(anim).inverse());
     lib.get(ModelId::ArmRight).draw_static(arm, tint, out);
 
     let mut fist_point = None;

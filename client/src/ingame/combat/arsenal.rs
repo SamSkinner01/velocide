@@ -203,7 +203,9 @@ impl ArsenalView {
     }
 
     /// Per frame, from the predicted weapon state: the charge glow and whine (Discharge,
-    /// Skewer), the bow's draw (creak while drawing, a ring at full draw, silence on release).
+    /// Skewer), the bow's draw (creak while drawing, a ring and a bright glint at full draw,
+    /// silence on release). Returns the bow's draw (0..1) and whether full draw was reached
+    /// this frame (the caller zooms and flashes, `docs/feel.md`).
     pub fn local_feel(
         &mut self,
         s: &WeaponState,
@@ -211,7 +213,7 @@ impl ArsenalView {
         tick_rate: u32,
         viewmodel: &mut Viewmodel,
         audio: &mut Audio,
-    ) {
+    ) -> (f32, bool) {
         // Nothing carried (gun game's Fist tier): fists only.
         viewmodel.set_unarmed(s.is_unarmed());
         viewmodel.set_charge(s.charge_fraction(t, tick_rate));
@@ -241,11 +243,15 @@ impl ArsenalView {
             audio.stop(Sfx::BowDraw);
             self.local.full_draw = false;
         }
+        let mut full_now = false;
         if drawing && draw >= 1.0 && !self.local.full_draw {
             audio.play_2d(Sfx::BowFullDraw);
+            audio.play_2d(Sfx::FullDrawGlint);
             self.local.full_draw = true;
+            full_now = true;
         }
         self.local.drawing = drawing;
+        (draw, full_now)
     }
 }
 
@@ -371,13 +377,26 @@ impl ArsenalProjectile {
         }
     }
 
-    /// Drawn scale (small things a little larger than life so they read at 640×360).
+    /// Drawn scale in flight: at least twice life size, more for the small fast ones, so they
+    /// read at 640×360 (`docs/feel.md`, the same as `entities::projectile_scale`).
     pub fn scale(self) -> f32 {
         match self {
+            ArsenalProjectile::Rivet => 3.2,
+            ArsenalProjectile::Limpet | ArsenalProjectile::FlakShell => 2.4,
+            ArsenalProjectile::Arrow
+            | ArsenalProjectile::PinningArrow
+            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BrandArrow => 2.2,
+            _ => 2.0,
+        }
+    }
+
+    /// Drawn scale once stuck (arrows in a wall, a limpet on a body): a little over life size.
+    pub fn stuck_scale(self) -> f32 {
+        match self {
+            ArsenalProjectile::Limpet => 1.8,
             ArsenalProjectile::Rivet => 1.5,
-            ArsenalProjectile::Limpet => 1.6,
-            ArsenalProjectile::FlakShell => 1.2,
-            _ => 1.0,
+            _ => 1.3,
         }
     }
 
@@ -466,26 +485,29 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
         }
         _ => Quat::IDENTITY,
     };
-    let sink = if p.stuck { p.kind.embed() } else { 0.0 };
-    // The models' fronts sit ~0.36 m (arrows) / 0.12 m (rivet) ahead of their origin.
-    let front = match p.kind {
-        ArsenalProjectile::Rivet => 0.12,
-        ArsenalProjectile::Arrow
-        | ArsenalProjectile::PinningArrow
-        | ArsenalProjectile::EmberArrow
-        | ArsenalProjectile::BrandArrow => 0.36,
-        _ => 0.0,
+    let scale = if p.stuck {
+        p.kind.stuck_scale()
+    } else {
+        p.kind.scale()
     };
+    let sink = if p.stuck { p.kind.embed() } else { 0.0 };
+    // The models' fronts sit ~0.36 m (arrows) / 0.12 m (rivet) ahead of their origin (at
+    // life size).
+    let front = scale
+        * match p.kind {
+            ArsenalProjectile::Rivet => 0.12,
+            ArsenalProjectile::Arrow
+            | ArsenalProjectile::PinningArrow
+            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BrandArrow => 0.36,
+            _ => 0.0,
+        };
     let offset = if p.stuck {
         -dir * (front - sink).max(0.0)
     } else {
         Vec3::ZERO
     };
-    Mat4::from_scale_rotation_translation(
-        Vec3::splat(p.kind.scale()),
-        look * spin,
-        p.position + offset,
-    )
+    Mat4::from_scale_rotation_translation(Vec3::splat(scale), look * spin, p.position + offset)
 }
 
 /// Is an armed limpet's lamp lit? It blinks faster the longer it sits (2 → 6 Hz).
@@ -1776,8 +1798,15 @@ mod tests {
             age: 5.0,
             seed: 0,
         };
-        let origin = projectile_transform(&arrow, 0.0).transform_point3(Vec3::ZERO);
-        assert!(origin.z > 0.05 && origin.z < 0.2, "{origin}");
+        let m = projectile_transform(&arrow, 0.0);
+        let origin = m.transform_point3(Vec3::ZERO);
+        assert!(origin.z > 0.05 && origin.z < 0.3, "{origin}");
+        // Its tip (0.36 m ahead of the model's origin at life size) is `embed` deep.
+        let tip = m.transform_point3(Vec3::new(0.0, 0.0, -0.36));
+        assert!(
+            (tip.z + ArsenalProjectile::Arrow.embed()).abs() < 1e-3,
+            "{tip}"
+        );
     }
 
     #[test]

@@ -3,8 +3,6 @@
 //!
 //! ```text
 //! cargo run -p shared --release --example balance_report               # everything
-//! cargo run -p shared --release --example balance_report -- --refit    # with feel's
-//!     0.2 m projectile hit pad assumed (until it lands)
 //! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots
 //!     abilities knacks healing
 //! cargo run -p shared --release --example balance_report -- --tuning path/to/tuning.ron
@@ -441,9 +439,7 @@ fn healing(base: &Tuning) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let assume = Assume {
-        refit: args.iter().any(|a| a == "--refit"),
-    };
+    let assume = Assume::default();
     let tuning_at = args.iter().position(|a| a == "--tuning");
     let base = match tuning_at.map(|i| args.get(i + 1)) {
         Some(Some(path)) => match Tuning::load(std::path::Path::new(path)) {
@@ -466,14 +462,7 @@ fn main() {
         .map(|(_, a)| a.as_str())
         .collect();
     let want = |name: &str| sections.is_empty() || sections.contains(&name);
-    println!(
-        "# VELOCIDE balance report{}\n",
-        if assume.refit {
-            " (the 0.2 m projectile hit pad assumed)"
-        } else {
-            ""
-        }
-    );
+    println!("# VELOCIDE balance report\n");
     if want("primaries") {
         primaries(&base, assume);
     }

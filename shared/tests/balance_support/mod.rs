@@ -108,14 +108,11 @@ pub enum Aim {
     Weak(usize),
 }
 
-/// Assumptions layered over the shipped tuning.
+/// Assumptions layered over the shipped tuning, for numbers ahead of other areas' merges. None
+/// at the moment: everything the refit's balance pass assumed (**pve**'s Mould hit shapes and
+/// hit assist, **feel**'s projectile hit pad) is on main, so every run measures it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Assume {
-    /// **feel**'s `projectile_hit_pad` (`docs/refit.md`): player projectiles hitting targets
-    /// with 0.2 m more radius, for numbers ahead of that merge. (**pve**'s bigger Mould hit
-    /// shapes and hit assist are on main: every run measures them.)
-    pub refit: bool,
-}
+pub struct Assume {}
 
 /// One damage event on a tracked target.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -273,26 +270,8 @@ fn flat_level(kind: LevelKind) -> LevelDef {
 }
 
 /// The tuning a `side` match runs with (`Tuning::for_mode`), plus the assumptions.
-pub fn effective(base: &Tuning, side: Side, assume: Assume) -> Tuning {
-    let mut t = base.for_mode(side.mode());
-    if assume.refit {
-        // Approximated by the radius (it also widens world contacts slightly: the bench's only
-        // level is the floor).
-        let c = &mut t.combat;
-        for r in [
-            &mut c.tumbler.bomb_projectile_radius,
-            &mut c.riveter.rivet_radius,
-            &mut c.cinderbox.rocket_radius,
-            &mut c.longwick.arrow_radius,
-            &mut c.flak.shell_radius,
-            &mut c.limpet.projectile_radius,
-            &mut c.mortar.projectile_radius,
-            &mut c.flare.projectile_radius,
-        ] {
-            *r += 0.2;
-        }
-    }
-    t
+pub fn effective(base: &Tuning, side: Side, _assume: Assume) -> Tuning {
+    base.for_mode(side.mode())
 }
 
 /// A valid build of `weapon` with `ability` in slot A (the other slot: the first other
