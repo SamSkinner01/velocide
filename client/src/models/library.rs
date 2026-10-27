@@ -17,6 +17,8 @@ use super::{EnemyAnim, ModelId, PlayerAnim, ViewmodelAnim, cosmetics, enemies, s
 /// All models, uploaded and ready to draw.
 pub struct ModelLibrary {
     rigs: Vec<Rig>,
+    /// Model-space bounds of each model in its rest pose (min, max): menu previews frame it.
+    bounds: Vec<(Vec3, Vec3)>,
     /// Models that could not be loaded from disk and were generated in memory instead.
     pub regenerated: Vec<ModelId>,
 }
@@ -41,6 +43,18 @@ pub struct ViewmodelDrawInfo {
     pub muzzle_dir: Vec3,
     /// View-space position of the held thorn's tip / fist knuckles (punch sparks), if visible.
     pub fist: Option<Vec3>,
+}
+
+/// Bounds of joint-space parts (from [`match_parts`]) put back at their pivots: the model in
+/// its rest pose.
+fn rest_bounds(id: ModelId, parts: &[(MeshData, Option<TextureData>, Vec4)]) -> (Vec3, Vec3) {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for (j, (mesh, _, _)) in id.joints().iter().zip(parts) {
+        let (lo, hi) = engine::assets::meshgen::bounds(&mesh.vertices);
+        let (lo, hi) = (lo + j.pivot, hi + j.pivot);
+        out = Some(out.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))));
+    }
+    out.unwrap_or_default()
 }
 
 /// Turns loaded / generated parts into joint-space meshes in joint-table order.
@@ -102,6 +116,7 @@ impl ModelLibrary {
         let mut textures: HashMap<u64, TextureId> = HashMap::new();
         let white = renderer.white_texture();
         let mut rigs = Vec::with_capacity(ModelId::ALL.len());
+        let mut bounds = Vec::with_capacity(ModelId::ALL.len());
         let mut regenerated = Vec::new();
         for id in ModelId::ALL {
             let path = dir.join(id.file_name());
@@ -117,6 +132,7 @@ impl ModelLibrary {
                     match_parts(id, &id.build())?
                 }
             };
+            bounds.push(rest_bounds(id, &parts));
             let mut rig = Rig::new(id.joints(), |i| {
                 let (mesh, texture, color) = &parts[i];
                 let texture = match texture {
@@ -136,11 +152,20 @@ impl ModelLibrary {
             }
             rigs.push(rig);
         }
-        Ok(ModelLibrary { rigs, regenerated })
+        Ok(ModelLibrary {
+            rigs,
+            bounds,
+            regenerated,
+        })
     }
 
     pub fn get(&self, id: ModelId) -> &Rig {
         &self.rigs[id.index()]
+    }
+
+    /// Model-space bounds (min, max) of a model in its rest pose (menu previews frame it).
+    pub fn bounds(&self, id: ModelId) -> (Vec3, Vec3) {
+        self.bounds.get(id.index()).copied().unwrap_or_default()
     }
 
     /// Draws a model in its bind pose (projectiles, props).

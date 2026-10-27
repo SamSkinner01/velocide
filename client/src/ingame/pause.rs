@@ -1,13 +1,14 @@
 //! Pause menu (Esc / Start): RESUME, RESTART (single-player), RETURN TO LOBBY (multiplayer
-//! host), LOADOUT (`menus::loadout`; changes apply at the next respawn), SETTINGS, LEAVE. In multiplayer the game keeps running behind it; in single-player
-//! the in-process server is paused (`ServerCommand::SetPaused`).
+//! host), LOADOUT (`menus::loadout`; changes apply at the next respawn), SETTINGS, LEAVE. In
+//! multiplayer the game keeps running behind it; in single-player the in-process server is
+//! paused (`ServerCommand::SetPaused`).
 
 use engine::audio::Sfx;
 use engine::input::InputState;
 use engine::ui::{Rect, TextStyle, Ui};
 use glam::vec2;
 
-use crate::menus::loadout::{self, LoadoutMenu};
+use crate::menus::loadout::{LoadoutMenu, Preview};
 use crate::menus::settings_menu::{self, SettingsMenu, SettingsResponse};
 use crate::settings::Settings;
 
@@ -48,6 +49,11 @@ impl PauseMenu {
         self.open
     }
 
+    /// The LOADOUT page is up (it fills the screen: no HUD under it).
+    pub fn is_loadout_open(&self) -> bool {
+        self.open && self.loadout.is_some()
+    }
+
     pub fn open(&mut self) {
         self.open = true;
         self.fresh = true;
@@ -61,6 +67,8 @@ impl PauseMenu {
         self.loadout = None;
     }
 
+    /// Draws the menu; the LOADOUT page turns its weapon in `preview`.
+    #[allow(clippy::too_many_arguments)]
     pub fn ui(
         &mut self,
         ui: &mut Ui,
@@ -69,6 +77,7 @@ impl PauseMenu {
         single_player: bool,
         lobby_host: bool,
         subtitle: &str,
+        preview: Preview,
     ) -> PauseOutput {
         let mut out = PauseOutput {
             action: PauseAction::None,
@@ -80,8 +89,10 @@ impl PauseMenu {
         }
         let fresh = std::mem::take(&mut self.fresh);
         let canvas = ui.canvas();
-        let sub = self.settings.is_some() || self.loadout.is_some();
-        settings_menu::dim(ui, if sub { 0.75 } else { 0.5 });
+        // (The LOADOUT page dims around its own window for the turning weapon.)
+        if self.loadout.is_none() {
+            settings_menu::dim(ui, if self.settings.is_some() { 0.75 } else { 0.5 });
+        }
         if let Some(menu) = &mut self.settings {
             out.settings = menu.ui(ui, s, input, settings_menu::panel_rect(canvas));
             if out.settings.back {
@@ -92,8 +103,9 @@ impl PauseMenu {
         }
         if let Some(menu) = &mut self.loadout {
             // The loadout lives in the settings file: report it like a settings change.
-            let r = menu.ui(ui, &mut s.loadout, loadout::panel_rect(canvas));
+            let r = menu.ui(ui, s, preview);
             out.settings.changed = r.changed;
+            out.sound = r.sound;
             if r.back {
                 out.settings.back = true;
                 self.loadout = None;
