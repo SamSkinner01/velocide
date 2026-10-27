@@ -12,7 +12,8 @@
 # libraries the game links (ALSA, udev, D-Bus) from Ubuntu's amd64 archive (multiarch). MinGW
 # cross-compiles to Windows from either architecture.
 #
-# RUST_VERSION picks the toolchain (default: stable). Run as root (containers are).
+# RUST_VERSION picks the toolchain (default: stable). Run as root (containers are). In a CI job
+# it also sets how many build jobs cargo runs in the job's later steps (see the end).
 set -euo pipefail
 
 WHAT=${1:-}
@@ -70,3 +71,18 @@ PATH=$CARGO_HOME/bin:$PATH
 [ -z "$TARGETS" ] || rustup target add $TARGETS
 [ -z "$COMPONENTS" ] || rustup component add $COMPONENTS
 rustc --version
+
+# In a CI job, the build jobs for its later steps: one per GB the container has free, at most
+# one per CPU. Cargo would start one per CPU, but the test build takes ~0.6 GB per job, more than
+# a Mac's Docker VM has per CPU (at a job per CPU, GNU ld was OOM-killed).
+if [ -n "${GITHUB_ENV:-}" ]; then
+    mem=$(($(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) * 1024))
+    limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
+    [ "$limit" = max ] || [ "$limit" -ge "$mem" ] || mem=$limit
+    cpus=$(nproc)
+    jobs=$((mem >> 30))
+    [ "$jobs" -le "$cpus" ] || jobs=$cpus
+    [ "$jobs" -ge 1 ] || jobs=1
+    echo "CARGO_BUILD_JOBS=$jobs" >>"$GITHUB_ENV"
+    echo "$cpus CPUs, $((mem >> 30)) GB free: CARGO_BUILD_JOBS=$jobs"
+fi

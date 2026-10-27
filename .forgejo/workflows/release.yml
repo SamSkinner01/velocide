@@ -39,6 +39,10 @@ jobs:
     runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 90
+    env:
+      # Line tables only (enough for backtraces): with full debug info the test build writes three
+      # times as much and needs half as much memory again.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - name: Check out
         run: |

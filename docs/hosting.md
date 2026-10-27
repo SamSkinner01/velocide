@@ -177,6 +177,12 @@ How it is built:
 - Each run compiles from scratch (there's no cache): a few minutes per job on the Mac Studio.
   With two `docker` runners free (or one with capacity 2), `linux` and `windows` build at the
   same time.
+- Memory: cargo runs one build job per GB the container has free, at most one per CPU
+  (`setup.sh` sets it; the Toolchain step's log shows the count). Cargo's default of one job per
+  CPU ran a Mac's Docker VM out of memory: the test build takes about 0.6 GB per job. The tests
+  also build with line tables only instead of full debug info, which cuts the build's memory by
+  a third and its disk use by two thirds. On a runner with only a few GB free, the jobs are
+  slow but they finish; give Docker more memory to speed them up.
 
 ## Notes
 
