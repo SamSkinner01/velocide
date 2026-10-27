@@ -68,6 +68,9 @@ pub struct CombatHudInfo<'a> {
     pub pinned: bool,
     /// The Q slot (`knacks::draw_slot`); `None`: nothing to throw (the PvP Thorn).
     pub knack: Option<super::knacks::KnackSlot>,
+    /// Out of the fight and watching a teammate (`ingame::spectate`): no death screen or
+    /// low-health vignette over their view (the spectating HUD carries the countdown).
+    pub spectating: bool,
     pub time: f64,
 }
 
@@ -156,9 +159,9 @@ impl CombatHud {
         let center = c.center().floor() + vec2(0.5, 0.5);
         let outline = fade(t.ink, 0.9);
 
-        // Low health vignette (pulsing).
+        // Low health vignette (pulsing; not over a teammate's view while you are down).
         let low = (info.health / info.max_health.max(1.0)).clamp(0.0, 1.0);
-        if !info.dead && low < 0.4 {
+        if !info.dead && !info.spectating && low < 0.4 {
             let k = ((0.4 - low) / 0.25).clamp(0.0, 1.0);
             let pulse = 0.75 + 0.25 * ((now * 5.0).sin() as f32);
             vignette(list, c, t.crimson, 0.75 * (0.35 + 0.65 * k) * pulse);
@@ -371,7 +374,7 @@ impl CombatHud {
         }
 
         // Death screen.
-        if info.dead {
+        if info.dead && !info.spectating {
             let since = *self.died_at.get_or_insert(now);
             let k = ((now - since) / 0.6).min(1.0) as f32;
             list.fill(c, fade(Vec4::new(0.12, 0.0, 0.01, 1.0), 0.55 * k));
@@ -398,7 +401,7 @@ impl CombatHud {
                     &style,
                 );
             }
-        } else {
+        } else if !info.dead {
             self.died_at = None;
         }
     }

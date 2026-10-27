@@ -106,6 +106,9 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
 pub struct RemotePlayers {
     visuals: HashMap<NetId, PlayerVisual>,
     time: f64,
+    /// A player posed but not drawn (the teammate a downed player watches from their eyes,
+    /// `ingame::spectate`): muzzle, head and name tag anchors stay up to date.
+    pub hidden: Option<NetId>,
 }
 
 impl RemotePlayers {
@@ -173,7 +176,13 @@ impl RemotePlayers {
             }
             // Other Shrikes are drawn a little larger than life so they read at a distance
             // (visual only: hit shapes and movement are unchanged).
-            let info = lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &tint, out);
+            let mut unseen = Vec::new();
+            let into = if self.hidden == Some(e.id) {
+                &mut unseen
+            } else {
+                &mut *out
+            };
+            let info = lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &tint, into);
             v.head = info.head;
             v.muzzle = info.muzzle;
             v.muzzle_dir = info.muzzle_dir;

@@ -53,7 +53,7 @@ use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, lan, resolve_address,
 };
-use crate::settings::LoadoutSettings;
+use crate::settings::Settings;
 
 /// The host's settings edits are sent at most this often (seconds).
 const SETTINGS_SEND_INTERVAL: f64 = 0.15;
@@ -404,17 +404,19 @@ impl LobbyPanel {
     }
 
     /// The LOADOUT sub-screen (call instead of [`LobbyPanel::ui`] while
-    /// [`LobbyPanel::is_loadout_open`]). Closing it focuses READY again; the caller saves the
-    /// settings when `back` is set (the loadout itself is sent by the screen's update).
-    pub fn loadout_ui(&mut self, ui: &mut Ui, s: &mut LoadoutSettings) -> LoadoutResponse {
+    /// [`LobbyPanel::is_loadout_open`]; its weapon turns in `preview`). Closing it focuses
+    /// READY again; the caller saves the settings when `back` is set (the loadout itself is
+    /// sent by the screen's update).
+    pub fn loadout_ui(
+        &mut self,
+        ui: &mut Ui,
+        s: &mut Settings,
+        preview: loadout::Preview,
+    ) -> LoadoutResponse {
         let Some(menu) = &mut self.loadout else {
             return LoadoutResponse::default();
         };
-        // As dark as the pause menu's sub-screens: the warm-up world and its ready board would
-        // read through the panel's numbers otherwise.
-        settings_menu::dim(ui, 0.75);
-        let canvas = ui.canvas();
-        let resp = menu.ui(ui, s, loadout::panel_rect(canvas));
+        let resp = menu.ui(ui, s, preview);
         if resp.back {
             self.loadout = None;
             self.focus_ready = true;
@@ -1088,6 +1090,11 @@ impl LobbyScreen {
         self.panel.open_customize();
     }
 
+    /// Opens the LOADOUT sub-screen (tools).
+    pub fn open_loadout(&mut self) {
+        self.panel.open_loadout();
+    }
+
     /// Hands the session to the game screen (frees the backdrop).
     pub fn into_handoff(mut self, renderer: &mut Renderer) -> Option<Handoff> {
         if let Some(b) = self.backdrop.take() {
@@ -1202,15 +1209,28 @@ impl LobbyScreen {
                 common.ui_sound(Sfx::UiBack);
             }
         } else if self.panel.is_loadout_open() {
-            let mut ui = Ui::new(
-                &mut out.ui,
-                &mut common.ui_state,
-                io.ui_input,
-                &common.theme,
-            );
-            let r = self.panel.loadout_ui(&mut ui, &mut common.settings.loadout);
+            let FrameBuffers {
+                ui: list,
+                viewmodel,
+                lights,
+                ..
+            } = out;
+            let mut ui = Ui::new(list, &mut common.ui_state, io.ui_input, &common.theme);
+            let preview = loadout::Preview {
+                lib: common.models.as_ref(),
+                viewmodel,
+                lights,
+                camera: scene.camera,
+                fov: scene.viewmodel_fov,
+            };
+            let r = self
+                .panel
+                .loadout_ui(&mut ui, &mut common.settings, preview);
             drop(ui);
             common.settings_changed |= r.changed;
+            if let Some(s) = r.sound {
+                common.ui_sound(s);
+            }
             if r.back {
                 common.settings_save = true;
                 common.ui_sound(Sfx::UiBack);

@@ -1,9 +1,10 @@
 //! The real lobby and game screens, headless (GPU, no window): host a listen server, land in
 //! the warm-up (the lobby screen hands over as soon as the hub arrives), autostart a match in
 //! the same game screen, join it from a second lobby screen, return everyone to the warm-up
-//! from the host's pause menu and start again; the lobby overlay, the Ready key and the
-//! customise sub-screen (the look reaches the server); and the old lobby screen round trip on
-//! a server without a warm-up world. Skips without a GPU adapter.
+//! from the host's pause menu and start again; the lobby overlay, the Ready key, the customise
+//! sub-screen (the look reaches the server) and the LOADOUT one (its weapon turns, a pick
+//! applies at once); and the old lobby screen round trip on a server without a warm-up world.
+//! Skips without a GPU adapter.
 
 use std::time::Duration;
 
@@ -352,6 +353,33 @@ fn the_overlay_ready_key_and_customise() {
     assert_eq!(shared_look, c.settings.cosmetics, "the server has our look");
     rig.frame(&mut c, Screen::Game(&mut game), &[UiKey::Escape]);
     assert!(c.settings_save, "closing customise saves the settings");
+
+    // LOADOUT: the selected weapon turns on its card in the viewmodel pass (the slate behind
+    // it and the weapon's parts). Its picker (slot card → CHANGE WEAPON, Down to the Lancet)
+    // equips the Lancet on slot 1; the warm-up applies it at once; Esc closes and saves.
+    c.settings_save = false;
+    game.open_loadout();
+    rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    assert!(
+        rig.buffers.viewmodel.len() > 2,
+        "the weapon turns on its card"
+    );
+    for key in [UiKey::Right, UiKey::Enter, UiKey::Down, UiKey::Enter] {
+        rig.frame(&mut c, Screen::Game(&mut game), &[key]);
+        rig.frame(&mut c, Screen::Game(&mut game), &[]);
+    }
+    let lancet = shared::loadout::WeaponKind::Lancet.default_build();
+    assert_eq!(c.settings.loadout.current.slots[0], Some(lancet));
+    let held = |g: &InGame| {
+        g.net()
+            .and_then(|n| n.own_combat())
+            .and_then(|o| o.combat.weapons.loadout.slots[0])
+    };
+    rig.game_until(&mut c, &mut game, 120, |g| held(g) == Some(lancet));
+    assert_eq!(held(&game), Some(lancet), "the warm-up applies it at once");
+    rig.frame(&mut c, Screen::Game(&mut game), &[UiKey::Escape]);
+    assert!(c.settings_save, "closing the loadout saves the settings");
     game.shutdown(&mut rig.renderer, &mut c);
 }
 

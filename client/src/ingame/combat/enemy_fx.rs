@@ -71,7 +71,8 @@ pub fn enemy_name(k: u16) -> &'static str {
 /// Hit capsule of an enemy (radius, top of the body hitbox) for client-side tracer ends.
 pub fn enemy_size(k: u16) -> (f32, f32) {
     def(k).map_or((0.6, 2.0), |d| {
-        (d.radius, d.body_top.unwrap_or(d.height).max(2.0 * d.radius))
+        let r = d.hit_radius.unwrap_or(d.radius);
+        (r, d.body_top.unwrap_or(d.height).max(2.0 * r))
     })
 }
 
@@ -609,13 +610,14 @@ pub fn latched_root(e: &EntityState, camera: Vec3) -> glam::Mat4 {
     let up = dir * b + Vec3::Y * a;
     let x = up.cross(-fwd);
     let rot = glam::Mat3::from_cols(x, up, -fwd);
-    // Drawn a little smaller than life so the cap sits along the bottom of the view.
+    // Drawn a little smaller than life so the cap sits along the bottom of the view (that is
+    // net of the model's drawn scale, which `draw_enemy` adds on top of this root).
     let scale = 0.75;
     let center = camera + dir * 0.75 - Vec3::Y * 1.65;
     let origin = center - rot * Vec3::new(0.0, 0.65, 0.1) * scale;
     glam::Mat4::from_translation(origin)
         * glam::Mat4::from_mat3(rot)
-        * glam::Mat4::from_scale(Vec3::splat(scale))
+        * glam::Mat4::from_scale(Vec3::splat(scale / enemy_kind(e.kind).scale()))
 }
 
 /// State / flag changes and continuous effects of the third roster: frenzy flares and auras,
