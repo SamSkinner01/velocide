@@ -405,56 +405,99 @@ fn enemy_poses_are_finite() {
     }
 }
 
-/// The models are built at the contract sizes (docs/roster.md): roughly the capsule's height,
-/// the Harrier's 3 m wingspan, and the weak points sit inside visible geometry.
+/// The models are built at the contract sizes (docs/roster.md) and drawn `model_scale` bigger
+/// (docs/enemies.md "Sizes and hit shapes"): as drawn, roughly as tall as their hit shapes,
+/// the Harrier's wingspan, the weak points inside visible geometry, and the hit shapes cover
+/// the drawn model (with the hit assist's pads, nearly all of it).
 #[test]
 fn enemy_models_match_their_definitions() {
+    use shared::sim::{HitPads, HitTarget};
     let defs = shared::sim::EnemyRegistry::builtin();
+    let assist = shared::tuning::HitAssistTuning::default();
+    let pads = HitPads {
+        body: assist.enemy_body_pad,
+        weak: assist.enemy_weak_pad,
+    };
     for kind in EnemyKind::ALL {
         let name = format!("{kind:?}").to_ascii_lowercase();
         let def = defs
             .get(&name)
             .unwrap_or_else(|| panic!("no definition for {name}"));
         assert_eq!(EnemyKind::from_name(&name), Some(kind));
-        let parts = kind.model().build();
+        assert_eq!(kind.scale(), def.draw_scale(), "{kind:?}");
+        // Model space as drawn: scaled about the origin (the feet; the Harrier: its hover
+        // centre), then lifted onto the feet.
+        let (scale, lift) = (kind.scale(), kind.root_lift());
+        let verts: Vec<Vec3> = kind
+            .model()
+            .build()
+            .iter()
+            .flat_map(|p| p.mesh.vertices.iter())
+            .map(|v| Vec3::from(v.position) * scale + Vec3::Y * lift)
+            .collect();
         let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-        for p in &parts {
-            let (a, b) = engine::assets::meshgen::bounds(&p.mesh.vertices);
-            lo = lo.min(a);
-            hi = hi.max(b);
+        for v in &verts {
+            lo = lo.min(*v);
+            hi = hi.max(*v);
         }
-        // Model space: feet at 0 (the Harrier: its hover centre).
-        let lift = kind.root_lift();
-        let (bottom, top) = (lo.y + lift, hi.y + lift);
         let size = hi - lo;
+        let hitbox = def.hitbox(
+            HitTarget::Entity(shared::protocol::NetId(1)),
+            Vec3::ZERO,
+            0.0,
+        );
+        let shapes_top = hitbox
+            .shapes
+            .iter()
+            .map(|s| s.a.y.max(s.b.y) + s.radius)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let covered = |pads: HitPads| {
+            let inside = verts
+                .iter()
+                .filter(|v| {
+                    hitbox
+                        .distance_to_point_padded(**v, pads)
+                        .is_some_and(|d| d.0 <= 0.0)
+                })
+                .count();
+            inside as f32 / verts.len().max(1) as f32
+        };
+        let (plain, padded) = (covered(HitPads::NONE), covered(pads));
         println!(
-            "{kind:?}: {size} (feet {bottom:.2} .. top {top:.2}), capsule {} x {}",
-            def.radius, def.height
+            "{kind:?} x{scale}: {size} (feet {:.2} .. top {:.2}), hit shapes to {shapes_top:.2}, \
+             covered {plain:.2} / padded {padded:.2}, capsule {} x {}",
+            lo.y, hi.y, def.radius, def.height
         );
         assert!(
-            size.max_element() >= 1.9,
-            "{kind:?}: at least ~2 m in its longest dimension"
+            size.max_element() >= 2.3,
+            "{kind:?}: drawn at least ~2.3 m in its longest dimension"
         );
         if kind == EnemyKind::Harrier {
-            assert!(size.x >= 2.9, "3 m wingspan: {}", size.x);
+            assert!(size.x >= 3.5, "a 3.9 m wingspan as drawn: {}", size.x);
         } else {
-            assert!(bottom.abs() < 0.12, "{kind:?} stands on its feet: {bottom}");
+            assert!(lo.y.abs() < 0.12, "{kind:?} stands on its feet: {}", lo.y);
             assert!(
-                (top - def.height).abs() < 0.45,
-                "{kind:?}: model top {top} vs capsule {}",
-                def.height
+                (hi.y - shapes_top).abs() < 0.45,
+                "{kind:?}: drawn top {} vs hit shapes {shapes_top}",
+                hi.y
             );
         }
         for w in &def.weak_points {
-            let c = w.offset - Vec3::Y * lift;
             assert!(
-                c.cmpge(lo - Vec3::splat(w.radius * 0.5)).all()
-                    && c.cmple(hi + Vec3::splat(w.radius * 0.5)).all(),
-                "{kind:?} weak point {} at {} outside the model {lo}..{hi}",
+                w.offset.cmpge(lo - Vec3::splat(w.radius * 0.5)).all()
+                    && w.offset.cmple(hi + Vec3::splat(w.radius * 0.5)).all(),
+                "{kind:?} weak point {} at {} outside the drawn model {lo}..{hi}",
                 w.name,
                 w.offset
             );
         }
+        // Hit shapes larger than the model: most of it inside the plain shapes, nearly all of
+        // it inside the padded ones player attacks test.
+        assert!(plain >= 0.55, "{kind:?}: plain hit shapes cover {plain:.2}");
+        assert!(
+            padded >= 0.9,
+            "{kind:?}: padded hit shapes cover {padded:.2}"
+        );
     }
 }
 

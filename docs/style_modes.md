@@ -24,6 +24,7 @@ grades. Everything is server-authoritative and runs inside `SimWorld::step`; num
 | `client::menus::results` | `ResultsScreen`: campaign solo tally, co-op table, deathmatch standings, grind (solo / co-op, best wave) |
 | `client::settings` | `Settings::{sp_mode, difficulty, grind_best}` (single-player page, the local grind records) |
 | `client::ingame::scoreboard` | score columns (`columns_for`) + per-cell colours |
+| `client::ingame::spectate` | `Spectate`: watching a teammate while dead / downed / out in PvE (below), its HUD |
 
 ## Where it runs
 
@@ -494,6 +495,41 @@ player) to everyone.
   FOR A REVIVE"; players who are out read "OUT UNTIL THE WAVE IS CLEARED" / "BACK FOR WAVE 8"
   (the death view hides waits longer than ten minutes, `combat::hud`).
 
+## Spectating (`ingame::spectate`)
+
+In the PvE modes (campaign co-op, grind; not the warm-up, not PvP) a player who is **dead,
+downed or out** watches a teammate who is up instead of the floor. Client-side only: the
+replicated player entities carry everything it needs (position, velocity, look yaw *and* pitch,
+movement flags, the held weapon and ability, `DEAD` / `DOWNED`, health).
+
+* **When**: `SPECTATE_DELAY` (1.5 s) after going out — the death view (or the downed view
+  sinking to the floor) shows first, so the moment reads; FIRE / ALT_FIRE skip the wait. Solo,
+  or with nobody up (a team wipe, an overrun), it stays today's death view.
+* **Who**: the nearest teammate who is up (the likeliest to come and revive you). FIRE / ALT_FIRE
+  cycle through the ones who are up by player id (gamepad: the triggers). When the watched one
+  goes down or leaves, the next one up; when nobody is, the death view until someone is up
+  again (revived).
+* **How**: from **their eyes** by default — a camera rig of its own fed from their replicated
+  movement (eye height, slides, landing dips), their pitch and yaw at the render tick, their held
+  weapon drawn as the viewmodel (ability colour, Longwick draw, charge, unarmed) and kicked by
+  their shots and punches; their model and name tag are hidden. **JUMP** toggles a
+  **third-person chase camera**: 3.6 m behind their head, starting behind their look and
+  orbited by the mouse / right stick; a sphere sweep from their head against the level pulls it
+  in at once when a wall is in the way and lets it ease back out, so it never looks through the
+  level (their model is hidden too if it ends up inside them). Your own look direction is kept
+  for when you get up. The choice of view is kept between targets and lives.
+* **Your body** lies where you went down, drawn in their view (the teammate coming to revive you
+  is seen kneeling at it).
+* **HUD**: under the crosshair "SPECTATING NAME" in their colour (with the shape cue), their
+  wick, and the controls named for the device in use ("[MOUSE 1] NEXT  [MOUSE 2] PREVIOUS
+  [SPACE] THIRD PERSON", "[PAD RT] ..."). The downed panel stays where it is (YOU ARE DOWN, the
+  checkpoint / out countdown, who is reviving you); while dead the respawn countdown ("RESPAWNING
+  IN 2.5") takes the downed panel's place, the mode lines ("RESPAWNING AT THE CHECKPOINT", "BACK
+  FOR WAVE 8") stay under it. No death screen and no low-health vignette over their view.
+* **Audio**: the listener is the view (`InGame::last_camera`), so you hear what they hear.
+* **Back**: the frame the server says you are up (revived, respawned, the next wave), the camera
+  is your own again.
+
 ## Tuning
 
 `style` (`StyleTuning`): `points_per_rank` 100, `decay_lowest` 4, `decay_highest` 30,
@@ -532,6 +568,8 @@ cargo test -p shared --lib difficulty grind gungame   # scaling numbers, wave pl
 cargo test -p server --test modes_net  # over UDP with real clients (7)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive / grind
 PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo grind from the menu, a gun game against bots
+cargo test -p client --test client_spectate   # spectating: choice, cycling, fallback; two real clients in co-op
+cargo run -p client --release --example enemy_shots -- out/ --spectate   # spectating shots
 ```
 
 * `style.rs`: every kill bonus trigger (incl. no AIRSHOT on flyers, FRAG vs KILL), ricochet chain
@@ -587,12 +625,23 @@ PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo gri
 * `style_shots`: the style meter at DULL / FERAL / MERCILESS (STALE) / SEARING (grouped
   multikill feed) / VELOCIDE, the rank-up banner, CHECKPOINT, the deathmatch HUD and Tab
   scoreboard, solo / perfect / co-op / deathmatch results mid-reveal and finished, and a real
-  two-client co-op revive (teammate marker with the prompt, the downed panel, both progress bars,
+  two-client co-op revive (teammate marker with the prompt, the downed panel — watching the
+  reviver from their eyes by then (spectating) — both progress bars,
   REVIVED); a real solo grind run on Knell Yard (HARD, record 12): the first breather, wave 1
   with its banner, the Tab scoreboard, WAVE 1 CLEARED, an injected BOSS WAVE 10, the overrun,
   its results, a deep run with NEW BEST!, a co-op grind table; a gun game on a real server with
   two bots (tiers injected): the tier block with a promotion banner, the Tab scoreboard, the Fist
   tier, PUNCHED DOWN, results won on the ladder.
+* Spectating (`client_spectate.rs`): the nearest teammate who is up is watched first (ties by
+  id, never a downed or dead one), cycling wraps both ways and skips the downed, the death view
+  for 1.5 s first (a press skips it), the view moves on when the watched one goes down or leaves
+  and falls back to the death view with nobody up (and back to watching when someone is
+  revived), stops at once when you are up, JUMP only toggles while watching; two real clients in
+  campaign co-op on a real server: the downed one sees from the other's eyes (camera at their
+  eye), JUMP puts the chase camera 1–3.7 m behind and above their head, FIRE with nobody else up
+  keeps them, a team wipe falls back to the death view, the respawn gives the own camera back.
+  Shots: `enemy_shots` `spectate_downed`, `spectate_eyes` (a Gnawer pack in Alpha's face, Alpha's
+  Quill in hand), `spectate_chase`.
 
 ## Known limitations / next steps
 
@@ -611,3 +660,7 @@ PLAYTHROUGH=grind,gungame cargo run -p client --example playthrough   # solo gri
 * Gun game's Fist tier is fists only in the sim, the replicated state and the prediction; until
   the arsenal-client work lands the HUD's weapon block and the viewmodel don't follow forced
   loadouts yet (an unarmed player is still drawn with the default weapon).
+* Spectating from a teammate's eyes shows them at the render tick (about 0.1 s behind them),
+  their shots' tracers start at their (hidden) model's muzzle by the eye rather than at the
+  viewmodel's, and a Snuffer latched onto them is drawn from outside, not as their smothered
+  view.

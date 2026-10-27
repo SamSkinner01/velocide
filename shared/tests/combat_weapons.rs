@@ -904,13 +904,16 @@ fn gravewell_pulls_hostile_players_at_half_strength_in_pvp() {
 
 #[test]
 fn hit_assist_pads_player_attacks_only() {
-    // Quill: 0.15 m past a dummy's body still hits (pad 0.2), 0.3 m past misses.
+    // Quill: 0.15 m past a dummy's body still hits (the body pad, 0.35), 0.1 m beyond the pad
+    // misses.
     let (mut a, p, d) = range(&[Vec3::new(0.0, 0.0, -15.0)], 1000.0);
+    let pad = a.tuning.combat.hit_assist.enemy_body_pad;
+    assert!(pad > 0.15);
     let body = dummy_body(&a, d[0]);
     a.aim(p, body + Vec3::X * (DUMMY_RADIUS + 0.15));
     let ev = a.tap(p, Buttons::FIRE, 20);
     assert_eq!(dmg(&ev, d[0]), 24.0, "near miss caught by the pad");
-    a.aim(p, body + Vec3::X * (DUMMY_RADIUS + 0.3));
+    a.aim(p, body + Vec3::X * (DUMMY_RADIUS + pad + 0.1));
     let ev = a.tap(p, Buttons::FIRE, 20);
     assert_eq!(dmg(&ev, d[0]), 0.0);
     // Fist: 2.7 m to the body surface (range 2.6) lands thanks to the pad.

@@ -25,6 +25,8 @@ pub mod slag;
 pub mod smelter;
 pub mod snuffer;
 
+use std::sync::OnceLock;
+
 use engine::glam::{Mat4, Quat, Vec3, Vec4};
 
 use super::ModelId;
@@ -107,9 +109,10 @@ impl EnemyKind {
         (cycle + rate * dt).rem_euclid(1.0)
     }
 
-    /// Approximate height of the model (feet to top), for name plates / debug.
+    /// Approximate height of the model as drawn (feet to top, [`EnemyKind::scale`] included),
+    /// for name plates / debug.
     pub fn height(self) -> f32 {
-        match self {
+        let built = match self {
             EnemyKind::Gnawer => 2.0,
             EnemyKind::Censer => 2.6,
             EnemyKind::Harrier => 1.3,
@@ -119,7 +122,26 @@ impl EnemyKind {
             EnemyKind::Snuffer => 1.4,
             EnemyKind::Smelter => 3.4,
             EnemyKind::Effigy => 2.2,
-        }
+        };
+        built * self.scale()
+    }
+
+    /// How much bigger than built the model is drawn: the definition's `model_scale` (the
+    /// built-in `assets/enemies/*.ron`, like everything else the client reads about enemies).
+    /// The Moulds are drawn larger than their movement capsules so they read and are easier to
+    /// hit; their hit shapes are sized to the scaled model (docs/enemies.md).
+    /// [`crate::models::ModelLibrary::draw_enemy`] applies it about the model origin.
+    pub fn scale(self) -> f32 {
+        static SCALES: OnceLock<[f32; 9]> = OnceLock::new();
+        let scales = SCALES.get_or_init(|| {
+            let defs = shared::sim::EnemyRegistry::builtin();
+            EnemyKind::ALL.map(|k| {
+                let name = format!("{k:?}").to_ascii_lowercase();
+                defs.get(&name).map_or(1.0, |d| d.draw_scale())
+            })
+        });
+        let i = EnemyKind::ALL.iter().position(|k| *k == self).unwrap_or(0);
+        scales[i]
     }
 
     /// Height of the model's origin above the replicated feet position (the Harrier's model

@@ -16,21 +16,30 @@
     name: "Smelter",
     net_kind: 27,
     model: "smelter",
+    // Drawn 1.12x its built size (3.8 m: it is a heavy already); the movement capsule stays
+    // the size the levels and the nav grid were built for.
+    model_scale: 1.12,
     health: 420.0,
     speed: 3.6,
     acceleration: 20.0,
     turn_rate: 130.0,
     radius: 1.1,
     height: 3.4,
-    // The head (with the furnace mouth) sits on top of the body hitbox.
-    body_top: Some(2.7),
-    eye_height: 2.95,
+    // Hit shapes: the body up to the yoke and across the shoulders (the head with the furnace
+    // mouth sits on top) and the crucible slung in front of the belly.
+    hit_radius: Some(1.2),
+    body_top: Some(3.15),
+    body_shapes: [
+        (a: (-0.45, 2.0, -1.05), b: (0.45, 2.0, -1.05), radius: 0.85),
+        (a: (-0.85, 2.75, 0.1), b: (0.85, 2.75, 0.1), radius: 0.5),
+    ],
+    eye_height: 3.3,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 0.15,
     weak_points: [
-        (name: "hatch", kind: Core, offset: (0.0, 1.45, -1.25), radius: 0.45, multiplier: 2.5),
-        (name: "head", kind: Head, offset: (0.0, 3.0, -0.35), radius: 0.4, multiplier: 1.5),
+        (name: "hatch", kind: Core, offset: (0.0, 1.62, -1.45), radius: 0.5, multiplier: 2.5),
+        (name: "head", kind: Head, offset: (0.0, 3.4, -0.37), radius: 0.45, multiplier: 1.5),
     ],
     armour: None,
     attacks: [

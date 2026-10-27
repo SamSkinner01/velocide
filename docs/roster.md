@@ -277,7 +277,8 @@ Shots should feel generous; being shot should feel fair.
 
 - **Player-owned attacks** (every weapon mode, splinters, arc chains, explosions, Fist, Thorn
   hits) test against hit shapes inflated by `combat.hit_assist`:
-  `enemy_body_pad` 0.2 m, `enemy_weak_pad` 0.1 m (weak points/heads), and in PvP
+  `enemy_body_pad` 0.35 m, `enemy_weak_pad` 0.15 m (weak points/heads; the refit raised them
+  from 0.2 / 0.1, `docs/enemies.md` "Sizes and hit shapes"), and in PvP
   `player_body_pad` 0.12 m, `player_head_pad` 0.06 m.
 - **Enemy attacks** against players use the plain hitboxes (no padding).
 - Padding is applied at test time (lag-compensated history keeps the plain shapes).
