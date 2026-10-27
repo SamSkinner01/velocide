@@ -9,6 +9,8 @@
 //!   cooldowns, the Discharge gauge, BRANDED.
 //! * [`arsenal`]: the expansion arsenal's projectiles, blasts, hazards and status effects, and
 //!   which build the local player holds.
+//! * [`melee`] and [`knacks`] (docs/refit.md): slash trails, melee hits and abilities; the Q
+//!   slot's knacks (HUD slot, flask and pool, snare, soot cloud, Tallow Skin, Surge).
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -19,6 +21,8 @@ pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
 pub mod hud;
+pub mod knacks;
+pub mod melee;
 pub mod weapon_feel;
 
 use engine::audio::{PlayParams, Sfx};
@@ -268,6 +272,9 @@ pub struct CombatClient {
     pub hud: CombatHud,
     /// The expansion arsenal's visuals (`arsenal.rs`).
     pub arsenal: arsenal::ArsenalView,
+    /// Melee trails, streaks and hurled pieces; the knacks' things (`melee.rs`, `knacks.rs`).
+    pub melee: melee::MeleeView,
+    pub knacks: knacks::KnackView,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -296,6 +303,8 @@ impl CombatClient {
             entities: EntityView::new(),
             hud: CombatHud::new(),
             arsenal: arsenal::ArsenalView::new(),
+            melee: melee::MeleeView::new(),
+            knacks: knacks::KnackView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             heat: 0.0,
@@ -315,6 +324,8 @@ impl CombatClient {
         self.entities.clear();
         self.hud.clear();
         self.arsenal.clear();
+        self.melee.clear();
+        self.knacks.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.heat = 0.0;
@@ -1027,6 +1038,39 @@ impl InGame {
             combat.arsenal.play_pending(&mut ctx);
         }
 
+        // Melee trails and streaks, the knacks' things (melee.rs, knacks.rs).
+        let local_body = net.local_state().map(|s| s.position);
+        let local_code = local.map(|p| p.0 as u16);
+        let bodies = |owner: u16| -> Option<Vec3> {
+            if Some(owner) == local_code {
+                return local_body;
+            }
+            entities
+                .iter()
+                .find(|e| {
+                    e.kind == kind::PLAYER && e.id.as_player().map(|p| p.0 as u16) == Some(owner)
+                })
+                .map(|e| e.position)
+        };
+        let mut ctx = melee::UpdateCtx {
+            effects,
+            beams: &mut combat.beams,
+            audio: &mut common.audio,
+            rng: &mut combat.rng,
+            world,
+            dt: vdt,
+        };
+        combat.melee.update(&mut ctx, &bodies);
+        let mut ctx = knacks::UpdateCtx {
+            effects,
+            beams: &mut combat.beams,
+            audio: &mut common.audio,
+            rng: &mut combat.rng,
+            world,
+            dt: vdt,
+        };
+        combat.knacks.update(&mut ctx);
+
         // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds.
         combat.arsenal.local_feel(
             combat.predictor.state(),
@@ -1081,6 +1125,11 @@ impl InGame {
         self.combat
             .arsenal
             .draw(common.models.as_ref(), &mut out.draws, &mut out.lights);
+        let lib = common.models.as_ref();
+        self.combat.melee.draw(lib, &mut out.draws, &mut out.lights);
+        self.combat
+            .knacks
+            .draw(lib, &mut out.draws, &mut out.lights);
     }
 
     /// Combat HUD layer (after `Hud::draw`).
@@ -1108,6 +1157,23 @@ impl InGame {
             })
             .map_or(0, |e| e.flags);
         let branded = own_flags & player_flags::BRANDED != 0;
+        // The Q slot: the Thorn's charges until the loadout carries a knack.
+        let knack = (t.thorn.charges > 0).then(|| {
+            let max = t.thorn.charges;
+            let ready = weapons.thorns(t);
+            knacks::KnackSlot {
+                knack: knacks::Knack::Thorn,
+                charges: ready,
+                max_charges: max,
+                recharge: if ready < max {
+                    (weapons.thorn_recharge as f32 / (t.thorn.recharge_time * rate as f32).max(1.0))
+                        .min(1.0)
+                } else {
+                    0.0
+                },
+                active: 0.0,
+            }
+        });
         let info = CombatHudInfo {
             camera: &self.last_camera,
             yaw: self.controls.yaw,
@@ -1123,8 +1189,14 @@ impl InGame {
             branded,
             burning: own_flags & player_flags::BURNING != 0,
             pinned: own_flags & player_flags::PINNED != 0,
+            knack,
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);
+        // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
+        let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
+        if !dead {
+            self.combat.knacks.hud(list, c, now);
+        }
     }
 }

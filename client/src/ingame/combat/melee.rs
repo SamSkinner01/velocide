@@ -1,0 +1,862 @@
+//! Melee presentation (docs/refit.md, area **arsenal-client**): what you see and hear of the
+//! Trimmer and the Tamper and their abilities, beyond the models themselves
+//! (`models::weapons::melee`: the viewmodel and third-person swings).
+//!
+//! * **Slash trails** ([`MeleeView::swing`]): a crescent of light swept in front of whoever
+//!   swings, growing with the blade through the strike — the Trimmer's alternate right to left
+//!   and left to right, the Tamper's comes down from overhead to the floor, the Upswing rises.
+//!   Local swings start from the camera, other players' from their eyes.
+//! * **Hits** ([`melee_hit`]): the Trimmer slices (sparks and wax along the cut), the Tamper
+//!   lands (lumps, dust, a shock ring, a jolt).
+//! * **Abilities**: the Lunge's streak ([`MeleeView::lunge`], following the body), the Whirl's
+//!   ring ([`whirl`]), the Hurl's spinning blade / head ([`draw_hurled`], with
+//!   [`hurled_trail`]), the Upswing's burst under what it launches ([`upswing_burst`]).
+//!
+//! [`MeleePreview`] / `InGame::preview_melee` stage any of it client-side for tools
+//! (`combat_shots`' `melee_*.png`).
+
+use engine::audio::{Audio, PlayParams, Sfx};
+use engine::gfx::{DrawItem, PointLight};
+use glam::{Quat, Vec2, Vec3, Vec4};
+
+use super::super::InGame;
+use super::super::effects::{Effects, FxTex, OnHit, Particle};
+use super::Rng;
+use super::fx::Beams;
+use crate::models::ModelLibrary;
+use crate::models::Tint;
+use crate::models::weapons::melee::{self as model, duration, impact};
+pub use crate::models::weapons::melee::{MeleeWeapon, Swing, SwingKind};
+
+/// The colour of a weapon's primary swing (trails, sparks): the Trimmer's honed steel, a
+/// warm white; the Tamper's hot iron.
+pub fn primary_color(weapon: MeleeWeapon) -> Vec4 {
+    match weapon {
+        MeleeWeapon::Trimmer => Vec4::new(1.0, 0.93, 0.8, 1.0),
+        MeleeWeapon::Tamper => Vec4::new(1.0, 0.55, 0.2, 1.0),
+    }
+}
+
+/// The colour of a melee ability (its trails, rings, streaks and the weapon's glow while it is
+/// selected). The four differ clearly: Lunge cyan, Whirl amber, Hurl violet, Upswing lime.
+pub fn ability_color(kind: SwingKind) -> Vec4 {
+    match kind {
+        SwingKind::Slash => Vec4::new(1.0, 0.93, 0.8, 1.0),
+        SwingKind::Lunge => Vec4::new(0.4, 0.95, 1.0, 1.0),
+        SwingKind::Whirl => Vec4::new(1.0, 0.72, 0.22, 1.0),
+        SwingKind::Hurl => Vec4::new(0.78, 0.5, 1.0, 1.0),
+        SwingKind::Upswing => Vec4::new(0.72, 1.0, 0.35, 1.0),
+    }
+}
+
+/// `c` boosted for unlit drawing (beams), alpha `a`.
+fn hot(c: Vec4, k: f32, a: f32) -> Vec4 {
+    (c.truncate() * k).extend(a)
+}
+
+/// The sound a move makes when it starts.
+pub fn swing_sfx(weapon: MeleeWeapon, kind: SwingKind) -> Sfx {
+    match (weapon, kind) {
+        (MeleeWeapon::Trimmer, SwingKind::Slash) => Sfx::TrimmerSlash,
+        (MeleeWeapon::Tamper, SwingKind::Slash) => Sfx::TamperSwing,
+        (_, SwingKind::Lunge) => Sfx::Lunge,
+        (_, SwingKind::Whirl) => Sfx::Whirl,
+        (_, SwingKind::Hurl) => Sfx::HurlThrow,
+        (_, SwingKind::Upswing) => Sfx::Upswing,
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Slash trails
+
+/// Where a trail's arc runs, in the swinger's view frame (x right, y up, looking down -Z): the
+/// direction `start` turned about `axis` through `sweep` radians, `radius` from `center`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Arc {
+    /// The axis the arc turns about (view frame).
+    axis: Vec3,
+    /// The arc's start direction (view frame).
+    start: Vec3,
+    /// Total sweep (radians, about `axis`, right-handed).
+    sweep: f32,
+    radius: f32,
+    /// Offset of the arc's centre from the eye (view frame).
+    center: Vec3,
+}
+
+/// The arc a move sweeps (the sim's reach is 3.0 m for the Trimmer, 3.4 m for the Tamper; the
+/// trail runs a little inside it, where the blade would be).
+fn arc(weapon: MeleeWeapon, kind: SwingKind, left: bool) -> Option<Arc> {
+    let side = if left { -1.0 } else { 1.0 };
+    let flat = |sweep: f32, tilt: f32, radius: f32| Arc {
+        // A cut across the front from the right (or the left), its plane tilted so it starts
+        // high and finishes low.
+        axis: Vec3::new(-tilt * side, 1.0, 0.0).normalize() * side,
+        start: Vec3::new(side * 0.8, 0.12, -0.6).normalize(),
+        sweep,
+        radius,
+        center: Vec3::new(0.0, -0.25, 0.0),
+    };
+    // Overhead: from up over the right shoulder, through the front, down to the floor left of
+    // centre. The plane leans 25 degrees and turns about the right shoulder, not the eye, so it
+    // is seen as a crescent (a plane through the eye would be seen edge on, as a line).
+    let (lean_s, lean_c) = 0.44f32.sin_cos();
+    let overhead_axis = Vec3::new(-lean_c, lean_s, 0.0);
+    let overhead_start = Quat::from_axis_angle(Vec3::Z, -0.44) * Vec3::new(0.0, 0.95, 0.3);
+    let shoulder = Vec3::new(0.45, -0.25, 0.1);
+    let vertical = |down: bool, radius: f32| {
+        let sweep = 2.6;
+        let start = overhead_start.normalize();
+        if down {
+            Arc {
+                axis: overhead_axis,
+                start,
+                sweep,
+                radius,
+                center: shoulder,
+            }
+        } else {
+            // The same path upwards: from where the overhead one ends.
+            Arc {
+                axis: -overhead_axis,
+                start: Quat::from_axis_angle(overhead_axis, sweep) * start,
+                sweep,
+                radius,
+                center: shoulder,
+            }
+        }
+    };
+    Some(match (weapon, kind) {
+        (MeleeWeapon::Trimmer, SwingKind::Slash) => flat(1.75, 0.35, 1.7),
+        (MeleeWeapon::Tamper, SwingKind::Slash) => vertical(true, 2.0),
+        (_, SwingKind::Upswing) => vertical(false, 1.8),
+        (_, SwingKind::Whirl) => Arc {
+            axis: Vec3::Y,
+            start: Vec3::new(1.0, 0.0, -0.2).normalize(),
+            sweep: std::f32::consts::TAU,
+            radius: 2.2,
+            center: Vec3::new(0.0, -0.75, 0.0),
+        },
+        _ => return None,
+    })
+}
+
+/// When a move's trail sweeps (seconds after the swing starts): from the wind-up's end to
+/// the blow.
+fn trail_window(weapon: MeleeWeapon, kind: SwingKind) -> (f32, f32) {
+    let d = duration(weapon, kind);
+    let hit = impact(weapon, kind) * d;
+    match kind {
+        SwingKind::Whirl => (0.12 * d, hit),
+        _ => (hit * 0.3, hit),
+    }
+}
+
+/// A slash trail being swept.
+#[derive(Clone, Copy, Debug)]
+struct Trail {
+    eye: Vec3,
+    /// View rotation at the swing.
+    frame: Quat,
+    arc: Arc,
+    window: (f32, f32),
+    /// Fraction of the arc drawn so far.
+    drawn: f32,
+    age: f32,
+    color: Vec4,
+    width: f32,
+}
+
+impl Trail {
+    fn point(&self, f: f32) -> Vec3 {
+        let a = self.arc;
+        let dir = Quat::from_axis_angle(a.axis, a.sweep * f) * a.start;
+        self.eye + self.frame * (a.center + dir * a.radius)
+    }
+}
+
+/// A Lunge's streak: the body's path while it lunges.
+#[derive(Clone, Copy, Debug)]
+struct Streak {
+    /// Whose body to follow (`None`: a preview that moves itself).
+    player: Option<u16>,
+    last: Vec3,
+    velocity: Vec3,
+    age: f32,
+    life: f32,
+    color: Vec4,
+}
+
+/// A hurled piece staged by a preview.
+#[derive(Clone, Copy, Debug)]
+struct Flying {
+    weapon: MeleeWeapon,
+    position: Vec3,
+    velocity: Vec3,
+    age: f32,
+}
+
+/// Something staged client-side by `InGame::preview_melee` (tools).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MeleePreview {
+    /// A move's trail (and sound) from `eye` looking along (`yaw`, `pitch`).
+    Swing {
+        weapon: MeleeWeapon,
+        kind: SwingKind,
+        left: bool,
+        eye: Vec3,
+        yaw: f32,
+        pitch: f32,
+    },
+    /// A Lunge streak from `from` at `velocity` for `seconds`.
+    Lunge {
+        from: Vec3,
+        velocity: Vec3,
+        seconds: f32,
+    },
+    /// The Whirl's ring round `feet`.
+    Whirl { feet: Vec3, radius: f32 },
+    /// A hurled blade / head flying from `from`.
+    Hurl {
+        weapon: MeleeWeapon,
+        from: Vec3,
+        velocity: Vec3,
+    },
+    /// The Upswing launching something standing at `feet`.
+    Upswing { feet: Vec3 },
+    /// A melee hit at `at`, the blow travelling along `dir`.
+    Hit {
+        weapon: MeleeWeapon,
+        at: Vec3,
+        dir: Vec3,
+    },
+}
+
+/// Melee visuals that live across frames.
+#[derive(Default)]
+pub struct MeleeView {
+    trails: Vec<Trail>,
+    streaks: Vec<Streak>,
+    flying: Vec<Flying>,
+    /// Previews waiting for the next update (they need the effects).
+    staged: Vec<MeleePreview>,
+    /// The Trimmer's next local slash is the left blade's.
+    pub next_left: bool,
+    time: f64,
+}
+
+/// Most trails alive at once (oldest dropped).
+const MAX_TRAILS: usize = 16;
+
+impl MeleeView {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self {
+            time: self.time,
+            ..Self::default()
+        };
+    }
+
+    /// A swing starts: its trail sweeps from `eye` along the look (`yaw`, `pitch`) in the
+    /// move's colour (`color`: the ability's for abilities, the weapon's for slashes).
+    #[allow(clippy::too_many_arguments)]
+    pub fn swing(
+        &mut self,
+        weapon: MeleeWeapon,
+        kind: SwingKind,
+        left: bool,
+        eye: Vec3,
+        yaw: f32,
+        pitch: f32,
+        color: Vec4,
+    ) {
+        let Some(arc) = arc(weapon, kind, left) else {
+            return;
+        };
+        if !(eye.is_finite() && yaw.is_finite() && pitch.is_finite()) {
+            return;
+        }
+        if self.trails.len() >= MAX_TRAILS {
+            self.trails.remove(0);
+        }
+        // The Whirl turns flat round the body whatever the look's pitch.
+        let pitch = if kind == SwingKind::Whirl {
+            0.0
+        } else {
+            pitch.clamp(-1.2, 1.2)
+        };
+        let frame = engine::gfx::Camera::rotation_from_angles(yaw, pitch, 0.0);
+        self.trails.push(Trail {
+            eye,
+            frame,
+            arc,
+            window: trail_window(weapon, kind),
+            drawn: 0.0,
+            age: 0.0,
+            color,
+            width: match (weapon, kind) {
+                (MeleeWeapon::Tamper, _) => 0.11,
+                (_, SwingKind::Whirl) => 0.1,
+                _ => 0.075,
+            },
+        });
+    }
+
+    /// A Lunge streak following `player`'s body (`None`: a free-flying preview).
+    pub fn lunge(&mut self, player: Option<u16>, from: Vec3, velocity: Vec3, color: Vec4) {
+        if !from.is_finite() {
+            return;
+        }
+        self.streaks.push(Streak {
+            player,
+            last: from,
+            velocity,
+            age: 0.0,
+            life: 0.4,
+            color,
+        });
+    }
+
+    fn preview(&mut self, p: MeleePreview, ctx: &mut UpdateCtx) {
+        match p {
+            MeleePreview::Swing {
+                weapon,
+                kind,
+                left,
+                eye,
+                yaw,
+                pitch,
+            } => {
+                let color = if kind == SwingKind::Slash {
+                    primary_color(weapon)
+                } else {
+                    ability_color(kind)
+                };
+                self.swing(weapon, kind, left, eye, yaw, pitch, color);
+                ctx.audio.play(swing_sfx(weapon, kind), PlayParams::at(eye));
+                if kind == SwingKind::Whirl {
+                    whirl(ctx.effects, ctx.beams, ctx.rng, eye - Vec3::Y * 1.5, 3.5);
+                }
+            }
+            MeleePreview::Lunge {
+                from,
+                velocity,
+                seconds,
+            } => {
+                self.lunge(None, from, velocity, ability_color(SwingKind::Lunge));
+                if let Some(s) = self.streaks.last_mut() {
+                    s.life = seconds.max(0.1);
+                }
+                ctx.audio.play(Sfx::Lunge, PlayParams::at(from));
+            }
+            MeleePreview::Whirl { feet, radius } => {
+                whirl(ctx.effects, ctx.beams, ctx.rng, feet, radius);
+                ctx.audio.play(Sfx::Whirl, PlayParams::at(feet));
+            }
+            MeleePreview::Hurl {
+                weapon,
+                from,
+                velocity,
+            } => {
+                self.flying.push(Flying {
+                    weapon,
+                    position: from,
+                    velocity,
+                    age: 0.0,
+                });
+                ctx.audio.play(Sfx::HurlThrow, PlayParams::at(from));
+            }
+            MeleePreview::Upswing { feet } => {
+                upswing_burst(ctx.effects, ctx.beams, ctx.rng, feet);
+                ctx.audio.play(Sfx::Upswing, PlayParams::at(feet));
+            }
+            MeleePreview::Hit { weapon, at, dir } => {
+                melee_hit(ctx.effects, ctx.beams, ctx.rng, ctx.audio, weapon, at, dir);
+            }
+        }
+    }
+
+    /// Advances trails (sweeping their newest segments), streaks and previews.
+    pub fn update(&mut self, ctx: &mut UpdateCtx, bodies: &dyn Fn(u16) -> Option<Vec3>) {
+        let dt = ctx.dt.max(0.0);
+        self.time += dt as f64;
+        for p in std::mem::take(&mut self.staged) {
+            self.preview(p, ctx);
+        }
+        for t in &mut self.trails {
+            t.age += dt;
+            let (a, b) = t.window;
+            let target = ((t.age - a) / (b - a).max(1e-3)).clamp(0.0, 1.0);
+            // Segments of ~1/12 of the arc; the newest one leads with a white-hot core.
+            let steps = ((target - t.drawn) * 12.0).ceil().max(0.0) as usize;
+            for i in 0..steps {
+                let f0 = t.drawn + (target - t.drawn) * i as f32 / steps as f32;
+                let f1 = t.drawn + (target - t.drawn) * (i + 1) as f32 / steps as f32;
+                let (p0, p1) = (t.point(f0), t.point(f1));
+                // A crescent: thickest through the middle of the arc.
+                let mid = 1.0 - (2.0 * (f0 + f1) * 0.5 - 1.0).abs();
+                let w = t.width * (0.35 + 0.65 * mid);
+                ctx.beams.beam(p0, p1, w, hot(t.color, 1.7, 0.8), 0.16);
+                ctx.beams
+                    .beam(p0, p1, w * 0.35, Vec4::new(2.4, 2.3, 2.1, 0.9), 0.09);
+            }
+            if steps > 0 && t.drawn < 1.0 && target >= 1.0 {
+                // The blow: a spark burst at the end of the arc.
+                let at = t.point(1.0);
+                for _ in 0..6 {
+                    ctx.effects.spawn(Particle {
+                        position: at,
+                        velocity: ctx.rng.dir() * ctx.rng.range(1.0, 3.0),
+                        gravity: 6.0,
+                        max_life: ctx.rng.range(0.15, 0.3),
+                        size: Vec2::splat(0.05),
+                        color: hot(t.color, 1.4, 1.0),
+                        texture: FxTex::Spark,
+                        additive: true,
+                        ..Default::default()
+                    });
+                }
+            }
+            t.drawn = target;
+        }
+        self.trails.retain(|t| t.age < t.window.1 + 0.3);
+
+        for s in &mut self.streaks {
+            s.age += dt;
+            let now = match s.player.and_then(bodies) {
+                Some(p) => p,
+                None => s.last + s.velocity * dt,
+            };
+            if s.age < s.life && now.distance(s.last) > 0.02 {
+                let fade = 1.0 - s.age / s.life;
+                for (h, w) in [(0.5, 0.09), (1.1, 0.12), (1.6, 0.07)] {
+                    let up = Vec3::Y * h;
+                    ctx.beams
+                        .beam(s.last + up, now + up, w * fade, hot(s.color, 1.6, 0.7), 0.3);
+                }
+                let d = (now - s.last).normalize_or_zero();
+                ctx.effects.spawn(Particle {
+                    position: now + Vec3::Y * ctx.rng.range(0.3, 1.5),
+                    velocity: -d * ctx.rng.range(2.0, 5.0),
+                    drag: 3.0,
+                    max_life: 0.3,
+                    size: Vec2::splat(0.2),
+                    end_scale: 2.5,
+                    color: s.color.truncate().extend(0.6),
+                    texture: FxTex::Glow,
+                    additive: true,
+                    ..Default::default()
+                });
+            }
+            s.last = now;
+        }
+        self.streaks.retain(|s| s.age < s.life);
+
+        let mut landed = Vec::new();
+        for f in &mut self.flying {
+            f.age += dt;
+            let step = f.velocity * dt;
+            let hit = ctx.world.and_then(|w| {
+                let len = step.length();
+                (len > 1e-5)
+                    .then(|| w.cast_ray(f.position, step / len, len, engine::physics::MASK_SHOTS))
+                    .flatten()
+            });
+            if let Some(h) = hit {
+                landed.push((f.weapon, h.point, step.normalize_or(Vec3::NEG_Z)));
+                f.age = f32::INFINITY;
+                continue;
+            }
+            f.position += step;
+            f.velocity.y -= HURL_GRAVITY * dt;
+            hurled_trail(
+                ctx.effects,
+                ctx.beams,
+                ctx.rng,
+                f.weapon,
+                f.position,
+                f.velocity,
+                dt,
+            );
+        }
+        for (weapon, at, dir) in landed {
+            hurl_impact(ctx.effects, ctx.audio, ctx.rng, weapon, at, dir);
+        }
+        self.flying.retain(|f| f.age < 3.0);
+    }
+
+    /// Draws staged hurled pieces.
+    pub fn draw(
+        &self,
+        lib: Option<&ModelLibrary>,
+        draws: &mut Vec<DrawItem>,
+        lights: &mut Vec<PointLight>,
+    ) {
+        for f in &self.flying {
+            if let Some(lib) = lib {
+                draw_hurled(lib, f.weapon, f.position, f.velocity, f.age, draws);
+            }
+            if lights.len() < 48 {
+                lights.push(hurled_light(f.weapon, f.position));
+            }
+        }
+    }
+
+    pub fn trail_count(&self) -> usize {
+        self.trails.len()
+    }
+}
+
+/// What [`MeleeView::update`] needs.
+pub struct UpdateCtx<'a> {
+    pub effects: &'a mut Effects,
+    pub beams: &'a mut Beams,
+    pub audio: &'a mut Audio,
+    pub rng: &'a mut Rng,
+    pub world: Option<&'a engine::physics::CollisionWorld>,
+    pub dt: f32,
+}
+
+impl InGame {
+    /// Stages a melee visual client-side (tools and screenshots; see [`MeleePreview`]).
+    #[doc(hidden)]
+    pub fn preview_melee(&mut self, preview: MeleePreview) {
+        self.combat.melee.staged.push(preview);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hits and abilities
+
+/// A melee blow landing on a target at `at` (travelling along `dir`): the Trimmer slices
+/// (sparks and molten wax along the cut, a bright nick), the Tamper lands (lumps, dust, a ring
+/// on the ground, a dull flash). Plays the hit sound there.
+pub fn melee_hit(
+    effects: &mut Effects,
+    beams: &mut Beams,
+    rng: &mut Rng,
+    audio: &mut Audio,
+    weapon: MeleeWeapon,
+    at: Vec3,
+    dir: Vec3,
+) {
+    let dir = dir.normalize_or(Vec3::NEG_Z);
+    match weapon {
+        MeleeWeapon::Trimmer => {
+            effects.sparks(at, -dir, 10);
+            effects.wax_spray(at, dir, 0.6);
+            let side = dir.cross(Vec3::Y).normalize_or(Vec3::X);
+            beams.beam(
+                at - side * 0.35 + Vec3::Y * 0.12,
+                at + side * 0.35 - Vec3::Y * 0.12,
+                0.05,
+                Vec4::new(2.4, 2.2, 1.9, 0.95),
+                0.12,
+            );
+            audio.play(Sfx::TrimmerHit, PlayParams::at(at));
+        }
+        MeleeWeapon::Tamper => {
+            effects.lumps(at, 8);
+            effects.sparks(at, Vec3::Y, 8);
+            let floor = at - Vec3::Y * at.y.rem_euclid(1.0).min(0.9);
+            effects.dust(floor, 16, 2.5);
+            beams.ring(
+                at,
+                dir,
+                0.2,
+                1.4,
+                0.06,
+                Vec4::new(1.8, 1.0, 0.45, 0.8),
+                0.22,
+            );
+            beams.light(at, Vec3::new(2.0, 1.1, 0.5), 5.0, 0.15);
+            for _ in 0..6 {
+                effects.spawn(Particle {
+                    position: at,
+                    velocity: (rng.dir() + Vec3::Y).normalize_or(Vec3::Y) * rng.range(2.0, 5.0),
+                    gravity: 14.0,
+                    max_life: rng.range(0.4, 0.8),
+                    size: Vec2::splat(rng.range(0.06, 0.12)),
+                    color: Vec4::new(0.55, 0.5, 0.45, 1.0),
+                    texture: FxTex::Lump,
+                    rotation: rng.angle(),
+                    spin: rng.range(-8.0, 8.0),
+                    collide: Some(OnHit::Bounce(0.3)),
+                    ..Default::default()
+                });
+            }
+            audio.play(Sfx::TamperHit, PlayParams::at(at));
+        }
+    }
+}
+
+/// The Whirl: a ring of light rushing out round `feet` to `radius` (the sim's reach), a second
+/// one chasing it, and a swirl of sparks and dust.
+pub fn whirl(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, feet: Vec3, radius: f32) {
+    let r = radius.max(1.0);
+    let c = ability_color(SwingKind::Whirl);
+    beams.ring(
+        feet + Vec3::Y * 0.9,
+        Vec3::Y,
+        0.8,
+        r,
+        0.09,
+        hot(c, 1.8, 0.9),
+        0.3,
+    );
+    beams.ring(
+        feet + Vec3::Y * 0.5,
+        Vec3::Y,
+        0.6,
+        r * 0.85,
+        0.05,
+        hot(c, 1.3, 0.7),
+        0.38,
+    );
+    beams.ring(
+        feet + Vec3::Y * 0.08,
+        Vec3::Y,
+        0.5,
+        r,
+        0.05,
+        hot(c, 1.0, 0.5),
+        0.45,
+    );
+    for k in 0..16 {
+        let a = k as f32 / 16.0 * std::f32::consts::TAU + rng.range(-0.1, 0.1);
+        let out = Vec3::new(a.cos(), 0.0, a.sin());
+        let tangent = Vec3::new(-a.sin(), 0.0, a.cos());
+        effects.spawn(Particle {
+            position: feet + Vec3::Y * rng.range(0.5, 1.3) + out * 0.8,
+            velocity: out * r * 2.2 + tangent * 4.0,
+            drag: 4.0,
+            max_life: rng.range(0.25, 0.4),
+            size: Vec2::splat(0.07),
+            color: hot(c, 1.3, 1.0),
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+    effects.dust(feet, 14, r * 1.6);
+}
+
+/// The Upswing launching what stands at `feet`: a column of dust and sparks thrown upward and
+/// a ring kicked off the floor.
+pub fn upswing_burst(effects: &mut Effects, beams: &mut Beams, rng: &mut Rng, feet: Vec3) {
+    let c = ability_color(SwingKind::Upswing);
+    beams.ring(
+        feet + Vec3::Y * 0.06,
+        Vec3::Y,
+        0.3,
+        1.6,
+        0.06,
+        hot(c, 1.5, 0.8),
+        0.25,
+    );
+    beams.beam(feet, feet + Vec3::Y * 3.0, 0.08, hot(c, 1.6, 0.6), 0.18);
+    for _ in 0..14 {
+        let spread = Vec3::new(rng.range(-0.4, 0.4), 0.0, rng.range(-0.4, 0.4));
+        effects.spawn(Particle {
+            position: feet + spread + Vec3::Y * 0.1,
+            velocity: Vec3::Y * rng.range(6.0, 11.0) + spread * 2.0,
+            gravity: 10.0,
+            drag: 1.0,
+            max_life: rng.range(0.4, 0.7),
+            size: Vec2::splat(0.06),
+            color: hot(c, 1.3, 1.0),
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+    effects.dust(feet, 12, 1.4);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hurled pieces
+
+/// Gravity of a staged hurl (the contract's "light gravity"; the replicated ones fly by the
+/// sim's numbers).
+const HURL_GRAVITY: f32 = 4.0;
+/// Turns per second of a hurled piece.
+const HURL_SPIN: f32 = 3.2;
+
+/// Draws a hurled blade (Trimmer) or hammer head (Tamper) `age` seconds into its flight.
+pub fn draw_hurled(
+    lib: &ModelLibrary,
+    weapon: MeleeWeapon,
+    position: Vec3,
+    velocity: Vec3,
+    age: f32,
+    out: &mut Vec<DrawItem>,
+) {
+    let spin = age * HURL_SPIN * std::f32::consts::TAU;
+    let glow = hot(ability_color(SwingKind::Hurl), 1.6, 1.0);
+    model::draw_hurled(
+        lib,
+        weapon,
+        position,
+        velocity,
+        spin,
+        glow,
+        &Tint::default(),
+        out,
+    );
+}
+
+/// The light a hurled piece carries.
+pub fn hurled_light(weapon: MeleeWeapon, position: Vec3) -> PointLight {
+    let c = ability_color(SwingKind::Hurl).truncate();
+    PointLight {
+        position,
+        color: c * if weapon == MeleeWeapon::Tamper {
+            1.6
+        } else {
+            1.1
+        },
+        radius: 3.5,
+    }
+}
+
+/// A hurled piece's wake: a violet streak and a few sparks thrown off its spin.
+pub fn hurled_trail(
+    effects: &mut Effects,
+    beams: &mut Beams,
+    rng: &mut Rng,
+    weapon: MeleeWeapon,
+    position: Vec3,
+    velocity: Vec3,
+    dt: f32,
+) {
+    let c = ability_color(SwingKind::Hurl);
+    let back = velocity * dt.clamp(0.0, 0.05) * 2.0;
+    beams.beam(position - back, position, 0.1, hot(c, 1.5, 0.55), 0.12);
+    if rng.unit() < dt * 30.0 {
+        effects.spawn(Particle {
+            position,
+            velocity: rng.dir() * 2.0,
+            gravity: 4.0,
+            max_life: 0.3,
+            size: Vec2::splat(if weapon == MeleeWeapon::Tamper {
+                0.1
+            } else {
+                0.06
+            }),
+            color: hot(c, 1.3, 1.0),
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+}
+
+/// A hurled piece striking the level or a target.
+pub fn hurl_impact(
+    effects: &mut Effects,
+    audio: &mut Audio,
+    rng: &mut Rng,
+    weapon: MeleeWeapon,
+    at: Vec3,
+    dir: Vec3,
+) {
+    effects.sparks(at, -dir, 12);
+    if weapon == MeleeWeapon::Tamper {
+        effects.lumps(at, 5);
+        effects.dust(at, 8, 1.2);
+    }
+    effects.glow(at, hot(ability_color(SwingKind::Hurl), 1.2, 0.8), 0.9, 0.15);
+    let _ = rng;
+    audio.play(Sfx::HurlHit, PlayParams::at(at));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trails_sweep_their_arc_then_go() {
+        let mut view = MeleeView::new();
+        let mut effects = Effects::headless();
+        let mut beams = Beams::headless();
+        let mut audio = Audio::disabled();
+        let mut rng = Rng::default();
+        for (weapon, kind, left) in [
+            (MeleeWeapon::Trimmer, SwingKind::Slash, false),
+            (MeleeWeapon::Trimmer, SwingKind::Slash, true),
+            (MeleeWeapon::Tamper, SwingKind::Slash, false),
+            (MeleeWeapon::Tamper, SwingKind::Upswing, false),
+            (MeleeWeapon::Trimmer, SwingKind::Whirl, false),
+        ] {
+            view.swing(weapon, kind, left, Vec3::Y * 1.6, 0.3, -0.1, Vec4::ONE);
+        }
+        // Moves without a trail (the Lunge has its streak, the Hurl its piece).
+        view.swing(
+            MeleeWeapon::Tamper,
+            SwingKind::Hurl,
+            false,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            Vec4::ONE,
+        );
+        assert_eq!(view.trail_count(), 5);
+        let before = beams.beam_count();
+        for _ in 0..90 {
+            let mut ctx = UpdateCtx {
+                effects: &mut effects,
+                beams: &mut beams,
+                audio: &mut audio,
+                rng: &mut rng,
+                world: None,
+                dt: 1.0 / 60.0,
+            };
+            view.update(&mut ctx, &|_| None);
+        }
+        assert!(beams.beam_count() > before, "the trails drew segments");
+        assert_eq!(
+            view.trail_count(),
+            0,
+            "and are gone a moment after the blow"
+        );
+        for t in &view.trails {
+            assert!(t.drawn <= 1.0);
+        }
+    }
+
+    #[test]
+    fn a_slash_trail_crosses_in_front_of_the_eye() {
+        // Looking down -Z from the origin: the right-hand slash starts on the right, ends on
+        // the left, and stays in front.
+        let mut view = MeleeView::new();
+        view.swing(
+            MeleeWeapon::Trimmer,
+            SwingKind::Slash,
+            false,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            Vec4::ONE,
+        );
+        let t = view.trails[0];
+        let (a, b) = (t.point(0.0), t.point(1.0));
+        assert!(a.x > 0.5 && b.x < -0.5, "{a} -> {b}");
+        assert!(t.point(0.5).z < -1.0, "{}", t.point(0.5));
+        // The Tamper's comes down from above to below the eye.
+        view.swing(
+            MeleeWeapon::Tamper,
+            SwingKind::Slash,
+            false,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            Vec4::ONE,
+        );
+        let t = view.trails[1];
+        assert!(t.point(0.0).y > 1.0 && t.point(1.0).y < -0.5);
+        assert!(t.point(0.6).z < -1.0);
+    }
+}

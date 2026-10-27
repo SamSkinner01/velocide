@@ -1,12 +1,11 @@
 //! Combat HUD layer, drawn on top of `Hud::draw`: hit markers (body / headshot / armour /
 //! kill), floating damage numbers, damage direction indicators, a low-health vignette, the
-//! death screen ("RESPAWNING IN N"), thorn charges, per-weapon cooldowns, the Arclash
+//! death screen ("RESPAWNING IN N"), the knack (Q) slot, per-weapon cooldowns, the Arclash
 //! Discharge gauge next to the crosshair and a BRANDED warning while you carry a brand. Health and hard damage themselves go through
 //! `HudInfo` into the existing health block.
 
 use engine::gfx::{Camera, UiDrawList};
 use engine::ui::draw::{fade, mix};
-use engine::ui::hud;
 use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use shared::input::look_dir;
@@ -67,6 +66,8 @@ pub struct CombatHudInfo<'a> {
     pub burning: bool,
     /// You are pinned (slowed): steel-blue bars at the screen edges and PINNED.
     pub pinned: bool,
+    /// The Q slot (`knacks::draw_slot`); `None`: nothing to throw (the PvP Thorn).
+    pub knack: Option<super::knacks::KnackSlot>,
     pub time: f64,
 }
 
@@ -343,31 +344,11 @@ impl CombatHud {
             );
         }
 
-        // Thorns above the weapon block (bottom right); none in PvP (the PvP balance has no
-        // thorns): no pips, no THORN label.
-        let charges = info.tuning.thorn.charges;
-        let avail = w.thorns(info.tuning);
-        let recharge =
-            (w.thorn_recharge as f32 / (info.tuning.thorn.recharge_time * rate).max(1.0)).min(1.0);
-        let pip = vec2(7.0, 4.0);
-        let pw = hud::pips_width(pip, 3.0, charges);
-        let px = c.max.x - 12.0 - pw;
-        let py = c.max.y - 66.0;
-        if charges > 0 {
-            hud::pips(
-                list,
-                t,
-                vec2(px, py),
-                pip,
-                3.0,
-                avail as f32 + if avail < charges { recharge } else { 0.0 },
-                charges,
-            );
-            list.text(
-                vec2(px - 4.0, py - 2.0),
-                "THORN",
-                &TextStyle::new(t.bone_dim).right().outline(outline),
-            );
+        // The knack (Q) above the weapon block (bottom right).
+        if let Some(slot) = &info.knack
+            && !info.dead
+        {
+            super::knacks::draw_slot(list, t, c, slot, now);
         }
         if info.branded && !info.dead {
             let pulse = 0.65 + 0.35 * ((now * 6.0).sin() as f32);
