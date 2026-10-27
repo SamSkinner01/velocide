@@ -269,8 +269,8 @@
         // Drum-fed auto-scattergun (Scatter), automatic while held.
         thresher: (
             pellets: 7,
-            pellet_damage: 8.0,    // 7 / 11 deg: below the Bellows at every range (docs/balance.md)
-            cone_degrees: 10.0,
+            pellet_damage: 7.5,    // 7: below the Bellows everywhere; 8 / 10 deg: above it to 15 m
+            cone_degrees: 11.0,    // with the Moulds' bigger hit shapes (docs/balance.md)
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
@@ -692,7 +692,7 @@
                 Tumbler: (damage: 0.9),       // 65 a bomb, as before the PvE raise
                 Lancet: (damage: 0.85),
                 Bellows: (damage: 0.6),       // 4.8 a pellet: no head one-shot from 5 m on
-                Thresher: (damage: 0.7),      // 5.6 a pellet, as before the PvE raise
+                Thresher: (damage: 0.75),     // 5.6 a pellet, as before the PvE raise
                 Cinderbox: (damage: 0.75),
                 Longwick: (damage: 0.5, interval: 0.85),
                 Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise

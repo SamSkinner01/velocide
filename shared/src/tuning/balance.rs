@@ -137,7 +137,7 @@ impl Default for BalanceTuning {
             (WeaponKind::Tumbler, scale(0.9)),
             (WeaponKind::Lancet, scale(0.85)),
             (WeaponKind::Bellows, scale(0.6)),
-            (WeaponKind::Thresher, scale(0.7)),
+            (WeaponKind::Thresher, scale(0.75)),
             (WeaponKind::Cinderbox, scale(0.75)),
             (
                 WeaponKind::Longwick,

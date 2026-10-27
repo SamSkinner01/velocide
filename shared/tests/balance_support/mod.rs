@@ -118,9 +118,9 @@ pub enum Aim {
 /// Assumptions layered over the shipped tuning.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Assume {
-    /// The refit's other areas (`docs/refit.md`): Mould hit shapes ×1.25 with hit assist
-    /// 0.35 / 0.15 m (**pve**) and player projectiles hitting targets with 0.2 m more radius
-    /// (**feel**'s `projectile_hit_pad`), for numbers ahead of those merges.
+    /// **feel**'s `projectile_hit_pad` (`docs/refit.md`): player projectiles hitting targets
+    /// with 0.2 m more radius, for numbers ahead of that merge. (**pve**'s bigger Mould hit
+    /// shapes and hit assist are on main: every run measures them.)
     pub refit: bool,
 }
 
@@ -274,9 +274,8 @@ fn flat_level(kind: LevelKind) -> LevelDef {
 pub fn effective(base: &Tuning, side: Side, assume: Assume) -> Tuning {
     let mut t = base.for_mode(side.mode());
     if assume.refit {
-        let a = &mut t.combat.hit_assist;
-        a.enemy_body_pad = a.enemy_body_pad.max(0.35);
-        a.enemy_weak_pad = a.enemy_weak_pad.max(0.15);
+        // Approximated by the radius (it also widens world contacts slightly: the bench's only
+        // level is the floor).
         let c = &mut t.combat;
         for r in [
             &mut c.tumbler.bomb_projectile_radius,
@@ -414,24 +413,6 @@ impl Bench {
         // Players never die: damage is read from the events (times to kill are read off the
         // curve against the real 100 HP).
         tuning.combat.max_health = ENDLESS;
-        if assume.refit {
-            let names: Vec<String> = world.enemy_defs.names().map(str::to_owned).collect();
-            for name in names {
-                if let Some(def) = world.enemy_defs.get(&name) {
-                    let mut def = (*def).clone();
-                    let k = 1.25;
-                    def.radius *= k;
-                    def.height *= k;
-                    def.body_top = def.body_top.map(|b| b * k);
-                    def.eye_height *= k;
-                    for w in &mut def.weak_points {
-                        w.offset *= k;
-                        w.radius *= k;
-                    }
-                    world.enemy_defs.insert(&name, def);
-                }
-            }
-        }
         let shooter = PlayerId(0);
         let p = world.add_player(shooter, "shooter");
         p.movement.position = Vec3::ZERO;

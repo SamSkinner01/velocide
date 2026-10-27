@@ -5,7 +5,8 @@
 //! (`combat.hit_assist`, see [`crate::sim::SimWorld::hit_pads`]); the recorded / rewound shapes
 //! stay plain and the padding is added at test time. A ray that hits the plain shapes keeps
 //! that result (the padding never turns a headshot into a body hit); only a near miss falls
-//! back to the padded shapes.
+//! back to the padded shapes. A swept sphere (projectiles, thorns) touches the padded shapes,
+//! by the same rule: a padded body contact on course for a plain weak point is that weak point.
 
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -151,6 +152,10 @@ fn ray_capsule(origin: Vec3, dir: Vec3, pa: Vec3, pb: Vec3, radius: f32) -> Opti
     best
 }
 
+/// How far [`Hitbox::sweep_sphere_padded`] follows a padded contact through the target to the
+/// plain shapes (m): farther than any target is deep.
+const THROUGH_TARGET: f32 = 8.0;
+
 /// Extra radius for forgiving hit tests: `body` for [`HitPart::Body`] shapes, `weak` for heads
 /// and weak points. [`HitPads::NONE`] = the plain shapes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -217,7 +222,10 @@ impl Hitbox {
         self.padded(pads).ray_hit(origin, dir, max_dist)
     }
 
-    /// [`Hitbox::sweep_sphere`] against the shapes inflated by `pads`.
+    /// [`Hitbox::sweep_sphere`] against the shapes inflated by `pads`. Like a ray, padding
+    /// never turns a weak-point hit into a body hit: a padded *body* contact whose straight
+    /// course meets a plain weak point before a plain body shape counts as that weak point. The
+    /// contact itself stays where the padded shapes put it.
     pub fn sweep_sphere_padded(
         &self,
         origin: Vec3,
@@ -228,7 +236,18 @@ impl Hitbox {
         if pads.is_none() {
             return self.sweep_sphere(origin, motion, radius);
         }
-        self.padded(pads).sweep_sphere(origin, motion, radius)
+        let (f, part) = self.padded(pads).sweep_sphere(origin, motion, radius)?;
+        let len = motion.length();
+        if part == HitPart::Body && len > 1e-6 {
+            let at = origin + motion * f;
+            let ahead = motion / len * THROUGH_TARGET;
+            if let Some((_, plain)) = self.sweep_sphere(at, ahead, radius)
+                && plain != HitPart::Body
+            {
+                return Some((f, plain));
+            }
+        }
+        Some((f, part))
     }
 
     /// [`Hitbox::distance_to_point`] to the shapes inflated by `pads`.
@@ -403,5 +422,51 @@ mod tests {
         let motion = Vec3::new(0.0, 0.0, -20.0);
         assert!(h.sweep_sphere(origin, motion, 0.05).is_none());
         assert!(h.sweep_sphere_padded(origin, motion, 0.05, pads).is_some());
+    }
+
+    #[test]
+    fn a_padded_body_never_steals_a_projectiles_weak_point() {
+        // A Smelter-like front: a crucible body shape with the hatch weak point at its lower
+        // edge. Padded (0.35 / 0.15), the crucible reaches out past the hatch.
+        let h = Hitbox {
+            target: HitTarget::Player(PlayerId(1)),
+            shapes: vec![
+                HitShape::sphere(HitPart::Body, Vec3::new(0.0, 2.0, -1.05), 0.85),
+                HitShape::sphere(HitPart::Weak(0), Vec3::new(0.0, 1.62, -1.45), 0.5),
+            ],
+        };
+        let pads = HitPads {
+            body: 0.35,
+            weak: 0.15,
+        };
+        // Straight at the hatch: the padded crucible is touched first ...
+        let origin = Vec3::new(0.0, 1.62, -20.0);
+        let motion = Vec3::new(0.0, 0.0, 20.0);
+        let (f, part) = h.padded(pads).sweep_sphere(origin, motion, 0.05).unwrap();
+        assert_eq!(part, HitPart::Body);
+        // ... but the hit is the hatch, at the padded contact.
+        assert_eq!(
+            h.sweep_sphere_padded(origin, motion, 0.05, pads),
+            Some((f, HitPart::Weak(0)))
+        );
+        assert_eq!(
+            h.sweep_sphere(origin, motion, 0.05).unwrap().1,
+            HitPart::Weak(0)
+        );
+        // A near miss beside the hatch that only the padding catches stays a body hit.
+        let beside = Vec3::new(1.0, 1.62, -20.0);
+        assert!(h.sweep_sphere(beside, motion, 0.05).is_none());
+        assert_eq!(
+            h.sweep_sphere_padded(beside, motion, 0.05, pads)
+                .map(|r| r.1),
+            Some(HitPart::Body)
+        );
+        // On course for the body (above the hatch): body.
+        let above = Vec3::new(0.0, 2.3, -20.0);
+        assert_eq!(
+            h.sweep_sphere_padded(above, motion, 0.05, pads)
+                .map(|r| r.1),
+            Some(HitPart::Body)
+        );
     }
 }

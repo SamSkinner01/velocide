@@ -3,8 +3,8 @@
 //!
 //! ```text
 //! cargo run -p shared --release --example balance_report               # everything
-//! cargo run -p shared --release --example balance_report -- --refit    # with the refit's
-//!     bigger Mould hit shapes / hit assist and the projectile hit pad assumed
+//! cargo run -p shared --release --example balance_report -- --refit    # with feel's
+//!     0.2 m projectile hit pad assumed (until it lands)
 //! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots abilities
 //! cargo run -p shared --release --example balance_report -- --tuning path/to/tuning.ron
 //! ```
@@ -393,7 +393,7 @@ fn main() {
     println!(
         "# VELOCIDE balance report{}\n",
         if assume.refit {
-            " (refit shapes and pads assumed)"
+            " (the 0.2 m projectile hit pad assumed)"
         } else {
             ""
         }

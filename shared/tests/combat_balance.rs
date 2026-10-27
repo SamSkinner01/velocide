@@ -1,15 +1,16 @@
 //! PvE balance bands (`docs/balance.md`), measured in the real simulation by the harness in
 //! `balance_support` (what `examples/balance_report.rs` prints): every primary's sustained
 //! damage inside one band, every Mould killable by every weapon in a sane time, no ability
-//! dominating its class and none dead weight. The PvP rules are measured in
-//! `combat_arsenal.rs`. The shipped `assets/tuning.ron` must be the defaults these run on.
+//! dominating its class and none dead weight, projectiles scoring weak points like rays. The
+//! PvP rules are measured in `combat_arsenal.rs`. The shipped `assets/tuning.ron` must be the
+//! defaults these run on.
 
 mod balance_support;
 
 use std::path::Path;
 
 use balance_support::*;
-use shared::loadout::Ability;
+use shared::loadout::{Ability, WeaponKind};
 use shared::tuning::{BalanceTuning, Tuning};
 
 #[test]
@@ -139,5 +140,37 @@ fn no_ability_dominates_its_class_and_none_is_dead_weight() {
     // Every class's pool was looked at.
     for class in classes() {
         assert!(weapons().iter().any(|w| w.class() == class));
+    }
+}
+
+/// Aimed at a weak point from 15 m, an arrow scores it just as a Quill ray does. With the
+/// Moulds' bigger body pads a padded body used to catch projectiles first (the Smelter's
+/// crucible in front of its hatch, the Gaoler's door below its grille): the Longwick lost the
+/// weak points of the Bellwether, the Smelter and the Gaoler's front
+/// (`Hitbox::sweep_sphere_padded`).
+#[test]
+fn projectiles_score_weak_points_like_rays() {
+    let base = Tuning::default();
+    for w in [WeaponKind::Quill, WeaponKind::Longwick] {
+        for m in MOULDS {
+            for behind in [false, m == "gaoler"] {
+                let t = on_mould(
+                    &base,
+                    Assume::default(),
+                    w.default_build(),
+                    Trigger::Primary,
+                    m,
+                    behind,
+                    weak_of(m, behind),
+                    15.0,
+                    Stop::secs(1.2),
+                );
+                let first = t.hits.first();
+                assert!(
+                    first.is_some_and(|h| h.weak),
+                    "{w:?} at a {m}'s weak point (behind: {behind}): {first:?}"
+                );
+            }
+        }
     }
 }

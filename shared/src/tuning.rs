@@ -812,8 +812,8 @@ impl Default for ThresherTuning {
     fn default() -> Self {
         Self {
             pellets: 7,
-            pellet_damage: 8.0,
-            cone_degrees: 10.0,
+            pellet_damage: 7.5,
+            cone_degrees: 11.0,
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
