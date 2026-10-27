@@ -542,7 +542,7 @@ Built once per level from the collision world: by the server at startup
 missing): rays every 22.5° within ~25° of a missing link, marched in 0.5 m steps from 1 m to
 `LEAP_MAX_DISTANCE` 8 m; the first floor past a gap (a column with no floor at our level), or
 above / below the step and drop limits (up to `LEAP_MAX_UP` 4 m, down to `LEAP_MAX_DOWN` 8
-m), that isn't already a walking neighbour is a candidate (≤ 3 per ray). A candidate becomes a
+m), that isn't already a walking neighbour is a candidate (≤ 2 per ray). A candidate becomes a
 leap when
 
 * its **landing is safe**: walkable, not deadly, and 0.75 m further along the leap there is
@@ -552,10 +552,10 @@ leap when
   apex `leap_apex` = the higher end + 0.5 m + 15 % of the distance; its shape doesn't depend on
   gravity, so the nav build sweeps exactly what the agent flies), checked first against the
   grid's own columns (a floor inside the capsule's span or a measured headroom that ends in it
-  fails) and then by **capsule sweeps** along it in ~2 m chords (sag < 5 cm), riding 0.25 m
-  above the feet: the tall clearance capsule (r 0.48 × 3.5 m: `jump_clear::TALL`, Censer, Heron,
-  Bellwether) first, and when that doesn't fit the narrow one (r 0.48 × 2 m: `NARROW`, Gnawer,
-  Snuffer); heavies don't leap (`WIDE` only on pad rides);
+  fails) and then by **capsule sweeps** along it in ~3 m chords (≤ ~10 cm under the arc),
+  riding 0.25 m above the feet: the tall clearance capsule (r 0.48 × 3.5 m: `jump_clear::TALL`,
+  Censer, Heron, Bellwether) first, and when that doesn't fit the narrow one (r 0.48 × 2 m:
+  `NARROW`, Gnawer, Snuffer); heavies don't leap (`WIDE` only on pad rides);
 * the feet **never pass through a kill volume** anywhere along the arc;
 * climbs that hit the lip from the wall's foot are retried with a **run-up** from up to two
   cells further back (a 3 m ledge is taken from 1–2 m out, so the arc clears it).
