@@ -315,6 +315,13 @@ its index, so generation is deterministic.
     line ignites or a Smelter's crucible spills; `SmelterSwingWindup` / `SmelterSwing` (the
     heave); `SmelterStep` (2 variants) footfalls with a slosh. `EffigyHit` (2 variants) a thunk
     into packed wax and the post creaking (instead of `EnemyHurt` on the training dummy).
+- **Feel** (`docs/feel.md`). `ShotPunch` (3 variants) is layered under every own shot with a
+  kick of 0.3 or more, at 0.4 + 0.6 × kick volume: a 150 → 52 Hz kick-drum thump, a snap and a
+  low noise body, driven, so light guns still land with weight. `ParryImpact` (−11) goes under
+  `Parry`: a 120 → 38 Hz boom, a crack and a shimmer rising 1.4 → 4.2 kHz. `FullDrawGlint`
+  (−13) two bright pings a fifth apart (G6, D7) over a sparkle, with `BowFullDraw` when the bow
+  reaches full draw. `WeakPointTick` (−16) a hard metallic tick on a confirmed weak-point /
+  head hit (with `Headshot`) or weak-point kill (with `KillConfirm`).
 - **Enemy hits and deaths.** The Moulds don't bleed: wax cracking, a hiss of heat, slag thuds,
   sizzle. `EnemyHurt` (3 variants) is a wax snap, a thud and a puff of hiss; `EnemyDeath`
   (2 variants, pitched by the client for the body's size) wax splitting, a slag thud and a long

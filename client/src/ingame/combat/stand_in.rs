@@ -274,12 +274,22 @@ impl Handover {
     }
 }
 
-/// Counters for tests and the debug overlay.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Counters for tests and tools.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StandInStats {
     pub spawned: u64,
     pub claimed: u64,
     pub expired: u64,
+    /// Seconds from the shot to its handover, summed over the claims: how long the projectile
+    /// would have been missing without its stand-in.
+    pub waited: f64,
+}
+
+impl StandInStats {
+    /// Mean seconds a stand-in flew before the server's projectile arrived.
+    pub fn mean_wait(&self) -> f64 {
+        self.waited / self.claimed.max(1) as f64
+    }
 }
 
 /// Every stand-in and handover of the local player.
@@ -494,6 +504,7 @@ impl StandIns {
             );
             self.claims.push((g.entity.id, e.id));
             self.stats.claimed += 1;
+            self.stats.waited += g.age as f64;
         }
 
         // Unclaimed for too long: the server never had it in flight (or it's long gone).

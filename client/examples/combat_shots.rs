@@ -403,10 +403,12 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 3, still);
     h.shot("feel_triple_nock");
     h.frames(game, 40, still);
+    let stats = game.combat.stand_ins.stats;
     println!(
-        "stand-ins: {:?} ({} handed over in this pass)",
-        game.combat.stand_ins.stats,
-        game.combat.stand_ins.stats.claimed - claimed
+        "stand-ins: {stats:?} ({} handed over in this pass; own projectiles appeared {:.0} ms \
+         after the shot on average, drawn from the muzzle meanwhile)",
+        stats.claimed - claimed,
+        stats.mean_wait() * 1000.0
     );
 
     // A needle: far off, then in punch reach (its ring flares), parried, flying back.

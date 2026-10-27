@@ -31,7 +31,7 @@ the debug overlay.
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
 | `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / thorn throw, Tumbler / Thresher drum turn, Discharge / Skewer charge, the Longwick's draw, the Cinderbox salvo, the Kiln's spray, plus landing dip / slide tilt / dash pull-back |
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
-| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / charge and draw gauge / BRANDED / BURNING / PINNED), `arsenal` (the expansion arsenal: the held build, local weapon feel, projectiles, blasts, the flak burst, burning patches, Burn / Pinned visuals, `InGame::preview_arsenal` for tools) |
+| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots, the press-frame lookahead), `stand_in` (own projectiles from the muzzle until the server's arrive, `docs/feel.md`), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / charge and draw gauge / BRANDED / BURNING / PINNED), `arsenal` (the expansion arsenal: the held build, local weapon feel, projectiles, blasts, the flak burst, burning patches, Burn / Pinned visuals, `InGame::preview_arsenal` for tools) |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags, `+N`/`-N` health popups (shape cues) |
 | `ingame::cues` | accessibility shape cues: player marker shapes (`player_swatch`, `draw_marker`), the parry icon over enemies in their parry window (`parry_icons`) |
@@ -98,13 +98,16 @@ input, dt, time, window size), so they run headless in tests and tools.
    `NetClient::tick` (predict + send) → predicted `MoveEvents` → `audio_hooks` and
    `InGame::on_local_move_events` (landing dip, stair smoothing, slam shockwave + shake +
    short hitstop, dust, jump-pad glow). Skipped while the single-player server is paused.
+   No tick this frame but a fire / punch button changed: the next tick's shot is played now
+   (`CombatClient::lookahead`, `docs/feel.md`).
 5. **Visual time**: `Feedback::update(real dt) -> visual dt` (0 during hitstop), then
    `combat_update` (drains `NetClient::drain_fx` into the Fx queue and plays what is due at
    the render tick, enemy / projectile bookkeeping, viewmodel charge + spin, music intensity).
    `CameraRig::update` places the camera at `local_render_position(alpha)` + smoothed eye
    height + landing dip + stair offset, with the FOV (settings, horizontal at 16:9, Hor+) +
-   smoothed `fov_kick`, smoothed `view_roll`, and shake offsets. The viewmodel and effects
-   advance on visual time.
+   smoothed `fov_kick` (and the bow's zoom), smoothed `view_roll`, the view punch and shake
+   offsets. The viewmodel and effects advance on visual time. Then `combat_after_ticks` plays
+   this frame's predicted shots from this frame's muzzle.
 6. **Draw** (`draw_world`, `draw_ui`): level (doors hidden while the replicated door state says
    open), remote players, combat entities + tracers (`combat_draw`), effects (sprites +
    decals), viewmodel, debug ghosts; name tags, HUD (+ `combat_hud`), chat log, scoreboard,

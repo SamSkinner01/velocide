@@ -892,6 +892,13 @@ impl SimWorld {
             };
             let d = d.max(0.0);
             let is_direct = direct == Some(h.target) || d <= 0.05;
+            // A projectile that hit through `projectile_hit_pad` went off up to that much
+            // further out: its direct hit loses nothing for it.
+            let d = if is_direct && projectile.is_some() && direct == Some(h.target) {
+                (d - projectile_target_pad(t, owner)).max(0.0)
+            } else {
+                d
+            };
             if d > spec.radius && !is_direct {
                 continue;
             }
