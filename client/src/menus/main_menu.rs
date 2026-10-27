@@ -232,9 +232,16 @@ impl MainMenu {
                     self.back();
                 }
             } else if let (Page::Loadout, Some(menu)) = (self.page, &mut self.loadout) {
-                settings_menu::dim(&mut ui, 0.45);
-                let r = menu.ui(&mut ui, &mut settings.loadout, loadout::panel_rect(canvas));
+                let preview = loadout::Preview {
+                    lib: common.models.as_ref(),
+                    viewmodel,
+                    lights,
+                    camera: scene.camera,
+                    fov: scene.viewmodel_fov,
+                };
+                let r = menu.ui(&mut ui, settings, preview);
                 settings_resp.changed |= r.changed;
+                sound = r.sound.or(sound);
                 if r.back {
                     settings_resp.back = true;
                     sound = Some(Sfx::UiBack);

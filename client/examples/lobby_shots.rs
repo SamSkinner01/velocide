@@ -4,13 +4,14 @@
 //! - the **warm-up** (docs/lobby.md): the host arriving in the Vestry with the lobby overlay
 //!   open (`warmup_overlay_host`), the hub with the HUD card and the ready board
 //!   (`warmup_board`), the customise sub-screen over the world (`warmup_customize`), the
-//!   overlay's LOADOUT (`warmup_loadout`), the firing range's Effigies (`warmup_range`), a
+//!   overlay's LOADOUT (`warmup_loadout`) and its weapon picker (`warmup_loadout_weapon`), the
+//!   firing range's Effigies (`warmup_range`), a
 //!   guest's overlay (`warmup_overlay_guest`), a practice pack summoned at the console
 //!   (`warmup_practice`), the countdown banner (`warmup_countdown`);
 //! - the match it starts (`match_started`), the scoreboard with pings, the host pause menu,
 //!   the results (`match_results`) and the warm-up after it (`warmup_after_match`);
-//! - the menu-style lobby screen of a server without a warm-up world (`lobby_no_world`) and
-//!   its leave dialog (`lobby_leave_confirm`);
+//! - the menu-style lobby screen of a server without a warm-up world (`lobby_no_world`), its
+//!   LOADOUT (`lobby_loadout`) and its leave dialog (`lobby_leave_confirm`);
 //! - the main menu's CUSTOMISE page (`menu_customize`).
 //!
 //! ```text
@@ -310,6 +311,12 @@ fn main() -> anyhow::Result<()> {
     game.open_loadout();
     rig.game(&mut host_common, &mut game, 20, &[]);
     rig.shot("warmup_loadout");
+    // Its weapon picker (slot card → CHANGE WEAPON), the Lancet under the focus.
+    rig.game(&mut host_common, &mut game, 2, &[UiKey::Right]);
+    rig.game(&mut host_common, &mut game, 2, &[UiKey::Enter]);
+    rig.game(&mut host_common, &mut game, 10, &[UiKey::Down]);
+    rig.shot("warmup_loadout_weapon");
+    rig.game(&mut host_common, &mut game, 2, &[UiKey::Escape]);
     rig.game(&mut host_common, &mut game, 1, &[UiKey::Escape]);
     game.set_lobby_overlay(false);
     rig.game(&mut host_common, &mut game, 10, &[]);
@@ -420,6 +427,8 @@ fn main() -> anyhow::Result<()> {
     };
     let server = ServerHandle::spawn(config)?;
     let mut common = common_for("tin saint", Cosmetics::from_seed(3));
+    // (The app loads them at start; its LOADOUT turns one.)
+    common.load_models(&mut rig.renderer);
     let mut lobby = LobbyScreen::start(
         &StartMode::Join {
             address: server.connect_addr().to_string(),
@@ -433,6 +442,12 @@ fn main() -> anyhow::Result<()> {
     println!("no-world lobby transition: {t:?}");
     rig.lobby(&mut common, &mut lobby, 1.5, |_| false);
     rig.shot("lobby_no_world");
+    // LOADOUT from the match panel: the weapon turns over the menu backdrop.
+    lobby.open_loadout();
+    rig.lobby(&mut common, &mut lobby, 0.5, |_| false);
+    rig.shot("lobby_loadout");
+    rig.frame(&mut common, Screen::Lobby(&mut lobby), &[UiKey::Escape]);
+    rig.lobby(&mut common, &mut lobby, 0.1, |_| false);
     // Esc asks before leaving.
     rig.frame(&mut common, Screen::Lobby(&mut lobby), &[UiKey::Escape]);
     for _ in 0..3 {
