@@ -1176,17 +1176,24 @@ fn projectile_glow(
     if !stuck && speed > 2.0 {
         let back = -vel / speed;
         let flown = (pos - start).dot(-back).max(0.0);
-        let len = (speed * look.streak).min(flown).min(9.0);
-        if len > 0.15 {
+        // Never reaching back into the camera, and faded when seen end-on (a streak flying
+        // straight away from you or at you would otherwise be a disc over the target).
+        let mut len = (speed * look.streak).min(flown).min(9.0);
+        let to_camera = (f.camera - pos).normalize_or_zero();
+        if back.dot(to_camera) > 0.0 {
+            len = len.min((distance - 2.0).max(0.0));
+        }
+        let side = ((1.0 - back.dot(to_camera).abs()) / 0.3).clamp(0.0, 1.0);
+        if len > 0.15 && side > 0.02 {
             let tail = pos + back * len;
             let width = 0.05 + 0.08 * look.halo;
             let core = color.truncate().lerp(Vec3::ONE, 0.45) * 2.0;
-            beams.frame_beam(tail, pos, width, core.extend(0.9));
+            beams.frame_beam(tail, pos, width, core.extend(0.9 * side.max(0.35)));
             beams.frame_beam(
-                pos + back * (len * 1.4),
+                tail,
                 pos,
                 width * 3.0,
-                (color.truncate() * 1.3).extend(0.3),
+                (color.truncate() * 1.3).extend(0.3 * side),
             );
         }
     }
