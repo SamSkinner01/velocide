@@ -210,7 +210,7 @@ const MUZZLE_BLEND: f32 = 0.15;
 impl EntityFrame<'_> {
     /// Every projectile to show: the entity, the time to evaluate its trajectory at and a
     /// visual offset (own projectiles start at the muzzle).
-    fn projectiles(&self) -> impl Iterator<Item = (&EntityState, f64, Vec3)> {
+    pub(crate) fn projectiles(&self) -> impl Iterator<Item = (&EntityState, f64, Vec3)> {
         let own = self.local_owner;
         self.entities
             .iter()

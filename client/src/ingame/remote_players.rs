@@ -23,6 +23,7 @@ use shared::protocol::{
 };
 use shared::sim::PlayerId;
 
+use super::combat::knacks::tallow_tint;
 use crate::models::shrike::REMOTE_SCALE;
 use crate::models::weapons::melee::{self, Swing};
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
@@ -165,10 +166,14 @@ impl RemotePlayers {
             let id = e.id.as_player();
             let color = id.map_or(PLAYER_COLORS[0], player_color);
             let anim = player_anim(e, v, self.time, id.map(look).unwrap_or_default());
+            let mut tint = Tint::team(color);
+            // Tallow Skin: a pale, waxy, glistening coat (knacks.rs).
+            if e.flags & player_flags::TALLOW != 0 {
+                tint.body = tallow_tint(1.0, self.time);
+            }
             // Other Shrikes are drawn a little larger than life so they read at a distance
             // (visual only: hit shapes and movement are unchanged).
-            let info =
-                lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &Tint::team(color), out);
+            let info = lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &tint, out);
             v.head = info.head;
             v.muzzle = info.muzzle;
             v.muzzle_dir = info.muzzle_dir;

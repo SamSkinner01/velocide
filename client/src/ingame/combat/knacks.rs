@@ -26,10 +26,19 @@ use engine::ui::draw::fade;
 use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4, vec2};
 
+use std::collections::HashMap;
+
+use shared::protocol::{EntityState, NetId, kind, player_flags, projectile_flags};
+use shared::sim::PlayerId;
+use shared::tuning::CombatTuning;
+
 use super::super::InGame;
 use super::super::effects::{DecalKind, Effects, FxTex, Particle};
+use super::super::viewmodel::Viewmodel;
 use super::Rng;
-use super::fx::Beams;
+use super::entities::EntityFrame;
+use super::fx::{Beams, FxCtx};
+use super::melee::{MeleeView, lunge_streak};
 use crate::models::{ModelId, ModelLibrary, Tint, knacks as props};
 
 pub use shared::loadout::Knack;
@@ -448,6 +457,7 @@ pub fn flask_shatter(effects: &mut Effects, audio: &mut Audio, rng: &mut Rng, at
     audio.play(Sfx::FlaskShatter, PlayParams::at(at));
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Per-frame particles of a kindling pool of `radius` at `position` (on the floor; `left` =
 /// fraction of its life remaining: it dies down at the end), and its rim.
 pub fn pool_effects(
@@ -733,6 +743,21 @@ struct Trap {
     armed_sound: bool,
 }
 
+/// A replicated knack entity seen last frame.
+#[derive(Clone, Copy, Debug)]
+struct Seen {
+    armed: bool,
+    still: bool,
+}
+
+/// A replicated hazard on screen this frame (its light).
+#[derive(Clone, Copy, Debug)]
+struct LiveArea {
+    position: Vec3,
+    radius: f32,
+    left: f32,
+}
+
 /// Knack visuals that live across frames.
 #[derive(Default)]
 pub struct KnackView {
@@ -741,6 +766,13 @@ pub struct KnackView {
     clouds: Vec<Area>,
     snares: Vec<Trap>,
     staged: Vec<KnackPreview>,
+    /// Replicated flasks, snares, pots, pools and clouds seen last frame (a pool or cloud
+    /// appearing is where a flask or pot broke; a snare arming ticks).
+    seen: HashMap<NetId, Seen>,
+    /// Replicated pools this frame (lights).
+    live_pools: Vec<LiveArea>,
+    /// Snares that just sprang (the jaws shut for a moment where the entity was).
+    sprung: Vec<(Vec3, f32)>,
     /// Your Tallow Skin / Surge (staged), seconds left and total.
     tallow: (f32, f32),
     surge: (f32, f32),
@@ -775,6 +807,45 @@ impl KnackView {
             time: self.time,
             ..Self::default()
         };
+    }
+
+    /// A predicted knack of the local player (`FireIntent::Knack`): the left hand throws its
+    /// thing (a Thorn, the flask, the snare, the pot) or Tallow Skin / Surge start on you.
+    #[allow(clippy::too_many_arguments)]
+    pub fn local_knack(
+        &mut self,
+        knack: Knack,
+        viewmodel: &mut Viewmodel,
+        audio: &mut Audio,
+        melee: &mut MeleeView,
+        me: Option<u16>,
+        feet: Option<Vec3>,
+        yaw: f32,
+        t: &CombatTuning,
+    ) {
+        match knack {
+            Knack::Thorn => {
+                viewmodel.throw_thorn();
+                audio.play_2d(Sfx::ThornThrow);
+            }
+            Knack::KindleFlask | Knack::Snare | Knack::SootPot => {
+                viewmodel.throw_item(thrown_of(knack).map(Thrown::model));
+                audio.play_2d(Sfx::KnackThrow);
+            }
+            Knack::TallowSkin => {
+                let d = t.knacks.tallow_skin.duration.max(0.1);
+                self.tallow = (d, d);
+                audio.play_2d(Sfx::TallowSkin);
+            }
+            Knack::Surge => {
+                self.surge = (0.35, 0.35);
+                audio.play_2d(Sfx::Surge);
+                if let Some(feet) = feet {
+                    let dir = shared::input::look_dir(yaw, 0.0);
+                    melee.streak(me, feet, dir * t.knacks.surge.speed, accent(Knack::Surge));
+                }
+            }
+        }
     }
 
     /// Your Tallow Skin (0..1 left), for the HUD sheen.
@@ -975,6 +1046,165 @@ impl KnackView {
         self.snares.retain(|s| s.age < 20.0);
     }
 
+    /// The replicated knacks this frame: thrown things' wakes, a pool or cloud appearing
+    /// (the flask / pot breaking there), pools burning and clouds billowing, a snare arming,
+    /// Tallow Skin glinting on other players.
+    pub fn update_replicated(&mut self, f: &EntityFrame, ctx: &mut UpdateCtx) {
+        let dt = ctx.dt.max(0.0);
+        for s in self.seen.values_mut() {
+            s.still = false;
+        }
+        self.live_pools.clear();
+        let rate = f.tick_rate.max(1) as f32;
+        for e in f.entities {
+            match e.kind {
+                kind::KINDLE_POOL | kind::SOOT_CLOUD => {
+                    let radius = (e.state as f32 / 10.0).max(0.5);
+                    let (full, first) = if e.kind == kind::KINDLE_POOL {
+                        (f.tuning.knacks.kindle_flask.duration, Thrown::Flask)
+                    } else {
+                        (f.tuning.knacks.soot_pot.duration, Thrown::SootPot)
+                    };
+                    let left = ((e.aux as f64 - f.render_tick) as f32 / (full * rate).max(1.0))
+                        .clamp(0.0, 1.0);
+                    if !self.seen.contains_key(&e.id) {
+                        match first {
+                            Thrown::Flask => {
+                                flask_shatter(ctx.effects, ctx.audio, ctx.rng, e.position)
+                            }
+                            _ => soot_burst(ctx.effects, ctx.audio, ctx.rng, e.position),
+                        }
+                    }
+                    if e.kind == kind::KINDLE_POOL {
+                        pool_effects(
+                            ctx.effects,
+                            ctx.beams,
+                            ctx.rng,
+                            e.position,
+                            radius,
+                            left.max(0.15),
+                            dt,
+                            self.time,
+                        );
+                        self.live_pools.push(LiveArea {
+                            position: e.position,
+                            radius,
+                            left: left.max(0.15),
+                        });
+                    } else {
+                        soot_effects(ctx.effects, ctx.rng, e.position, radius, left, dt);
+                    }
+                    self.seen.insert(
+                        e.id,
+                        Seen {
+                            armed: false,
+                            still: true,
+                        },
+                    );
+                }
+                kind::SNARE if e.flags & projectile_flags::STUCK != 0 => {
+                    let armed = e.flags & projectile_flags::ARMED != 0;
+                    let was = self.seen.get(&e.id).copied();
+                    if was.is_none() {
+                        // Just landed (first seen lying on the floor).
+                        ctx.audio.play(Sfx::SnareSet, PlayParams::at(e.position));
+                    }
+                    if armed && was.is_some_and(|s| !s.armed) {
+                        ctx.audio.play(Sfx::SnareArmed, PlayParams::at(e.position));
+                    }
+                    if armed && f.local_owner == Some(e.owner) {
+                        snare_ring(ctx.beams, e.position, SNARE_RADIUS, self.time);
+                    }
+                    self.seen.insert(e.id, Seen { armed, still: true });
+                }
+                // Tallow Skin: drips of wax glinting on the body.
+                kind::PLAYER
+                    if e.flags & player_flags::TALLOW != 0 && ctx.rng.unit() < dt * 10.0 =>
+                {
+                    let a = ctx.rng.angle();
+                    ctx.effects.spawn(Particle {
+                        position: e.position
+                            + Vec3::new(a.cos() * 0.4, ctx.rng.range(0.4, 1.8), a.sin() * 0.4),
+                        velocity: Vec3::NEG_Y * 0.4,
+                        max_life: 0.4,
+                        size: Vec2::splat(0.08),
+                        color: accent(Knack::TallowSkin),
+                        texture: FxTex::Spark,
+                        additive: true,
+                        ..Default::default()
+                    });
+                }
+                _ => {}
+            }
+        }
+        // Thrown things in flight: their wakes (at the time they are drawn).
+        for (e, time, offset) in f.projectiles() {
+            let Some(thing) = thrown_kind(e.kind) else {
+                continue;
+            };
+            if e.flags & projectile_flags::STUCK != 0 {
+                continue;
+            }
+            let at = shared::sim::projectiles::replicated_position(e, time, f.tick_rate, f.tuning)
+                + offset;
+            thrown_trail(ctx.effects, ctx.rng, thing, at, dt);
+        }
+        self.seen.retain(|_, s| s.still);
+        for s in &mut self.sprung {
+            s.1 += dt;
+        }
+        self.sprung.retain(|s| s.1 < 0.8);
+    }
+
+    /// A snare sprang at `position` (`Fx::SnareSprung`): its jaws shut there for a moment.
+    pub fn snare_sprung(&mut self, position: Vec3) {
+        self.sprung.push((position, 0.0));
+    }
+
+    /// Draws the replicated thrown things (in flight, a snare on the floor) at the time the
+    /// entity frame shows them.
+    pub fn draw_replicated(
+        &self,
+        lib: Option<&ModelLibrary>,
+        f: &EntityFrame,
+        draws: &mut Vec<DrawItem>,
+        lights: &mut Vec<PointLight>,
+    ) {
+        if let Some(lib) = lib {
+            for (e, time, offset) in f.projectiles() {
+                let Some(thing) = thrown_kind(e.kind) else {
+                    continue;
+                };
+                let pos =
+                    shared::sim::projectiles::replicated_position(e, time, f.tick_rate, f.tuning)
+                        + offset;
+                if pos.distance(f.camera) < 0.5 {
+                    continue;
+                }
+                if thing == Thrown::Snare && e.flags & projectile_flags::STUCK != 0 {
+                    let armed = if e.flags & projectile_flags::ARMED != 0 {
+                        1.0
+                    } else {
+                        0.4
+                    };
+                    let yaw = (e.id.0 % 13) as f32 * 0.48;
+                    draw_snare(lib, pos, yaw, armed, 0.0, self.time, draws);
+                    continue;
+                }
+                let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
+                draw_thrown(lib, thing, pos, e.velocity, age.max(0.0), draws);
+            }
+            for (at, age) in &self.sprung {
+                draw_snare(lib, *at, 0.0, 1.0, (age / 0.06).min(1.0), self.time, draws);
+            }
+        }
+        for p in &self.live_pools {
+            if lights.len() < 48 {
+                lights.push(pool_light(p.position, p.radius, p.left, self.time));
+            }
+        }
+    }
+
     pub fn draw(
         &self,
         lib: Option<&ModelLibrary>,
@@ -1001,11 +1231,95 @@ impl KnackView {
         }
     }
 
-    /// Your Tallow Skin's sheen and the Surge's speed lines (the combat HUD calls it).
-    pub fn hud(&self, list: &mut UiDrawList, c: Rect, now: f64) {
-        tallow_hud(list, c, self.tallow_self(), now);
+    /// How strongly your Tallow Skin shows (0..1, its time left): the predicted timer, kept
+    /// up while the server's `TALLOW` flag (`flag`) is on; a timer the server never confirmed
+    /// is dropped after its first moments.
+    pub fn tallow_strength(&self, flag: bool) -> f32 {
+        let own = self.tallow_self();
+        if flag {
+            own.max(0.3)
+        } else if own > 0.8 {
+            own
+        } else {
+            0.0
+        }
+    }
+
+    /// Your Tallow Skin's sheen (`tallow`: [`KnackView::tallow_strength`]) and the Surge's
+    /// speed lines (the combat HUD calls it).
+    pub fn hud(&self, list: &mut UiDrawList, c: Rect, tallow: f32, now: f64) {
+        tallow_hud(list, c, tallow, now);
         surge_hud(list, c, self.surge_self(), now);
     }
+}
+
+/// The thrown thing of a knack (`None`: Tallow Skin, Surge and the Thorn aren't these).
+pub fn thrown_of(knack: Knack) -> Option<Thrown> {
+    match knack {
+        Knack::KindleFlask => Some(Thrown::Flask),
+        Knack::Snare => Some(Thrown::Snare),
+        Knack::SootPot => Some(Thrown::SootPot),
+        _ => None,
+    }
+}
+
+/// The thrown thing a replicated projectile kind is.
+pub fn thrown_kind(k: u16) -> Option<Thrown> {
+    match k {
+        kind::KINDLE_FLASK => Some(Thrown::Flask),
+        kind::SNARE => Some(Thrown::Snare),
+        kind::SOOT_POT => Some(Thrown::SootPot),
+        _ => None,
+    }
+}
+
+/// Another player used a knack (`Fx::Knack`): the throw (their left arm), Tallow Skin's
+/// sound (the sheen is their `TALLOW` flag), the Surge's streak and rush.
+pub fn remote_knack(ctx: &mut FxCtx, player: PlayerId, knack: Knack) {
+    let id = NetId::player(player);
+    let Some(e) = ctx.entities.iter().find(|e| e.id == id).copied() else {
+        return;
+    };
+    let at = e.position + Vec3::Y * 1.2;
+    match knack {
+        Knack::KindleFlask | Knack::Snare | Knack::SootPot | Knack::Thorn => {
+            ctx.remote.visual_mut(id).punching = 0.01;
+            ctx.audio.play(Sfx::KnackThrow, PlayParams::at(at));
+        }
+        Knack::TallowSkin => ctx.audio.play(Sfx::TallowSkin, PlayParams::at(at)),
+        Knack::Surge => {
+            ctx.audio.play(Sfx::Surge, PlayParams::at(at));
+            let dir = shared::input::look_dir(e.yaw, 0.0);
+            lunge_streak(ctx.beams, e.position, dir * 4.0, accent(Knack::Surge));
+        }
+    }
+}
+
+/// The viewpoint's own knack in a replay (first person): the throw with its thing in hand, or
+/// Tallow Skin's / the Surge's sound.
+pub fn first_person_knack(vm: &mut Viewmodel, audio: &mut Audio, knack: Knack) {
+    match thrown_of(knack) {
+        Some(thing) => {
+            vm.throw_item(Some(thing.model()));
+            audio.play_2d(Sfx::KnackThrow);
+        }
+        None => audio.play_2d(match knack {
+            Knack::TallowSkin => Sfx::TallowSkin,
+            Knack::Surge => Sfx::Surge,
+            _ => Sfx::ThornThrow,
+        }),
+    }
+}
+
+/// A snare springing (`Fx::SnareSprung`): the flash, chains and snap.
+pub fn remote_snare_sprung(ctx: &mut FxCtx, position: Vec3) {
+    snare_spring(ctx.effects, ctx.beams, ctx.audio, position);
+}
+
+/// Whether a replicated entity is drawn by this module (thrown knacks: the entity drawers
+/// skip them).
+pub fn draws_entity(e: &EntityState) -> bool {
+    thrown_kind(e.kind).is_some()
 }
 
 impl InGame {

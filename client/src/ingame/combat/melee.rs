@@ -18,34 +18,69 @@
 use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
 use glam::{Quat, Vec2, Vec3, Vec4};
+use shared::loadout::{Ability, WeaponKind};
+use shared::protocol::{EntityState, NetId, kind, player_weapon};
+use shared::sim::{Attack, FireIntent, PlayerId};
+use shared::tuning::CombatTuning;
 
 use super::super::InGame;
 use super::super::effects::{Effects, FxTex, OnHit, Particle};
+use super::super::feedback::Feedback;
+use super::super::viewmodel::Viewmodel;
 use super::Rng;
-use super::fx::Beams;
-use crate::models::ModelLibrary;
+use super::entities::EntityFrame;
+use super::fx::{Beams, FxCtx};
 use crate::models::Tint;
 use crate::models::weapons::melee::{self as model, duration, impact};
 pub use crate::models::weapons::melee::{MeleeWeapon, Swing, SwingKind};
+use crate::models::{ModelLibrary, WeaponLook as _, ability_color as weapon_ability_color};
 
-/// The colour of a weapon's primary swing (trails, sparks): the Trimmer's honed steel, a
-/// warm white; the Tamper's hot iron.
+/// The colour of a weapon's primary swing (trails, sparks): `WeaponLook::primary_color`, the
+/// Trimmer's honed steel (a warm white), the Tamper's hot iron.
 pub fn primary_color(weapon: MeleeWeapon) -> Vec4 {
-    match weapon {
-        MeleeWeapon::Trimmer => Vec4::new(1.0, 0.93, 0.8, 1.0),
-        MeleeWeapon::Tamper => Vec4::new(1.0, 0.55, 0.2, 1.0),
+    model::weapon_kind(weapon).primary_color()
+}
+
+/// The colour of a melee move (its trails, rings, streaks): a slash in the weapon's primary
+/// colour, an ability in its ability colour (`models::ability_color`: Lunge cyan, Whirl amber,
+/// Hurl violet, Upswing lime).
+pub fn ability_color(kind: SwingKind) -> Vec4 {
+    match kind {
+        SwingKind::Slash => primary_color(MeleeWeapon::Trimmer),
+        SwingKind::Lunge => weapon_ability_color(Ability::Lunge),
+        SwingKind::Whirl => weapon_ability_color(Ability::Whirl),
+        SwingKind::Hurl => weapon_ability_color(Ability::Hurl),
+        SwingKind::Upswing => weapon_ability_color(Ability::Upswing),
     }
 }
 
-/// The colour of a melee ability (its trails, rings, streaks and the weapon's glow while it is
-/// selected). The four differ clearly: Lunge cyan, Whirl amber, Hurl violet, Upswing lime.
-pub fn ability_color(kind: SwingKind) -> Vec4 {
+/// The colour of a move made with `weapon`.
+pub fn move_color(weapon: MeleeWeapon, kind: SwingKind) -> Vec4 {
     match kind {
-        SwingKind::Slash => Vec4::new(1.0, 0.93, 0.8, 1.0),
-        SwingKind::Lunge => Vec4::new(0.4, 0.95, 1.0, 1.0),
-        SwingKind::Whirl => Vec4::new(1.0, 0.72, 0.22, 1.0),
-        SwingKind::Hurl => Vec4::new(0.78, 0.5, 1.0, 1.0),
-        SwingKind::Upswing => Vec4::new(0.72, 1.0, 0.35, 1.0),
+        SwingKind::Slash => primary_color(weapon),
+        _ => ability_color(kind),
+    }
+}
+
+/// The melee move an attack is (`None`: not a melee attack).
+pub fn swing_kind(attack: Attack) -> Option<SwingKind> {
+    Some(match attack {
+        Attack::Trimmer | Attack::Tamper => SwingKind::Slash,
+        Attack::Lunge => SwingKind::Lunge,
+        Attack::Whirl => SwingKind::Whirl,
+        Attack::Hurl => SwingKind::Hurl,
+        Attack::Upswing => SwingKind::Upswing,
+        _ => return None,
+    })
+}
+
+/// How hard a move shakes its swinger's view.
+fn swing_shake(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
+    match (weapon, kind) {
+        (MeleeWeapon::Trimmer, SwingKind::Slash) => 0.03,
+        (MeleeWeapon::Tamper, SwingKind::Slash) => 0.1,
+        (_, SwingKind::Hurl) => 0.05,
+        _ => 0.09,
     }
 }
 
@@ -242,6 +277,8 @@ pub struct MeleeView {
     staged: Vec<MeleePreview>,
     /// The Trimmer's next local slash is the left blade's.
     pub next_left: bool,
+    /// Replicated hurled pieces drawn last frame (id, piece, position, velocity).
+    hurled: Vec<(NetId, MeleeWeapon, Vec3, Vec3)>,
     time: f64,
 }
 
@@ -305,8 +342,9 @@ impl MeleeView {
         });
     }
 
-    /// A Lunge streak following `player`'s body (`None`: a free-flying preview).
-    pub fn lunge(&mut self, player: Option<u16>, from: Vec3, velocity: Vec3, color: Vec4) {
+    /// A streak following `player`'s body (the Lunge; the Surge knack), or flying on at
+    /// `velocity` (`None`: a preview).
+    pub fn streak(&mut self, player: Option<u16>, from: Vec3, velocity: Vec3, color: Vec4) {
         if !from.is_finite() {
             return;
         }
@@ -346,7 +384,7 @@ impl MeleeView {
                 velocity,
                 seconds,
             } => {
-                self.lunge(None, from, velocity, ability_color(SwingKind::Lunge));
+                self.streak(None, from, velocity, ability_color(SwingKind::Lunge));
                 if let Some(s) = self.streaks.last_mut() {
                     s.life = seconds.max(0.1);
                 }
@@ -507,6 +545,322 @@ impl MeleeView {
 
     pub fn trail_count(&self) -> usize {
         self.trails.len()
+    }
+
+    /// A predicted intent of the local player. A melee one (a slash, a melee ability) starts
+    /// the viewmodel's swing (the Trimmer alternating hands), its sound and its trail from the
+    /// eye; returns whether it was one. The Hurl's piece is the server's projectile.
+    #[allow(clippy::too_many_arguments)]
+    pub fn local_intent(
+        &mut self,
+        intent: &FireIntent,
+        viewmodel: &mut Viewmodel,
+        audio: &mut Audio,
+        feedback: &mut Feedback,
+        beams: &mut Beams,
+        effects: &mut Effects,
+        rng: &mut Rng,
+        me: Option<u16>,
+        eye: Vec3,
+        feet: Option<Vec3>,
+        yaw: f32,
+        pitch: f32,
+        t: &CombatTuning,
+    ) -> bool {
+        let Some(weapon) = intent.weapon().and_then(model::of) else {
+            return false;
+        };
+        let Some(kind) = intent.attack().and_then(swing_kind) else {
+            return false;
+        };
+        let left = weapon == MeleeWeapon::Trimmer && kind == SwingKind::Slash && self.next_left;
+        if weapon == MeleeWeapon::Trimmer && kind == SwingKind::Slash {
+            self.next_left = !self.next_left;
+        }
+        viewmodel.swing(kind, left);
+        audio.play_2d(swing_sfx(weapon, kind));
+        feedback.shake(swing_shake(weapon, kind));
+        let color = move_color(weapon, kind);
+        self.swing(weapon, kind, left, eye, yaw, pitch, color);
+        let feet = feet.unwrap_or(eye - Vec3::Y * 1.6);
+        match kind {
+            SwingKind::Lunge => {
+                let dir = shared::input::look_dir(yaw, 0.0);
+                self.streak(me, feet, dir * t.lunge.speed, color);
+            }
+            SwingKind::Whirl => whirl(effects, beams, rng, feet, t.whirl.radius),
+            _ => {}
+        }
+        true
+    }
+}
+
+/// Another player's swing (`Fx::Swing`): their Shrike swings (the Trimmer alternating hands:
+/// the client alternates per swing it shows), the whoosh at them, the trail swept in front of
+/// their eyes (drawn whole: they are seen from outside), the Whirl's ring, the Lunge's streak.
+pub fn remote_swing(ctx: &mut FxCtx, player: PlayerId, attack: Attack, hits: u8) {
+    let Some(kind) = swing_kind(attack) else {
+        return;
+    };
+    let id = NetId::player(player);
+    let Some(e) = ctx.entities.iter().find(|e| e.id == id).copied() else {
+        return;
+    };
+    let weapon = model::of(player_weapon(e.state).0).unwrap_or(match attack {
+        Attack::Tamper => MeleeWeapon::Tamper,
+        _ => MeleeWeapon::Trimmer,
+    });
+    let vis = ctx.remote.visual_mut(id);
+    let left = weapon == MeleeWeapon::Trimmer && kind == SwingKind::Slash && !vis.swing.left;
+    vis.swing = Swing {
+        kind,
+        progress: 1e-3,
+        left,
+    };
+    let eye = e.position + Vec3::Y * 1.6;
+    ctx.audio.play(
+        swing_sfx(weapon, kind),
+        PlayParams::at(eye).with_volume(0.9),
+    );
+    let color = move_color(weapon, kind);
+    if let Some(end) = whole_trail(ctx.beams, weapon, kind, left, eye, e.yaw, e.pitch, color)
+        && hits > 0
+    {
+        ctx.effects.sparks(end, Vec3::Y, 6 + 2 * hits as usize);
+    }
+    match kind {
+        SwingKind::Whirl => whirl(ctx.effects, ctx.beams, ctx.rng, e.position, 3.5),
+        SwingKind::Lunge => {
+            // Where the lunge carries them (the replicated body follows a moment later).
+            let dir = shared::input::look_dir(e.yaw, 0.0);
+            lunge_streak(ctx.beams, e.position, dir * 5.6, color);
+        }
+        _ => {}
+    }
+}
+
+/// A move's trail drawn whole at once (others' swings, replays: no sweep to follow), from
+/// `eye` looking along (`yaw`, `pitch`). Returns where the blow ends.
+#[allow(clippy::too_many_arguments)]
+pub fn whole_trail(
+    beams: &mut Beams,
+    weapon: MeleeWeapon,
+    kind: SwingKind,
+    left: bool,
+    eye: Vec3,
+    yaw: f32,
+    pitch: f32,
+    color: Vec4,
+) -> Option<Vec3> {
+    let arc = arc(weapon, kind, left)?;
+    let pitch = if kind == SwingKind::Whirl {
+        0.0
+    } else {
+        pitch.clamp(-1.2, 1.2)
+    };
+    let trail = Trail {
+        eye,
+        frame: engine::gfx::Camera::rotation_from_angles(yaw, pitch, 0.0),
+        arc,
+        window: (0.0, 1.0),
+        drawn: 0.0,
+        age: 0.0,
+        color,
+        width: 0.09,
+    };
+    for i in 0..12 {
+        let (f0, f1) = (i as f32 / 12.0, (i + 1) as f32 / 12.0);
+        let mid = 1.0 - (f0 + f1 - 1.0).abs();
+        beams.beam(
+            trail.point(f0),
+            trail.point(f1),
+            trail.width * (0.35 + 0.65 * mid),
+            hot(color, 1.7, 0.8),
+            0.14 + 0.01 * i as f32,
+        );
+    }
+    Some(trail.point(1.0))
+}
+
+/// The melee weapon a melee attack was made with: the primaries' own; an ability's carrier
+/// (`held`, when it is a melee weapon), else the weapon whose default pair has it.
+pub fn weapon_of_attack(attack: Attack, held: Option<WeaponKind>) -> Option<MeleeWeapon> {
+    swing_kind(attack)?;
+    Some(match attack {
+        Attack::Trimmer => MeleeWeapon::Trimmer,
+        Attack::Tamper => MeleeWeapon::Tamper,
+        _ => match held.and_then(model::of) {
+            Some(m) => m,
+            None if matches!(attack, Attack::Whirl | Attack::Upswing) => MeleeWeapon::Tamper,
+            None => MeleeWeapon::Trimmer,
+        },
+    })
+}
+
+/// The viewpoint's own swing in a replay (first person): the viewmodel swings (the Trimmer
+/// alternating), the sound, the trail drawn whole from the eye.
+pub fn first_person_swing(
+    vm: &mut Viewmodel,
+    audio: &mut Audio,
+    beams: &mut Beams,
+    feedback: &mut Feedback,
+    cam: &engine::gfx::Camera,
+    attack: Attack,
+) {
+    let Some(kind) = swing_kind(attack) else {
+        return;
+    };
+    let Some(weapon) = weapon_of_attack(attack, Some(vm.weapon())) else {
+        return;
+    };
+    let left = weapon == MeleeWeapon::Trimmer && kind == SwingKind::Slash && !vm.swing_left();
+    vm.swing(kind, left);
+    audio.play_2d(swing_sfx(weapon, kind));
+    feedback.shake(swing_shake(weapon, kind));
+    let fwd = cam.rotation * Vec3::NEG_Z;
+    let yaw = (-fwd.x).atan2(-fwd.z);
+    let pitch = fwd.y.clamp(-1.0, 1.0).asin();
+    whole_trail(
+        beams,
+        weapon,
+        kind,
+        left,
+        cam.position,
+        yaw,
+        pitch,
+        move_color(weapon, kind),
+    );
+}
+
+/// A Lunge streak drawn whole from `from` along `travel` (another player's, seen at a
+/// distance): three fading lines at knee, chest and head height.
+pub fn lunge_streak(beams: &mut Beams, from: Vec3, travel: Vec3, color: Vec4) {
+    for (h, w) in [(0.5, 0.08), (1.1, 0.11), (1.6, 0.06)] {
+        let up = Vec3::Y * h;
+        beams.beam(from + up, from + travel + up, w, hot(color, 1.6, 0.7), 0.35);
+    }
+}
+
+/// A Lunge reached its target (`Fx::LungeStruck`): a cyan burst and the bite of a hit.
+pub fn lunge_struck(ctx: &mut FxCtx, player: PlayerId, at: Vec3) {
+    let c = ability_color(SwingKind::Lunge);
+    ctx.effects.glow(at, hot(c, 1.2, 0.9), 1.6, 0.18);
+    ctx.effects.sparks(at, Vec3::Y, 14);
+    ctx.beams
+        .ring(at, Vec3::Y, 0.2, 1.4, 0.05, hot(c, 1.6, 0.8), 0.2);
+    let weapon = ctx
+        .entities
+        .iter()
+        .find(|e| e.id == NetId::player(player))
+        .and_then(|e| model::of(player_weapon(e.state).0))
+        .unwrap_or(MeleeWeapon::Trimmer);
+    let sfx = match weapon {
+        MeleeWeapon::Trimmer => Sfx::TrimmerHit,
+        MeleeWeapon::Tamper => Sfx::TamperHit,
+    };
+    ctx.audio.play(sfx, PlayParams::at(at));
+    if Some(player) == ctx.local {
+        ctx.feedback.hitstop(0.05);
+        ctx.feedback.shake(0.15);
+    }
+}
+
+/// The melee weapon whose blow an attack is (for hit effects): its own for the primaries,
+/// the carrier's (`held`) for the Lunge, Whirl and Upswing. The Hurl's piece makes its own
+/// impact ([`hurl_impact`]).
+pub fn hit_weapon(attack: Attack, held: Option<WeaponKind>) -> Option<MeleeWeapon> {
+    match attack {
+        Attack::Trimmer => Some(MeleeWeapon::Trimmer),
+        Attack::Tamper => Some(MeleeWeapon::Tamper),
+        Attack::Lunge | Attack::Whirl | Attack::Upswing => {
+            Some(held.and_then(model::of).unwrap_or(MeleeWeapon::Trimmer))
+        }
+        _ => None,
+    }
+}
+
+/// The hurled piece a replicated `HURL` projectile carries (`state` = the carrier's weapon id).
+pub fn hurled_weapon(e: &EntityState) -> MeleeWeapon {
+    model::of_id(e.state as u8).unwrap_or(MeleeWeapon::Trimmer)
+}
+
+/// Whether a replicated entity is a hurled piece.
+pub fn is_hurled(e: &EntityState) -> bool {
+    e.kind == kind::HURL
+}
+
+/// Another player hurled their blade / head (the `Fx::Shot` of a Hurl): the throw.
+pub fn remote_hurl(ctx: &mut FxCtx, player: PlayerId, at: Vec3) {
+    let vis = ctx.remote.visual_mut(NetId::player(player));
+    vis.swing = Swing {
+        kind: SwingKind::Hurl,
+        progress: 1e-3,
+        left: false,
+    };
+    ctx.audio.play(Sfx::HurlThrow, PlayParams::at(at));
+}
+
+impl MeleeView {
+    /// The replicated hurled pieces' wakes this frame, and where one vanished (it struck).
+    pub fn update_replicated(&mut self, f: &EntityFrame, ctx: &mut UpdateCtx) {
+        let dt = ctx.dt.max(0.0);
+        let mut seen = Vec::new();
+        for (e, time, offset) in f.projectiles() {
+            if !is_hurled(e) {
+                continue;
+            }
+            let at = shared::sim::projectiles::replicated_position(e, time, f.tick_rate, f.tuning)
+                + offset;
+            let weapon = hurled_weapon(e);
+            // Not right in front of the eye (an own throw starts at the camera).
+            let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
+            if age > 0.06 {
+                hurled_trail(ctx.effects, ctx.beams, ctx.rng, weapon, at, e.velocity, dt);
+            }
+            seen.push((e.id, weapon, at, e.velocity));
+        }
+        // Gone since last frame: it struck something where it was last drawn.
+        for (id, weapon, at, vel) in &self.hurled {
+            if !seen.iter().any(|s| s.0 == *id) {
+                hurl_impact(
+                    ctx.effects,
+                    ctx.audio,
+                    ctx.rng,
+                    *weapon,
+                    *at,
+                    vel.normalize_or(Vec3::NEG_Z),
+                );
+            }
+        }
+        self.hurled = seen;
+    }
+
+    /// Draws the replicated hurled pieces at the time the entity frame shows them.
+    pub fn draw_replicated(
+        &self,
+        lib: Option<&ModelLibrary>,
+        f: &EntityFrame,
+        draws: &mut Vec<DrawItem>,
+        lights: &mut Vec<PointLight>,
+    ) {
+        for (e, time, offset) in f.projectiles() {
+            if !is_hurled(e) {
+                continue;
+            }
+            let at = shared::sim::projectiles::replicated_position(e, time, f.tick_rate, f.tuning)
+                + offset;
+            if at.distance(f.camera) < 0.6 {
+                continue;
+            }
+            let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
+            let weapon = hurled_weapon(e);
+            if let Some(lib) = lib {
+                draw_hurled(lib, weapon, at, e.velocity, age.max(0.0), draws);
+            }
+            if lights.len() < 48 {
+                lights.push(hurled_light(weapon, at));
+            }
+        }
     }
 }
 

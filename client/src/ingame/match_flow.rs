@@ -93,8 +93,10 @@ impl InGame {
             self.match_ui.results_since = Some(now);
         }
         if let Some(screen) = self.modes.results.take() {
-            let screen =
+            let finale = screen.finale;
+            let mut screen =
                 crate::menus::results::ResultsScreen::new(screen.results, screen.local, now);
+            screen.finale = finale;
             self.modes.results = Some(screen);
         }
     }

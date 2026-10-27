@@ -891,16 +891,13 @@ fn lookups() {
     assert_eq!(weapons::weapon_kind(200), WeaponKind::Quill);
     assert!(!WeaponKind::Quill.two_handed() && WeaponKind::Tumbler.two_handed());
     assert!(!WeaponKind::Lancet.two_handed() && WeaponKind::Longwick.two_handed());
-    // Every weapon has its own model (the melee weapons borrow two until theirs exist:
-    // arsenal-client, docs/refit.md), and the default builds' glows are the ability colours.
-    let guns = WeaponKind::ALL
-        .iter()
-        .filter(|w| w.class() != shared::loadout::WeaponClass::Melee);
-    let mut models: Vec<ModelId> = guns.map(|w| w.model()).collect();
-    let n = models.len();
+    // Every weapon has its own model, and the default builds' glows are the ability colours.
+    let mut models: Vec<ModelId> = WeaponKind::ALL.iter().map(|w| w.model()).collect();
     models.sort_unstable();
     models.dedup();
-    assert_eq!(models.len(), n);
+    assert_eq!(models.len(), WeaponKind::COUNT);
+    assert_eq!(WeaponKind::Trimmer.model(), ModelId::Trimmer);
+    assert_eq!(WeaponKind::Tamper.model(), ModelId::Tamper);
     assert_eq!(
         WeaponKind::Tumbler.glow_color(1),
         ability_color(Ability::Gravewell)

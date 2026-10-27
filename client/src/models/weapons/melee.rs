@@ -17,6 +17,7 @@ use super::{VIEWMODEL_SCALE, smoothstep, tamper, trimmer, unit, wave};
 use crate::models::ModelId;
 use crate::models::library::ModelLibrary;
 use crate::models::rig::{Pose, Tint};
+use shared::loadout::WeaponKind;
 
 /// The two melee weapons, as the models see them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -349,6 +350,18 @@ pub fn hurl_hidden(swing: &Swing) -> bool {
     swing.active() && swing.kind == SwingKind::Hurl && (0.3..0.62).contains(&swing.progress)
 }
 
+/// What the left hand is doing while a melee weapon is held.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LeftHand {
+    /// On the weapon: the Trimmer's left blade, the Tamper's haft.
+    Weapon,
+    /// Punching (the fist at this view transform, drawn by the caller): the Trimmer's left
+    /// blade goes with it; it leaves the Tamper's haft.
+    Punch(Mat4),
+    /// Throwing a knack (drawn by the caller): the Trimmer's left blade is put away for it.
+    Busy,
+}
+
 /// Draws the melee viewmodel: the weapon(s) with the right arm (the Trimmer's left blade in
 /// the left fist), returning the view-space strike point and the direction of the blow.
 #[allow(clippy::too_many_arguments)]
@@ -358,6 +371,7 @@ pub fn draw_view(
     swing: &Swing,
     pose: &Pose,
     extra: Vec3,
+    left_hand: LeftHand,
     tint: &Tint,
     out: &mut Vec<DrawItem>,
 ) -> (Vec3, Vec3) {
@@ -367,7 +381,11 @@ pub fn draw_view(
     let hidden = hurl_hidden(swing);
     match weapon {
         MeleeWeapon::Trimmer => {
-            let left = view_left(swing, extra);
+            let left = match left_hand {
+                // The blade rides in the punching fist (its grip is through the fist).
+                LeftHand::Punch(fist) => fist * FIST_ON_GRIP.inverse(),
+                _ => view_left(swing, extra),
+            };
             // Each half in its own hand: the left one's local transform takes it from its
             // bind spot beside the right half to the left fist.
             let pivot = Vec3::from(trimmer::LEFT_GRIP);
@@ -380,15 +398,21 @@ pub fn draw_view(
                 pose.hide(trimmer::EDGE_R);
                 pose.hide(trimmer::WICK);
             }
+            if left_hand == LeftHand::Busy {
+                pose.hide(trimmer::BLADE_L);
+                pose.hide(trimmer::EDGE_L);
+            }
             lib.get(model).draw(&pose, right, tint, out);
             // The left fist closes round the left blade's grip.
-            draw_left_fist(
-                lib,
-                left * FIST_ON_GRIP,
-                left_shoulder(weapon) + extra,
-                tint,
-                out,
-            );
+            if left_hand == LeftHand::Weapon {
+                draw_left_fist(
+                    lib,
+                    left * FIST_ON_GRIP,
+                    left_shoulder(weapon) + extra,
+                    tint,
+                    out,
+                );
+            }
         }
         MeleeWeapon::Tamper => {
             if hidden {
@@ -398,7 +422,7 @@ pub fn draw_view(
             lib.get(model).draw(&pose, right, tint, out);
             // Both hands on the haft, the left one higher up; for the overhead slam it slides
             // down to the right one (hidden behind it) and back once the head is down.
-            if !hands_together(swing) {
+            if left_hand == LeftHand::Weapon && !hands_together(swing) {
                 let fist = right * Mat4::from_translation(tamper::LEFT_HAND) * FIST_ON_GRIP;
                 draw_left_fist(lib, fist, left_shoulder(weapon) + extra, tint, out);
             }
@@ -706,13 +730,25 @@ pub fn arms(weapon: MeleeWeapon, swing: &Swing, reach: f32, pitch: f32) -> Arms 
     }
 }
 
-/// The melee weapon of a replicated / input weapon id (the contract's wire ids: 10 Trimmer,
-/// 11 Tamper).
-pub fn of_id(id: u8) -> Option<MeleeWeapon> {
-    match id {
-        10 => Some(MeleeWeapon::Trimmer),
-        11 => Some(MeleeWeapon::Tamper),
+/// The melee weapon a weapon is (`None`: a gun).
+pub fn of(weapon: WeaponKind) -> Option<MeleeWeapon> {
+    match weapon {
+        WeaponKind::Trimmer => Some(MeleeWeapon::Trimmer),
+        WeaponKind::Tamper => Some(MeleeWeapon::Tamper),
         _ => None,
+    }
+}
+
+/// The melee weapon of a replicated / input weapon id.
+pub fn of_id(id: u8) -> Option<MeleeWeapon> {
+    WeaponKind::from_id(id).and_then(of)
+}
+
+/// The weapon a melee weapon is.
+pub fn weapon_kind(m: MeleeWeapon) -> WeaponKind {
+    match m {
+        MeleeWeapon::Trimmer => WeaponKind::Trimmer,
+        MeleeWeapon::Tamper => WeaponKind::Tamper,
     }
 }
 

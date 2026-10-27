@@ -778,6 +778,11 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 q(*origin)
             };
             let dir = vis.muzzle_dir;
+            // A Hurl: the throw (its piece is an entity; melee.rs).
+            if *attack == Attack::Hurl {
+                super::melee::remote_hurl(ctx, *shooter, muzzle);
+                return;
+            }
             let style = attack_style(*attack);
             ctx.audio.play(style.sfx, PlayParams::at(muzzle));
             if *attack == Attack::Gust {
@@ -944,35 +949,25 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.audio.play(Sfx::ThornThrow, PlayParams::at(at));
         }
         Fx::ThornPlanted { position } => thorn_plant(ctx, q(*position)),
-        // Melee and knacks: placeholders (punch / thorn looks and sounds) until the
-        // arsenal-client work (docs/refit.md).
-        Fx::Swing { player, hits, .. } => {
-            if Some(*player) == ctx.local {
-                return;
+        // Melee and knacks (melee.rs, knacks.rs).
+        Fx::Swing {
+            player,
+            attack,
+            hits,
+        } => {
+            if Some(*player) != ctx.local {
+                super::melee::remote_swing(ctx, *player, *attack, *hits);
             }
-            let vis = ctx.remote.visual_mut(NetId::player(*player));
-            vis.punching = 0.01;
-            let at = vis.head;
-            let sfx = if *hits > 0 { Sfx::PunchHit } else { Sfx::Punch };
-            ctx.audio.play(sfx, PlayParams::at(at));
         }
-        Fx::LungeStruck { position, .. } => {
-            ctx.audio.play(Sfx::PunchHit, PlayParams::at(q(*position)));
+        Fx::LungeStruck { player, position } => {
+            super::melee::lunge_struck(ctx, *player, q(*position));
         }
-        Fx::Knack { player, .. } => {
-            if Some(*player) == ctx.local {
-                return;
+        Fx::Knack { player, knack } => {
+            if Some(*player) != ctx.local {
+                super::knacks::remote_knack(ctx, *player, *knack);
             }
-            let vis = ctx.remote.visual_mut(NetId::player(*player));
-            vis.punching = 0.01;
-            let at = vis.head;
-            ctx.audio.play(Sfx::ThornThrow, PlayParams::at(at));
         }
-        Fx::SnareSprung { position } => {
-            let p = q(*position);
-            ctx.effects.sparks(p, Vec3::Y, 6);
-            ctx.audio.play(Sfx::ThornShatter, PlayParams::at(p));
-        }
+        Fx::SnareSprung { position } => super::knacks::remote_snare_sprung(ctx, q(*position)),
         Fx::ThornExpired { id } => {
             if let Some(p) = (ctx.thorn_position)(*id) {
                 ctx.effects

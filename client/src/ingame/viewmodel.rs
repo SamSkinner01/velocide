@@ -9,7 +9,8 @@
 //! clock (hitstop freezes it).
 //!
 //! Combat hooks: [`Viewmodel::fire`] (recoil kick), [`Viewmodel::punch`],
-//! [`Viewmodel::throw_thorn`], [`Viewmodel::set_charge`] (Discharge / Skewer charge),
+//! [`Viewmodel::throw_thorn`] / [`Viewmodel::throw_item`] (a knack), [`Viewmodel::swing`] (a
+//! melee move), [`Viewmodel::set_charge`] (Discharge / Skewer charge),
 //! [`Viewmodel::turn_drum`] (a Tumbler or Thresher shot), [`Viewmodel::set_draw`] (Longwick
 //! draw), [`Viewmodel::salvo`] (a Cinderbox salvo), [`Viewmodel::spray`] (the Kiln firing)
 //! and [`Viewmodel::last_draw`] (view-space muzzle / fist for tracers and sparks).
@@ -18,8 +19,9 @@ use engine::gfx::DrawItem;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use shared::movement::{MoveMode, MoveState};
 
+use crate::models::weapons::melee::{self, Swing, SwingKind};
 use crate::models::{
-    Ability, DrumTurn, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo, WeaponKind,
+    Ability, DrumTurn, ModelId, ModelLibrary, Tint, ViewmodelAnim, ViewmodelDrawInfo, WeaponKind,
 };
 
 const SWITCH_TIME: f32 = 0.12;
@@ -73,7 +75,32 @@ impl Viewmodel {
 
     /// Starts the thorn throw animation.
     pub fn throw_thorn(&mut self) {
+        self.throw_item(None);
+    }
+
+    /// Starts the throw animation with a knack's model in the hand (`None`: a Thorn).
+    pub fn throw_item(&mut self, item: Option<ModelId>) {
         self.anim.throw = 0.01;
+        self.anim.throw_item = item;
+    }
+
+    /// The weapon in the hand (last drawn).
+    pub fn weapon(&self) -> WeaponKind {
+        self.anim.weapon
+    }
+
+    /// The last melee move was the Trimmer's left blade (the next slash is the right one's).
+    pub fn swing_left(&self) -> bool {
+        self.anim.swing.left
+    }
+
+    /// A melee move starts (the Trimmer's slashes: `left` = the left blade's turn).
+    pub fn swing(&mut self, kind: SwingKind, left: bool) {
+        self.anim.swing = Swing {
+            kind,
+            progress: 1e-3,
+            left,
+        };
     }
 
     /// A Tumbler shot: the drum turns one chamber.
@@ -153,6 +180,10 @@ impl Viewmodel {
         }
         self.drum.update(dt);
         a.spin = self.drum.angle();
+        match melee::of(a.weapon) {
+            Some(m) => a.swing.advance(m, dt),
+            None => a.swing = Swing::default(),
+        }
         if let Some(s) = &mut a.salvo {
             *s += dt;
             if *s > 1.0 {
@@ -195,6 +226,7 @@ impl Viewmodel {
             self.anim.draw = 0.0;
             self.anim.salvo = None;
             self.anim.spray = 0.0;
+            self.anim.swing = Swing::default();
         }
         self.anim.weapon = weapon;
         self.anim.ability = ability;

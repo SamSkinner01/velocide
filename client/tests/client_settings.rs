@@ -208,28 +208,34 @@ fn accessibility_tab_changes_colour_vision_live() {
 #[test]
 fn an_unbound_action_stays_unbound() {
     let mut s = Settings::default();
-    s.bindings.clear(Action::ThrowThorn, false);
-    s.bindings.clear(Action::ThrowThorn, true);
+    s.bindings.clear(Action::Knack, false);
+    s.bindings.clear(Action::Knack, true);
     let back = Settings::from_ron(&s.to_ron()).unwrap();
-    assert!(back.bindings.get(Action::ThrowThorn).is_empty());
+    assert!(back.bindings.get(Action::Knack).is_empty());
 }
 
 #[test]
 fn old_settings_files_keep_their_throw_binding() {
-    // The action used to be called `ThrowPrism`; files saved then still load.
+    // The KNACK action used to be called `ThrowThorn` (before the knacks) and `ThrowPrism`
+    // (before the thorns); files saved then still load.
     let mut s = Settings::default();
     s.bindings.bind(
-        Action::ThrowThorn,
+        Action::Knack,
         engine::input::Binding::Key(engine::input::Key::KeyG),
     );
-    let text = s.to_ron().replace("ThrowThorn", "ThrowPrism");
-    assert!(text.contains("ThrowPrism"));
-    let back = Settings::from_ron(&text).unwrap();
-    assert!(
-        back.bindings
-            .get(Action::ThrowThorn)
-            .contains(&engine::input::Binding::Key(engine::input::Key::KeyG))
-    );
+    let text = s.to_ron();
+    assert!(text.contains("Knack"));
+    for old in ["ThrowThorn", "ThrowPrism"] {
+        let old_text = text.replace("Knack:", &format!("{old}:"));
+        assert!(old_text.contains(old));
+        let back = Settings::from_ron(&old_text).unwrap();
+        assert!(
+            back.bindings
+                .get(Action::Knack)
+                .contains(&engine::input::Binding::Key(engine::input::Key::KeyG)),
+            "{old}"
+        );
+    }
 }
 
 #[test]
@@ -265,7 +271,8 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
         .replace("\"Knack: Soot Pot\",", "")
         .replace(", \"Knack: Soot Pot\"", "")
         .replace(", \"Knack: Thorn\"", "");
-    assert!(!old.contains("Knack:"), "{old}");
+    // (The KNACK binding is `Knack: [..]` in the bindings; the loadout's are strings.)
+    assert!(!old.contains("\"Knack:"), "{old}");
     let old = Settings::from_ron(&old).unwrap();
     assert_eq!(
         old.loadout.current,

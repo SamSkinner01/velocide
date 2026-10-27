@@ -7,8 +7,8 @@
 //!   (kills, style, damage, deaths, revives, the four grades, overall), "LEFT BEHIND" for
 //!   anyone who missed the extraction.
 //! * **Deathmatch**: winner banner and the final standings (frags, deaths, best rank, style).
-//! * **Gun game**: the deathmatch layout with the tier reached (and its weapon / FIST / WON) in
-//!   place of the frags.
+//! * **Gun game**: the deathmatch layout with the tier reached (and its weapon / the melee
+//!   finale's / WON) in place of the frags.
 //! * **Grind**: OVERRUN; solo, the campaign tally with WAVE (time survived, the wave grade) in
 //!   place of TIME; co-op, the team line with the wave and one row per player (wave, kills,
 //!   style and damage grades). The local best wave on this arena and difficulty, or NEW BEST.
@@ -56,6 +56,8 @@ pub struct ResultsScreen {
     pub looks: std::collections::BTreeMap<PlayerId, shared::cosmetics::Cosmetics>,
     /// Grind: the local best wave on this arena and difficulty before this run (0 = none).
     pub previous_best_wave: Option<u32>,
+    /// Gun game: the melee finale's weapon (`gun_game.finale`), named on its tier.
+    pub finale: Option<shared::loadout::WeaponKind>,
     opened: f64,
     /// Stamps already heard.
     stamps_played: usize,
@@ -106,6 +108,7 @@ impl ResultsScreen {
             local,
             looks: Default::default(),
             previous_best_wave: None,
+            finale: None,
             opened: now,
             stamps_played: 0,
         }
@@ -876,7 +879,7 @@ impl ResultsScreen {
             Some(g) => {
                 let won = p.stats.tier as usize > g.ladder.len();
                 let col = if won { t.rank_color(7) } else { t.bone };
-                (result_tier_label(&g.ladder, p.stats.tier), col)
+                (result_tier_label(&g.ladder, self.finale, p.stats.tier), col)
             }
             None if p.stats.frags < 0 => (format!("{}", p.stats.frags), t.crimson_bright),
             None => (format!("{}", p.stats.frags), t.bone),
@@ -1053,11 +1056,19 @@ fn winner_headline(r: &MatchResults, local: Option<PlayerId>) -> &'static str {
     }
 }
 
-/// A gun game tier on the results: "7 LANCET", "FIST" (the last tier), "WON" (past it).
-fn result_tier_label(ladder: &[shared::loadout::WeaponKind], tier: u8) -> String {
+/// A gun game tier on the results: "7 LANCET", "FINAL TRIMMER" (the melee finale; "FINAL
+/// TIER" when its weapon isn't known), "WON" (past it).
+fn result_tier_label(
+    ladder: &[shared::loadout::WeaponKind],
+    finale: Option<shared::loadout::WeaponKind>,
+    tier: u8,
+) -> String {
     match ladder.get(tier as usize) {
         Some(w) => format!("{} {}", tier as usize + 1, w.name().to_uppercase()),
-        None if tier as usize == ladder.len() => "FIST".into(),
+        None if tier as usize == ladder.len() => match finale {
+            Some(w) => format!("FINAL {}", w.name().to_uppercase()),
+            None => "FINAL TIER".into(),
+        },
         None => "WON".into(),
     }
 }
@@ -1153,9 +1164,11 @@ mod tests {
         r.players[0].stats.kills = 9;
         assert_eq!(winner_headline(&r, Some(PlayerId(1))), "TOP OF THE TABLE");
         let ladder = &r.gun_game.as_ref().unwrap().ladder;
-        assert_eq!(result_tier_label(ladder, 1), "2 LANCET");
-        assert_eq!(result_tier_label(ladder, 2), "FIST");
-        assert_eq!(result_tier_label(ladder, 3), "WON");
+        assert_eq!(result_tier_label(ladder, None, 1), "2 LANCET");
+        assert_eq!(result_tier_label(ladder, None, 2), "FINAL TIER");
+        let trimmer = Some(shared::loadout::WeaponKind::Trimmer);
+        assert_eq!(result_tier_label(ladder, trimmer, 2), "FINAL TRIMMER");
+        assert_eq!(result_tier_label(ladder, None, 3), "WON");
     }
 
     #[test]

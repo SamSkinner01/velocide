@@ -249,8 +249,36 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::TripleNock => s(Sfx::TripleNock, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::PinningArrow => s(Sfx::PinningRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::EmberArrow => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
+        // Melee (melee.rs draws the swings): no flash, no tracer.
+        Attack::Trimmer
+        | Attack::Tamper
+        | Attack::Lunge
+        | Attack::Whirl
+        | Attack::Hurl
+        | Attack::Upswing => {
+            let (weapon, kind) = match attack_melee(a) {
+                Some(m) => m,
+                None => (melee::MeleeWeapon::Trimmer, melee::SwingKind::Slash),
+            };
+            AttackStyle {
+                flash: 0.0,
+                ..s(
+                    melee::swing_sfx(weapon, kind),
+                    0.0,
+                    0.0,
+                    Vec4::ONE,
+                    0.0,
+                    0.05,
+                )
+            }
+        }
         _ => s(Sfx::QuillFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.0),
     }
+}
+
+/// The melee weapon and move of a melee attack.
+fn attack_melee(a: Attack) -> Option<(melee::MeleeWeapon, melee::SwingKind)> {
+    melee::weapon_of_attack(a, None).zip(melee::swing_kind(a))
 }
 
 /// Range of a hitscan attack's rays (client tracers).
@@ -608,6 +636,27 @@ impl InGame {
                         }),
                     ),
                 }
+                // A melee blow lands: the slice / the slam where it struck (melee.rs); the
+                // Tamper's lands with a jolt.
+                let held = Some(self.combat.predictor.state().current());
+                if let Some(weapon) = melee::hit_weapon(h.attack, held) {
+                    let dir = (h.point - me).normalize_or(Vec3::NEG_Z);
+                    melee::melee_hit(
+                        &mut self.effects,
+                        &mut self.combat.beams,
+                        &mut self.combat.rng,
+                        &mut common.audio,
+                        weapon,
+                        h.point,
+                        dir,
+                    );
+                    if weapon == melee::MeleeWeapon::Tamper {
+                        self.feedback.hitstop(0.06);
+                        self.feedback.shake(0.18);
+                    } else {
+                        self.feedback.hitstop(0.025);
+                    }
+                }
                 self.combat.heat = (self.combat.heat + 0.15).min(1.0);
             }
             GameEvent::Killed(k) => {
@@ -716,6 +765,8 @@ impl InGame {
         let cam = *last_camera;
         let vm = viewmodel.last_draw();
         let body = net.local_state().map(|s| s.position + Vec3::Y * 0.9);
+        let me = net.local_player_id().map(|p| p.0 as u16);
+        let feet = net.local_state().map(|s| s.position);
         for shot in shots {
             let input = &shot.input;
             let aim = look_dir(input.yaw, input.pitch);
@@ -728,6 +779,25 @@ impl InGame {
                         let Some(attack) = intent.attack() else {
                             continue;
                         };
+                        // Melee (melee.rs): the swing, its sound and trail.
+                        if combat.melee.local_intent(
+                            intent,
+                            viewmodel,
+                            &mut common.audio,
+                            feedback,
+                            &mut combat.beams,
+                            effects,
+                            &mut combat.rng,
+                            me,
+                            cam.position,
+                            feet,
+                            input.yaw,
+                            input.pitch,
+                            t,
+                        ) {
+                            combat.heat = (combat.heat + 0.05).min(1.0);
+                            continue;
+                        }
                         let style = attack_style(attack);
                         common.audio.play_2d(style.sfx);
                         viewmodel.fire(style.kick);
@@ -869,11 +939,17 @@ impl InGame {
                         viewmodel.punch();
                         common.audio.play_2d(Sfx::Punch);
                     }
-                    // Every knack throws like the Thorn until arsenal-client gives each its own.
-                    FireIntent::Knack(_) => {
-                        viewmodel.throw_thorn();
-                        common.audio.play_2d(Sfx::ThornThrow);
-                    }
+                    // The knacks (knacks.rs): a throw, or Tallow Skin / Surge on you.
+                    FireIntent::Knack(knack) => combat.knacks.local_knack(
+                        *knack,
+                        viewmodel,
+                        &mut common.audio,
+                        &mut combat.melee,
+                        me,
+                        feet,
+                        input.yaw,
+                        t,
+                    ),
                 }
             }
         }
@@ -973,6 +1049,27 @@ impl InGame {
             &mut combat.rng,
             &mut combat.beams,
         );
+        // Hurled pieces, thrown knacks, pools, clouds, snares (melee.rs, knacks.rs).
+        {
+            let mut ctx = melee::UpdateCtx {
+                effects,
+                beams: &mut combat.beams,
+                audio: &mut common.audio,
+                rng: &mut combat.rng,
+                world: net.world().map(|w| &w.collision.world),
+                dt: vdt,
+            };
+            combat.melee.update_replicated(&frame, &mut ctx);
+            let mut ctx = knacks::UpdateCtx {
+                effects,
+                beams: &mut combat.beams,
+                audio: &mut common.audio,
+                rng: &mut combat.rng,
+                world: net.world().map(|w| &w.collision.world),
+                dt: vdt,
+            };
+            combat.knacks.update_replicated(&frame, &mut ctx);
+        }
 
         // Fx due at the render tick.
         let due = combat.queue.due(render_tick, local);
@@ -995,6 +1092,12 @@ impl InGame {
             };
             for ev in &due {
                 fx::play(&mut ctx, ev);
+            }
+            // A sprung snare's jaws stay shut there a moment (knacks.rs).
+            for ev in &due {
+                if let shared::protocol::Fx::SnareSprung { position } = ev.fx {
+                    combat.knacks.snare_sprung(position.to_vec3());
+                }
             }
         }
         combat.beams.update(vdt);
@@ -1129,6 +1232,12 @@ impl InGame {
         let lib = common.models.as_ref();
         self.combat.melee.draw(lib, &mut out.draws, &mut out.lights);
         self.combat
+            .melee
+            .draw_replicated(lib, &frame, &mut out.draws, &mut out.lights);
+        self.combat
+            .knacks
+            .draw_replicated(lib, &frame, &mut out.draws, &mut out.lights);
+        self.combat
             .knacks
             .draw(lib, &mut out.draws, &mut out.lights);
     }
@@ -1158,6 +1267,11 @@ impl InGame {
             })
             .map_or(0, |e| e.flags);
         let branded = own_flags & player_flags::BRANDED != 0;
+        // Tallow Skin on you: the predicted start, held while the server's flag says so.
+        let tallow = self
+            .combat
+            .knacks
+            .tallow_strength(own_flags & player_flags::TALLOW != 0);
         // The Q slot: the loadout's knack (none when it holds no charges: a PvP Thorn).
         let knack = {
             let k = weapons.knack();
@@ -1173,7 +1287,7 @@ impl InGame {
                     0.0
                 },
                 active: if k == knacks::Knack::TallowSkin {
-                    self.combat.knacks.tallow_self()
+                    tallow
                 } else {
                     0.0
                 },
@@ -1201,7 +1315,7 @@ impl InGame {
         // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
         let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
         if !dead {
-            self.combat.knacks.hud(list, c, now);
+            self.combat.knacks.hud(list, c, tallow, now);
         }
     }
 }

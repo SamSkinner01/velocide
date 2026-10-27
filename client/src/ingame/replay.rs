@@ -1231,7 +1231,9 @@ fn own_fx(f: &Fx, vp: PlayerId) -> bool {
         Fx::Punch { player, .. }
         | Fx::ThornThrown { player }
         | Fx::Discharge { player, .. }
-        | Fx::SlamShockwave { player, .. } => *player == vp,
+        | Fx::SlamShockwave { player, .. }
+        | Fx::Swing { player, .. }
+        | Fx::Knack { player, .. } => *player == vp,
         _ => false,
     }
 }
@@ -1340,6 +1342,11 @@ fn play_first_person(
             vm.throw_thorn();
             audio.play_2d(Sfx::ThornThrow);
         }
+        // Melee swings and knacks (melee.rs, knacks.rs).
+        Fx::Swing { attack, .. } => {
+            super::combat::melee::first_person_swing(vm, audio, beams, feedback, &cam, *attack)
+        }
+        Fx::Knack { knack, .. } => super::combat::knacks::first_person_knack(vm, audio, *knack),
         Fx::Discharge {
             position,
             radius_dm,

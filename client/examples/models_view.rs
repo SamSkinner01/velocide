@@ -1216,16 +1216,17 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             Vec3::new(0.0, 1.5, 0.0),
             75.0,
         ));
-        let pose = melee::pose(weapon, color, s.flare(weapon), t);
-        melee::draw_view(
-            lib,
-            weapon,
-            &s,
-            &pose,
-            Vec3::ZERO,
-            &Tint::default(),
-            &mut shot.viewmodel,
-        );
+        // Through the game's own viewmodel path (the selected ability colours the edges).
+        let kind = melee::weapon_kind(weapon);
+        let anim = ViewmodelAnim {
+            weapon: kind,
+            ability: kind.default_build().abilities[0],
+            swing: s,
+            switch: 1.0,
+            time: t,
+            ..Default::default()
+        };
+        lib.draw_viewmodel(&anim, &Tint::default(), &mut shot.viewmodel);
         shots.push((format!("melee_vm_{i:02}"), name.to_string(), shot));
     }
 
@@ -1465,7 +1466,12 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
 
     // Weapons at real scale, side and three-quarter views: the original four, then the six
     // expansion weapons (the Longwick, a tall bow, stands in the middle).
-    let (old, new) = WeaponKind::ALL.split_at(4);
+    // (The melee weapons have their own sheets: `melee_weapons*`.)
+    let guns: Vec<WeaponKind> = WeaponKind::ALL
+        .into_iter()
+        .filter(|w| client::models::weapons::melee::of(*w).is_none())
+        .collect();
+    let (old, new) = guns.split_at(4);
     for (name, title, cam, yaw, set) in [
         (
             "weapons",
