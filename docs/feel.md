@@ -36,7 +36,7 @@ The path from a click to something on screen, frame by frame, as it was:
 | sending | `NetClient::tick` flushes the input at once | unchanged |
 | where the effects start | shot effects ran inside the tick loop, *before* the camera update, so flashes and tracers left the previous frame's muzzle (0.33 m behind at 20 m/s and 60 fps), and a 60 ms flash stayed in the world while the gun moved on | shots play after the camera update (this frame's muzzle); flash particles carry the shooter's velocity |
 | recoil | the kick was applied the same frame, decaying linearly over 0.3 s | still the same frame (now drawn at full strength), decaying exponentially: most of it gone in 0.1 s, so it reads as a snap |
-| own projectiles | only drawn once a snapshot carrying them arrived: the input's trip, the server's input buffer and the snapshot's trip back. Measured in single player (`combat_shots`, 34 shots): **39 ms** on average with nothing on screen; online add the round trip (~140 ms at 100 ms ping) | a local stand-in leaves the muzzle on the shot's frame and hands over to the server's projectile (below) |
+| own projectiles | only drawn once a snapshot carrying them arrived: the input's trip, the server's input buffer and the snapshot's trip back. Measured in single player (`combat_shots`, 34 shots): **27–39 ms** on average with nothing on screen (three runs); online add the round trip (~130–140 ms at 100 ms ping) | a local stand-in leaves the muzzle on the shot's frame and hands over to the server's projectile (below) |
 | parry feedback | waited for the server's `Parried`: the punch's trip, the parry delay window and the event's trip back | shown on the punch's frame (below) |
 | hit confirmation | `HitConfirm` is sent reliably on the tick of the hit and handled at the start of the next client frame: a round trip, nothing added on top | unchanged (it can't be sooner without guessing hits); markers and sounds are bigger and more distinct |
 | audio | `play_2d` at once; the mixer's own buffer is the engine's | unchanged |
@@ -119,7 +119,8 @@ radius keeps flying; enemy needles get no pad).
   coming is shown when `Parried` arrives.
 * **The parry itself**: hitstop 0.12 → 0.16 s, flash 0.6 → 0.65, shake 0.15 → 0.28, `Parry`
   layered with `ParryImpact`, a white shock ring bursting from the fist, a 7 m light, sparks
-  and a glow where it was struck, the `PARRY` banner.
+  where it was struck (no glare: the deflected projectile, white-hot, is what you see next),
+  the `PARRY` banner.
 * **Readable window**: a ring in the parry colour closes on the crosshair while the window
   lasts (0.2 s); the knuckles flare as before.
 

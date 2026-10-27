@@ -498,7 +498,7 @@ fn parry_feedback(
     audio.play_2d(Sfx::ParryImpact);
     let pal = crate::palette::palette();
     let white = pal.effect(Vec4::new(2.4, 2.4, 2.2, 0.95), pal.deflected, 2.2);
-    beams.ring(fist, view, 0.05, 0.9, 0.035, white, 0.22);
+    beams.ring(fist, view, 0.05, 0.7, 0.02, white, 0.2);
     beams.light(fist, Vec3::new(3.0, 3.0, 2.8), 7.0, 0.2);
     // (No glow sprite at the fist: half a metre from the eye it would white out the screen.)
     effects.sparks(fist + view * 0.3, -view, 10);
@@ -746,7 +746,7 @@ impl InGame {
                 let pal = crate::palette::palette();
                 let glow = pal.effect(Vec4::new(1.0, 1.0, 0.95, 1.0), pal.deflected, 1.0);
                 // Small for the parrier: it happened an arm's length from their eye.
-                let size = if Some(p.player) == local { 0.7 } else { 2.2 };
+                let size = if Some(p.player) == local { 0.3 } else { 2.2 };
                 self.effects.glow(p.position, glow, size, 0.2);
                 self.effects.sparks(p.position, Vec3::Y, 16);
             }
@@ -1036,9 +1036,8 @@ impl InGame {
             fist,
             view,
         );
-        let pal = crate::palette::palette();
-        let glow = pal.effect(Vec4::new(1.0, 1.0, 0.95, 1.0), pal.deflected, 1.0);
-        self.effects.glow(at, glow, 0.7, 0.12);
+        // Sparks where it was struck (no glow: right in front of the eye it would hide the
+        // deflected projectile flying off, which should be what you see next).
         self.effects.sparks(at, -view, 18);
         self.hud.banner("PARRY", common.theme.bone, now);
     }
