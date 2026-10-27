@@ -535,3 +535,36 @@ fn melee_and_knack_prediction_stays_exact() {
         }
     )));
 }
+
+#[test]
+fn melee_pvp_numbers_keep_the_one_shot_rules_and_the_time_to_kill_band() {
+    use shared::lobby::GameMode;
+    let pvp = shared::tuning::Tuning::default()
+        .for_mode(GameMode::Deathmatch)
+        .combat;
+    // No body one-shot from any swing, ability or the Snare (melee has no headshots).
+    for weapon in [WeaponKind::Trimmer, WeaponKind::Tamper] {
+        let primary = weapon.primary_damage(&pvp);
+        for (name, damage) in [
+            ("swing", primary),
+            ("lunge", primary * pvp.lunge.damage_scale),
+            ("whirl", primary * pvp.whirl.damage_scale),
+            ("hurl", primary * pvp.hurl.damage_scale),
+            ("upswing", primary * pvp.upswing.damage_scale),
+        ] {
+            assert!(damage < 100.0, "{weapon:?} {name}: {damage}");
+        }
+    }
+    assert!(pvp.knacks.snare.damage < 100.0);
+    // Time to kill, every swing landing: inside the PvP band (0.8-1.8 s).
+    let ttk = |damage: f32, interval: f32| {
+        let hits = (100.0 / damage).ceil() - 1.0;
+        hits * (interval * 60.0).round() / 60.0
+    };
+    for (name, secs) in [
+        ("trimmer", ttk(pvp.trimmer.damage, pvp.trimmer.interval)),
+        ("tamper", ttk(pvp.tamper.damage, pvp.tamper.interval)),
+    ] {
+        assert!((0.8..=1.8).contains(&secs), "{name}: {secs:.2} s");
+    }
+}
