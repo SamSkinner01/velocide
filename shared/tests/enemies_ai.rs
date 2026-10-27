@@ -1826,6 +1826,55 @@ fn moulds_reach_a_player_on_a_floe_in_the_wax_press() {
 }
 
 #[test]
+fn a_leaping_gnawer_knocked_mid_air_falls_in_the_water() {
+    // Floor A (x < 0) and floor B (x > 6) with 6 m of deep water between them, 30 m long.
+    let mut level = flat_level(LevelKind::Campaign, Vec::new());
+    level.brushes = vec![
+        brush([-20.0, -1.0, -15.0], [0.0, 0.0, 15.0]),
+        brush([0.0, -5.0, -15.0], [6.0, -4.0, 15.0]),
+        brush([6.0, -1.0, -15.0], [26.0, 0.0, 15.0]),
+    ];
+    level.kill_volumes = vec![
+        Volume {
+            min: Vec3::new(0.0, -5.0, -15.0),
+            max: Vec3::new(6.0, -0.5, 15.0),
+        },
+        Volume {
+            min: Vec3::new(-500.0, -100.0, -500.0),
+            max: Vec3::new(500.0, -20.0, 500.0),
+        },
+    ];
+    let mut a = Arena::new(level);
+    let p = a.player(0, Vec3::new(12.0, 0.0, 0.5), 0.0);
+    god(&mut a, p);
+    let g = spawn(&mut a, "gnawer", Vec3::new(-8.0, 0.0, 0.5), -PI * 0.5);
+    aware(&mut a, g);
+    let t = a.tuning.clone();
+    let mut knocked = false;
+    let mut drowned = false;
+    for _ in 0..(8 * 60) {
+        let ev = a.tick();
+        drowned |= ev.iter().any(|e| {
+            matches!(e, SimEvent::Killed(k) if k.victim == HitTarget::Entity(g) && k.attack == Attack::World)
+        });
+        if drowned {
+            break;
+        }
+        let e = &a.world.enemies[&g];
+        if !knocked && e.state == AiState::Leap && !e.on_ground && e.position.x > 0.5 {
+            // A punch straight back the way it came, over the water.
+            let info = DamageInfo::new(1.0, Owner::Player(p), Attack::Dev)
+                .at(e.center(), Vec3::NEG_X)
+                .knockback(Vec3::new(-9.0, 0.0, 0.0));
+            a.world.apply_damage(&t, HitTarget::Entity(g), info);
+            knocked = true;
+        }
+    }
+    assert!(knocked, "it leapt");
+    assert!(drowned, "knocked back into the water, it was quenched");
+}
+
+#[test]
 fn gnawers_ride_a_jump_pad_up_to_a_ledge() {
     // A 6 m ledge 10..16 m north, no way up but the pad at the origin.
     let mut level = flat_level(

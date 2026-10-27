@@ -1222,6 +1222,7 @@ impl SimWorld {
             pad,
             launched: false,
             speed: 0.0,
+            knocked: false,
         });
         e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
         if pad.is_some() {
@@ -1320,8 +1321,15 @@ impl SimWorld {
         }
         let dt = self.dt();
         let flat = horizontal(plan.to - e.feet());
+        // Knocked about in the air: it flies where it was knocked (into the water, maybe).
+        if e.stagger > 0
+            && let Some(l) = e.leap.as_mut()
+        {
+            l.knocked = true;
+        }
         if !e.on_ground
             && plan.pad.is_none()
+            && !plan.knocked
             && e.stagger == 0
             && flat.length() > 0.3
             && horizontal(e.velocity).length() < plan.speed * 0.5

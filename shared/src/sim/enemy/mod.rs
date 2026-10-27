@@ -186,6 +186,8 @@ pub struct LeapPlan {
     pub launched: bool,
     /// Planned horizontal speed of the flight (m/s).
     pub speed: f32,
+    /// Knocked about in the air: no more guiding it onto the landing.
+    pub knocked: bool,
 }
 
 /// The parryable phase of a telegraphed attack (ticks, inclusive) and its sequence number.

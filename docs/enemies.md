@@ -858,7 +858,8 @@ cargo run -p client --release --example models_view -- --only gaoler   # model p
 * **Getting there** (`enemies_ai.rs`): a Gnawer crosses the Drowned Chandlery's flooded break
   (C2 Spool Walk) in 1.95 s with a leap and bites; a Gnawer and a Snuffer leap onto the player's
   floe in the Wax Press (1.9 / 2.8 s) while a Gaoler waits at the water's edge (< 9 m) without
-  melting; a Gaoler rides a pad up onto a 6 m ledge; a Gaoler stranded on a 7 m block prowls
+  melting; a leaping Gnawer punched back over the water mid-air falls in and is quenched (no
+  guiding a knocked leap); a Gaoler rides a pad up onto a 6 m ledge; a Gaoler stranded on a 7 m block prowls
   the edge (16.5 m paced), melts after 6.6 s (0.6 s alert + 6 s), the slump takes 36 ticks, it
   rises on the floor 8.5 m from the player (in its 8–16 m band) and attacks; a Gnawer flung by
   a blast onto a 10 m block re-forms on the floor 6.4 s after landing and reaches the player;
