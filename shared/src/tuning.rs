@@ -1266,7 +1266,7 @@ impl Default for EmberArrowTuning {
         Self {
             damage_scale: 0.9,
             explosion_radius: 3.0,
-            damage: 35.0,
+            damage: 36.0,
             knockback: 8.0,
             burn_stacks: 2,
             cooldown: 3.0,

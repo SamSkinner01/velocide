@@ -125,7 +125,7 @@ switching ability cancels the charge and the arming.
 
 | ability style | abilities | rule |
 |---|---|---|
-| instant | most | while `ALT_FIRE` is held, once per cooldown. Both Barrels and Volley are the primary's shot fired another way: they also wait for the primary to be ready, take its shot (the primary doesn't fire that tick) and put it on its interval |
+| instant | most | while `ALT_FIRE` is held, once per cooldown. Both Barrels, Volley, Whirl and Upswing are the primary's shot (or swing) fired another way: they also wait for the primary to be ready, take its shot (the primary doesn't fire that tick) and put it on its interval |
 | charge | Discharge, Skewer | hold to charge once off cooldown, fires on release (`charge` 0..1) |
 | burst | Flurry | `flurry.shots` shots `flurry.gap` apart |
 | hold | Limpet | a tap (released before `limpet.detonate_hold`) fires with `charge` 0 = throw, off cooldown; holding to it fires once with `charge` 1 = detonate (any time) |
@@ -151,8 +151,8 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
 | 8 | Longwick | Draw | hold to draw (0.62 s to full), release: arrow 55–135 m/s, 22–105 dmg by draw, gravity 10, 0.25 s before the next draw; a tap looses a weak, slow arrow (handling: `docs/feel.md`) |
 | 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 20° cone: 4 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
-| 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 30 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
-| 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16 |
+| 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 36 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
+| 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 85 dmg to everything in it, kb 16 |
 
 Only the Quill's shots ricochet off Thorns, whichever ability fires them (its identity): Brand,
 Splinter and Flurry ricochet on the Quill and not on the Lancet; Skewer pierces instead.
@@ -168,13 +168,13 @@ behave the same (their damage scaled, below). New ones, as built:
 | Flurry | 3 shots 0.06 s apart (4 ticks), each 1.0 × the weapon's primary damage, 1° spread; 1.4 s |
 | Slug | one exact hitscan slug, 55 dmg, kb 6; 1.2 s |
 | Flak | a shell (45 m/s, straight) that bursts after 14 m of flight, or 0.5 m short of a target it touches, or off a wall (the ring then sprays along the reflected flight): 10 pellet rays evenly around the flight axis, each 25° off it, 14 m, 9 dmg each. On contact the ring closes on the target (a point-blank shotgun); in the open it fans out behind cover and around corners. Not parryable. `SimEvent::Burst` / `Fx::Burst` carry the rays. 1.8 s |
-| Volley | 10 of the weapon's own shots at once in a 6° cone: rivets (Riveter), chaining zaps (Arclash), ember rays that each set a Burn stack (Kiln); it takes the primary's shot (waits for it to be ready, then the primary waits its interval). 2.2 s |
+| Volley | 10 of the weapon's own shots at once in a 6° cone, each 0.85 × its damage: rivets (Riveter), chaining zaps (Arclash), ember rays that each set a Burn stack (Kiln); it takes the primary's shot (waits for it to be ready, then the primary waits its interval). 2.2 s |
 | Flare | a flare lobbed 10° above the aim (22 m/s, gravity 16); where it lands — on the floor, at the feet of what it hit, under where it hit a wall, or below where it burns out after 4 s — a 3 m burning patch for 4 s (no patch over a pit). 3.0 s |
 | Limpet | tap: throws a charge (24 m/s, gravity 16) that sticks to the level or to the enemy / player it hits and rides along; hold 0.25 s: every charge out detonates (r 3.5 m, 40 dmg, kb 14, a direct hit on what it sticks to). Up to 3 out: a throw with 3 out detonates them instead. A charge left alone goes off after 20 s. 0.9 s between throws |
 | Mortar | a shell lobbed 35° above the aim at 26 m/s, gravity 20: r 6 m, 85 dmg, kb 26; 3.0 s |
 | Triple Nock | 3 arrows in a 7° fan at the current draw (≥ 30 %), each 0.6 × a plain arrow's damage; 1.4 s |
 | Pinning Arrow | an arrow at the draw that pins what it hits (Pinned, below); 2.5 s |
-| Ember Arrow | an arrow at the draw whose own hit is 0.9 × a plain arrow's, then it bursts — on a target, on the level or at the end of its flight: r 3 m, 35 dmg, kb 8, and 2 Burn stacks on everything in the burst; 3.0 s |
+| Ember Arrow | an arrow at the draw whose own hit is 0.9 × a plain arrow's, then it bursts — on a target, on the level or at the end of its flight: r 3 m, 36 dmg, kb 8, and 2 Burn stacks on everything in the burst; 3.0 s |
 | Both Barrels | as `docs/roster.md` (24 × 8 dmg, 5°, recoil 9), but 1.8 s (was 1.4) and, like Volley, it takes the primary's shot: it waits for the blast to be ready and fires instead of it (never a blast and Both Barrels on one tick) |
 | Wisp | as `docs/roster.md`, but zaps 11 dmg (was 8), pop 30 (was 25), 2.4 s (was 2.8) |
 | Brand (on the Longwick) | a branding arrow at the draw: what it hits is branded exactly like a Brand shot (`quill.brand_*`) |
@@ -211,8 +211,8 @@ keep swinging). Code: `shared::sim::melee`.
 
 | weapon | primary (PvE) |
 |---|---|
-| Trimmer | every 0.32 s a 3.0 m / 70° arc in front of the eye: 30 dmg to up to 3 targets (nearest first), kb 4; the swing deflects the parryable hostile projectiles in its arc like a punch parry (same reward) |
-| Tamper | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16; no deflect |
+| Trimmer | every 0.32 s a 3.0 m / 70° arc in front of the eye: 36 dmg to up to 3 targets (nearest first), kb 4; the swing deflects the parryable hostile projectiles in its arc like a punch parry (same reward) |
+| Tamper | every 0.85 s a 3.4 m / 100° arc: 85 dmg to everything in it, kb 16; no deflect |
 
 A swing tests the arc against the hit shapes the swinger saw (lag compensation, like
 hitscan), with hit assist and line of sight from the eye. `melee::in_arc`: along the aim within
@@ -221,25 +221,27 @@ touches — the angle from the aim to the point of the shape's axis nearest the 
 angle the shape's radius covers from there. Measuring to a target's centre (as the punch does)
 missed a low Mould right at your feet while you looked ahead; this doesn't. Melee **ignores weak
 points**: the arc already forgives where a ray wouldn't, and a hammer that headshots for ×2
-would one-shot. All melee damage carries `DamageFlags::MELEE`; its embers heal at
+would one-shot (the Hurl's thrown blade / hammer-head strikes the body too). All melee damage
+carries `DamageFlags::MELEE`; its embers heal at
 `embers.melee_weapon_heal_fraction` (0.5: between a gun's 0.4 and the fist's 1.0 — the melee
 weapons hit often and several targets at once, the fist's rate made them near-immortal).
 
 | id | ability | as built (damage = `damage_scale` × the carrier's primary damage) |
 |---|---|---|
 | 19 | Lunge | an impulse along the aim (16 m/s, 35 % of its vertical part kept) and at least 4.5 m/s up (`lunge.lift`: off the ground it glides some 5 m; ground friction stopped a standing lunge within 1.5 m); for 0.35 s the first hostile within 0.8 m of the body (current shapes — the body is really there — hit assist, line of sight) takes 1.5×, kb 10 (`Fx::LungeStruck`). 3.0 s |
-| 20 | Whirl | everything within 3.5 m of the body (lag-compensated, line of sight) takes 1.2×, knocked outward (kb 12, up bias 0.35). 4.0 s |
-| 21 | Hurl | a spinning blade / hammer-head (30 m/s, gravity 6, r 0.25 m, 2 s), 1.5× on contact, kb 6. 2.5 s |
-| 22 | Upswing | the carrier's arc: 0.8× and an upward launch of 14 m/s (enemies × their knockback scale); the swinger hops (vertical speed at least 5 m/s). 3.0 s |
+| 20 | Whirl | in place of the next swing (it takes the primary's swing, like Both Barrels its shot): everything within 3.5 m of the body (lag-compensated, line of sight) takes 1.5×, knocked outward (kb 12, up bias 0.35). 4.0 s |
+| 21 | Hurl | a spinning blade / hammer-head (30 m/s, gravity 6, r 0.25 m, 2 s), 1.5× on contact (on the body: no weak points, no headshots), kb 6. 2.5 s |
+| 22 | Upswing | in place of the next swing: the carrier's arc, 1.4× and an upward launch of 14 m/s (enemies × their knockback scale); the swinger hops (vertical speed at least 5 m/s). 3.0 s |
 
 Defaults: Trimmer `[Lunge, Hurl]`, Tamper `[Whirl, Upswing]` (the home weapons for
 `ability_power`, both 1.0: the abilities follow the carrier's swing, `ability_power` scales them
 like any ability). The impulses (Lunge, Upswing's hop) are server-side like Both Barrels'
 recoil: the owner's client reconciles.
 
-PvP: no headshots, so the rules are the body ones. The Trimmer kills in 4 slashes (0.95 s), the
-Tamper (×0.8: 60) in 2 swings (0.85 s); with the abilities at 1.5 × 75 a Lunge or a Hurl would
-have one-shot (`combat_melee.rs` checks every swing and ability stays under 100).
+PvP: no headshots, so the rules are the body ones. The Trimmer (×0.84: 30) kills in 4 slashes
+(0.95 s), the Tamper (×0.7: 59.5) in 2 swings (0.85 s); its Lunge, Whirl and Hurl hit 89, its
+Upswing 83 (`combat_melee.rs` checks every swing and ability stays under 100, the balance
+harness measures it in play: `docs/balance.md`).
 
 ## Knacks (refit)
 
@@ -254,7 +256,7 @@ fires `FireIntent::Knack(knack)`; `SimWorld::use_knack` (`shared::sim::knacks`) 
 | 1 | Kindle Flask | lobbed 15° above the aim (16 m/s); where it breaks (on a body: at its feet) a 3.5 m pool for 4 s heals every living Shrike whose feet are inside 2.5 HP every 0.25 s (10 HP/s, 40 in all) through `PlayerCombat::heal` — never above the effective max, so hard damage still caps it; in PvP only the thrower | 1 / 14 s |
 | 2 | Snare | thrown (12 m/s, passes through bodies) to the floor, lies there `STUCK` (off a wall it drops on); 0.6 s after landing it is armed (`ARMED`); the nearest hostile whose feet come within 1.8 m (and at most 2 m above) springs it: 15 dmg (`Attack::Snare`) and Pinned (the Pinning Arrow's times: a Mould rooted 1.4 s, heavies 0.6 s, a player slowed to half for 1 s). Teammates and the owner walk over it. Up to 2 out (a throw with 2 out retires the oldest), 20 s each | 2 / 10 s |
 | 3 | Soot Pot | thrown (18 m/s); bursts on contact (or after 2 s) into a 5 m cloud for 7 s: `soot_blocks` — a Mould whose eye or target is inside it, or whose line of sight crosses it, can't see that player: never picked as a target (aware arena spawns included), a target hidden this way is lost at once, a Heron's laser wind-up breaks off. Players' shots pass through | 1 / 15 s |
-| 4 | Tallow Skin | for 3 s: damage × 0.5 and no knockback (your own blasts still push: blast jumps work); `TALLOW` player flag | 1 / 16 s |
+| 4 | Tallow Skin | for 3 s: damage × 0.5 and no knockback (your own blasts still push: blast jumps work); `TALLOW` player flag. PvP: × 0.7 for 2 s (`balance.pvp` overrides: half damage for 3 s won every even duel) | 1 / 16 s |
 | 5 | Surge | an impulse of 18 m/s along the look (30 % of its vertical part kept) | 2 / 6 s |
 
 **PvP**: a knack that isn't `Knack::pvp_allowed` (the Thorn) is replaced by
@@ -435,7 +437,7 @@ party). Times to kill and per-pull damage below are measured in play by the bala
 | Kiln | damage 0.9 | 3.6 / 5 ticks + 15 dps burn | 1.75 s inside 13 m, and the 3 s burn keeps going (45) — the counterplay is breaking contact (PvE spray went 3 → 4: the same 3.6 here) |
 | Tumbler | damage 0.9 | 65 a direct bomb | 2 direct: 0.98 s at 5 m; splash kills take three (PvE bombs went 65 → 72: the same 65 here) |
 | Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.47 s at 5 m, 1.7 s at 15 m; three 32s (96) were a body one-shot in 0.16 s with any brand |
-| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.53 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (48) is not; body: 2 full draws, 1.27 s |
+| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.53 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (97) is not; body: 2 full draws, 1.30 s at 5 m, 1.38 s at 15 m with the flight (feel's 0.62 s draw, 55–135 m/s) |
 | Both Barrels | damage 0.25 | 24 × 2 = 48 (96 to the head) | at 0.4 (77) a 5° cone at the head was a one-shot (154), and fired on the same tick as a blast it was a body one-shot (144) — it now takes the blast's shot; it stays the blast-jump |
 | Wisp | damage 0.5 | 5.5 a zap | it aims itself: 40 dps of free damage was too much (PvE zaps went 8 → 11: about the same 5.6 as before here) |
 | Discharge | damage 0.9 | 22.5–72 | no one-shot even with a hit before it |
@@ -444,13 +446,13 @@ party). Times to kill and per-pull damage below are measured in play by the bala
 | Skewer | damage 0.58 | 17–52 (on the Lancet) | full charge to the head (104) is the one-shot, 90 % (97) is not; it still pierces a line of players |
 | Flurry | damage 0.6 | Quill: 3 × 14.4 | three Quill heads in 0.13 s (115) were a one-shot (PvE went 0.8 → 1.0 of the primary: the same 14.4 here) |
 | Flak | damage 0.8 | 10 × 7.2 | a contact burst landing every pellet stays under 100 |
-| Volley | damage 0.65 | Riveter / Arclash: 10 × 4.55 | ten rivets at once (70, more with heads) was an instant kill up close; at 0.7 the 7-dmg zaps put ten at the head for 98 |
+| Volley | damage 0.75 | Riveter / Arclash: 10 × 4.46 (0.85 of the shot × 0.75) | ten rivets at once (70, more with heads) was an instant kill up close; ten 7-dmg zaps at 0.7 put 98 on a head, now 89 |
 | Limpet | damage 0.75 | 30 a charge | three charges on one player (88) is a kill only with a hit before it (PvE went 50 → 40 a charge: the same 30 here; 0.9 s between throws in both) |
 | Mortar | damage 0.75, radius 0.85 | 64, r 5.1 m | a huge blast is area denial in PvE but a free kill on a corner in PvP |
 | Triple Nock | damage 0.55 | 3 × 17 (a third of an arrow each) | at 0.5 three heads at a 90 % draw (144) one-shot: now 95, and a full draw's three heads (104) is the bow's one-shot; the fan is a forgiving shot, not more damage |
-| Ember Arrow | damage 0.5 | 0.45 × the arrow + a 17.5 burst + 2 Burn stacks | at 1.0 a 90 % draw to the head with its burst and burn (124) one-shot; now 88 (92 at a full draw) |
-| Tamper | damage 0.8 | 60 a swing | 2 swings: 0.85 s; its abilities are multiples of the swing, and 1.5 × 75 (Lunge, Hurl) was a body one-shot |
-| Trimmer | 1.0 | 30 / 0.32 s | 4 slashes: 0.95 s (no headshots: melee); its Lunge / Hurl hit 45 |
+| Ember Arrow | damage 0.5 | 0.45 × the arrow + an 18 burst + 2 Burn stacks | at 1.0 a 90 % draw to the head with its burst and burn (124) one-shot; now 89 (93 at a full draw) |
+| Tamper | damage 0.7 | 59.5 a swing | 2 swings: 0.85 s; its abilities are multiples of the swing: Lunge, Whirl, Hurl 89, Upswing 83 (at 1.0 a 1.5 × Lunge or Hurl was a body one-shot; the Hurl to a head was 180 before it struck the body only) |
+| Trimmer | damage 0.84 | 30 / 0.32 s | 4 slashes: 0.95 s (no headshots: melee); its Lunge, Whirl, Hurl hit 45, Upswing 42 (PvE slashes went 30 → 36: the same 30 here) |
 | everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Splinter, Slug (55: its headshot is the allowed one-shot), Flare (burn), Pinning / Brand arrows (they ride the bow's 0.5) |
 
 `shared/tests/combat_arsenal.rs::pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band`

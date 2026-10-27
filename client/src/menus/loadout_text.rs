@@ -106,8 +106,7 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
         }
         Ability::BothBarrels => {
             "Both barrels at once: a dense, narrow blast that throws you backwards. Aim down \
-             to blast-jump. It is your next shot: it waits for the gun to be ready, and the \
-             normal shot waits after it."
+             to blast-jump. It is your next shot, not an extra one."
         }
         Ability::Slug => {
             "One heavy, perfectly accurate slug in place of the pellets: the scattergun's \
@@ -127,8 +126,7 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
         }
         Ability::Volley => {
             "Dumps a burst of the weapon's own shots at once in a tight cone: rivets, chaining \
-             zaps or burning embers. It is your next shot: it waits for the trigger to be ready, \
-             and the trigger waits after it."
+             zaps or burning embers. It is your next shot, not an extra one."
         }
         Ability::Flare => {
             "Lobs a flare; where it lands, a patch of fire burns whatever stands in it. Deny a \
@@ -720,13 +718,16 @@ mod tests {
         assert_eq!(lancet[1].1, "17");
         // Flurry is made of the carrier's own shot.
         let quill = ability_stats(Ability::Flurry, WeaponKind::Quill, &t, false);
-        assert_eq!(quill[1].1, "3X19.2");
+        let c = &t.combat;
+        let each = num(c.quill.damage * c.flurry.damage_scale, 1);
+        assert_eq!(quill[1].1, format!("3X{each}"));
         // The PvP column of the Pinning Arrow is the players' slow.
         let pvp = ability_stats(Ability::PinningArrow, WeaponKind::Longwick, &t, true);
         assert!(pvp[2].1.starts_with("SLOW"), "{:?}", pvp[2]);
         // Melee abilities hit for a multiple of their carrier's swing.
         let lunge = |w| ability_stats(Ability::Lunge, w, &t, false)[1].1.clone();
-        assert_eq!(lunge(WeaponKind::Trimmer), "45");
-        assert_eq!(lunge(WeaponKind::Tamper), "112.5");
+        let scale = c.lunge.damage_scale;
+        assert_eq!(lunge(WeaponKind::Trimmer), num(c.trimmer.damage * scale, 1));
+        assert_eq!(lunge(WeaponKind::Tamper), num(c.tamper.damage * scale, 1));
     }
 }

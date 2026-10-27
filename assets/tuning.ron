@@ -415,7 +415,7 @@
         ember_arrow: (
             damage_scale: 0.9,     // the arrow's own hit, of a plain arrow at the same draw; at
             explosion_radius: 3.0, // 0.75 / 30 it added 6 DPS to the bow (docs/balance.md)
-            damage: 35.0,
+            damage: 36.0,          // (18 in PvP: a whole number on the loadout screen)
             knockback: 8.0,
             burn_stacks: 2,
             cooldown: 3.0,
