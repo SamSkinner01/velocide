@@ -14,20 +14,27 @@
     name: "Heron",
     net_kind: 24,
     model: "heron",
+    // Drawn 1.2x its built size (4 m to the crown); the movement capsule stays as it was.
+    model_scale: 1.2,
     health: 60.0,
     speed: 7.0,
     acceleration: 35.0,
     turn_rate: 300.0,
     radius: 0.5,
     height: 3.4,
-    // The body hitbox covers the legs and body; neck and lens-head sit above it.
-    body_top: Some(2.75),
-    eye_height: 3.12,
+    // The body hitbox covers the stilt legs up into the body, a second capsule the body's long
+    // back; the neck and the lens-head sit above them.
+    hit_radius: Some(0.6),
+    body_top: Some(3.1),
+    body_shapes: [
+        (a: (0.0, 2.7, 0.0), b: (0.0, 2.7, 0.95), radius: 0.42),
+    ],
+    eye_height: 3.74,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 0.9,
     weak_points: [
-        (name: "head", kind: Head, offset: (0.0, 3.12, -0.4), radius: 0.35, multiplier: 2.5),
+        (name: "head", kind: Head, offset: (0.0, 3.74, -0.48), radius: 0.42, multiplier: 2.5),
     ],
     armour: None,
     attacks: [
@@ -66,7 +73,7 @@
                 count: 1,
                 interval: 0.1,
                 spread: 0.0,
-                muzzle: (0.0, 3.12, -0.62),
+                muzzle: (0.0, 3.74, -0.74),
                 lead: 0.0,
             )),
             laser: Some((lock: 0.25, track_rate: 120.0, lead: 0.0)),

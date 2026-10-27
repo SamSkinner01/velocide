@@ -42,6 +42,8 @@ pub mod pause;
 pub mod remote_players;
 pub mod replay; // play of the game: recording, title card, replay (docs/potg.md)
 pub mod scoreboard;
+// Spectating a teammate while dead / downed / out in PvE (docs/style_modes.md "Spectating").
+pub mod spectate;
 pub mod style_hud;
 pub mod tuning_edit;
 pub mod viewmodel;
@@ -61,7 +63,7 @@ use engine::ui::{Rect, TextStyle, Ui, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use server::{ServerCommand, ServerConfig};
 use shared::movement::MoveEvents;
-use shared::protocol::GameEvent;
+use shared::protocol::{GameEvent, NetId};
 
 use crate::app::Common;
 use crate::bot::Bot;
@@ -135,6 +137,8 @@ pub struct InGame {
     pub warmup: warmup::WarmupUi,
     /// Play of the game: recording, marked clip, the end-of-match replay (`replay.rs`).
     potg: replay::PotgClient,
+    /// Watching a teammate while out of the fight in PvE (`spectate.rs`).
+    pub spectate: spectate::Spectate,
 }
 
 impl InGame {
@@ -260,6 +264,7 @@ impl InGame {
             match_ui: match_flow::MatchUi::default(),
             warmup: warmup::WarmupUi::new(panel, !common.launch.bot),
             potg: replay::PotgClient::new(),
+            spectate: spectate::Spectate::new(),
         };
         game.load_received_level(common, renderer);
         game
@@ -639,7 +644,10 @@ impl InGame {
 
         // 3. Look (every frame) + latch presses / weapon selection.
         if playing && self.bot.is_none() {
+            let view = vec2(self.controls.yaw, self.controls.pitch);
             self.controls.look(input, &common.settings, dt);
+            // Watching a teammate: the buttons pick who, the look turns the chase camera.
+            self.spectate_controls(common, input, view);
         }
         // Slot keys skip what the carried loadout leaves empty.
         let loadout = self.combat.predictor.state().loadout;
@@ -799,6 +807,8 @@ impl InGame {
                 far: 600.0,
             };
         }
+        // Out of the fight in PvE: a teammate's view instead (spectate.rs).
+        self.update_spectate(common, dt, vdt);
         scene.camera = self.last_camera;
         scene.viewmodel_fov = common.settings.viewmodel_fov;
         scene.screen_flash = self.feedback.screen_flash();
@@ -811,6 +821,9 @@ impl InGame {
     fn draw_world(&mut self, common: &Common, out: &mut FrameBuffers, dt: f32, vdt: f32) {
         // Game mode: active checkpoint props, downed poses (mode_hud.rs).
         self.update_mode_visuals();
+        // Spectating: your own body lies in their view, the one watched from the eyes isn't.
+        let own_body = self.spectate_own_body();
+        self.remote.hidden = self.spectate.hidden_player().map(NetId::player);
         let net = self.session.as_ref().map(Session::client);
         let world = net.and_then(NetClient::world);
         let lib = common.models.as_ref();
@@ -823,8 +836,8 @@ impl InGame {
                     .map(|p| p.cosmetics)
                     .unwrap_or_default()
             };
-            self.remote
-                .draw(lib, net.remote_players(), &look, dt, &mut out.draws);
+            let players = net.remote_players().chain(own_body.as_ref());
+            self.remote.draw(lib, players, &look, dt, &mut out.draws);
         }
         // Enemies, projectiles, ember bursts, thorns, tracers.
         self.combat_draw(common, out);
@@ -839,7 +852,11 @@ impl InGame {
             let dead = net.own_combat().is_some_and(|c| c.combat.dead);
             // (Nor behind the warm-up's lobby overlay.)
             let lobby_up = self.warmup.open && self.in_warmup();
-            if common.settings.show_viewmodel && !results && !dead && !lobby_up {
+            // Watching a teammate from their eyes: their weapon (spectate.rs).
+            let watched = common.settings.show_viewmodel
+                && !results
+                && self.spectate.draw_viewmodel(lib, &mut out.viewmodel);
+            if common.settings.show_viewmodel && !results && !dead && !lobby_up && !watched {
                 let team = net
                     .local_player_id()
                     .map_or(crate::models::DEFAULT_TEAM_COLOR, player_color);
@@ -933,10 +950,11 @@ impl InGame {
             if let Some(net) = self.net() {
                 let world = net.world().map(|w| &w.collision.world);
                 let cam = self.last_camera;
+                let hidden = self.spectate.hidden_player();
                 let tags: Vec<NameTag> = net
                     .remote_players()
                     .filter_map(|e| {
-                        let id = e.id.as_player()?;
+                        let id = e.id.as_player().filter(|id| Some(*id) != hidden)?;
                         let pos = self.remote.name_tag_position(e);
                         Some(NameTag {
                             position: pos,
@@ -953,7 +971,10 @@ impl InGame {
                 // Accessibility: a parry icon over enemies in their parryable window.
                 if palette::shape_cues() {
                     let defs = net.world().map(|w| &w.enemy_defs);
-                    let height = |k: u16| defs.and_then(|d| d.by_kind(k)).map(|d| d.height);
+                    let height = |k: u16| {
+                        let def = defs.and_then(|d| d.by_kind(k));
+                        def.map(|d| d.height * d.draw_scale())
+                    };
                     cues::parry_icons(
                         list,
                         &cam,
@@ -972,6 +993,7 @@ impl InGame {
                 now,
             );
             self.draw_mode_hud(common, list, now, io.dt);
+            self.draw_spectate_hud(common, list);
             self.warmup_hud(common, list);
         }
         if in_game && !lobby_up {

@@ -18,20 +18,29 @@
     name: "Bellwether",
     net_kind: 25,
     model: "bellwether",
+    // Drawn 1.2x its built size (the movement capsule stays as it was).
+    model_scale: 1.2,
     health: 220.0,
     speed: 5.5,
     acceleration: 30.0,
     turn_rate: 240.0,
     radius: 0.7,
     height: 3.1,
-    // The body hitbox stops at the hunched shoulders; the bell hangs above it on the yoke.
-    body_top: Some(2.2),
-    eye_height: 1.95,
+    // The body hitbox stops at the hunched shoulders, the hooded head juts out low in front, the
+    // long forearms knuckle down to the floor; the bell hangs above and behind them on the yoke.
+    hit_radius: Some(0.8),
+    body_top: Some(2.65),
+    body_shapes: [
+        (a: (0.0, 2.42, -0.85), b: (0.0, 2.42, -0.85), radius: 0.4),
+        (a: (-0.7, 1.4, -0.62), b: (-0.7, 0.35, -1.05), radius: 0.2),
+        (a: (0.7, 1.4, -0.62), b: (0.7, 0.35, -1.05), radius: 0.2),
+    ],
+    eye_height: 2.35,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 0.5,
     weak_points: [
-        (name: "bell", kind: Core, offset: (0.0, 2.62, 0.3), radius: 0.6, multiplier: 2.0),
+        (name: "bell", kind: Core, offset: (0.0, 3.17, 0.36), radius: 0.72, multiplier: 2.0),
     ],
     armour: None,
     attacks: [

@@ -131,10 +131,11 @@
             merge_distance: 1.0,
             merge_window: 0.2,
         ),
-        // Hit assist: player-owned attacks test against shapes this much bigger (m).
+        // Hit assist: player-owned attacks test against shapes this much bigger (m). The Moulds'
+        // hit shapes already cover their (scaled-up) models; the pads reach past them.
         hit_assist: (
-            enemy_body_pad: 0.2,
-            enemy_weak_pad: 0.1,  // weak points / heads
+            enemy_body_pad: 0.35,
+            enemy_weak_pad: 0.15, // weak points / heads
             player_body_pad: 0.12, // PvP
             player_head_pad: 0.06,
         ),

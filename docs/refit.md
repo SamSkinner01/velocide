@@ -235,6 +235,23 @@ Redesign `client/src/menus/loadout.rs` for usability. Requirements:
   Docs: `docs/enemies.md` (sizes, hit shapes), `docs/style_modes.md` (a short "Spectating"
   section). Shots in `client/examples/enemy_shots.rs`.
 
+### As built (pve)
+
+- Enemy definitions gain `model_scale` (the drawn size; the client applies it in
+  `ModelLibrary::draw_enemy`), `hit_radius` (the body hit capsule's radius, `None` = the
+  movement radius) and `body_shapes` (extra body capsules); `EnemyDef::hitbox(target, feet,
+  yaw)` builds every hit shape and `Enemy::hitbox()` (same signature as before) calls it, so
+  hitscan, projectiles, explosions and melee pick the new shapes up unchanged. Scales: Harrier
+  and Snuffer ×1.3, Gnawer and Effigy ×1.25, Censer, Heron and Bellwether ×1.2, Gaoler and
+  Smelter ×1.12 (the heavies read already; bigger crowds their rooms). Numbers and reasons:
+  `docs/enemies.md` "Sizes and hit shapes".
+- Spectating waits 1.5 s of the death view first (FIRE / ALT_FIRE skip it) and draws your own
+  body where you lie; no `camera.rs` change was needed (it owns its own `CameraRig`). Hunks
+  outside the listed files: `remote_players.rs` (a hidden player), `replay.rs` (its viewpoint
+  helpers made `pub(super)`), `combat/{mod,hud}.rs` (`CombatHudInfo::spectating`: no death
+  screen / low-health vignette over the watched view), `combat/enemy_fx.rs` (tracer ends use
+  the hit radius; the latched Snuffer keeps its size in the victim's view).
+
 ## Balance (area **balance**)
 
 - Build a **balance harness** (`shared/examples/balance_report.rs` or a test module) that

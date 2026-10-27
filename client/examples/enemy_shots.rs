@@ -9,12 +9,17 @@
 //! all nine Moulds and a row of elites, the Bellwether hauling its bell back, the toll ringing
 //! out and the frenzied pack, its bell shot mid-swing; the Snuffer rearing, latched onto you
 //! (smothering the view) and punched off; the Smelter's slag line as a telegraph and burning;
-//! the Effigy flinching under fire.
+//! the Effigy flinching under fire. The refit (docs/enemies.md "Sizes and hit shapes"): the
+//! lineup again with every Mould's hit shapes drawn over it (white: the plain shapes, cyan: as
+//! padded by the hit assist for the player's attacks), from the front and from above behind;
+//! and spectating (docs/style_modes.md): two clients in campaign co-op on a real server, one
+//! goes down and watches the other fight a Gnawer pack from their eyes, then from the chase
+//! camera.
 //!
 //! ```text
-//! cargo run -p client --release --example enemy_shots -- [out_dir] [--third]
+//! cargo run -p client --release --example enemy_shots -- [out_dir] [--third] [--spectate]
 //! # default out_dir target/enemy_shots; --third: only the third roster (Bellwether, Snuffer,
-//! # Smelter, Effigy, elites)
+//! # Smelter, Effigy, elites); --spectate: only spectating
 //! ```
 
 use std::path::PathBuf;
@@ -26,14 +31,15 @@ use client::frame::{FrameBuffers, FrameIo};
 use client::ingame::InGame;
 use client::settings::Settings;
 use engine::audio::Audio;
-use engine::gfx::{RetroSettings, UiDrawList};
-use engine::input::InputState;
+use engine::gfx::{DebugLine, RetroSettings, UiDrawList};
+use engine::input::{GamepadButton, GamepadEvent, InputState};
 use engine::render::Renderer;
 use engine::ui::UiInput;
-use glam::{Vec2, Vec3};
+use glam::{Vec2, Vec3, Vec4};
+use server::{ServerConfig, ServerHandle};
 use shared::input::Buttons;
 use shared::protocol::{EntityState, enemy_flags, kind};
-use shared::sim::AiState;
+use shared::sim::{AiState, EnemyRegistry, HitPads, HitPart, HitTarget};
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -48,6 +54,14 @@ struct Harness {
     out: PathBuf,
     /// Movement held by the player: (forward, right, buttons).
     moving: (f32, f32, Buttons),
+    /// Draw every enemy's hit shapes over the frame.
+    hit_shapes: bool,
+}
+
+/// A second player's screen (spectating shots): its own settings and input.
+struct Other {
+    common: Common,
+    input: InputState,
 }
 
 impl Harness {
@@ -55,27 +69,50 @@ impl Harness {
         std::thread::sleep(Duration::from_secs_f32(DT));
         self.time += DT as f64;
         self.common.stats.update(DT);
+        self.render(game, None);
+    }
+
+    /// One frame of `game` (as `other`'s screen when given), rendered.
+    fn render(&mut self, game: &mut InGame, other: Option<&mut Other>) {
         let ui = UiInput {
             mouse_pos: Vec2::splat(-100.0),
             time: self.time,
             ..Default::default()
         };
         self.buffers.clear(UiDrawList::canvas_for_window(W, H));
+        let (common, input) = match other {
+            Some(o) => (&mut o.common, &mut o.input),
+            None => (&mut self.common, &mut self.input),
+        };
         let out = {
             let mut io = FrameIo {
                 renderer: &mut self.renderer,
-                input: &self.input,
+                input,
                 ui_input: &ui,
                 dt: DT,
                 time: self.time,
                 window_size: (W, H),
             };
-            game.frame(&mut self.common, &mut io, &mut self.buffers)
+            game.frame(common, &mut io, &mut self.buffers)
         };
+        if self.hit_shapes {
+            hit_shape_lines(game, &mut self.buffers.lines);
+        }
         if let Err(e) = self.renderer.render(&self.buffers.desc(&out.scene), None) {
             eprintln!("render: {e:#}");
         }
-        self.input.end_frame();
+        input.end_frame();
+    }
+
+    /// `n` frames of two players' screens (the second one rendered last: shots show it).
+    fn frames2(&mut self, a: &mut InGame, b: &mut InGame, other: &mut Other, n: usize) {
+        for _ in 0..n {
+            std::thread::sleep(Duration::from_secs_f32(DT));
+            self.time += DT as f64;
+            a.controls.override_move = Some(self.moving);
+            self.render(a, None);
+            self.render(b, Some(other));
+        }
     }
 
     fn frames(&mut self, game: &mut InGame, n: usize) {
@@ -123,6 +160,77 @@ impl Harness {
             }
         }
         false
+    }
+}
+
+/// Wireframes of every living enemy's hit shapes, built from the replicated position and yaw
+/// like the server builds them (`EnemyDef::hitbox`): white the plain shapes (enemy attacks,
+/// lag compensation), weak points orange; cyan the same padded by the hit assist (what the
+/// player's attacks test).
+fn hit_shape_lines(game: &InGame, out: &mut Vec<DebugLine>) {
+    let Some(net) = game.net() else {
+        return;
+    };
+    let assist = &net.tuning().combat.hit_assist;
+    let pads = HitPads {
+        body: assist.enemy_body_pad,
+        weak: assist.enemy_weak_pad,
+    };
+    let defs = EnemyRegistry::builtin();
+    for e in net.remote_entities() {
+        if !kind::is_enemy(e.kind) || e.flags & enemy_flags::DYING != 0 {
+            continue;
+        }
+        let Some(def) = defs.by_kind(e.kind) else {
+            continue;
+        };
+        let hitbox = def.hitbox(HitTarget::Entity(e.id), e.position, e.yaw);
+        for s in &hitbox.shapes {
+            let plain = if s.part == HitPart::Body {
+                Vec4::new(1.0, 1.0, 1.0, 0.9)
+            } else {
+                Vec4::new(1.0, 0.55, 0.1, 1.0)
+            };
+            capsule_wire(s.a, s.b, s.radius, plain, out);
+            let pad = pads.for_part(s.part);
+            capsule_wire(s.a, s.b, s.radius + pad, Vec4::new(0.2, 0.9, 1.0, 0.7), out);
+        }
+    }
+}
+
+/// A capsule as lines: a ring around each end, four lines along it, and the end caps as two
+/// half circles each.
+fn capsule_wire(a: Vec3, b: Vec3, r: f32, color: Vec4, out: &mut Vec<DebugLine>) {
+    const N: usize = 16;
+    let axis = (b - a).try_normalize().unwrap_or(Vec3::Y);
+    let u = axis.any_orthonormal_vector();
+    let v = axis.cross(u);
+    let mut line = |p: Vec3, q: Vec3| out.push(DebugLine { a: p, b: q, color });
+    for c in [a, b] {
+        for i in 0..N {
+            let t0 = i as f32 / N as f32 * std::f32::consts::TAU;
+            let t1 = (i + 1) as f32 / N as f32 * std::f32::consts::TAU;
+            line(
+                c + (u * t0.cos() + v * t0.sin()) * r,
+                c + (u * t1.cos() + v * t1.sin()) * r,
+            );
+        }
+    }
+    for side in [u, v, -u, -v] {
+        line(a + side * r, b + side * r);
+    }
+    // Caps: half circles over each end, in the two planes through the axis.
+    for (c, out_dir) in [(a, -axis), (b, axis)] {
+        for side in [u, v] {
+            for i in 0..N / 2 {
+                let t0 = i as f32 / (N / 2) as f32 * std::f32::consts::PI;
+                let t1 = (i + 1) as f32 / (N / 2) as f32 * std::f32::consts::PI;
+                line(
+                    c + (side * t0.cos() + out_dir * t0.sin()) * r,
+                    c + (side * t1.cos() + out_dir * t1.sin()) * r,
+                );
+            }
+        }
     }
 }
 
@@ -232,6 +340,22 @@ fn third_roster(h: &mut Harness, game: &mut InGame) {
     look_from(h, game, Vec3::new(0.0, 0.0, 19.0), Vec3::new(0.0, 1.2, 2.0));
     h.frames(game, 30);
     h.shot("third_lineup");
+    // The same Moulds with their hit shapes (docs/enemies.md "Sizes and hit shapes"), three at
+    // a time from the front, then the middle three from above and behind (the Gaoler's
+    // lantern, the Bellwether's bell). No gun in the way.
+    h.hit_shapes = true;
+    h.common.settings.show_viewmodel = false;
+    // (They stand 8 m in front of where each was spawned from: z = 2.)
+    for (i, x) in [-12.0f32, 0.0, 12.0].into_iter().enumerate() {
+        look_from(h, game, Vec3::new(x, 0.0, 9.5), Vec3::new(x, 1.5, 2.0));
+        h.frames(game, 2);
+        h.shot(&format!("hit_shapes_{}", i + 1));
+    }
+    look_from(h, game, Vec3::new(0.0, 3.0, -6.0), Vec3::new(0.0, 1.5, 2.0));
+    h.frames(game, 2);
+    h.shot("hit_shapes_behind");
+    h.hit_shapes = false;
+    h.common.settings.show_viewmodel = true;
     cmd(h, game, "/killall");
     h.frames(game, 60);
     for (i, name) in ["gnawer", "gaoler", "bellwether", "snuffer", "smelter"]
@@ -285,8 +409,12 @@ fn third_roster(h: &mut Harness, game: &mut InGame) {
     // The next toll: shoot the bell mid-swing (it cracks, the toll is cancelled).
     let ok = h.until(game, kind::BELLWETHER, 900, |e| windup_of(e, 1) > 60);
     if let Some(b) = nearest(game, kind::BELLWETHER) {
-        // The bell hangs 0.3 m behind its centre line.
-        let bell = b.position + glam::Quat::from_rotation_y(b.yaw) * Vec3::new(0.0, 2.62, 0.3);
+        // The bell hangs behind its centre line (its weak point in the definition).
+        let offset = EnemyRegistry::builtin()
+            .get("bellwether")
+            .and_then(|d| d.weak_points.first().map(|w| w.offset))
+            .unwrap_or(Vec3::new(0.0, 3.17, 0.36));
+        let bell = b.position + glam::Quat::from_rotation_y(b.yaw) * offset;
         aim_at(game, bell);
     }
     h.frames(game, 1);
@@ -382,6 +510,87 @@ fn third_roster(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 60);
 }
 
+/// Spectating (docs/style_modes.md "Spectating"): two clients in campaign co-op on a real
+/// server. Bravo goes down and, after a moment of the death view, watches Alpha fight a
+/// Gnawer pack from Alpha's eyes (Alpha's weapon in hand), then from the chase camera.
+fn spectating(h: &mut Harness) -> anyhow::Result<()> {
+    let server = ServerHandle::spawn(ServerConfig {
+        bind: "127.0.0.1:0".parse()?,
+        level: "crucible_of_veins".into(),
+        max_players: 4,
+        watch_tuning: false,
+        dev_commands: true,
+        ..Default::default()
+    })?;
+    let address = server.connect_addr().to_string();
+    let join = StartMode::Join { address };
+    h.common.name_override = Some("Alpha".into());
+    let mut a = InGame::start(&join, &mut h.common, &mut h.renderer)?;
+    let scratch = std::env::temp_dir().join("velocide-enemy-shots-bravo.ron");
+    let mut other = Other {
+        common: Common::new(
+            Settings::default(),
+            scratch,
+            Audio::disabled(),
+            LaunchOptions::default(),
+        ),
+        input: InputState::new(),
+    };
+    other.common.name_override = Some("Bravo".into());
+    let mut b = InGame::start(&join, &mut other.common, &mut h.renderer)?;
+    for _ in 0..900 {
+        h.frames2(&mut a, &mut b, &mut other, 1);
+        if a.is_playing() && b.is_playing() {
+            break;
+        }
+    }
+    h.frames2(&mut a, &mut b, &mut other, 60);
+    a.send_chat("/god");
+    h.frames2(&mut a, &mut b, &mut other, 10);
+    // Bravo goes down; Alpha calls in a pack and turns on it.
+    b.send_chat("/kill");
+    a.send_chat("/spawn gnawer 3");
+    h.frames2(&mut a, &mut b, &mut other, 30);
+    h.shot("spectate_downed");
+    for _ in 0..60 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    println!("spectating: {:?}", b.spectate.target());
+    h.moving = (0.0, 0.0, Buttons::FIRE);
+    for _ in 0..14 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    h.shot("spectate_eyes");
+    // JUMP (gamepad A): the chase camera.
+    other
+        .input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::South, true));
+    h.frames2(&mut a, &mut b, &mut other, 1);
+    other
+        .input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::South, false));
+    for _ in 0..50 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    println!("chase camera: {}", b.spectate.chase());
+    h.shot("spectate_chase");
+    a.shutdown(&mut h.renderer, &mut h.common);
+    b.shutdown(&mut h.renderer, &mut other.common);
+    server.stop();
+    h.common.name_override = None;
+    Ok(())
+}
+
 fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
     let mut game = InGame::start(
         &StartMode::SinglePlayer {
@@ -411,6 +620,7 @@ fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target/enemy_shots"));
     let only_third = std::env::args().any(|a| a == "--third");
+    let only_spectate = std::env::args().any(|a| a == "--spectate");
     std::fs::create_dir_all(&out)?;
     let renderer = Renderer::new_headless(W, H, &RetroSettings::default())?;
     let scratch = std::env::temp_dir().join("velocide-enemy-shots-settings.ron");
@@ -427,7 +637,12 @@ fn main() -> anyhow::Result<()> {
         time: 10.0,
         out,
         moving: (0.0, 0.0, Buttons::NONE),
+        hit_shapes: false,
     };
+
+    if only_spectate {
+        return spectating(&mut h);
+    }
 
     // ---- Proving ground: one type at a time. ----
     let mut game = session(&mut h, shared::sim::BUILTIN_LEVEL)?;
@@ -665,5 +880,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 60);
     h.shot("arena4_cleared");
     game.shutdown(&mut h.renderer, &mut h.common);
-    Ok(())
+
+    // ---- Spectating a teammate (campaign co-op, a real server). ----
+    spectating(&mut h)
 }

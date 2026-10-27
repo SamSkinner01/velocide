@@ -1124,6 +1124,7 @@ impl InGame {
             branded,
             burning: own_flags & player_flags::BURNING != 0,
             pinned: own_flags & player_flags::PINNED != 0,
+            spectating: self.spectate.is_active(),
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);

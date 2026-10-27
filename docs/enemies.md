@@ -26,7 +26,7 @@ replication basics are in `docs/combat.md`.
 | `client::models::enemies` | the nine rigs and their pure pose functions (`docs/models.md`), the slag strip |
 | `client::ingame::combat::enemy_fx` | names / sizes / sounds per kind, the Heron's aim laser, wax-and-ember effects, the third roster's effects (toll, frenzy, elites, latch view, slag lines) |
 | `client::ingame::encounter_hud` | banners + sounds for the encounter events, "WAVE 2/3 - 5 LEFT" readout |
-| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type, the nine-Mould lineup, elites + an arena encounter |
+| `client/examples/enemy_shots.rs` | headless screenshots of every attack of every type, the nine-Mould lineup, its hit shapes drawn over it, elites, an arena encounter, spectating a teammate |
 
 ## The five Moulds
 
@@ -42,6 +42,7 @@ between centres.
 | health | 45 | 80 | 40 | 520 | 60 |
 | speed / accel | 10 / 60 | 5 / 40 | 15 / 32 | 4.5 / 25 | 7 / 35 |
 | capsule r × h | 0.6 × 2.0 | 0.6 × 2.5 | 0.7 × 1.3 (3 m wingspan) | 1.3 × 3.7 | 0.5 × 3.4 |
+| drawn (`model_scale`) | ×1.25 (2.5 m) | ×1.2 (3.25 m) | ×1.3 (3.9 m wingspan) | ×1.12 (4.2 m) | ×1.2 (4 m) |
 | nav class | narrow, 2 m | narrow, 2.6 m headroom | — (flies) | wide, 3.8 m headroom | narrow, 3.5 m headroom |
 | weak points | head (jaw) ×2 | lantern (brazier head) ×2 | heart (under the chest) ×2.5 | head (grille) ×1.5, lantern (back) ×2.5 | head (lens) ×2.5 |
 | armour | — | — | — | front ×0.15 in a 120° arc, explosions too; head + lantern bypass; parry counters bypass | — |
@@ -96,8 +97,9 @@ body surfaces).
 | health | 220 | 70 | 420 | 1000 (never below 1) |
 | speed / accel | 5.5 / 30 | 12.5 / 70 | 3.6 / 20 | 0 |
 | capsule r × h | 0.7 × 3.1 | 0.7 × 1.4 | 1.1 × 3.4 | 0.5 × 2.2 |
+| drawn (`model_scale`) | ×1.2 (3.9 m) | ×1.3 (2.9 m tail to cap) | ×1.12 (3.8 m) | ×1.25 (2.8 m) |
 | nav class | narrow, 3.2 m headroom | narrow, none | wide, 3.5 m headroom | — (never moves) |
-| weak points | **bell** (0, 2.62, 0.3) r 0.6 ×2 (Core) | **wick** under the cap (0, 0.62, −1.0) r 0.32 ×2.5 (Head) | **hatch** on the crucible (0, 1.45, −1.25) r 0.45 ×2.5 (Core); head (0, 3.0, −0.35) r 0.4 ×1.5 | head (0, 1.97, −0.04) r 0.3 ×2; sigil (0, 1.35, −0.28) r 0.22 ×1.5 |
+| weak points | **bell** (0, 3.17, 0.36) r 0.72 ×2 (Core) | **wick** under the cap (0, 0.82, −1.32) r 0.42 ×2.5 (Head) | **hatch** on the crucible (0, 1.62, −1.45) r 0.5 ×2.5 (Core); head (0, 3.4, −0.37) r 0.45 ×1.5 | head (0, 2.46, −0.05) r 0.37 ×2; sigil (0, 1.69, −0.35) r 0.27 ×1.5 |
 | knockback scale | 0.5 | 1.3 | 0.15 | 0 |
 | keeps | 14–26 m, side-steps (`preferred_range`) | melee | melee (pours on the way in) | its post |
 
@@ -234,6 +236,70 @@ with the difficulty's health and elite roll; dev `/spawn` uses the same difficul
 boss-grade elite is an elite with a larger `health_scale` (grind: `boss_health` ×4, then the
 elite bonus). Flyers are placed by their feet
 (the encounter code converts hover-centre spawn points; grind should too).
+
+## Sizes and hit shapes (the refit)
+
+Players found the Moulds hard to hit (`docs/refit.md`, area **pve**): the small, quick and
+thin ones (Gnawer, Harrier, Snuffer, the Heron's stilts) most of all. So every Mould is now
+**drawn bigger than it is built** and its **hit shapes cover more than the drawn model**.
+
+* **Drawn size**: `EnemyDef::model_scale` (rows "drawn" above; `draw_scale()` keeps a file's
+  value in 0.25..4). The client scales the model about its origin — the feet, the Harrier's
+  hover centre — in `ModelLibrary::draw_enemy` / `enemy_attack_point`, so every caller (the
+  game, elites' shells, the replay, `models_view`) draws the same size; `EnemyKind::scale()` /
+  `height()` follow the definition. Around ×1.25, per type as it reads best: the small and
+  quick ones most (Harrier and Snuffer ×1.3), the heavies least (Gaoler and Smelter ×1.12:
+  at 3.7 m they read already, and a 4.6 m Gaoler would crowd every room it fights in).
+* **The movement capsule stays** (`radius`, `height`), so the nav grid, the nav classes'
+  headroom, doors, ledges and every level test are unchanged. The cost: a Mould can poke
+  through a low ceiling. Measured on every shipped level (passable nodes of each class whose
+  headroom is below the drawn height): 0–0.3 % almost everywhere, at most 2.7 % (the Heron on
+  The Drowned Chandlery; 1.5 % the Bellwether there), so it is rare.
+* **Hit shapes are split from the movement capsule** and sized to the scaled model
+  (`EnemyDef::hitbox(target, feet, yaw)` builds them; `Enemy::hitbox` and the client's debug
+  views use it): the upright body capsule has its own radius (`hit_radius`, `None` = the
+  capsule's) and top (`body_top`); `body_shapes` add capsules for what one upright capsule
+  misses; the weak points sit on the scaled models. All `HitPart::Body` but the weak points
+  (armour, damage numbers and the parry rules are unchanged). Offsets from the feet, +X right,
+  −Z forward:
+
+  | | body capsule r, top | extra body shapes | weak points |
+  |---|---|---|---|
+  | Gnawer | 0.78, 2.3 | a bar across the fists (r 0.3) | head (0, 1.95, −0.65) r 0.52 |
+  | Censer | 0.74, 2.35 | — | lantern (0, 2.68, −0.12) r 0.5 |
+  | Harrier | 0.7, (1.3) | neck and beak (r 0.26), both wings in their V (r 0.32, to ±1.8 m) | heart (0, 0.26, −0.2) r 0.44 |
+  | Gaoler | 1.4, 3.45 | the cell door (x −0.7, z −1.05, r 0.7) | head (0, 3.72, −0.35) r 0.5, lantern (0, 2.46, 1.06) r 0.6 |
+  | Heron | 0.6, 3.1 | the long back (r 0.42) | head (0, 3.74, −0.48) r 0.42 |
+  | Bellwether | 0.8, 2.65 | the low hooded head (r 0.4), both forearms to the floor (r 0.2) | bell (0, 3.17, 0.36) r 0.72 |
+  | Snuffer | 0.75, (1.4) | the back and tail (r 0.45), the cap above the wick (r 0.44), two bars across the legs (r 0.3) | wick (0, 0.82, −1.32) r 0.42 |
+  | Smelter | 1.2, 3.15 | the crucible (r 0.85), the shoulders (r 0.5) | hatch (0, 1.62, −1.45) r 0.5, head (0, 3.4, −0.37) r 0.45 |
+  | Effigy | 0.5, 2.2 | the crossbar arms (r 0.15) | head (0, 2.46, −0.05) r 0.37, sigil (0, 1.69, −0.35) r 0.27 |
+
+  Weak points stay in front of the body shapes that could hide them (the Snuffer's cap is
+  above its wick, the Smelter's hatch sphere stands proud of the crucible, the Gaoler's
+  lantern of its back), so a plain hit on them is still a weak-point hit.
+* **More hit assist**: `combat.hit_assist.enemy_body_pad` 0.2 → **0.35**, `enemy_weak_pad`
+  0.1 → **0.15** (player-owned attacks only; enemy attacks test the plain player shapes, PvP
+  pads unchanged). Together: the plain shapes hold 60–94 % of each drawn model's vertices, the
+  padded ones 92–100 % (the model test prints them); the hit area reaches past the model on
+  every side.
+* **What moved with the models**: eye heights (sight lines start at the drawn eyes), the
+  Censer's volley muzzle (3.66 m, the censer whirled over its head) and the Heron's lens
+  (3.74 m: the needle and the aim laser leave the drawn lens).
+* **What didn't**: attack reaches and arcs. Melee ranges are measured from the movement
+  capsule's surface as before; the bigger bodies only make the reach read right (a Gnawer's
+  jaw now ends about where its bite lands). Knockback, mass and the push-apart use the
+  movement capsule. The latched Snuffer is drawn at its old size in its victim's view (net of
+  the scale), so it doesn't cover the crosshair; everyone else sees it at full size.
+* **Client**: tracer ends use the hit radius (`enemy_fx::enemy_size`), the colour-vision parry
+  icons sit over the drawn height.
+* **Tests**: `builtin_roster_matches_the_contract` (the new weak points; every Mould drawn at
+  least ×1.1, its hit radius at least the capsule's), `client::models` `enemy_models_match_
+  their_definitions` (drawn top within 0.45 m of the hit shapes' top, weak points inside the
+  drawn model, ≥ 55 % of the model inside the plain shapes and ≥ 90 % inside the padded ones),
+  `combat_weapons::hit_assist_pads_player_attacks_only` (reads the pad from the tuning). Shots:
+  `enemy_shots` `hit_shapes_1..3` (three Moulds each, white the plain shapes, orange the weak
+  points, cyan as padded) and `hit_shapes_behind`.
 
 ## AI (`ai.rs`, server only)
 
@@ -418,8 +484,9 @@ sizes and the laser muzzle come from the data.
 
 * **Models**: `ModelLibrary::draw_enemy` with an `EnemyAnim` from the replicated state: AI
   state + progress, attack index (which telegraph / strike to pose), speed / strafe, aim pitch
-  (the laser's pitch; a diving Harrier's flight pitch), `aim_locked`. Weak points are bright
-  `Core` parts; telegraphs `Glow` parts (`docs/models.md`).
+  (the laser's pitch; a diving Harrier's flight pitch), `aim_locked`; drawn `model_scale`
+  bigger than built ("Sizes and hit shapes"). Weak points are bright `Core` parts; telegraphs
+  `Glow` parts (`docs/models.md`).
 * **Hits** crack the wax: pale wax droplets and molten orange droplets fly off, sparks, a white
   hurt flash, `EnemyHurt` (wax snap + sizzle). **Kills** release the heat as one big ember
   burst (a flash and a short point light, a fountain of embers, lumps of wax, smoke,
@@ -469,7 +536,7 @@ cargo test -p shared --test enemies_nav -- --nocapture   # grid on every level, 
 cargo test -p shared --test enemies_perf -- --nocapture  # 55 enemies on the campaign, per-tick cost
 cargo test -p shared --test combat_enemy --test combat_parry --test combat_replication
 cargo test -p server --test encounter_crucible           # encounters end to end (real server + clients)
-cargo run -p client --release --example enemy_shots -- out/   # screenshots (--third: only the third roster)
+cargo run -p client --release --example enemy_shots -- out/   # screenshots (--third: only the third roster, --spectate: only spectating)
 cargo run -p client --release --example models_view -- --only gaoler   # model pose sheets
 ```
 
@@ -548,7 +615,11 @@ flight and bursting, the Harriers hovering / rearing (heart white-hot) / diving 
 them swatted by one punch, the Gaoler's door rim strobing in its parry window, the bash, the
 red chain sweep, the rush behind the door, the Heron's red laser at you, white-hot once locked,
 and passing beside you after a dash, a mixed crowd, its ember bursts and melting corpses, and
-arena 4 of the campaign ("ARENA LOCKED", "WAVE 1/2 - 5 LEFT", the Gaoler on the island).
+arena 4 of the campaign ("ARENA LOCKED", "WAVE 1/2 - 5 LEFT", the Gaoler on the island). The
+refit: the lineup at its new sizes with the hit shapes over it from the front and behind (every
+weak point on its part: jaws, braziers, the heart, helm and lantern, the lens, the bell, the
+wick, hatch and head, the Effigy's head and sigil; the padded shapes past every silhouette),
+the latched Snuffer at its old size in the victim's view, and spectating (`docs/style_modes.md`).
 
 ## Known limitations / next steps
 

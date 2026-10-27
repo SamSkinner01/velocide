@@ -20,22 +20,30 @@
     name: "Gaoler",
     net_kind: 23,
     model: "gaoler",
+    // Drawn 1.12x its built size (4.2 m: it is the heavy already); the movement capsule stays
+    // the size the levels and the nav grid were built for.
+    model_scale: 1.12,
     health: 520.0,
     speed: 4.5,
     acceleration: 25.0,
     turn_rate: 150.0,
     radius: 1.3,
     height: 3.7,
-    // The helm sits on top of the body hitbox.
-    body_top: Some(3.0),
-    eye_height: 3.3,
+    // Hit shapes cover the drawn model: the body up to the shoulders (the helm sits on top),
+    // the cell door held out in front of its left side.
+    hit_radius: Some(1.4),
+    body_top: Some(3.45),
+    body_shapes: [
+        (a: (-0.7, 1.15, -1.05), b: (-0.7, 2.9, -1.05), radius: 0.7),
+    ],
+    eye_height: 3.7,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 0.12,
     weak_points: [
-        (name: "head", kind: Head, offset: (0.0, 3.32, -0.35), radius: 0.45, multiplier: 1.5),
+        (name: "head", kind: Head, offset: (0.0, 3.72, -0.35), radius: 0.5, multiplier: 1.5),
         // The caged heart-lantern on its back: the unarmoured side.
-        (name: "lantern", kind: Core, offset: (0.0, 2.2, 0.95), radius: 0.55, multiplier: 2.5),
+        (name: "lantern", kind: Core, offset: (0.0, 2.46, 1.06), radius: 0.6, multiplier: 2.5),
     ],
     armour: Some((
         front_multiplier: 0.15,
