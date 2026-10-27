@@ -344,6 +344,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             tail = -0.6 * e;
         }
         EnemyState::Idle | EnemyState::Walk => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
     }
     pose.glow = gray(glow);
     pose.core = gray(core);

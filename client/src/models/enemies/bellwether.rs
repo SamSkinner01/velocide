@@ -502,6 +502,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             legs = [(0.9 * e, 1.6 * e), (0.7 * e, 1.4 * e)];
         }
         EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
     }
     pose.glow = gray(glow);
     // The bell's band burns brighter while it tolls.

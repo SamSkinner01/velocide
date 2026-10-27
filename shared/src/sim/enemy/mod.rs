@@ -149,6 +149,13 @@ impl AiState {
     }
 }
 
+/// A melting Mould at depth `d` ([`melt_depth`]) has sunk `MELT_SINK × d` of its drawn height
+/// into the floor and sagged to `1 − MELT_SAG × d` of its height (about its feet): fully
+/// melted, only a puddle shows. Its hit shapes (`Enemy::hitbox`) and its drawn model
+/// (`client::models::enemies::body_transform`) follow the same numbers.
+pub const MELT_SINK: f32 = 0.75;
+pub const MELT_SAG: f32 = 0.35;
+
 /// How far into its puddle a Mould is from its replicated state and progress (0 = standing, 1
 /// = only the puddle left): the slump takes the first three quarters of `Melt`, the rise the
 /// last three quarters of `Reform`. Its hit shapes sink with it (`Enemy::hitbox`); clients
@@ -293,6 +300,8 @@ pub struct Enemy {
     /// and the tick to give up on it; the tick of the last orbit flip at a wall.
     pub detour: Option<(Vec3, u32)>,
     pub last_flip: u32,
+    /// Melt on its next chasing tick, stranded or not (dev `/melt`, `SimWorld::melt_enemies`).
+    pub melt_now: bool,
 }
 
 impl Enemy {
@@ -361,6 +370,7 @@ impl Enemy {
             search_after: 0,
             detour: None,
             last_flip: 0,
+            melt_now: false,
         }
     }
 
@@ -475,20 +485,21 @@ impl Enemy {
 
     /// Body capsule + extra body shapes + weak point spheres (`HitPart::Weak(i)`), sized to
     /// the drawn model rather than the movement capsule ([`EnemyDef::hitbox`]). A melting /
-    /// re-forming Mould stays hittable, its shapes sinking with it into the puddle (squashed
-    /// towards the feet, down to a fifth of their height and 40 % of their radius).
+    /// re-forming Mould stays hittable, its shapes sinking with it into the floor as its model
+    /// does ([`MELT_SINK`], [`MELT_SAG`]): what is still above the floor can be shot, down to
+    /// the puddle.
     pub fn hitbox(&self) -> Hitbox {
         let mut hitbox = self
             .def
             .hitbox(HitTarget::Entity(self.id), self.feet(), self.yaw);
         let depth = self.melt_depth();
         if depth > 0.0 {
-            let squash = (1.0 - depth).max(0.2);
+            let sag = 1.0 - MELT_SAG * depth;
+            let sink = MELT_SINK * depth * self.def.height * self.def.draw_scale();
             let feet = self.feet().y;
             for s in &mut hitbox.shapes {
-                s.a.y = feet + (s.a.y - feet) * squash;
-                s.b.y = feet + (s.b.y - feet) * squash;
-                s.radius *= squash.max(0.4);
+                s.a.y = feet + (s.a.y - feet) * sag - sink;
+                s.b.y = feet + (s.b.y - feet) * sag - sink;
             }
         }
         hitbox

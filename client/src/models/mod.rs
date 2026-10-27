@@ -133,10 +133,12 @@ pub enum ModelId {
     KindleFlask,
     Snare,
     SootPot,
+    /// The wax puddle a stranded Mould melts into and re-forms out of.
+    WaxPuddle,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 52] = [
+    pub const ALL: [ModelId; 53] = [
         ModelId::Shrike,
         ModelId::ShrikeKit,
         ModelId::Gnawer,
@@ -189,6 +191,7 @@ impl ModelId {
         ModelId::KindleFlask,
         ModelId::Snare,
         ModelId::SootPot,
+        ModelId::WaxPuddle,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -251,6 +254,7 @@ impl ModelId {
             ModelId::KindleFlask => "prop_kindle_flask.gltf",
             ModelId::Snare => "prop_snare.gltf",
             ModelId::SootPot => "prop_soot_pot.gltf",
+            ModelId::WaxPuddle => "fx_wax_puddle.gltf",
         }
     }
 
@@ -270,6 +274,7 @@ impl ModelId {
             ModelId::Smelter => &enemies::smelter::JOINTS,
             ModelId::Effigy => &enemies::effigy::JOINTS,
             ModelId::SlagStrip => &enemies::slag::JOINTS,
+            ModelId::WaxPuddle => &enemies::puddle::JOINTS,
             ModelId::Quill => &weapons::quill::JOINTS,
             ModelId::Bellows => &weapons::bellows::JOINTS,
             ModelId::Arclash => &weapons::arclash::JOINTS,
@@ -307,6 +312,7 @@ impl ModelId {
             ModelId::Smelter => enemies::smelter::build(),
             ModelId::Effigy => enemies::effigy::build(),
             ModelId::SlagStrip => enemies::slag::build(),
+            ModelId::WaxPuddle => enemies::puddle::build(),
             ModelId::Quill => weapons::quill::build(),
             ModelId::Bellows => weapons::bellows::build(),
             ModelId::Arclash => weapons::arclash::build(),

@@ -10,6 +10,7 @@
 //! | `/spawn <enemy> [count] [elite]` | spawns enemies 8 m in front of you (on the ground); `elite` makes them elites |
 //! | `/enemies` | lists enemy definitions |
 //! | `/killall` | kills every enemy |
+//! | `/melt` | every ground Mould melts and re-forms near its target (docs/enemies.md) |
 //! | `/god` | toggles invulnerability |
 //! | `/notarget` | toggles: enemies ignore you |
 //! | `/give` | full health, no hard damage, every knack charge, weapons ready |
@@ -33,7 +34,7 @@ use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...] [knack:<name>]";
+const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /melt, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...] [knack:<name>]";
 
 /// Lower-case letters and digits only ("Triple Nock" → "triplenock").
 fn squash(s: &str) -> String {
@@ -191,6 +192,10 @@ impl Server {
                 let n = self.world.enemies.values().filter(|e| e.is_alive()).count();
                 self.kill_all_enemies();
                 format!("killed {n} enemies")
+            }
+            "melt" => {
+                let n = self.world.melt_enemies();
+                format!("{n} Moulds melt and re-form near their targets")
             }
             "god" => match self.world.players.get_mut(&player) {
                 Some(p) => {

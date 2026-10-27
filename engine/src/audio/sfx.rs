@@ -240,6 +240,10 @@ pub enum Sfx {
     SmelterStep,
     /// A hit on the training dummy: a wax thunk and the post creaking.
     EffigyHit,
+    /// A stranded Mould slumping into a wax puddle: a wet sag, its heat hissing into the floor.
+    MouldMelt,
+    /// A Mould rising out of a puddle where it re-formed: bubbling, a wet groan, a slap.
+    MouldRise,
 
     // ----- feel (refit, area **feel**: docs/feel.md) -------------------------------------------
     /// Layered under every own shot (volume = the shot's kick): a tight low-end punch and a
@@ -490,6 +494,8 @@ impl Sfx {
         Sfx::SmelterSwing,
         Sfx::SmelterStep,
         Sfx::EffigyHit,
+        Sfx::MouldMelt,
+        Sfx::MouldRise,
         // feel
         Sfx::ShotPunch,
         Sfx::ParryImpact,
@@ -703,6 +709,8 @@ impl Sfx {
             SmelterSwing => info(-12.0, 3, 0.04, 0.1),
             SmelterStep => variants(info(-18.0, 4, 0.06, 0.1), 2),
             EffigyHit => variants(info(-18.0, 4, 0.1, 0.04), 2),
+            MouldMelt => variants(info(-17.0, 4, 0.08, 0.1), 2),
+            MouldRise => variants(info(-17.0, 4, 0.08, 0.1), 2),
             // feel
             ShotPunch => variants(info(-15.0, 4, 0.05, 0.02), 3),
             ParryImpact => info(-11.0, 2, 0.0, 0.08),
@@ -3593,6 +3601,38 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             lowpass(&mut creak, 1000.0);
             stutter(&mut creak, 30.0, 0.0);
             layer(&[(&thunk, 1.0, 0.0), (&crack, 0.6, 0.0), (&creak, 0.35, 0.06)])
+        }
+        MouldMelt => {
+            // A Mould slumping into a puddle: a wet, sagging groan falling away, its heat
+            // hissing out into the floor, the wax bubbling as it spreads.
+            let dur = 0.75;
+            let mut sag = tone(dur, Wave::Saw, 130.0, 42.0, dur, 0.04, 0.5);
+            lowpass(&mut sag, 520.0);
+            let hiss = noise(r, dur, Pass::High, 3800.0, 2200.0, 0.7, 0.08, 0.35);
+            let bubbles = envelope(crackle(r, dur, 110.0, 0.9), 0.06, 0.45);
+            let slosh = noise(r, 0.4, Pass::Low, 600.0, 200.0, 1.2, 0.02, 0.18);
+            layer(&[
+                (&sag, 0.75, 0.0),
+                (&slosh, 0.6, 0.05),
+                (&hiss, 0.35, 0.12),
+                (&bubbles, 0.5, 0.15),
+            ])
+        }
+        MouldRise => {
+            // Rising out of a puddle: bubbling welling up, a wet groan climbing, a slap as it
+            // stands.
+            let dur = 0.85;
+            let bubbles = envelope(crackle(r, dur, 150.0, 1.2), 0.25, 0.3);
+            let mut groan = tone(dur, Wave::Saw, 48.0, 115.0, dur, 0.3, 0.3);
+            lowpass(&mut groan, 640.0);
+            let slap = thump(0.25, 170.0, 65.0, 0.01, 0.12);
+            let slosh = noise(r, 0.3, Pass::Low, 300.0, 800.0, 1.2, 0.08, 0.12);
+            layer(&[
+                (&bubbles, 0.55, 0.0),
+                (&groan, 0.7, 0.08),
+                (&slosh, 0.45, 0.4),
+                (&slap, 0.6, 0.6),
+            ])
         }
 
         // ----- feel ---------------------------------------------------------------------------

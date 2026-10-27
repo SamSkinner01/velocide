@@ -378,6 +378,17 @@ fn enemy_poses_are_finite() {
         EnemyState::Dying(0.6),
         EnemyState::Dying(1.0),
         EnemyState::Dying(-1.0),
+        EnemyState::Crouch(0.0),
+        EnemyState::Crouch(0.7),
+        EnemyState::Crouch(3.0),
+        EnemyState::Airborne(0.0),
+        EnemyState::Airborne(0.6),
+        EnemyState::Melt(0.0),
+        EnemyState::Melt(0.5),
+        EnemyState::Melt(1.0),
+        EnemyState::Reform(0.0),
+        EnemyState::Reform(0.6),
+        EnemyState::Reform(1.0),
     ];
     for kind in EnemyKind::ALL {
         for state in states {
@@ -402,6 +413,53 @@ fn enemy_poses_are_finite() {
                 }
             }
         }
+    }
+}
+
+/// The getting-there states (docs/enemies.md): a leap's crouch squashes every Mould down
+/// without lighting its attack telegraph, the flight stretches it, a melt sinks it into its
+/// puddle (flat at the bottom, as the server's sinking hit shapes), a re-form brings it back
+/// up, and the puddle is gone at both ends of the move between them.
+#[test]
+fn getting_there_states_squash_sink_and_rise() {
+    use super::enemies::{EnemyState as S, body_transform, melt_depth};
+    use crate::ingame::combat::enemy_fx::puddle_radius;
+    for kind in EnemyKind::ALL {
+        // The top of the drawn model.
+        let top = kind.height();
+        let height = |a: &EnemyAnim| body_transform(a).transform_point3(Vec3::Y * top).y;
+        let at = |state| EnemyAnim {
+            state,
+            ..EnemyAnim::new(kind)
+        };
+        assert!(height(&at(S::Crouch(1.0))) < top * 0.9, "{kind:?} crouches");
+        assert!(
+            height(&at(S::Airborne(0.0))) > top * 1.05,
+            "{kind:?} stretches"
+        );
+        assert!(
+            height(&at(S::Melt(1.0))) < 0.0,
+            "{kind:?} sank into its puddle"
+        );
+        assert!(
+            height(&at(S::Melt(0.4))) > top * 0.3,
+            "{kind:?} still shows"
+        );
+        assert!(
+            (height(&at(S::Reform(1.0))) - top).abs() < 1e-3,
+            "{kind:?} stands"
+        );
+        assert!(melt_depth(S::Melt(0.4)) < melt_depth(S::Melt(0.7)));
+        assert!(melt_depth(S::Reform(0.4)) > melt_depth(S::Reform(0.7)));
+        // A crouch is no telegraph: it glows like walking.
+        let calm = super::enemies::pose(&at(S::Walk)).glow;
+        let crouch = super::enemies::pose(&at(S::Crouch(0.9))).glow;
+        assert!((calm - crouch).abs().max_element() < 0.2, "{kind:?}");
+    }
+    for melt in [true, false] {
+        assert_eq!(puddle_radius(melt, 0.0, 1.0), 0.0);
+        assert!(puddle_radius(melt, 1.0, 1.0) < 1e-3);
+        assert!(puddle_radius(melt, 0.5, 1.0) > 1.0);
     }
 }
 

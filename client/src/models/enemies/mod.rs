@@ -21,6 +21,7 @@ pub mod gaoler;
 pub mod gnawer;
 pub mod harrier;
 pub mod heron;
+pub mod puddle;
 pub mod slag;
 pub mod smelter;
 pub mod snuffer;
@@ -152,6 +153,17 @@ impl EnemyKind {
             _ => 0.0,
         }
     }
+
+    /// The attack whose wind-up and strike pose a leap along the path (the crouch and the
+    /// flight): the Gnawer's pounce, the Snuffer's latching leap. Others crouch and fly with
+    /// [`body_transform`] alone.
+    pub fn leap_attack(self) -> Option<u8> {
+        match self {
+            EnemyKind::Gnawer => Some(gnawer::POUNCE),
+            EnemyKind::Snuffer => Some(snuffer::LATCH),
+            _ => None,
+        }
+    }
 }
 
 /// Animation state; progress values run 0..1 through the phase (the client divides elapsed
@@ -175,6 +187,26 @@ pub enum EnemyState {
     Latched,
     /// Death: slumps, splits and melts (progress over the corpse time).
     Dying(f32),
+    /// Crouching to leap along its path (progress through the crouch): a coil, without the
+    /// telegraph glow (it isn't an attack). Translated by [`pose`]; see [`body_transform`].
+    Crouch(f32),
+    /// In the air on a leap or a pad ride (progress through the planned flight).
+    Airborne(f32),
+    /// Stranded: slumping into a wax puddle (progress; [`melt_depth`]).
+    Melt(f32),
+    /// Rising out of the puddle where it re-formed (progress; [`melt_depth`]).
+    Reform(f32),
+}
+
+/// How far into its puddle a melting / re-forming Mould is drawn (0 standing … 1 only the
+/// puddle): the server's curve (`shared::sim::enemy::melt_depth`), which its hit shapes follow.
+pub fn melt_depth(state: EnemyState) -> f32 {
+    use shared::sim::AiState;
+    match state {
+        EnemyState::Melt(p) => shared::sim::enemy::melt_depth(AiState::Melt, p),
+        EnemyState::Reform(p) => shared::sim::enemy::melt_depth(AiState::Reform, p),
+        _ => 0.0,
+    }
 }
 
 /// Everything an enemy pose depends on.
@@ -225,18 +257,94 @@ impl EnemyAnim {
     }
 }
 
-/// Pose for any enemy.
+/// Pose for any enemy. The getting-there states are drawn with poses every Mould already has:
+/// a crouch with its leap attack's wind-up (the Gnawer's pounce coil, the Snuffer's bunched
+/// legs) or standing, a flight with that attack's strike or a mid-stride, a melt / re-form with
+/// its death slump (sunk as deep as [`melt_depth`]) — without the telegraph glow, which belongs
+/// to attacks. [`body_transform`] adds the squash, stretch and sink.
 pub fn pose(anim: &EnemyAnim) -> Pose {
-    match anim.kind {
-        EnemyKind::Gnawer => gnawer::pose(anim),
-        EnemyKind::Censer => censer::pose(anim),
-        EnemyKind::Harrier => harrier::pose(anim),
-        EnemyKind::Gaoler => gaoler::pose(anim),
-        EnemyKind::Heron => heron::pose(anim),
-        EnemyKind::Bellwether => bellwether::pose(anim),
-        EnemyKind::Snuffer => snuffer::pose(anim),
-        EnemyKind::Smelter => smelter::pose(anim),
-        EnemyKind::Effigy => effigy::pose(anim),
+    let mut a = *anim;
+    a.state = match anim.state {
+        EnemyState::Crouch(p) => match anim.kind.leap_attack() {
+            Some(i) => {
+                a.attack = i;
+                EnemyState::Windup(p)
+            }
+            None => EnemyState::Idle,
+        },
+        EnemyState::Airborne(_) => {
+            a.aim_pitch = 0.0;
+            match anim.kind.leap_attack() {
+                Some(i) => {
+                    a.attack = i;
+                    EnemyState::Attack(0.3)
+                }
+                None => {
+                    a.speed = a.speed.max(4.0);
+                    a.cycle = 0.3;
+                    EnemyState::Walk
+                }
+            }
+        }
+        EnemyState::Melt(_) | EnemyState::Reform(_) => {
+            EnemyState::Dying(0.85 * melt_depth(anim.state))
+        }
+        s => s,
+    };
+    let mut pose = match a.kind {
+        EnemyKind::Gnawer => gnawer::pose(&a),
+        EnemyKind::Censer => censer::pose(&a),
+        EnemyKind::Harrier => harrier::pose(&a),
+        EnemyKind::Gaoler => gaoler::pose(&a),
+        EnemyKind::Heron => heron::pose(&a),
+        EnemyKind::Bellwether => bellwether::pose(&a),
+        EnemyKind::Snuffer => snuffer::pose(&a),
+        EnemyKind::Smelter => smelter::pose(&a),
+        EnemyKind::Effigy => effigy::pose(&a),
+    };
+    if a.state != anim.state {
+        let glow = telegraph(anim.state, anim.time, 1.0);
+        pose.glow = gray(glow);
+        pose.core = gray(heat(anim.state, glow));
+    }
+    pose
+}
+
+/// The squash, stretch and sink the getting-there states put on the whole body (about the
+/// feet, in drawn metres: applied after the drawn scale), on top of its pose: a crouch
+/// squashes it down and out, a leap stretches it at takeoff and tilts it along its flight
+/// (`aim_pitch` = the flight's pitch), a melt sags it and sinks it down into its puddle (the
+/// floor hides what is below), a re-form the reverse — the same sink as the server's hit
+/// shapes (`Enemy::hitbox`, `shared::sim::enemy::{MELT_SINK, MELT_SAG}`).
+pub fn body_transform(anim: &EnemyAnim) -> Mat4 {
+    match anim.state {
+        EnemyState::Crouch(p) => {
+            let e = smoothstep(p / 0.8);
+            Mat4::from_scale(Vec3::new(1.0 + 0.08 * e, 1.0 - 0.16 * e, 1.0 + 0.08 * e))
+        }
+        EnemyState::Airborne(p) => {
+            let stretch = 1.0 + 0.1 * (1.0 - smoothstep(p * 2.5));
+            let thin = 1.0 / stretch.sqrt();
+            let pivot = Vec3::Y * (anim.kind.height() * 0.5);
+            let tilt = if anim.kind == EnemyKind::Harrier {
+                0.0
+            } else {
+                0.6 * anim.aim_pitch.clamp(-0.9, 0.9)
+            };
+            Mat4::from_translation(pivot)
+                * Mat4::from_rotation_x(tilt)
+                * Mat4::from_translation(-pivot)
+                * Mat4::from_scale(Vec3::new(thin, stretch, thin))
+        }
+        EnemyState::Melt(_) | EnemyState::Reform(_) => {
+            let d = melt_depth(anim.state);
+            let sag = 1.0 - shared::sim::enemy::MELT_SAG * d;
+            let spread = 1.0 + 0.25 * d;
+            let sink = shared::sim::enemy::MELT_SINK * d * anim.kind.height();
+            Mat4::from_translation(Vec3::NEG_Y * sink)
+                * Mat4::from_scale(Vec3::new(spread, sag, spread))
+        }
+        _ => Mat4::IDENTITY,
     }
 }
 
@@ -278,7 +386,13 @@ pub(crate) fn rz(a: f32) -> Quat {
 /// glow starts strobing).
 pub(crate) fn telegraph(state: EnemyState, time: f64, flicker_from: f32) -> f32 {
     match state {
-        EnemyState::Idle | EnemyState::Walk => 0.45 + 0.1 * wave(time, 0.7, 0.0),
+        EnemyState::Idle | EnemyState::Walk | EnemyState::Crouch(_) | EnemyState::Airborne(_) => {
+            0.45 + 0.1 * wave(time, 0.7, 0.0)
+        }
+        // The heat sinks into the floor with the body.
+        EnemyState::Melt(_) | EnemyState::Reform(_) => {
+            (0.45 + 0.1 * wave(time, 0.7, 0.0)) * (1.0 - melt_depth(state))
+        }
         EnemyState::Windup(p) => {
             let p = p.clamp(0.0, 1.0);
             let ramp = 0.6 + 1.9 * p;
@@ -302,6 +416,8 @@ pub(crate) fn heat(state: EnemyState, glow: f32) -> f32 {
     match state {
         EnemyState::Dying(p) => 1.6 * (1.0 - smoothstep(p * 1.4)),
         EnemyState::Stunned => 0.7,
+        // Still shootable while it sinks: the weak points glow on down into the puddle.
+        EnemyState::Melt(_) | EnemyState::Reform(_) => 1.15 * (1.0 - 0.6 * melt_depth(state)),
         _ => glow.max(1.15),
     }
 }

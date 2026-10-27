@@ -763,6 +763,11 @@ pub fn pose(a: &EnemyAnim) -> Pose {
             legs = [(1.4 * e, -2.0 * e), (1.2 * e, -1.9 * e)];
         }
         EnemyState::Idle | EnemyState::Walk | EnemyState::Latched => {}
+        // (Translated into the states above by `enemies::pose`.)
+        EnemyState::Crouch(_)
+        | EnemyState::Airborne(_)
+        | EnemyState::Melt(_)
+        | EnemyState::Reform(_) => {}
         // Telegraphs of other attacks fall back on the bash.
         EnemyState::Windup(_) | EnemyState::Attack(_) => {}
     }

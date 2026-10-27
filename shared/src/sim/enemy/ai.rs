@@ -219,7 +219,7 @@ impl SimWorld {
         let ms = grid.stats.build_ms;
         let s = &grid.stats;
         log::info!(
-            "nav grid for '{}': {}x{} columns, {} floors ({} walkable, {} large, {} hazard, {} deadly), {} links, {:.1} ms",
+            "nav grid for '{}': {}x{} columns, {} floors ({} walkable, {} large, {} hazard, {} deadly), {} links, {} leaps, {} pad rides, {:.1} ms",
             self.level_name,
             grid.nx,
             grid.nz,
@@ -229,10 +229,25 @@ impl SimWorld {
             s.hazard,
             s.deadly,
             s.links,
+            s.leaps,
+            s.pad_links,
             ms
         );
         self.ai.nav = Some(std::sync::Arc::new(grid));
         ms
+    }
+
+    /// Dev (`/melt`): every living ground Mould that can melt does so on its next chasing tick,
+    /// stranded or not, and re-forms near its target. Returns how many will.
+    pub fn melt_enemies(&mut self) -> usize {
+        let mut n = 0;
+        for e in self.enemies.values_mut() {
+            if e.is_alive() && !e.is_flying() && !e.is_dummy() && e.def.melt.after > 0.0 {
+                e.melt_now = true;
+                n += 1;
+            }
+        }
+        n
     }
 
     /// Runs every enemy's AI and movement for one tick.
@@ -462,6 +477,11 @@ impl SimWorld {
             }
             AiState::Chase => match target {
                 None => e.set_state(AiState::Idle, 0),
+                // Dev `/melt`: now, whatever it was about to do.
+                Some(tp) if e.melt_now => {
+                    face = Some(tp.position);
+                    self.begin_melt(e, &tp, cx);
+                }
                 Some(tp) => {
                     face = Some(tp.position);
                     let mut chosen = self.choose_attack(e, &tp, cx);
@@ -1091,6 +1111,7 @@ impl SimWorld {
             return;
         }
         cx.searches_left -= 1;
+        e.melt_now = false;
         let Some(nav) = cx.nav.clone() else {
             return;
         };

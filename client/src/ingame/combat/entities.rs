@@ -77,15 +77,25 @@ pub fn enemy_anim(e: &EntityState, cycle: f32, time: f64) -> EnemyAnim {
         Some(AiState::Stunned) => EnemyState::Stunned,
         Some(AiState::Latched) => EnemyState::Latched,
         Some(AiState::Dying) => EnemyState::Dying(progress),
+        // A jump on its path: crouched on the ground, then in the air.
+        Some(AiState::Leap) if e.flags & enemy_flags::AIRBORNE != 0 => {
+            EnemyState::Airborne(progress)
+        }
+        Some(AiState::Leap) => EnemyState::Crouch(progress),
+        Some(AiState::Melt) => EnemyState::Melt(progress),
+        Some(AiState::Reform) => EnemyState::Reform(progress),
         _ if speed > 0.2 => EnemyState::Walk,
         _ => EnemyState::Idle,
     };
     let fwd = shared::input::look_dir(e.yaw, 0.0);
     let right = Vec3::new(-fwd.z, 0.0, fwd.x);
-    // Heads aim with the replicated laser pitch; a diving Harrier points down its dive.
+    // Heads aim with the replicated laser pitch; a diving Harrier points down its dive, a
+    // leaping Mould its flight.
     let aim_pitch = if e.flags & enemy_flags::AIMING != 0 {
         e.pitch
-    } else if k == EnemyKind::Harrier && state == EnemyState::Attack(progress) {
+    } else if (k == EnemyKind::Harrier && state == EnemyState::Attack(progress))
+        || matches!(state, EnemyState::Airborne(_))
+    {
         e.velocity.y.atan2(speed.max(1e-3))
     } else {
         0.0
@@ -155,6 +165,10 @@ struct EnemyVis {
     laser: Option<(Vec3, Vec3, bool)>,
     /// Frenzy / elite / latch effects state.
     extra: enemy_fx::ExtraVis,
+    /// In the air on a leap last frame (takeoff / landing dust), and seconds to the next steam
+    /// puff while melting or rising.
+    airborne: bool,
+    steam: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -374,7 +388,7 @@ impl EntityView {
             if kind::is_enemy_hazard(e.kind) {
                 self.slag.update(e, f.world, dt, effects, audio, rng);
             } else if kind::is_enemy(e.kind) {
-                self.update_enemy(e, f, dt, effects, audio, rng);
+                self.update_enemy(e, f, dt, effects, audio, rng, beams);
             } else if e.kind == kind::EMBER_BURST {
                 let v = self.embers.entry(e.id).or_default();
                 let first = !v.seen && v.puff == 0.0;
@@ -438,6 +452,7 @@ impl EntityView {
         self.slag.end();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_enemy(
         &mut self,
         e: &EntityState,
@@ -446,6 +461,7 @@ impl EntityView {
         effects: &mut Effects,
         audio: &mut Audio,
         rng: &mut Rng,
+        beams: &mut Beams,
     ) {
         let k = enemy_kind(e.kind);
         let height = k.height();
@@ -608,6 +624,53 @@ impl EntityView {
         {
             audio.play(Sfx::GaolerStep, PlayParams::at(e.position));
             effects.dust(e.position, 3, 1.2);
+        }
+        // Getting there: dust where a leap takes off and lands; a melt slops wax out and
+        // steams, the puddle where it re-forms bubbles up and it rises with a splash ring.
+        let size = enemy_size(e.kind).0;
+        let airborne = state == Some(AiState::Leap) && e.flags & enemy_flags::AIRBORNE != 0;
+        let heavy = matches!(k, EnemyKind::Gaoler | EnemyKind::Smelter);
+        let pitch = (1.1 / size.max(0.4)).clamp(0.6, 1.4);
+        if airborne && !v.airborne {
+            enemy_fx::leap_dust(effects, rng, e.position, size);
+            audio.play(
+                Sfx::Jump,
+                PlayParams::at(e.position)
+                    .with_pitch(pitch * 0.7)
+                    .with_volume(0.8),
+            );
+        }
+        if v.airborne && !airborne && !dying && e.flags & enemy_flags::AIRBORNE == 0 {
+            enemy_fx::leap_dust(effects, rng, e.position, size * 1.2);
+            let land = if heavy { Sfx::HeavyLand } else { Sfx::Land };
+            audio.play(land, PlayParams::at(e.position).with_pitch(pitch * 0.8));
+        }
+        v.airborne = airborne && !dying;
+        if entered(AiState::Melt) {
+            enemy_fx::melt_burst(effects, rng, e.position, size, wax);
+            audio.play(Sfx::MouldMelt, PlayParams::at(center).with_pitch(pitch));
+        }
+        if entered(AiState::Reform) {
+            enemy_fx::rise_burst(effects, rng, e.position, size, wax);
+            audio.play(Sfx::MouldRise, PlayParams::at(e.position).with_pitch(pitch));
+        }
+        if v.state == AiState::Reform as u16 && state != Some(AiState::Reform) && !dying {
+            beams.ring(
+                e.position + Vec3::Y * 0.08,
+                Vec3::Y,
+                size * 0.8,
+                size * 2.6,
+                0.08,
+                wax * Vec4::new(1.2, 1.2, 1.2, 0.8),
+                0.4,
+            );
+        }
+        if matches!(state, Some(AiState::Melt | AiState::Reform)) {
+            v.steam -= dt;
+            if v.steam <= 0.0 {
+                v.steam = rng.range(0.08, 0.18);
+                enemy_fx::melt_steam(effects, rng, e.position, size);
+            }
         }
         let frame = enemy_fx::ExtraFrame {
             center,
@@ -877,6 +940,13 @@ impl EntityView {
                     EnemyAnim::root(e.position + root_offset(e.kind), e.yaw)
                 };
                 lib.draw_enemy(&anim, root, &tint, draws);
+                // The puddle it melts into / rises out of.
+                if let EnemyState::Melt(p) | EnemyState::Reform(p) = anim.state {
+                    let melt = matches!(anim.state, EnemyState::Melt(_));
+                    let size = enemy_size(e.kind).0;
+                    let r = enemy_fx::puddle_radius(melt, p, size);
+                    enemy_fx::draw_puddle(lib, e, r, draws);
+                }
                 if let Some((scale, shell)) = enemy_fx::elite_shell(e, time) {
                     let pivot = Vec3::Y * (enemy_kind(e.kind).height() * 0.5);
                     let grow = Mat4::from_translation(pivot)

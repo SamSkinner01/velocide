@@ -16,10 +16,16 @@
 //! goes down and watches the other fight a Gnawer pack from their eyes, then from the chase
 //! camera.
 //!
+//! Getting there (docs/enemies.md "Leaps, pads, melting"): Gnawers crouching and leaping up
+//! onto a block and over the Drowned Chandlery's water onto a floe, and every ground Mould
+//! melting into a wax puddle and rising out of a new one.
+//!
 //! ```text
 //! cargo run -p client --release --example enemy_shots -- [out_dir] [--third] [--spectate]
+//!     [--getting-there]
 //! # default out_dir target/enemy_shots; --third: only the third roster (Bellwether, Snuffer,
-//! # Smelter, Effigy, elites); --spectate: only spectating
+//! # Smelter, Effigy, elites); --spectate: only spectating; --getting-there: only the leaps
+//! # and the melting
 //! ```
 
 use std::path::PathBuf;
@@ -591,6 +597,141 @@ fn spectating(h: &mut Harness) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Progress (0..1) of a replicated enemy's timed state.
+fn progress(e: &EntityState) -> f32 {
+    (e.aux & 0xFF) as f32 / 255.0
+}
+
+fn in_state(e: &EntityState, s: AiState) -> bool {
+    e.state == s as u16 && e.flags & enemy_flags::DYING == 0
+}
+
+/// Frames (the camera left where it is) until some living enemy satisfies `pred`.
+fn wait_for(
+    h: &mut Harness,
+    game: &mut InGame,
+    max: usize,
+    pred: impl Fn(&EntityState) -> bool,
+) -> bool {
+    for _ in 0..max {
+        game.controls.override_move = Some(h.moving);
+        h.frame(game);
+        if game.net().is_some_and(|n| {
+            n.remote_entities()
+                .iter()
+                .any(|e| kind::is_enemy(e.kind) && pred(e))
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Getting there (docs/enemies.md "Leaps, pads, melting"): Gnawers leaping up onto the 3 m
+/// block the player stands on (in the air, landed; their crouch at its foot is out of sight
+/// from up there: `over_the_water` shows one); a lineup of every ground Mould melting into
+/// puddles (`/melt`) and rising out of new ones near the player (from the arena's corner, so
+/// wherever they rise is in view).
+fn getting_there(h: &mut Harness, game: &mut InGame) {
+    // Leaps: the 3 m block (24..30, 24..30); Gnawers spawned on the floor west of it.
+    game.controls.yaw = 90f32.to_radians();
+    game.controls.pitch = 0.0;
+    cmd(h, game, "/tp 28.5 3 27");
+    cmd(h, game, "/spawn gnawer 2");
+    let leap = |e: &EntityState, up: bool, p: f32| {
+        e.kind == kind::GNAWER
+            && in_state(e, AiState::Leap)
+            && (e.flags & enemy_flags::AIRBORNE != 0) == up
+            && progress(e) >= p
+    };
+    let ok = h.until(game, kind::GNAWER, 900, |e| leap(e, true, 0.3));
+    println!("leap airborne: {ok}");
+    h.shot("leap_airborne");
+    h.frames(game, 30);
+    h.shot("leap_landed");
+    clear(h, game);
+
+    // Melting and re-forming: a fan of every ground Mould in front of the player (nobody
+    // targets them while they are placed), then `/melt`.
+    cmd(h, game, "/notarget");
+    cmd(h, game, "/tp 56 0 56");
+    let names = [
+        "gnawer",
+        "censer",
+        "gaoler",
+        "heron",
+        "bellwether",
+        "snuffer",
+        "smelter",
+    ];
+    for (i, name) in names.iter().enumerate() {
+        game.controls.yaw = (15.0 + 10.0 * i as f32).to_radians();
+        game.controls.pitch = 0.0;
+        h.frames(game, 2);
+        cmd(h, game, &format!("/spawn {name}"));
+    }
+    game.controls.yaw = 45f32.to_radians();
+    game.controls.pitch = -0.12;
+    game.send_chat("/notarget");
+    h.frames(game, 2);
+    game.send_chat("/melt");
+    let ok = wait_for(h, game, 120, |e| {
+        in_state(e, AiState::Melt) && progress(e) > 0.4
+    });
+    println!("melt slump: {ok}");
+    h.shot("melt_slump");
+    let ok = wait_for(h, game, 60, |e| {
+        in_state(e, AiState::Melt) && progress(e) > 0.75
+    });
+    println!("melt puddle: {ok}");
+    h.shot("melt_puddle");
+    let ok = wait_for(h, game, 120, |e| {
+        in_state(e, AiState::Reform) && progress(e) > 0.2
+    });
+    println!("reform puddle: {ok}");
+    h.shot("reform_puddle");
+    let ok = wait_for(h, game, 60, |e| {
+        in_state(e, AiState::Reform) && progress(e) > 0.6
+    });
+    println!("reform rising: {ok}");
+    h.shot("reform_rising");
+    h.frames(game, 40);
+    h.shot("reform_risen");
+    clear(h, game);
+}
+
+/// Over the water (The Drowned Chandlery): the player out on a wax floe in the Wax Press's
+/// drowned third, Gnawers crouching at the water's edge, in the air over the water, landing on
+/// the floe.
+fn over_the_water(h: &mut Harness) -> anyhow::Result<()> {
+    let mut owned = session(h, "drowned_chandlery")?;
+    let game = &mut owned;
+    // Spawn them on the press floor (8 m east of where we stand), then step onto the floe.
+    game.controls.yaw = (-90f32).to_radians();
+    game.controls.pitch = 0.0;
+    cmd(h, game, "/notarget");
+    cmd(h, game, "/tp -36 11 -28");
+    cmd(h, game, "/spawn gnawer 2");
+    cmd(h, game, "/tp -45.5 11.3 -27.5");
+    cmd(h, game, "/notarget");
+    let leap = |e: &EntityState, up: bool, p: f32| {
+        e.kind == kind::GNAWER
+            && in_state(e, AiState::Leap)
+            && (e.flags & enemy_flags::AIRBORNE != 0) == up
+            && progress(e) >= p
+    };
+    let ok = h.until(game, kind::GNAWER, 900, |e| leap(e, false, 0.5));
+    println!("water's edge crouch: {ok}");
+    h.shot("water_leap_crouch");
+    let ok = h.until(game, kind::GNAWER, 120, |e| leap(e, true, 0.4));
+    println!("over the water: {ok}");
+    h.shot("water_leap_airborne");
+    h.frames(game, 25);
+    h.shot("water_leap_floe");
+    owned.shutdown(&mut h.renderer, &mut h.common);
+    Ok(())
+}
+
 fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
     let mut game = InGame::start(
         &StartMode::SinglePlayer {
@@ -621,6 +762,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("target/enemy_shots"));
     let only_third = std::env::args().any(|a| a == "--third");
     let only_spectate = std::env::args().any(|a| a == "--spectate");
+    let only_getting_there = std::env::args().any(|a| a == "--getting-there");
     std::fs::create_dir_all(&out)?;
     let renderer = Renderer::new_headless(W, H, &RetroSettings::default())?;
     let scratch = std::env::temp_dir().join("velocide-enemy-shots-settings.ron");
@@ -650,6 +792,11 @@ fn main() -> anyhow::Result<()> {
         third_roster(&mut h, &mut game);
         game.shutdown(&mut h.renderer, &mut h.common);
         return Ok(());
+    }
+    if only_getting_there {
+        getting_there(&mut h, &mut game);
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return over_the_water(&mut h);
     }
 
     // Gnawers: the pack comes knuckle-running, the jaw unhinges, the bite; then the player
@@ -857,7 +1004,10 @@ fn main() -> anyhow::Result<()> {
     h.shot("mixed_crowd_killed");
     h.frames(&mut game, 30);
     h.shot("mixed_crowd_melting");
+    clear(&mut h, &mut game);
+    getting_there(&mut h, &mut game);
     game.shutdown(&mut h.renderer, &mut h.common);
+    over_the_water(&mut h)?;
 
     // ---- Campaign: an arena encounter (Crucible Heart: the gaoler on the island). ----
     let mut game = session(&mut h, "crucible_of_veins")?;
