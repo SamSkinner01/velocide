@@ -132,7 +132,7 @@ Kill hitstop 0.045 → 0.06 s.
 
 ## The Longwick
 
-* **Placement**: drawn at 0.72× → 0.8× of the common viewmodel scale (`VIEW_SCALE` 0.8),
+* **Placement**: drawn at 0.8× the common viewmodel scale (`VIEW_SCALE`),
   held low on the left (`VIEW_OFFSET` (−0.14, −0.14, −0.42)), canted 0.62 rad about the arrow's
   own axis so the upper limb leans left, away from the crosshair, and the lower one runs off
   the bottom of the screen; turned so the arrow points at the crosshair. Drawing brings it up
