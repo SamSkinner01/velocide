@@ -11,6 +11,7 @@ use client::net::{ClientConfig, NetClient, NetSimConfig};
 use engine::time::FixedTimestep;
 use server::{Server, ServerConfig};
 use shared::input::{Buttons, PlayerInput};
+use shared::loadout::{Ability, Loadout, WeaponKind};
 use shared::protocol::Fx;
 use shared::sim::{FireIntent, Knack};
 
@@ -160,6 +161,71 @@ fn weapon_prediction_matches_the_server() {
             .any(|i| matches!(i, FireIntent::Ability { charge, .. } if *charge > 0.0)),
         "a charged Discharge"
     );
+}
+
+#[test]
+fn melee_and_knack_prediction_matches_the_server() {
+    let mut s = server();
+    let mut cs = vec![client(&s, 50.0, 4)];
+    run(&mut s, &mut cs, 2.0, &|_, _| Some(PlayerInput::default()));
+    assert!(cs[0].net.is_in_game());
+    // Both melee weapons and the Snare (a server-side change: one re-base, then none).
+    let id = cs[0].net.local_player_id().unwrap();
+    let loadout = Loadout {
+        slots: [
+            Some(WeaponKind::Trimmer.default_build()),
+            Some(WeaponKind::Tamper.default_build()),
+            None,
+            None,
+        ],
+        knack: Knack::Snare,
+    };
+    s.world_mut().force_loadout(id, Some(loadout));
+    run(&mut s, &mut cs, 1.0, &|_, _| Some(PlayerInput::default()));
+    let settled = cs[0].predictor.mismatches;
+    cs[0].intents.clear();
+    run(&mut s, &mut cs, 6.0, &|_, t| {
+        let mut inp = PlayerInput {
+            yaw: t as f32 * 0.01,
+            pitch: -0.3,
+            weapon: ((t / 80) % 2) as u8,
+            weapon_mode: ((t / 160) % 2) as u8,
+            ..Default::default()
+        };
+        inp.buttons.set(Buttons::FIRE, t % 30 < 18);
+        inp.buttons.set(Buttons::ALT_FIRE, t % 50 > 40);
+        inp.buttons.set(Buttons::THROW, t % 120 == 7);
+        inp.buttons.set(Buttons::PUNCH, t.is_multiple_of(41));
+        Some(inp)
+    });
+    run(&mut s, &mut cs, 1.0, &|_, _| None);
+    let c = &mut cs[0];
+    c.predictor.sync(&c.net);
+    let server_weapons = s.world().players[&id].combat.weapons;
+    assert_eq!(server_weapons.loadout, loadout);
+    assert_eq!(*c.predictor.state(), server_weapons, "prediction == server");
+    assert_eq!(
+        c.predictor.mismatches, settled,
+        "prediction never disagreed"
+    );
+    let fired = |want: &dyn Fn(&FireIntent) -> bool| c.intents.iter().any(want);
+    for weapon in [WeaponKind::Trimmer, WeaponKind::Tamper] {
+        assert!(fired(
+            &|i| matches!(i, FireIntent::Primary { weapon: w, .. } if *w == weapon)
+        ));
+    }
+    for ability in [
+        Ability::Lunge,
+        Ability::Hurl,
+        Ability::Whirl,
+        Ability::Upswing,
+    ] {
+        assert!(
+            fired(&|i| matches!(i, FireIntent::Ability { ability: a, .. } if *a == ability)),
+            "{ability:?}"
+        );
+    }
+    assert!(fired(&|i| *i == FireIntent::Knack(Knack::Snare)));
 }
 
 #[test]

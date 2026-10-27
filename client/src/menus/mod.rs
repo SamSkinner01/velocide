@@ -10,6 +10,8 @@ pub mod backdrop;
 pub mod customize;
 /// The LOADOUT screen (the arsenal: weapons per slot, abilities, presets).
 pub mod loadout;
+/// What the LOADOUT screen says about each weapon and ability, and their numbers.
+pub mod loadout_text;
 pub mod lobby;
 pub mod main_menu;
 /// End-of-match results screens (campaign tally / co-op table / deathmatch standings).

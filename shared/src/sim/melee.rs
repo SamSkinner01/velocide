@@ -2,9 +2,10 @@
 //! (Lunge, Whirl, Hurl, Upswing), docs/arsenal.md "Melee".
 //!
 //! **Swings** (the primaries, the Upswing) hit the hostiles inside an arc in front of the eye
-//! (`reach` from the eye, `arc_degrees` full aperture: along the aim, or the nearest surface
-//! within reach with the centre inside the arc), as the swinger saw them (lag compensation,
-//! like hitscan), with hit assist and line of sight from the eye. Melee ignores weak points
+//! ([`in_arc`]: a (padded) shape whose surface is within `reach` of the eye and that the
+//! `arc_degrees` cone around the aim touches — so a low Mould right at your feet is in it even
+//! while you look ahead), as the swinger saw them (lag compensation, like hitscan), with hit
+//! assist and line of sight from the eye. Melee ignores weak points
 //! (no headshots): a blade or a hammer is aimed at the whole body, and the arc already
 //! forgives where a ray would not. The Trimmer hits up to `max_targets`, nearest first, and
 //! its swing deflects the parryable hostile projectiles in its arc like a punch parry (same
@@ -12,7 +13,8 @@
 //!
 //! The abilities hit for a multiple of the carrier's primary damage (`damage_scale`):
 //!
-//! * **Lunge**: an impulse along the aim (mostly horizontal); for `lunge.window` the first
+//! * **Lunge**: an impulse along the aim (mostly horizontal, lifted off the ground so it
+//!   glides); for `lunge.window` the first
 //!   hostile the lunging body comes within `lunge.reach` of is struck ([`SimEvent::LungeStruck`]).
 //!   It tests the current hit shapes each tick (like projectiles: the body is really there).
 //! * **Whirl**: everything within `whirl.radius` of the body (lag-compensated), knocked
@@ -29,10 +31,9 @@ use std::collections::BTreeMap;
 use engine::physics::MASK_SHOTS;
 use glam::Vec3;
 
-use super::area::in_cone;
 use super::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
 use super::projectiles::ProjectileKind;
-use super::{HitPart, HitTarget, HitboxHistory, PlayerId, SimEvent, SimWorld};
+use super::{HitPads, HitPart, HitTarget, Hitbox, HitboxHistory, PlayerId, SimEvent, SimWorld};
 use crate::input::PlayerInput;
 use crate::loadout::{Ability, WeaponKind};
 use crate::tuning::{CombatTuning, Tuning};
@@ -74,6 +75,50 @@ impl WeaponKind {
             _ => (t.trimmer.reach, t.trimmer.arc_degrees),
         }
     }
+}
+
+/// Is `h` inside a swing from `eye` along `aim` (`reach`, half aperture `half_arc` radians)?
+/// Along the aim within reach; or one of its shapes (inflated by `pads`) has its surface within
+/// reach and the cone touches it: the angle from the aim to the point of the shape's axis
+/// nearest the eye, less the angle the shape's radius covers from there. Returns the surface
+/// distance and the point struck.
+pub fn in_arc(
+    h: &Hitbox,
+    pads: HitPads,
+    eye: Vec3,
+    aim: Vec3,
+    reach: f32,
+    half_arc: f32,
+) -> Option<(f32, Vec3)> {
+    if let Some((d, _)) = h.ray_hit_padded(eye, aim, reach, pads) {
+        return Some((d, eye + aim * d));
+    }
+    h.shapes
+        .iter()
+        .filter_map(|s| {
+            let radius = s.radius + pads.for_part(s.part).max(0.0);
+            let ab = s.b - s.a;
+            let along = if ab.length_squared() < 1e-12 {
+                0.0
+            } else {
+                ((eye - s.a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
+            };
+            let nearest = s.a + ab * along;
+            let to = nearest - eye;
+            let d = to.length();
+            let surface = (d - radius).max(0.0);
+            if surface > reach {
+                return None;
+            }
+            let covers = if d > radius {
+                (radius / d).asin()
+            } else {
+                std::f32::consts::PI
+            };
+            let angle = to.normalize_or(aim).angle_between(aim);
+            (angle - covers <= half_arc).then_some((surface, nearest))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
 }
 
 /// Melee damage by player `id`: `amount` as `attack`, struck at `point` along `dir` (on the
@@ -124,7 +169,7 @@ impl SimWorld {
             .filter(|h| self.can_hit(me, h.target))
             .filter_map(|h| {
                 let pads = self.hit_pads(t, me, h.target);
-                let (d, _, point) = in_cone(h, pads, eye, aim, reach, half_arc)?;
+                let (d, point) = in_arc(h, pads, eye, aim, reach, half_arc)?;
                 (!world.line_blocked(eye, point, MASK_SHOTS)).then_some((d, h.target, point))
             })
             .collect();
@@ -196,6 +241,11 @@ impl SimWorld {
                 let l = &c.lunge;
                 let dir = Vec3::new(aim.x, aim.y * l.vertical, aim.z).normalize_or(aim);
                 self.apply_impulse(id, dir * l.speed);
+                // Off the ground (a hop, not stacked on a jump): ground friction would stop it.
+                if let Some(p) = self.players.get_mut(&id) {
+                    let v = &mut p.movement.velocity;
+                    v.y = v.y.max(l.lift);
+                }
                 let until = self.tick + secs_to_ticks(l.window, self.tick_rate, 1) as u32;
                 self.melee.lunges.insert(
                     id,

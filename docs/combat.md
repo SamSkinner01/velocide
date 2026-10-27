@@ -79,7 +79,7 @@ keeps the plain shapes; hit assist pads them at test time.
 `primary_cooldown[4]`, `alt_cooldown[4]` (ticks, per slot: switching mid-combo is free; the two
 abilities of a build share its alt cooldown), `charge` (Discharge / Skewer ticks held), `draw`
 (Longwick), `armed` (the bow's armed ability), `bloom` (Lancet), `burst` (salvo / Flurry in
-progress), `punch_cooldown`, `parry` (window ticks left), `thorns_used` + `thorn_recharge`.
+progress), `punch_cooldown`, `parry` (window ticks left), `knack_used` + `knack_recharge` (the Q slot's knack, `docs/arsenal.md`; were the thorns').
 
 **Input mapping.** `PlayerInput::weapon` = slot of the loadout (empty slots and other values
 keep the current weapon); `weapon_mode` 0/1 (others → 0); switching weapon or mode is instant
@@ -438,7 +438,7 @@ block each other (player movement must stay predictable).
 
 | kind | owner | position / velocity | yaw | flags | state | health | aux |
 |---|---|---|---|---|---|---|---|
-| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BURNING 1<<12, PINNED 1<<13, DRAWING 1<<14, BRANDED 1<<15` | held weapon, selected ability, charge / draw: `protocol::player_weapon(state)` (`docs/arsenal.md`) | health (ceil) | hard (bits 0–7) \| thorn charges (8–11) \| wall-cling yaw (16–31) |
+| `PLAYER` 0 | player id | feet / velocity | view | `LOW_PROFILE 1, INVULNERABLE 2, DEAD 4, PARRY 8, CHARGING 16, PROTECTED 32, DOWNED 64, …, BURNING 1<<12, PINNED 1<<13, DRAWING 1<<14, BRANDED 1<<15` | held weapon, selected ability, charge / draw: `protocol::player_weapon(state)` (`docs/arsenal.md`) | health (ceil) | hard (bits 0–7) \| knack charges (8–11) \| wall-cling yaw (16–31) |
 | enemies 16..64 | target player or `OWNER_NONE` | feet / velocity (¼ m/s steps) | facing (~0.7° steps; exact while `AIMING`), pitch = the laser's aim pitch while `AIMING` | `ALERT 1, PARRYABLE 2, STUNNED 4, DYING 8, AIRBORNE 16, ARMOURED 32, AIMING 64, AIM_LOCKED 128` (6–12 enemies area), `BURNING 1<<13`, `PINNED 1<<14`, `BRANDED 1<<15` | `AiState` (Idle 0, Alert 1, Chase 2, Windup 3, Strike 4, Recover 5, Stunned 6, Dying 7) | health (ceil) | progress through the timed state 0–255 (0–7) \| attack index (8–15) \| max health (16–31) |
 | projectiles 64..128 | shooter id, `OWNER_ENEMY` (0xFFFE), `OWNER_NONE` | **at launch tick** | – | `PARRIED 1, STUCK 2, PENDING 4, ENEMY 8` | bounces left | – | launch tick |
 | `EMBER_BURST` 128 | – | burst centre | – | `BIG 1` | radius (dm) | pool left (ceil) | spawn tick |
