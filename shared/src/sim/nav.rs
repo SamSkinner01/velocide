@@ -103,7 +103,7 @@ pub const PAD_COST: f32 = 3.0;
 /// Leap rays per edge node (every 22.5°; only those within ~25° of a missing walking link).
 const LEAP_RAYS: u32 = 16;
 /// Candidate landings swept per ray before giving up on it.
-const LEAP_TRIES: u32 = 3;
+const LEAP_TRIES: u32 = 2;
 /// The swept clearance capsules ride this far above the feet's arc (kerbs and lips at either
 /// end don't count; collide-and-slide steps over them).
 const ARC_LIFT: f32 = 0.25;
@@ -1222,10 +1222,10 @@ impl NavGrid {
         h: f32,
         stats: &mut NavStats,
     ) -> Option<u8> {
-        // Chords of ~2 m: they sag less than 5 cm from the parabola.
+        // Chords of ~3 m: below the parabola by at most ~10 cm (the capsule rides 0.25 m up).
         let apex = leap_apex(from, to);
         let length = flat_distance(from, to) + (apex - from.y) + (apex - to.y);
-        let n = ((length / 2.0).ceil() as u32).clamp(4, 12);
+        let n = ((length / 3.0).ceil() as u32).clamp(3, 10);
         let half = (h * 0.5 - r).max(0.0);
         let lift = Vec3::Y * (ARC_LIFT + h * 0.5);
         let mut door = 0u8;

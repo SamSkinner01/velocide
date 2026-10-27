@@ -99,7 +99,11 @@ re-theme say `flesh` / `bone`; those names still load as `wax` / `waxstone`.
 Deep water (the Drowned Chandlery) uses the same contract: water snuffs a Shrike's wick. A
 flooded pit is a dark bed (`panel`), a translucent `glass` surface with no collision, and a kill
 volume from the bed to 10 cm over the surface (every floor round it is ≥ 0.5 m above the
-surface). Ankle-deep shallows are decoration only (a `glass` film on the floor).
+surface). Ankle-deep shallows are decoration only (a `glass` film on the floor). Moulds treat
+deep water like lava: they never walk into it, a Mould knocked into it is quenched, and they
+leap over it (across the breaks, onto the floes) along the nav grid's leap links; they don't
+wade — every pool is a sheer-sided pit 2.4–6.4 m deep, over the heads of nearly all of them
+(`docs/enemies.md` "Leaps, pads, melting"). The level format has no liquid kinds.
 
 ## Grind spawns and Mould gates
 
@@ -995,7 +999,9 @@ code):
 - **Cylinders / round brushes** for bells, moulds and pillars (the Spire's bells are stepped
   boxes).
 - **Per-spawn co-op spread** (`spread: f32` or "no copies") for enemies on narrow ledges.
-- **Nav hints / links** for AI across jump pads. Walking enemies can't use pads, so the
-  pad-only ledges (Crucible's R3 tiers, R4 corner platforms, R5 galleries; the Spire's hoist
-  cages) only ever hold the censers that spawn there; herons always stand on ledges with ramps
-  (R2's mezzanine, R5's dais, the Spire's rood loft and galleries) so they can walk down.
+
+No longer wished for: **nav links across jump pads and gaps**. The nav grid now links them on
+its own (`docs/enemies.md` "Navigation grid": leaps off every edge, a ride per pad, built from
+the level as it is), so ground Moulds leap gaps and ledges and ride pads up to the pad-only
+ledges (Crucible's R3 tiers, R4 corner platforms, R5 galleries; the Spire's hoist cages); a
+Mould still stranded melts and re-forms near its target. Levels need no hints.

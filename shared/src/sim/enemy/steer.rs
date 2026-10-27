@@ -30,7 +30,8 @@ use crate::sim::nav::{
 /// A* searches allowed per tick (all enemies together); the rest keep their old path one more
 /// tick. Straight-line checks are not budgeted (cheap).
 pub const PATHS_PER_TICK: u32 = 4;
-/// Re-form, vantage and detour searches allowed per tick (all enemies together).
+/// Re-form and vantage searches allowed per tick (all enemies together; a flyer's detour
+/// search is throttled per flyer instead).
 pub const SEARCHES_PER_TICK: u32 = 1;
 /// Node expansions per A* search before it gives up with a partial path.
 pub const MAX_EXPAND: usize = 3000;
@@ -38,7 +39,7 @@ pub const MAX_EXPAND: usize = 3000;
 const WAYPOINT_RADIUS: f32 = 0.7;
 /// A jump starts once the agent stands this close to its takeoff node (horizontal); within
 /// [`APPROACH`] of it the agent slows down and the edge guard trusts the node.
-pub(crate) const TAKEOFF_RADIUS: f32 = 0.3;
+const TAKEOFF_RADIUS: f32 = 0.3;
 const APPROACH: f32 = 1.5;
 /// Re-plan when the goal moved more than this (+ 20 % of the distance to it).
 const GOAL_MOVED: f32 = 1.5;
@@ -167,7 +168,7 @@ pub(crate) struct NavCtx {
     pub doors: Vec<bool>,
     pub scratch: NavScratch,
     pub paths_left: u32,
-    /// Re-form / vantage / detour searches left this tick.
+    /// Re-form / vantage searches left this tick.
     pub searches_left: u32,
     pub stats: AiStats,
     pub tick: u32,

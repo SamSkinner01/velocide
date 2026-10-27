@@ -1128,6 +1128,36 @@ mod tests {
         assert!(!w.enemies[&dummy].elite);
     }
 
+    /// A melting Mould stays hittable while its hit shapes sink with it: part of it above the
+    /// floor halfway down, only the puddle's height at the bottom, all of it again once risen.
+    #[test]
+    fn hit_shapes_sink_into_the_puddle() {
+        let r = EnemyRegistry::builtin();
+        for name in ["gnawer", "gaoler", "heron", "smelter"] {
+            let def = r.get(name).unwrap();
+            let mut e = Enemy::new(NetId(1024), def.clone(), Vec3::ZERO, 0.0, 10.0, 0);
+            let top = |e: &Enemy| {
+                e.hitbox()
+                    .shapes
+                    .iter()
+                    .map(|s| s.a.y.max(s.b.y) + s.radius)
+                    .fold(f32::MIN, f32::max)
+            };
+            let standing = top(&e);
+            e.set_state(AiState::Melt, 36);
+            e.state_ticks = 12;
+            let sinking = top(&e);
+            e.state_ticks = 36;
+            let puddle = top(&e);
+            e.set_state(AiState::Reform, 48);
+            e.state_ticks = 48;
+            let risen = top(&e);
+            assert!(sinking < standing && sinking > 0.5, "{name}: {sinking}");
+            assert!(puddle < 0.4 * standing && puddle < 1.4, "{name}: {puddle}");
+            assert!((risen - standing).abs() < 1e-4, "{name}");
+        }
+    }
+
     #[test]
     fn local_offsets_follow_yaw() {
         let def = Arc::new(EnemyDef::default());
