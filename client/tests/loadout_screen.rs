@@ -1,13 +1,13 @@
 //! The LOADOUT screen driven headless (no GPU, no models): keyboard / gamepad walks, the
-//! weapon and ability pickers with their editing rules, presets, the mouse, Escape, and that
-//! everything it draws stays on the canvas.
+//! weapon, ability and knack pickers with their editing rules, presets, the mouse, Escape, and
+//! that everything it draws stays on the canvas.
 
 use client::menus::loadout::{Layout, LoadoutMenu, LoadoutResponse, Preview};
 use client::settings::Settings;
 use engine::gfx::{Camera, DrawItem, PointLight, UiDrawList};
 use engine::ui::{Rect, Theme, Ui, UiInput, UiKey, UiState};
 use glam::{Vec2, vec2};
-use shared::loadout::{Ability, Loadout, WeaponClass, WeaponKind};
+use shared::loadout::{Ability, Knack, Loadout, WeaponClass, WeaponKind};
 use shared::tuning::Tuning;
 
 use UiKey::*;
@@ -226,8 +226,9 @@ fn escape_closes_a_picker_then_leaves() {
 fn presets_load_through_the_keys() {
     let mut s = Screen::new();
     s.keys(&[]);
-    // Slots 1–4, CHANGE WEAPON, boxes A and B, then the PRESET choice: next preset, LOAD.
-    s.press(&[Down; 7]);
+    // Slots 1–4, the knack, CHANGE WEAPON, boxes A and B, then the PRESET choice: next
+    // preset, LOAD.
+    s.press(&[Down; 8]);
     s.press(&[Right, Down, Enter]);
     let hunter = &s.settings.loadout.presets[1];
     assert_eq!(hunter.name, "HUNTER");
@@ -249,10 +250,37 @@ fn the_mouse_selects_slots_and_opens_the_boxes() {
     assert!(r.changed);
     let arclash = s.loadout().slots[2].unwrap();
     assert_eq!(arclash.abilities, [Ability::Wisp, Ability::Volley]);
-    // The knack card is not a control (yet): clicking it changes nothing.
-    let before = s.loadout();
+    // The knack card opens the knack picker; a tile picks (Surge, the last).
     s.click(lay.slot_card(4).center());
-    assert_eq!(s.loadout(), before);
+    assert!(s.menu.is_picking_knack());
+    let r = s.click(lay.knack_tile(Knack::COUNT - 1).center());
+    assert!(r.changed && !s.menu.is_picking_knack());
+    assert_eq!(s.loadout().knack, Knack::Surge);
+    assert_eq!(s.loadout().slots[2], Some(arclash), "the weapons stay");
+}
+
+#[test]
+fn the_knack_picker_walks_picks_and_cancels() {
+    let mut s = Screen::new();
+    s.keys(&[]);
+    // Walk down the slot cards to slot 4, then onto the knack card (Q): Enter opens its
+    // picker on the Thorn.
+    s.press(&[Down, Down, Down]);
+    assert_eq!(s.menu.slot(), 3);
+    s.press(&[Down, Enter]);
+    assert!(s.menu.is_picking_knack());
+    assert_eq!(s.menu.slot(), 3, "the knack card selects no slot");
+    // Down to the Snare (the third), pick it.
+    let snare = Knack::ALL.iter().position(|k| *k == Knack::Snare).unwrap();
+    s.press(&vec![Down; snare]);
+    let r = s.press(&[Enter]);
+    assert!(r.changed && !s.menu.is_picking_knack());
+    assert_eq!(s.loadout().knack, Knack::Snare);
+    assert!(s.loadout().is_valid());
+    // Back on the knack card: open again, walk away, Escape: nothing changes.
+    s.press(&[Enter, Down, Escape]);
+    assert!(!s.menu.is_picking_knack());
+    assert_eq!(s.loadout().knack, Knack::Snare);
 }
 
 #[test]
@@ -261,7 +289,13 @@ fn everything_stays_on_the_canvas_at_every_aspect() {
         let mut s = Screen::new();
         s.list = UiDrawList::new(UiDrawList::canvas_for_window(w, h));
         let canvas = Rect::from_min_size(Vec2::ZERO, s.list.canvas_size);
-        for keys in [&[][..], &[Right, Enter][..], &[Escape, Down, Enter][..]] {
+        let knack = [Escape, Up, Up, Enter];
+        for keys in [
+            &[][..],
+            &[Right, Enter][..],
+            &[Escape, Down, Enter][..],
+            &knack[..],
+        ] {
             s.press(keys);
             for q in &s.list.quads {
                 let r = Rect::new(q.min, q.max);

@@ -5,15 +5,17 @@
 //! One full-screen page:
 //!
 //! - left: the four **slot cards** (key, weapon, its two abilities; selecting one shows it on
-//!   the right), the **knack** card (Q), and the compact **presets** (PRESET choice, LOAD /
-//!   SAVE / NEW / DELETE, NAME) with the gun game note;
+//!   the right), the **knack** card (Q; it opens the knack picker), and the compact
+//!   **presets** (PRESET choice, LOAD / SAVE / NEW / DELETE, NAME) with the gun game note;
 //! - right, the **showcase**: the selected weapon turning on a card (drawn into the viewmodel
 //!   pass like the CUSTOMISE preview; drag, PageUp / PageDown or the shoulders turn it), its
 //!   name, class, role and numbers, CHANGE WEAPON; under it the **two ability boxes** (A and
 //!   B): name, how it is fired, what it does and its numbers;
 //! - CHANGE WEAPON opens the **weapon picker** (the weapons grouped by class; the one under
 //!   the cursor / focus turns on the card with its role and numbers), an ability box opens
-//!   the **ability picker** (the class's pool as four boxes explained the same way).
+//!   the **ability picker** (the class's pool as four boxes explained the same way), the
+//!   knack card the **knack picker** (the six knacks; the one under the cursor / focus
+//!   explained in a box, PvE-only ones marked: in PvP they become Surge).
 //!
 //! Every number is shown for PvE and PvP from the effective tunings of the local
 //! `assets/tuning.ron` (`Tuning::for_mode`); the words come from [`super::loadout_text`].
@@ -22,8 +24,8 @@
 //! player leaves and sends the loadout to the server: `NetClient::set_loadout`). Rules kept
 //! while editing: no weapon twice (picking a weapon another slot holds swaps the two slots),
 //! at least one weapon (the last one can't be emptied), the two abilities differ (picking the
-//! other one swaps them). Gun game hands out its own weapons (`force_loadout`) and ignores
-//! the loadout; the screen says so.
+//! other one swaps them); any knack. Gun game hands out its own weapons (`force_loadout`)
+//! and keeps only the knack; the screen says so.
 //!
 //! Mouse, keyboard and gamepad: every control is focusable (Up / Down walk them; Left / Right
 //! jump between the slot cards, the showcase and the boxes, and across the pickers' grids),
@@ -35,7 +37,9 @@ use engine::ui::draw::{self, fade};
 use engine::ui::text::{line_width, truncate, wrap_text};
 use engine::ui::{Id, Rect, Response, TextFilter, TextStyle, Theme, Ui, UiDrawExt, UiKey};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4, vec2};
-use shared::loadout::{Ability, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponClass, WeaponKind};
+use shared::loadout::{
+    Ability, Knack, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponClass, WeaponKind,
+};
 use shared::lobby::GameMode;
 use shared::tuning::Tuning;
 
@@ -64,10 +68,11 @@ const BOX_GAP: f32 = 6.0;
 const BOX_PAD: f32 = 6.0;
 const LINE_H: f32 = 11.0;
 const CARD_H: f32 = 27.0;
-const TILE_H: f32 = 18.0;
-/// Lines of explanation an ability box and the weapon panel have room for.
+const TILE_H: f32 = 24.0;
+/// Lines of explanation an ability box, the weapon panel and the knack box have room for.
 pub(crate) const BOX_LINES: usize = 5;
 pub(crate) const ROLE_LINES: usize = 3;
+pub(crate) const KNACK_LINES: usize = 6;
 
 /// What the screen did this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -102,6 +107,8 @@ enum Picker {
     Weapon,
     /// Ability A (0) or B (1) of the selected slot.
     Ability(usize),
+    /// The knack on Q.
+    Knack,
 }
 
 /// One column of numbers: a label and the effective tuning it comes from.
@@ -171,6 +178,24 @@ impl Layout {
     pub fn slot_card(&self, i: usize) -> Rect {
         let y = self.left.min.y + HEADING_H + i as f32 * (CARD_H + 3.0);
         Rect::from_min_size(vec2(self.left.min.x, y), vec2(self.left.width(), CARD_H))
+    }
+
+    /// The knack picker: tile `i` in a column on the left of the right side ...
+    pub fn knack_tile(&self, i: usize) -> Rect {
+        let w = (self.right.width() * 0.32).round();
+        let y = self.right.min.y + HEADING_H + i as f32 * (CARD_H + 4.0);
+        Rect::from_min_size(vec2(self.right.min.x, y), vec2(w, CARD_H))
+    }
+
+    /// ... and the box explaining the knack under the cursor / focus, beside them.
+    /// (As tall as the column of tiles.)
+    pub fn knack_detail(&self) -> Rect {
+        let first = self.knack_tile(0);
+        let last = self.knack_tile(Knack::COUNT - 1);
+        Rect::new(
+            vec2(first.max.x + BOX_GAP, first.min.y),
+            vec2(self.right.max.x, last.max.y),
+        )
     }
 
     /// The four boxes of the ability picker (2 × 2 over the right side, under a heading).
@@ -284,6 +309,11 @@ impl LoadoutMenu {
         self.picker == Picker::Weapon
     }
 
+    /// The knack picker is open.
+    pub fn is_picking_knack(&self) -> bool {
+        self.picker == Picker::Knack
+    }
+
     /// The ability picker is open for ability `k` (0 = A, 1 = B).
     pub fn picking_ability(&self) -> Option<usize> {
         match self.picker {
@@ -331,15 +361,19 @@ impl LoadoutMenu {
         }
         // Left / Right only move a focus that was there when the frame began.
         self.focus_start = ui.state().focused();
-        let card_visible = !matches!(self.picker, Picker::Ability(_));
+        let card_visible = !matches!(self.picker, Picker::Ability(_) | Picker::Knack);
         let hole = card_visible.then_some(lay.card);
         let theme = ui.theme();
         draw_frame(ui.painter(), theme, canvas, &lay, hole);
 
         let picking = self.picker != Picker::None;
+        let knack_key = s
+            .bindings
+            .hint(Action::ThrowThorn)
+            .filter(|k| k.len() <= 3)
+            .unwrap_or_else(|| "Q".into());
         ui.enabled_scope(!picking, |ui| {
-            self.slot_cards(ui, &lay, &loadout.current, &mut r);
-            knack_card(ui, &lay, &self.columns);
+            self.slot_cards(ui, &lay, &loadout.current, &knack_key, &mut r);
         });
         let held = loadout.current.slots[self.slot];
         let hints = InputHints::new(&s.bindings, self.slot);
@@ -369,6 +403,7 @@ impl LoadoutMenu {
                     self.ability_grid(ui, &lay, k, build, &mut loadout.current, &mut r);
                 }
             }
+            Picker::Knack => self.knack_grid(ui, &lay, &mut loadout.current, &knack_key, &mut r),
         }
         ui.enabled_scope(!picking, |ui| {
             r.changed |= self.presets(ui, &lay, loadout, &mut r.sound);
@@ -417,6 +452,7 @@ impl LoadoutMenu {
     fn close_picker(&mut self) {
         self.focus = Some(match self.picker {
             Picker::Ability(k) => box_label(k),
+            Picker::Knack => KNACK_CARD.into(),
             _ => CHANGE_WEAPON.into(),
         });
         self.picker = Picker::None;
@@ -424,13 +460,15 @@ impl LoadoutMenu {
 
     // ---- left column ----------------------------------------------------------------------
 
-    /// The four slot cards. Clicking (or walking onto it with the keys) selects a slot; Enter
-    /// on one opens its weapon picker; Right jumps to the showcase.
+    /// The four slot cards and the knack card. Clicking a slot card (or walking onto it with
+    /// the keys) selects the slot; Enter on one opens its weapon picker; the knack card opens
+    /// the knack picker; Right jumps to the showcase.
     fn slot_cards(
         &mut self,
         ui: &mut Ui,
         lay: &Layout,
         loadout: &Loadout,
+        knack_key: &str,
         r: &mut LoadoutResponse,
     ) {
         heading(ui, lay.left.min, lay.left.width(), "SLOTS", "");
@@ -474,6 +512,24 @@ impl LoadoutMenu {
             if resp.focused {
                 self.nav(ui, &slot_label(i), None, Some(CHANGE_WEAPON));
             }
+        }
+        let rect = lay.slot_card(LOADOUT_SLOTS);
+        let id = ui.id(KNACK_CARD);
+        let resp = ui.interact(id, rect, true);
+        let k = loadout.knack;
+        let line = loadout_text::knack_line(k, &self.columns[0].tuning.combat);
+        let name = k.name().to_uppercase();
+        draw_card(ui, rect, &resp, false, knack_key, &name, &line);
+        if !ui.is_enabled() {
+            return;
+        }
+        if resp.activated {
+            self.picker = Picker::Knack;
+            self.focus = Some(knack_label(k));
+            r.sound = Some(Sfx::UiSelect);
+        }
+        if resp.focused {
+            self.nav(ui, KNACK_CARD, None, Some(CHANGE_WEAPON));
         }
     }
 
@@ -537,7 +593,7 @@ impl LoadoutMenu {
             ui.spacing(4.0);
             let dim = TextStyle::new(ui.theme().ash);
             ui.text_wrapped(
-                "GUN GAME HANDS OUT ITS OWN WEAPONS: IT IGNORES YOUR LOADOUT.",
+                "GUN GAME HANDS OUT ITS OWN WEAPONS: IT KEEPS ONLY YOUR KNACK.",
                 &dim,
             );
         });
@@ -633,19 +689,13 @@ impl LoadoutMenu {
             let resp = ui.interact(id, lay.boxes[k], true);
             let a = build.abilities[k];
             let badge = if k == 0 { "A" } else { "B" };
-            ability_box(
-                ui,
-                lay.boxes[k],
-                &resp,
-                BoxLook {
-                    badge: Some(badge),
-                    selected: false,
-                    tag: "CHANGE",
-                },
-                a,
-                build.weapon,
-                &self.columns,
-            );
+            let look = BoxLook {
+                badge: Some(badge),
+                selected: false,
+                tag: "CHANGE",
+            };
+            let explain = Explain::ability(a, build.weapon, &self.columns);
+            explain_box(ui, lay.boxes[k], &resp, look, &explain);
             if resp.hovered || resp.focused {
                 lit = Some(a);
             }
@@ -717,14 +767,18 @@ impl LoadoutMenu {
                 );
                 let id = ui.id(&weapon_label(w));
                 let resp = ui.interact(id, rect, true);
-                let other = loadout.slot_of(w).filter(|&s| s as usize != slot);
+                let tag = match loadout.slot_of(w) {
+                    Some(s) if s as usize == slot => Some("EQUIPPED".to_string()),
+                    Some(s) => Some(format!("ON SLOT {}", s + 1)),
+                    None => None,
+                };
                 draw_tile(
                     ui,
                     rect,
                     &resp,
                     current == Some(w),
                     &w.name().to_uppercase(),
-                    other.map(|s| (s + 1).to_string()).as_deref(),
+                    tag.as_deref(),
                 );
                 if resp.hovered || resp.focused {
                     peek = Some(w);
@@ -747,7 +801,7 @@ impl LoadoutMenu {
         // The empty slot (not for the last weapon).
         let bottom = Rect::new(vec2(lower.min.x, lower.max.y - 16.0), lower.max);
         let can_empty = current.is_none() || loadout.builds().count() > 1;
-        let empty = Rect::from_min_size(bottom.min, vec2(col_w * 1.5, 16.0));
+        let empty = Rect::from_min_size(bottom.min, vec2((col_w * 1.6).round(), 16.0));
         let id = ui.id(EMPTY_TILE);
         let resp = ui.enabled_scope(can_empty, |ui| {
             let resp = ui.interact(id, empty, true);
@@ -848,19 +902,13 @@ impl LoadoutMenu {
                 Some(_) => "SWAPS",
                 None => "PICK",
             };
-            ability_box(
-                ui,
-                rect,
-                &resp,
-                BoxLook {
-                    badge,
-                    selected: build.abilities[k] == a,
-                    tag,
-                },
-                a,
-                build.weapon,
-                &self.columns,
-            );
+            let look = BoxLook {
+                badge,
+                selected: build.abilities[k] == a,
+                tag,
+            };
+            let explain = Explain::ability(a, build.weapon, &self.columns);
+            explain_box(ui, rect, &resp, look, &explain);
             if resp.activated {
                 picked = Some(a);
             }
@@ -877,6 +925,63 @@ impl LoadoutMenu {
         }
         if let Some(a) = picked {
             r.changed |= set_ability(loadout, self.slot, k, a);
+            self.close_picker();
+            r.sound = Some(Sfx::UiSelect);
+        }
+    }
+
+    /// The knack picker: a tile per knack (PvE-only ones say so) and the box explaining the
+    /// one under the cursor / focus. Picking puts it on Q and closes it.
+    fn knack_grid(
+        &mut self,
+        ui: &mut Ui,
+        lay: &Layout,
+        loadout: &mut Loadout,
+        knack_key: &str,
+        r: &mut LoadoutResponse,
+    ) {
+        let title = format!("KNACK ({knack_key})");
+        let right = "PVE-ONLY KNACKS BECOME SURGE IN PVP   ESC CANCELS";
+        heading(ui, lay.right.min, lay.right.width(), &title, right);
+        let current = loadout.knack;
+        let mut peek = current;
+        let mut picked = None;
+        for (i, k) in Knack::ALL.into_iter().enumerate() {
+            let rect = lay.knack_tile(i);
+            let id = ui.id(&knack_label(k));
+            let resp = ui.interact(id, rect, true);
+            let line = loadout_text::knack_line(k, &self.columns[0].tuning.combat);
+            draw_card(
+                ui,
+                rect,
+                &resp,
+                k == current,
+                "",
+                &k.name().to_uppercase(),
+                &line,
+            );
+            if resp.hovered || resp.focused {
+                peek = k;
+            }
+            if resp.activated {
+                picked = Some(k);
+            }
+        }
+        let look = BoxLook {
+            badge: Some(knack_key),
+            selected: peek == current,
+            tag: if peek == current { "EQUIPPED" } else { "PICK" },
+        };
+        let detail = Response::default();
+        explain_box(
+            ui,
+            lay.knack_detail(),
+            &detail,
+            look,
+            &Explain::knack(peek, &self.columns),
+        );
+        if let Some(k) = picked {
+            r.changed |= set_knack(loadout, k);
             self.close_picker();
             r.sound = Some(Sfx::UiSelect);
         }
@@ -970,6 +1075,7 @@ impl LoadoutMenu {
 /// Ids of the screen's controls (inside its id scope).
 const CHANGE_WEAPON: &str = "CHANGE WEAPON##change";
 const EMPTY_TILE: &str = "##empty";
+const KNACK_CARD: &str = "##knack";
 
 fn slot_label(i: usize) -> String {
     format!("##slot{i}")
@@ -985,6 +1091,10 @@ fn weapon_label(w: WeaponKind) -> String {
 
 fn ability_label(a: Ability) -> String {
     format!("##ability{}", a.id())
+}
+
+fn knack_label(k: Knack) -> String {
+    format!("##knack{}", k.id())
 }
 
 /// Short names of the inputs the boxes mention ("MOUSE 2", "1").
@@ -1081,8 +1191,9 @@ fn heading(ui: &mut Ui, pos: Vec2, width: f32, text: &str, right: &str) -> f32 {
 fn draw_frame(list: &mut UiDrawList, t: &Theme, canvas: Rect, lay: &Layout, hole: Option<Rect>) {
     let frame = lay.frame;
     fill_around(list, canvas, frame, fade(t.ink, 0.6));
-    // The body is darker than a panel: nothing of the HUD or the world reads through it.
-    for color in [fade(t.ink, 0.85), t.panel] {
+    // The body is opaque, unlike a panel: nothing of the HUD or the world (the warm-up's lit
+    // ready board) reads through it.
+    for color in [t.ink, t.panel] {
         match hole {
             Some(h) => fill_around(list, frame, h, color),
             None => draw::fill(list, frame, color),
@@ -1210,8 +1321,13 @@ fn draw_card(
             t.crimson_bright,
         );
     }
-    badge(list, t, rect.min + vec2(5.0, 8.0), key, selected);
-    let x = rect.min.x + 22.0;
+    // (No key: no badge.)
+    let x = if key.is_empty() {
+        rect.min.x + 8.0
+    } else {
+        badge(list, t, rect.min + vec2(5.0, 8.0), key, selected);
+        rect.min.x + 22.0
+    };
     let width = rect.max.x - x - 6.0;
     let (main, sub) = if !enabled {
         (t.ash, t.ash)
@@ -1232,33 +1348,14 @@ fn draw_card(
     );
 }
 
-/// The knack card (Q): the Thorn, the relay spike every Shrike carries.
-fn knack_card(ui: &mut Ui, lay: &Layout, columns: &[Column]) {
-    let rect = lay.slot_card(LOADOUT_SLOTS);
-    let charges: Vec<String> = columns
-        .iter()
-        .map(|c| c.tuning.combat.thorn.charges.to_string())
-        .collect();
-    let line = if charges.iter().all(|c| c == "0") {
-        "RELAY SPIKE".to_string()
-    } else {
-        format!("{} CHARGES (PVE)", charges[0])
-    };
-    let resp = Response {
-        rect,
-        ..Default::default()
-    };
-    draw_card(ui, rect, &resp, false, "Q", "THORN", &line);
-}
-
-/// A weapon tile in the picker: its name; `other`: the slot that holds it.
+/// A weapon tile in the picker: its name, and a tag under it (where it is equipped).
 fn draw_tile(
     ui: &mut Ui,
     rect: Rect,
     resp: &Response,
     current: bool,
     name: &str,
-    other: Option<&str>,
+    tag: Option<&str>,
 ) {
     let t = ui.theme();
     let enabled = ui.is_enabled();
@@ -1279,24 +1376,23 @@ fn draw_tile(
     } else {
         t.bone_dim
     };
-    let right = if let Some(slot) = other {
-        badge(
-            list,
-            t,
-            vec2(rect.max.x - 15.0, rect.min.y + 4.0),
-            slot,
-            false,
-        );
-        16.0
+    let width = rect.width() - 9.0;
+    let y = if tag.is_some() {
+        rect.min.y + 3.0
     } else {
-        0.0
+        (rect.center().y - 4.0).round()
     };
-    let shown = truncate(name, rect.width() - 10.0 - right, 1.0);
-    list.text(
-        vec2(rect.min.x + 6.0, rect.min.y + 5.0),
-        &shown,
-        &TextStyle::new(color),
-    );
+    let shown = truncate(name, width, 1.0);
+    list.text(vec2(rect.min.x + 6.0, y), &shown, &TextStyle::new(color));
+    if let Some(tag) = tag {
+        let sub = if enabled { t.bone_dim } else { t.ash };
+        let shown = truncate(tag, width, 1.0);
+        list.text(
+            vec2(rect.min.x + 6.0, y + 10.0),
+            &shown,
+            &TextStyle::new(sub),
+        );
+    }
 }
 
 /// The weapon's name (big), class chip, role and numbers in the info panel. Returns the y
@@ -1384,17 +1480,60 @@ struct BoxLook<'a> {
     tag: &'a str,
 }
 
-/// An ability box: badge, name, what activating does; how it fires; what it does; its
-/// numbers per column.
-fn ability_box(
-    ui: &mut Ui,
-    rect: Rect,
-    resp: &Response,
-    look: BoxLook,
-    a: Ability,
-    weapon: WeaponKind,
-    columns: &[Column],
-) {
+/// What an explanation box says: an ability (the A / B boxes, the ability picker) or a knack.
+struct Explain {
+    name: String,
+    /// Its colour, as a bar before the name (an ability's: the weapon glows in it).
+    color: Option<Vec4>,
+    /// How it is fired.
+    input: &'static str,
+    /// What it does and how to use it, and how many lines that may take.
+    text: &'static str,
+    lines: usize,
+    /// A lit line under the text (a knack's PvP rule).
+    note: Option<&'static str>,
+    /// Its numbers per column.
+    stats: Vec<(&'static str, Vec<Stat>)>,
+}
+
+impl Explain {
+    fn ability(a: Ability, weapon: WeaponKind, columns: &[Column]) -> Explain {
+        Explain {
+            name: a.name().to_uppercase(),
+            color: Some(ability_color(a)),
+            input: loadout_text::ability_input(a, weapon),
+            text: loadout_text::ability_text(a, weapon),
+            lines: BOX_LINES,
+            note: None,
+            stats: columns
+                .iter()
+                .map(|c| {
+                    let stats = loadout_text::ability_stats(a, weapon, &c.tuning, c.pvp);
+                    (c.label, stats)
+                })
+                .collect(),
+        }
+    }
+
+    fn knack(k: Knack, columns: &[Column]) -> Explain {
+        Explain {
+            name: k.name().to_uppercase(),
+            color: None,
+            input: loadout_text::knack_input(k),
+            text: loadout_text::knack_text(k),
+            lines: KNACK_LINES,
+            note: (!k.pvp_allowed()).then_some("PVE ONLY: IN PVP YOU CARRY SURGE INSTEAD."),
+            stats: columns
+                .iter()
+                .map(|c| (c.label, loadout_text::knack_stats(k, &c.tuning, c.pvp)))
+                .collect(),
+        }
+    }
+}
+
+/// An explanation box: badge, colour, name, what activating does; how it fires; what it
+/// does; its numbers per column at the bottom.
+fn explain_box(ui: &mut Ui, rect: Rect, resp: &Response, look: BoxLook, e: &Explain) {
     let t = ui.theme();
     let enabled = ui.is_enabled();
     let list = ui.painter();
@@ -1414,13 +1553,14 @@ fn ability_box(
         badge(list, t, vec2(x, y), b, look.selected || resp.focused);
         x += 16.0;
     }
-    // The ability's colour (the weapon glows in it): a small bar before the name.
-    let swatch = Rect::from_min_size(vec2(x, y + 2.0), vec2(3.0, 7.0));
-    draw::fill(list, swatch, ability_color(a));
-    x += 7.0;
+    if let Some(color) = e.color {
+        let swatch = Rect::from_min_size(vec2(x, y + 2.0), vec2(3.0, 7.0));
+        draw::fill(list, swatch, color);
+        x += 7.0;
+    }
     list.text(
         vec2(x, y + 2.0),
-        &a.name().to_uppercase(),
+        &e.name,
         &TextStyle::new(t.bone).shadow(t.shadow),
     );
     let tag_color = if resp.focused || resp.hovered {
@@ -1440,35 +1580,26 @@ fn ability_box(
         Rect::from_min_size(vec2(inner.min.x, y + 3.0), vec2(4.0, 3.0)),
         t.crimson_bright,
     );
-    let input = truncate(
-        loadout_text::ability_input(a, weapon),
-        inner.width() - 7.0,
-        1.0,
-    );
+    let input = truncate(e.input, inner.width() - 7.0, 1.0);
     list.text(vec2(inner.min.x + 7.0, y), &input, &TextStyle::new(t.bone));
     y += LINE_H + 1.0;
     let body = TextStyle::new(t.bone_dim);
-    paragraph(
+    y += paragraph(
         list,
         vec2(inner.min.x, y),
         inner.width(),
-        loadout_text::ability_text(a, weapon),
-        BOX_LINES,
+        e.text,
+        e.lines,
         &body,
     );
+    if let Some(note) = e.note {
+        let note = truncate(note, inner.width(), 1.0);
+        list.text(vec2(inner.min.x, y + 3.0), &note, &TextStyle::new(t.bone));
+    }
     // The numbers sit at the bottom of the box.
-    let stats: Vec<(&str, Vec<Stat>)> = columns
-        .iter()
-        .map(|c| {
-            (
-                c.label,
-                loadout_text::ability_stats(a, weapon, &c.tuning, c.pvp),
-            )
-        })
-        .collect();
-    let rows = stats.first().map_or(0, |(_, s)| s.len());
+    let rows = e.stats.first().map_or(0, |(_, s)| s.len());
     let table_y = inner.max.y - 10.0 - rows as f32 * LINE_H + 2.0;
-    stat_table(list, t, inner.min.x, inner.max.x, table_y, &stats);
+    stat_table(list, t, inner.min.x, inner.max.x, table_y, &e.stats);
 }
 
 /// Draws `weapon` turning on the card (canvas rect `card`) into the viewmodel pass: the ready
@@ -1587,6 +1718,14 @@ pub fn set_ability(loadout: &mut Loadout, slot: usize, k: usize, ability: Abilit
     true
 }
 
+/// Puts `knack` on Q (every knack is allowed; PvP worlds swap PvE-only ones for Surge
+/// themselves). Returns whether the loadout changed.
+pub fn set_knack(loadout: &mut Loadout, knack: Knack) -> bool {
+    let changed = loadout.knack != knack;
+    loadout.knack = knack;
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1630,6 +1769,26 @@ mod tests {
         );
         assert!(!set_ability(&mut l, 1, 0, Ability::Brand), "empty slot");
         assert!(l.is_valid());
+        // Melee pools are their own: no Gust on the shears, a Whirl swaps in.
+        let mut l = Loadout::single(WeaponKind::Trimmer.default_build());
+        assert!(!set_ability(&mut l, 0, 0, Ability::Gust));
+        assert!(set_ability(&mut l, 0, 1, Ability::Whirl));
+        assert_eq!(
+            l.slot(0).unwrap().abilities,
+            [Ability::Lunge, Ability::Whirl]
+        );
+    }
+
+    #[test]
+    fn picking_a_knack_keeps_the_weapons() {
+        let mut l = Loadout::default();
+        assert!(!set_knack(&mut l, Knack::Thorn), "already on Q");
+        for k in Knack::ALL.into_iter().rev() {
+            assert!(set_knack(&mut l, k), "{k:?} replaces the last one");
+            assert_eq!(l.knack, k);
+            assert_eq!(l.slots, Loadout::default().slots);
+            assert!(l.is_valid(), "every knack is allowed, PvE-only ones too");
+        }
     }
 
     #[test]
@@ -1645,6 +1804,10 @@ mod tests {
             assert!(apart(lay.left, lay.right) && apart(lay.card, lay.info));
             assert!(apart(lay.boxes[0], lay.boxes[1]) && apart(lay.card, lay.boxes[0]));
             assert!(apart(lay.right, lay.foot) && apart(lay.left, lay.foot));
+            for i in 0..Knack::COUNT {
+                assert!(lay.right.contains_rect(lay.knack_tile(i)), "{w}: knack {i}");
+                assert!(apart(lay.knack_tile(i), lay.knack_detail()));
+            }
             let g = lay.grid();
             for i in 0..4 {
                 assert!(lay.right.contains_rect(g[i]));

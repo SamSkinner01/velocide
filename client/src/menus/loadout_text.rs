@@ -12,7 +12,7 @@
 //! keep them true when a mechanic changes. Lengths are budgeted for the screen's boxes (a test
 //! wraps them at the 16:9 widths).
 
-use shared::loadout::{Ability, WeaponClass, WeaponKind};
+use shared::loadout::{Ability, Knack, WeaponClass, WeaponKind};
 use shared::sim::DEFAULT_TICK_RATE;
 use shared::sim::combat::secs_to_ticks;
 use shared::sim::weapons::{AbilityStyle, ability_tuning};
@@ -63,6 +63,14 @@ pub fn weapon_role(w: WeaponKind) -> &'static str {
         WeaponKind::Longwick => {
             "Hold to draw, release to loose: a full draw flies fastest and hits hardest, a \
              tap is weak and slow. Arrows drop."
+        }
+        WeaponKind::Trimmer => {
+            "Quick slashes through several targets in front of you; a slash turns parryable \
+             shots back like a punch."
+        }
+        WeaponKind::Tamper => {
+            "A slow, heavy hammer swing through everything in a wide arc, knocking it far \
+             back. Melee has no weak points."
         }
     }
 }
@@ -152,7 +160,127 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
             "Your next arrow bursts into flame where it lands, on a target, the floor or the \
              end of its flight, and sets everything near it alight."
         }
+        Ability::Lunge => {
+            "A dash along your aim: for a moment the first hostile your body reaches takes a \
+             heavy blow. Close the gap and strike at once."
+        }
+        Ability::Whirl => {
+            "A spin that hits everything around you, front and back, and knocks it outward. \
+             Room to breathe when you're surrounded."
+        }
+        Ability::Hurl => {
+            "Throws a spinning blade or hammer-head that hits hard on contact and drops a \
+             little in flight: melee with reach."
+        }
+        Ability::Upswing => {
+            "A rising strike in your swing's arc: what it hits is launched into the air and \
+             you hop up with it. Follow it up in the air."
+        }
     }
+}
+
+/// What a knack does and how to use it.
+pub fn knack_text(k: Knack) -> &'static str {
+    match k {
+        Knack::Thorn => {
+            "A barbed glass spike that plants itself where it lands. A Quill shot passing a live \
+             Thorn ricochets off it into the next target (another Thorn first), harder each \
+             bounce. Throw it at a Mould: it hurts and drops, still live."
+        }
+        Knack::KindleFlask => {
+            "Lob a flask of kindling: where it breaks, a pool heals the Shrikes standing in it \
+             for a few seconds (in PvP only you). Throw it where your team holds, or at your \
+             own feet."
+        }
+        Knack::Snare => {
+            "Throw a wax trap to the floor. Once armed, the first hostile that comes close is \
+             pinned (a Mould rooted, a player slowed) and hurt. Guard a doorway, your back or \
+             a flank."
+        }
+        Knack::SootPot => {
+            "A pot that bursts into a thick cloud of soot. Moulds can't see into, out of or \
+             through it: they lose you, and a Heron's lock breaks. Players see a dense cloud."
+        }
+        Knack::TallowSkin => {
+            "Wax over: for a few seconds you take much less damage and no knockback (your own \
+             blasts still push you, so blast-jumps work). Use it before the big hit lands."
+        }
+        Knack::Surge => {
+            "A burst of speed along your look, mostly level: cross a gap, dodge a shot or \
+             close in. It works in every mode and stands in for PvE-only knacks in PvP."
+        }
+    }
+}
+
+/// How a knack is used (one short line).
+pub fn knack_input(k: Knack) -> &'static str {
+    match k {
+        Knack::Thorn | Knack::SootPot => "KNACK: THROWS IT ALONG YOUR AIM",
+        Knack::KindleFlask => "KNACK: LOBS IT A LITTLE HIGH",
+        Knack::Snare => "KNACK: THROWS IT TO THE FLOOR",
+        Knack::TallowSkin => "KNACK: AT ONCE, ON YOU",
+        Knack::Surge => "KNACK: AT ONCE, ALONG YOUR LOOK",
+    }
+}
+
+/// A knack in a few words for its card: charges and recharge, or PvE only.
+pub fn knack_line(k: Knack, t: &CombatTuning) -> String {
+    if !k.pvp_allowed() {
+        return "PVE ONLY".into();
+    }
+    let n = k.charges(t);
+    let s = if n == 1 { "" } else { "S" };
+    format!("{n} CHARGE{s}, {}", secs(k.recharge_time(t)))
+}
+
+/// A knack's key numbers in one effective tuning (`pvp`: the PvP column, where a knack that
+/// isn't allowed shows `-`: Surge stands in): charges, recharge, then one or two more.
+pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
+    let c = &tuning.combat;
+    let n = &c.knacks;
+    let mut rows = vec![
+        ("CHARGES", k.charges(c).to_string()),
+        ("RECHARGE", secs(k.recharge_time(c))),
+    ];
+    let radius = |r: f32| format!("{}M", num(r, 1));
+    rows.extend(match k {
+        Knack::Thorn => vec![("BOUNCE", format!("X{}", num(c.thorn.damage_multiplier, 2)))],
+        Knack::KindleFlask => {
+            let f = &n.kindle_flask;
+            vec![
+                ("HEALS", format!("{}/S", num(f.heal_rate, 1))),
+                ("POOL", format!("{} {}", radius(f.radius), secs(f.duration))),
+            ]
+        }
+        Knack::Snare => {
+            let s = &n.snare;
+            vec![
+                ("DAMAGE", num(s.damage, 1)),
+                ("AT ONCE", s.max_live.to_string()),
+            ]
+        }
+        Knack::SootPot => {
+            let p = &n.soot_pot;
+            vec![(
+                "CLOUD",
+                format!("{} {}", radius(p.radius), secs(p.duration)),
+            )]
+        }
+        Knack::TallowSkin => {
+            let t = &n.tallow_skin;
+            vec![
+                ("DAMAGE", format!("X{}", num(t.damage_scale, 2))),
+                ("LASTS", secs(t.duration)),
+            ]
+        }
+        Knack::Surge => vec![("SPEED", format!("{} M/S", num(n.surge.speed, 1)))],
+    });
+    if pvp && k.for_world(true) != k {
+        for (_, value) in &mut rows {
+            *value = "-".into();
+        }
+    }
+    rows
 }
 
 /// How an ability is fired from `weapon` (one short line).
@@ -262,6 +390,7 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
         )
     };
     let radius = |r: f32| format!("{}M", num(r, 1));
+    let primary = weapon.primary_damage(c);
     let mut rows = vec![("COOLDOWN", secs(a.cooldown(c)))];
     let bow = weapon.class() == WeaponClass::Draw;
     let more: [Stat; 2] = match a {
@@ -456,6 +585,23 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
                 ),
             ]
         }
+        // Melee: multiples of the carrier's swing.
+        Ability::Lunge => [
+            ("DAMAGE", num(primary * c.lunge.damage_scale, 1)),
+            ("DASH", format!("{} M/S", num(c.lunge.speed, 1))),
+        ],
+        Ability::Whirl => [
+            ("DAMAGE", num(primary * c.whirl.damage_scale, 1)),
+            ("RADIUS", radius(c.whirl.radius)),
+        ],
+        Ability::Hurl => [
+            ("DAMAGE", num(primary * c.hurl.damage_scale, 1)),
+            ("SPEED", format!("{} M/S", num(c.hurl.speed, 1))),
+        ],
+        Ability::Upswing => [
+            ("DAMAGE", num(primary * c.upswing.damage_scale, 1)),
+            ("LAUNCH", format!("{} M/S", num(c.upswing.launch, 1))),
+        ],
     };
     rows.extend(more);
     rows
@@ -467,7 +613,7 @@ mod tests {
     use engine::ui::text::wrap_text;
     use shared::lobby::GameMode;
 
-    use crate::menus::loadout::{BOX_LINES, Layout, ROLE_LINES};
+    use crate::menus::loadout::{BOX_LINES, KNACK_LINES, Layout, ROLE_LINES};
     use engine::ui::Rect;
     use glam::{Vec2, vec2};
 
@@ -488,6 +634,34 @@ mod tests {
                 assert!(n <= BOX_LINES, "{a:?} on {w:?}: {n} lines");
                 assert!(lines(ability_input(a, w), boxes - 7.0) == 1, "{a:?} input");
             }
+        }
+    }
+
+    #[test]
+    fn every_knack_is_explained_and_fits() {
+        let lay = Layout::new(Rect::from_min_size(Vec2::ZERO, vec2(576.0, 360.0)));
+        let width = lay.knack_detail().width() - 12.0;
+        let file = Tuning::default();
+        let (pve, pvp) = (
+            file.for_mode(GameMode::Campaign),
+            file.for_mode(GameMode::Deathmatch),
+        );
+        for k in Knack::ALL {
+            let n = lines(knack_text(k), width);
+            assert!(n <= KNACK_LINES, "{k:?}: {n} lines");
+            assert!(lines(knack_input(k), width - 7.0) == 1, "{k:?} input");
+            let line = knack_line(k, &pve.combat);
+            let card = lay.slot_card(4).width() - 28.0;
+            assert!(lines(&line, card) == 1, "{k:?}: {line}");
+            let (a, b) = (knack_stats(k, &pve, false), knack_stats(k, &pvp, true));
+            assert_eq!(a.len(), b.len());
+            assert!(
+                a.iter().all(|(l, v)| l.len() <= 8 && v.len() <= 11),
+                "{a:?}"
+            );
+            // In PvP the Thorn gives way to Surge: its column is empty.
+            let blank = b.iter().all(|(_, v)| v == "-");
+            assert_eq!(blank, !k.pvp_allowed(), "{k:?}");
         }
     }
 
@@ -548,5 +722,9 @@ mod tests {
         // The PvP column of the Pinning Arrow is the players' slow.
         let pvp = ability_stats(Ability::PinningArrow, WeaponKind::Longwick, &t, true);
         assert!(pvp[2].1.starts_with("SLOW"), "{:?}", pvp[2]);
+        // Melee abilities hit for a multiple of their carrier's swing.
+        let lunge = |w| ability_stats(Ability::Lunge, w, &t, false)[1].1.clone();
+        assert_eq!(lunge(WeaponKind::Trimmer), "45");
+        assert_eq!(lunge(WeaponKind::Tamper), "112.5");
     }
 }

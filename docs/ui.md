@@ -388,9 +388,9 @@ CHANGES APPLY AT ONCE"). One full-screen page (`loadout::Layout`: the canvas les
 margin, at most 720 wide, a LOADOUT title bar like a panel's):
 
 - left: **SLOTS**: four cards (key badge, weapon, its two abilities; the selected one lit),
-  then the **knack** card (Q: today the Thorn, its charges, PvE only); **PRESETS** (PRESET
-  choice, LOAD / SAVE, NEW / DELETE, NAME field) and the note that gun game hands out its own
-  weapons;
+  then the **knack** card (the KNACK key's badge, the knack, its charges and recharge or PVE
+  ONLY); **PRESETS** (PRESET choice, LOAD / SAVE, NEW / DELETE, NAME field) and the note that
+  gun game hands out its own weapons and keeps only the knack;
 - right, the **showcase**: the selected weapon **turning on a card** (a window in the page:
   drawn into the viewmodel pass on the ready board's slate, lit by two lamps the screen adds,
   sized from the model's bounds, `ModelLibrary::bounds`; drag it, PageUp / PageDown or the
@@ -404,14 +404,18 @@ margin, at most 720 wide, a LOADOUT title bar like a panel's):
 - foot: the hint (or the pause menu's note), DEFAULT LOADOUT, BACK.
 
 **CHANGE WEAPON** opens the **weapon picker** in place of the boxes: a column per class
-(`WeaponClass::ALL`), a tile per weapon (the slot's weapon lit, a badge on weapons another slot
-holds) and EMPTY SLOT (disabled for the last weapon). The tile under the cursor / focus turns on
-the card with its role and numbers, and the abilities it comes with or "ON SLOT 3: EQUIPPING
-SWAPS THE TWO". An **ability box** opens the **ability picker**: the class's pool as four boxes
-in a 2 × 2 grid over the right side, each explained like the A / B boxes, tagged EQUIPPED /
-SWAPS / PICK. Picking applies the rules below and closes the picker; Escape / B or CANCEL
-closes it without a change. While a picker is open the left column and DEFAULT LOADOUT are
-disabled.
+(`WeaponClass::ALL`, melee last), a tile per weapon (the slot's weapon lit and tagged EQUIPPED,
+weapons another slot holds tagged ON SLOT n) and EMPTY SLOT (disabled for the last weapon). The
+tile under the cursor / focus turns on the card with its role and numbers, and the abilities it
+comes with or "ON SLOT 3: EQUIPPING SWAPS THE TWO". An **ability box** opens the **ability
+picker**: the class's pool as four boxes in a 2 × 2 grid over the right side, each explained
+like the A / B boxes, tagged EQUIPPED / SWAPS / PICK. The **knack card** opens the **knack
+picker**: a tile per knack (`Knack::ALL`; charges and recharge, or PVE ONLY) and beside them a
+box explaining the one under the cursor / focus the same way (how it is used, what it does,
+CHARGES / RECHARGE and its numbers); a PvE-only knack (the Thorn) says "PVE ONLY: IN PVP YOU
+CARRY SURGE INSTEAD" and shows `-` in the PVP column (`Knack::for_world`; the stored pick is
+kept). Picking applies the rules below and closes the picker; Escape / B or CANCEL closes it
+without a change. While a picker is open the left column and DEFAULT LOADOUT are disabled.
 
 The words live in `menus::loadout_text` (written from `docs/arsenal.md` and checked against the
 sim; no numbers in them); every number comes from the effective tunings of the local
@@ -421,16 +425,17 @@ differs from PVE is lit. Its tests wrap every text at the 16:10 widths (nothing 
 16:10 up; 4:3 cuts with `..`) and check that every number fits its column.
 
 Keys and pad: Up / Down walk every control (walking onto a slot card selects it); Left / Right
-jump between a slot card, CHANGE WEAPON and the boxes, and across the pickers' columns; Enter / A
-activates (on a slot card: its weapon picker); Escape / B closes a picker, then leaves. The
-mouse clicks everything and drags the weapon. Callers hand the screen a `loadout::Preview` (the
-model library, the frame's viewmodel list, which the screen clears, its lights, the camera and
-the viewmodel FOV); the pause menu's page hides the HUD under it.
+jump between a slot / knack card, CHANGE WEAPON and the boxes, and across the pickers' columns;
+Enter / A activates (on a slot card: its weapon picker); Escape / B closes a picker, then
+leaves. The mouse clicks everything and drags the weapon. Callers hand the screen a
+`loadout::Preview` (the model library, the frame's viewmodel list, which the screen clears, its
+lights, the camera and the viewmodel FOV); the pause menu's page hides the HUD under it.
 
-Rules while editing (`loadout::set_weapon`, `set_ability`): a weapon another slot holds swaps the
-two slots, the last weapon can't be emptied, picking a build's other ability swaps the two. The
-loadout and presets live in the settings file's `loadout` section as text per slot
-(`"Longwick: Ember Arrow, Brand"`, `"-"`; `settings::loadout_text`): an unknown weapon empties
+Rules while editing (`loadout::set_weapon`, `set_ability`, `set_knack`): a weapon another slot
+holds swaps the two slots, the last weapon can't be emptied, picking a build's other ability
+swaps the two, any knack goes on Q. The loadout and presets live in the settings file's
+`loadout` section as text per slot (`"Longwick: Ember Arrow, Brand"`, `"-"`, then
+`"Knack: Snare"`; `settings::loadout_text`): an unknown weapon empties
 its slot, an unknown ability falls back to the weapon's default, the loadout is sanitised, and
 nothing else in the file is affected. `NetClient::set_loadout` sends it (`SetLoadout`) once per
 change and after every connect; the game and lobby screens call it each frame.

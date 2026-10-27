@@ -1,6 +1,6 @@
 //! Renders the real client screens headless (GPU, no window) with scripted input and saves
-//! PNGs: every main-menu page (the LOADOUT page also with its ability and weapon pickers and
-//! the HUNTER preset loaded), each settings tab, a notice, single-player gameplay (bot driven),
+//! PNGs: every main-menu page (the LOADOUT page also with its ability, weapon and knack
+//! pickers and the HUNTER preset loaded), each settings tab, a notice, single-player gameplay (bot driven),
 //! the pause menu (+ its loadout and settings pages), chat, the scoreboard and the connecting
 //! screen. Used to check layout and look without clicking through the game.
 //!
@@ -166,7 +166,8 @@ fn main() -> anyhow::Result<()> {
     // Slot card → (Right) CHANGE WEAPON → (Down) ability box A → its picker.
     h.menu(&mut menu, &[&[Right], &[Down], &[Enter]]);
     h.shot("menu_loadout_ability");
-    // Back to the showcase, then the weapon picker with the Longwick under the focus.
+    // Back to the showcase, then the weapon picker with the Trimmer (melee, the last column)
+    // under the focus.
     h.menu(
         &mut menu,
         &[
@@ -178,13 +179,20 @@ fn main() -> anyhow::Result<()> {
             &[Right],
             &[Right],
             &[Right],
+            &[Right],
         ],
     );
     h.shot("menu_loadout_weapon");
+    // Cancel; the knack card (Up from CHANGE WEAPON) opens the knack picker on the Thorn
+    // (PvE only: Surge in PvP), then the Snare.
+    h.menu(&mut menu, &[&[Escape], &[Up], &[Enter]]);
+    h.shot("menu_loadout_knack_thorn");
+    h.menu(&mut menu, &[&[Down], &[Down]]);
+    h.shot("menu_loadout_knack");
     // Cancel; load the HUNTER preset (PRESET choice → next, LOAD) and look at its bow.
     h.menu(
         &mut menu,
-        &[&[Escape], &[Down; 3], &[Right], &[Down], &[Enter], &[]],
+        &[&[Escape], &[Down; 4], &[Right], &[Down], &[Enter], &[]],
     );
     h.shot("menu_loadout_hunter");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
