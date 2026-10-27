@@ -89,6 +89,10 @@ fn builds_on_every_shipped_level() {
             s.capsule_tests,
             s.build_ms
         );
+        println!(
+            "{:20} jumps: {} leaps ({} over lava / water), {} pad rides; {} arc sweeps, {:.1} ms",
+            "", s.leaps, s.leaps_over_deadly, s.pad_links, s.arc_sweeps, s.jumps_ms
+        );
         assert!(s.small > 1000, "{name}: only {} walkable nodes", s.small);
         assert!(s.links > s.small, "{name}: barely linked");
         // Room per enemy class (narrow + headroom, or the wide footprint).
@@ -298,6 +302,144 @@ fn crucible_has_stacked_floors_and_lava_is_refused() {
                 o.pos
             );
         }
+    }
+}
+
+/// The full nav class of a ground Mould: size, leap limits, pads (as `Enemy::nav_class`).
+fn full_class_of(enemy: &str) -> NavClass {
+    let def = EnemyRegistry::builtin().get(enemy).expect("enemy");
+    let class = NavClass::for_size(def.radius, def.height).with_pads(def.pads);
+    match def.leap {
+        Some(l) => class.with_leaps(l.distance, l.up, l.down),
+        None => class,
+    }
+}
+
+/// Nodes reachable from `seeds` for `class` (walking links, plus its jumps when `jumps`).
+fn reachable(g: &NavGrid, seeds: &[u32], class: NavClass, jumps: bool) -> Vec<bool> {
+    let walker = NavClass {
+        leap_dm: 0,
+        pads: false,
+        ..class
+    };
+    let class = if jumps { class } else { walker };
+    let mut seen = vec![false; g.nodes.len()];
+    let mut queue: Vec<u32> = seeds.to_vec();
+    while let Some(n) = queue.pop() {
+        if std::mem::replace(&mut seen[n as usize], true) {
+            continue;
+        }
+        g.for_each_successor(n, class, &[], |m| {
+            if !seen[m as usize] {
+                queue.push(m);
+            }
+        });
+    }
+    seen
+}
+
+#[test]
+fn no_leap_lands_in_or_flies_through_a_kill_volume() {
+    for name in LevelDef::list() {
+        let (level, g, _) = load(&name);
+        for j in g.jumps() {
+            let (a, b) = (g.nodes[j.from as usize].pos, g.nodes[j.to as usize].pos);
+            for n in [j.from, j.to] {
+                let node = &g.nodes[n as usize];
+                assert!(!node.is(node_flags::DEADLY), "{name}: leap {a} -> {b}");
+                assert!(
+                    !in_kill_volume(&level, node.pos + Vec3::Y * 0.1),
+                    "{name}: leap {a} -> {b} ends in a kill volume"
+                );
+            }
+            if j.kind == shared::sim::nav::JumpKind::Leap {
+                for i in 1..40 {
+                    let p = shared::sim::nav::leap_point(a, b, i as f32 / 40.0);
+                    assert!(
+                        !in_kill_volume(&level, p),
+                        "{name}: leap {a} -> {b} passes through a kill volume at {p}"
+                    );
+                }
+                assert!(j.dist <= shared::sim::nav::LEAP_MAX_DISTANCE + 1e-3);
+            }
+        }
+    }
+}
+
+/// How much of the floor players can reach each ground Mould can reach (from the player
+/// spawns and checkpoints, doors open), walking only (before the leap links) and with its
+/// leaps and pads (`docs/enemies.md` measurements), counted over the part of that floor the
+/// Mould fits on (headroom, the wide footprint). "Player-reachable" is approximated by
+/// walking + every leap (8 m, 4 m up, 8 m down) + every pad from the same seeds; players do
+/// more (wall jumps, dashes, rocket jumps), so this is a floor of what they reach.
+#[test]
+fn reachability_per_class_on_every_level() {
+    let moulds = [
+        "gnawer",
+        "snuffer",
+        "censer",
+        "heron",
+        "bellwether",
+        "gaoler",
+        "smelter",
+    ];
+    let mut names = LevelDef::list();
+    names.sort();
+    println!(
+        "{:20} {:>7}  {}",
+        "level",
+        "player",
+        moulds
+            .iter()
+            .map(|m| format!("{m:>16}"))
+            .collect::<String>()
+    );
+    for name in names {
+        if name == "movement_test" {
+            continue;
+        }
+        let (level, g, _) = load(&name);
+        let seeds: Vec<u32> = level
+            .spawns
+            .iter()
+            .map(|s| s.position)
+            .chain(level.checkpoints.iter().map(|c| c.spawn.position))
+            .filter_map(|p| g.node_at(p, 0.6, NavClass::SMALL, &[]))
+            .collect();
+        let player = NavClass::SMALL.with_leaps(8.0, 4.0, 8.0).with_pads(true);
+        let players = reachable(&g, &seeds, player, true);
+        let total = players.iter().filter(|r| **r).count().max(1);
+        let mut row = String::new();
+        for m in moulds {
+            let class = full_class_of(m);
+            let own: Vec<u32> = seeds
+                .iter()
+                .filter_map(|&s| g.nearest_node(g.nodes[s as usize].pos, 6, class, &[]))
+                .collect();
+            let fits: Vec<bool> = (0..g.nodes.len() as u32)
+                .map(|n| players[n as usize] && g.passable(n, class, &[]))
+                .collect();
+            let room = fits.iter().filter(|f| **f).count().max(1);
+            let count = |r: &[bool]| r.iter().zip(&fits).filter(|(a, b)| **a && **b).count();
+            let before = count(&reachable(&g, &own, class, false));
+            let after = count(&reachable(&g, &own, class, true));
+            assert!(after >= before, "{name} {m}: {before} -> {after}");
+            row.push_str(&format!(
+                "{:>16}",
+                format!(
+                    "{:.0}% -> {:.0}%",
+                    100.0 * before as f32 / room as f32,
+                    100.0 * after as f32 / room as f32
+                )
+            ));
+            if m == "gnawer" && name == "drowned_chandlery" {
+                assert!(
+                    after as f32 > before as f32 * 1.05,
+                    "{name}: leaps open up the flooded halls ({before} -> {after})"
+                );
+            }
+        }
+        println!("{name:20} {total:>7}  {row}");
     }
 }
 

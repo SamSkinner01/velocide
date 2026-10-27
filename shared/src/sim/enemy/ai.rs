@@ -20,16 +20,23 @@
 //! * Movement: capsule collide-and-slide against the level ([`move_enemy`]), soft separation
 //!   while moving plus a hard push-apart pass, an edge guard against lava and ledges, knockback
 //!   with stagger; enemies whose feet enter a kill volume die.
+//! * **Getting there** (docs/enemies.md "Leaps, pads, melting"): a jump on the nav path is a
+//!   **leap** (a crouch, then the nav arc, guided past a lip that steals its speed) or a **pad
+//!   ride**; melee Moulds whose target is unreachable **prowl** the nearest reachable edge,
+//!   ranged ones walk to a **vantage point** that sees it; a Mould stranded or stuck for
+//!   `MeltDef::after` **melts** into a puddle and **re-forms** near its target.
 
 use engine::physics::{CollisionWorld, MASK_MOVEMENT, MASK_SHOTS};
 use glam::Vec3;
 
-use super::steer::{self, NavCtx};
-use super::{AiState, AimLaser, AttackDef, AttackKind, Enemy, Locomotion, ParryWindow};
+use super::steer::{self, NavCtx, Reach, SiteQuery};
+use super::{
+    AiState, AimLaser, AttackDef, AttackKind, Enemy, EnemyDef, LeapPlan, Locomotion, ParryWindow,
+};
 use crate::movement::SKIN;
 use crate::protocol::NetId;
 use crate::sim::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
-use crate::sim::nav::{MAX_DROP, STEP_UP};
+use crate::sim::nav::{JumpKind, MAX_DROP, STEP_UP, leap_velocity};
 use crate::sim::parry::ParryKey;
 use crate::sim::weapons::{SpreadRng, spread_dir};
 use crate::sim::{HitTarget, PlayerId, SimEvent, SimPlayer, SimWorld};
@@ -111,6 +118,15 @@ fn rotate_towards(from: Vec3, to: Vec3, max_angle: f32) -> Vec3 {
         return to;
     }
     (glam::Quat::from_axis_angle(axis.normalize(), max_angle) * from).normalize_or(to)
+}
+
+/// Shortest reach of an enemy's plain melee attacks (no lunges; `INFINITY` without any).
+fn melee_reach(def: &EnemyDef) -> f32 {
+    def.attacks
+        .iter()
+        .filter(|a| matches!(a.kind, AttackKind::Melee | AttackKind::Slam) && a.lunge <= 0.0)
+        .map(|a| a.range)
+        .fold(f32::INFINITY, f32::min)
 }
 
 /// Closest point to `p` on the segment `a`–`b`.
@@ -289,9 +305,12 @@ impl SimWorld {
         for e in self.enemies.values_mut() {
             if e.is_alive() && (e.state != AiState::Idle || e.target.is_some()) {
                 e.target = None;
-                // A latched Snuffer lets go; an unpoured line just burns out (harmlessly).
+                // A latched Snuffer lets go; an unpoured line just burns out (harmlessly); a
+                // leap or a melt is off (it stands where it is).
                 e.latched = None;
                 e.pour_line = None;
+                e.leap = None;
+                e.reform_at = None;
                 e.nav.reset();
                 e.set_state(AiState::Idle, 0);
             }
@@ -465,9 +484,42 @@ impl SimWorld {
                         }
                     } else {
                         (desired, max_drop) = self.chase_velocity(e, &tp, cx, 1.0);
+                        if let Some((jump, landing)) = e.nav.jump_ready.take()
+                            && e.stagger == 0
+                        {
+                            // On a jump's takeoff: crouch and leap / ride the pad.
+                            self.begin_leap(t, e, jump, landing, cx);
+                            desired = Vec3::ZERO;
+                            face = e.leap.map(|l| l.to);
+                        } else if self.stranded(e, &tp) {
+                            self.begin_melt(e, &tp, cx);
+                        }
                     }
                 }
             },
+            AiState::Leap => {
+                face = self.step_leap(t, e);
+            }
+            AiState::Melt => {
+                // A puddle doesn't move (knockback included); gravity still holds it down.
+                e.velocity = Vec3::new(0.0, e.velocity.y.min(0.0), 0.0);
+                if e.state_ticks >= e.state_len {
+                    self.finish_melt(e, target.as_ref());
+                }
+            }
+            AiState::Reform => {
+                e.velocity = Vec3::new(0.0, e.velocity.y.min(0.0), 0.0);
+                face = target.map(|p| p.position);
+                if e.state_ticks >= e.state_len {
+                    e.stranded = 0;
+                    let next = if target.is_some() {
+                        AiState::Chase
+                    } else {
+                        AiState::Idle
+                    };
+                    e.set_state(next, 0);
+                }
+            }
             AiState::Windup => {
                 let Some(a) = def.attacks.get(e.attack) else {
                     e.set_state(AiState::Chase, 0);
@@ -508,7 +560,8 @@ impl SimWorld {
                     && let Some(tp) = &target
                 {
                     // Climb back to hover height (after a dive).
-                    desired = steer::fly_velocity(&self.collision.world, e, tp, now, 0.5);
+                    desired =
+                        steer::fly_velocity(&self.collision.world, e, tp, now, 0.5, &mut cx.stats);
                     flying_recovery = true;
                 }
                 if e.state_ticks >= e.state_len {
@@ -561,13 +614,23 @@ impl SimWorld {
             // Hover in place (no gravity while alive).
             desired = horizontal(desired);
         }
-        if e.stagger > 0 {
+        if e.stagger > 0 || matches!(e.state, AiState::Leap | AiState::Melt | AiState::Reform) {
+            // (A leap flies its arc; a puddle stays put.)
             desired = Vec3::ZERO;
         }
-        let guarded = steer::guard(cx.nav.as_deref(), e, desired, max_drop);
+        // Walking onto a jump's takeoff, the node is the guard: it sits right at the edge.
+        let approaching = std::mem::take(&mut e.nav.approaching) && e.state == AiState::Chase;
+        let guarded = if approaching {
+            desired
+        } else {
+            steer::guard(cx.nav.as_deref(), e, desired, max_drop)
+        };
         // Own momentum (a lunge, braking after a run) stops dead at a ledge / lava edge;
         // knockback (stagger) doesn't: players may launch enemies into the lava.
-        if e.stagger == 0 && steer::heading_off_edge(cx.nav.as_deref(), e, max_drop, dt) {
+        if e.stagger == 0
+            && !approaching
+            && steer::heading_off_edge(cx.nav.as_deref(), e, max_drop, dt)
+        {
             e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
         }
         let before = e.position;
@@ -811,7 +874,14 @@ impl SimWorld {
         // Frenzied and elite enemies move faster.
         let scale = scale * self.fury(e).speed;
         if let Locomotion::Flying { .. } = def.locomotion {
-            let v = steer::fly_velocity(&self.collision.world, e, tp, self.tick, scale);
+            let v = steer::fly_velocity(
+                &self.collision.world,
+                e,
+                tp,
+                self.tick,
+                scale,
+                &mut cx.stats,
+            );
             return (v, MAX_DROP);
         }
         let speed = def.speed * scale;
@@ -823,9 +893,14 @@ impl SimWorld {
             Some((min, max)) => {
                 let d = tp.chest.distance(e.eye());
                 if !e.has_los || d > max {
-                    // Walk towards the target until it is in sight and in range.
-                    return steer::ground_velocity(e, tp.position, speed, cx, rate);
+                    // Walk to a spot that sees the target when walking at it doesn't get it
+                    // in sight, else towards it until it is in sight and in range.
+                    let goal = self
+                        .vantage_goal(e, tp, (min, max), cx)
+                        .unwrap_or(tp.position);
+                    return steer::ground_velocity(e, goal, speed, cx, rate);
                 }
+                e.vantage = None;
                 e.nav.reset();
                 let world = &self.collision.world;
                 let nav = cx.nav.as_deref();
@@ -872,22 +947,384 @@ impl SimWorld {
                 (v, STEP_UP + 0.1)
             }
             None => {
-                let reach = def
-                    .attacks
-                    .iter()
-                    .filter(|a| {
-                        matches!(a.kind, AttackKind::Melee | AttackKind::Slam) && a.lunge <= 0.0
-                    })
-                    .map(|a| a.range)
-                    .fold(f32::INFINITY, f32::min);
+                let reach = melee_reach(&def);
                 let surface = dist - e.radius() - tp.radius;
                 let level = (tp.position.y - feet.y).abs() < 1.0;
                 if reach.is_finite() && surface <= reach * 0.6 && level {
                     return (Vec3::ZERO, STEP_UP);
                 }
-                steer::ground_velocity(e, tp.position, speed, cx, rate)
+                let v = steer::ground_velocity(e, tp.position, speed, cx, rate);
+                if e.nav.at_partial_end() {
+                    return self.prowl(e, tp, speed, cx);
+                }
+                v
             }
         }
+    }
+
+    /// Pacing the reachable edge nearest an unreachable target (the end of its partial path):
+    /// side to side across the line to it at a prowl, facing it, turning at walls, ledges and
+    /// lava, every ~1.5 s, and when 2.5 m from where the path ended.
+    fn prowl(&self, e: &mut Enemy, tp: &PlayerView, speed: f32, cx: &NavCtx) -> (Vec3, f32) {
+        let world = &self.collision.world;
+        let nav = cx.nav.as_deref();
+        let feet = e.feet();
+        let end = e.nav.waypoints.last().map_or(e.progress_from, |w| w.pos);
+        let to = horizontal(tp.position - feet).normalize_or(e.forward());
+        let mut dir = Vec3::new(-to.z, 0.0, to.x) * e.strafe_sign;
+        if e.strafe_flip_in > 0 {
+            e.strafe_flip_in -= 1;
+        } else if horizontal(feet - end).dot(dir) > 2.5
+            || !steer::can_step(world, nav, e, dir)
+            || (self.tick + e.id.0).is_multiple_of(90)
+        {
+            e.strafe_sign = -e.strafe_sign;
+            e.strafe_flip_in = 30;
+            dir = -dir;
+        }
+        if !steer::can_step(world, nav, e, dir) {
+            return (Vec3::ZERO, STEP_UP);
+        }
+        (dir * speed * 0.45, STEP_UP + 0.1)
+    }
+
+    /// A ranged Mould with no sight of its target (`band` its preferred range): the vantage
+    /// point it is walking to, or a new one ([`steer::vantage_site`]) once walking at the target
+    /// hasn't brought it into sight for 1.5 s or the target can't be reached (one search a
+    /// second per enemy, within the per-tick search budget). Given up on after 4 s.
+    fn vantage_goal(
+        &self,
+        e: &mut Enemy,
+        tp: &PlayerView,
+        band: (f32, f32),
+        cx: &mut NavCtx,
+    ) -> Option<Vec3> {
+        let now = self.tick;
+        if let Some((p, until)) = e.vantage {
+            if now < until && horizontal(p - e.feet()).length() > 0.8 {
+                return Some(p);
+            }
+            e.vantage = None;
+        }
+        let need =
+            e.unseen_ticks > 90 || matches!(e.nav.reach, Reach::Unreachable | Reach::OffGrid);
+        if !need || now < e.search_after || cx.searches_left == 0 {
+            return None;
+        }
+        cx.searches_left -= 1;
+        cx.stats.vantage_searches += 1;
+        e.search_after = now + self.tick_rate;
+        let nav = cx.nav.clone()?;
+        let class = e.nav_class();
+        let start = nav.node_at(e.feet(), 1.0, class, &cx.doors)?;
+        let q = SiteQuery {
+            class,
+            doors: &cx.doors,
+            target: tp.chest,
+            target_eye: tp.chest,
+            band,
+            eye_height: e.def.eye_height,
+            radius: e.radius(),
+            others: &[],
+            arena: None,
+        };
+        let p = steer::vantage_site(&nav, &mut cx.scratch, &self.collision.world, start, &q)?;
+        e.vantage = Some((p, now + 4 * self.tick_rate));
+        Some(p)
+    }
+
+    /// Is a chasing Mould in a fight right now: a ranged one seeing its target within its
+    /// band, a melee one within a metre and a half of its reach (at about its level)?
+    fn engaged(&self, e: &Enemy, tp: &PlayerView) -> bool {
+        match e.def.ai.preferred_range {
+            Some((_, max)) => e.has_los && tp.chest.distance(e.eye()) <= max,
+            None => {
+                let reach = melee_reach(&e.def);
+                let surface = horizontal(tp.position - e.feet()).length() - e.radius() - tp.radius;
+                let reach = if reach.is_finite() { reach } else { 2.0 };
+                surface <= reach + 1.5 && (tp.position.y - e.feet().y).abs() < e.height().max(2.0)
+            }
+        }
+    }
+
+    /// Stranded bookkeeping of a chasing ground Mould (docs/enemies.md "Melting and
+    /// re-forming"), once a tick: in a fight it isn't stranded; else its target unreachable
+    /// counts, and so does a reachable (or far) target it isn't getting anywhere towards (it
+    /// moved less than 1 m in the last 2 s window); off the nav grid and not moving counts
+    /// triple. True when it has been stranded for `MeltDef::after`.
+    fn stranded(&self, e: &mut Enemy, tp: &PlayerView) -> bool {
+        let melt = e.def.melt;
+        if melt.after <= 0.0 || e.is_flying() || e.is_dummy() {
+            return false;
+        }
+        if e.progress_in == 0 {
+            let moved = e.feet() - e.progress_from;
+            e.progressing = horizontal(moved).length() >= 1.0 || moved.y.abs() >= 1.5;
+            e.progress_from = e.feet();
+            e.progress_in = 2 * self.tick_rate;
+        } else {
+            e.progress_in -= 1;
+        }
+        if self.engaged(e, tp) {
+            e.stranded = 0;
+            return false;
+        }
+        e.stranded += match e.nav.reach {
+            Reach::Unreachable => 1,
+            Reach::OffGrid if !e.progressing => 3,
+            Reach::OffGrid => 0,
+            _ if e.progressing => {
+                e.stranded = 0;
+                0
+            }
+            _ => 1,
+        };
+        e.stranded >= secs_to_ticks(melt.after, self.tick_rate, 1) as u32
+    }
+
+    /// Starts a melt: finds where it re-forms ([`steer::reform_site`]; one search a tick for all
+    /// enemies) and slumps into a puddle. With nowhere to re-form (an isolated target), or
+    /// when its target stands where it can't (a floe too small for a Gaoler) and it is already
+    /// near, it keeps prowling and tries again in half the time.
+    fn begin_melt(&mut self, e: &mut Enemy, tp: &PlayerView, cx: &mut NavCtx) {
+        if cx.searches_left == 0 {
+            return;
+        }
+        cx.searches_left -= 1;
+        let Some(nav) = cx.nav.clone() else {
+            return;
+        };
+        let melt = e.def.melt;
+        let rate = self.tick_rate;
+        let class = e.nav_class();
+        let near = horizontal(tp.position - e.feet()).length() <= melt.far;
+        if near && nav.node_at(tp.position, 3.0, class, &cx.doors).is_none() {
+            cx.stats.melt_no_site += 1;
+            e.stranded = secs_to_ticks(melt.after * 0.5, rate, 1) as u32;
+            return;
+        }
+        let others: Vec<(Vec3, f32)> = self
+            .enemies
+            .values()
+            .filter(|o| o.is_alive() && o.id != e.id)
+            .map(|o| (o.reform_at.unwrap_or(o.feet()), o.radius()))
+            .collect();
+        // An encounter's Moulds stay in its arena while their target fights there.
+        let arena = e
+            .encounter
+            .and_then(|(i, _)| self.level.encounters.get(i as usize))
+            .and_then(|enc| enc.arena)
+            .filter(|a| a.contains(tp.position + Vec3::Y * 0.1));
+        let q = SiteQuery {
+            class,
+            doors: &cx.doors,
+            target: tp.position,
+            target_eye: tp.position + Vec3::Y * (tp.height - 0.2),
+            band: (melt.near, melt.far.max(melt.near)),
+            eye_height: e.def.eye_height,
+            radius: e.radius(),
+            others: &others,
+            arena,
+        };
+        let site = steer::reform_site(
+            &nav,
+            &mut cx.scratch,
+            &self.collision.world,
+            &self.level,
+            &q,
+        );
+        let Some(site) = site else {
+            cx.stats.melt_no_site += 1;
+            e.stranded = secs_to_ticks(melt.after * 0.5, rate, 1) as u32;
+            return;
+        };
+        cx.stats.melts += 1;
+        e.reform_at = Some(site);
+        e.leap = None;
+        e.vantage = None;
+        e.nav.reset();
+        e.aim_locked = false;
+        e.velocity = Vec3::new(0.0, e.velocity.y.min(0.0), 0.0);
+        if let Some(line) = e.pour_line.take() {
+            self.drop_unlit_line(line);
+        }
+        e.set_state(AiState::Melt, secs_to_ticks(melt.sink, rate, 1) as u32);
+    }
+
+    /// The puddle has soaked away: the Mould is moved to its re-form site, facing its target,
+    /// and rises.
+    fn finish_melt(&mut self, e: &mut Enemy, target: Option<&PlayerView>) {
+        if let Some(site) = e.reform_at.take() {
+            e.position = site;
+            e.velocity = Vec3::ZERO;
+            e.on_ground = true;
+            e.trail.clear();
+            if let Some(tp) = target
+                && let Some(yaw) = yaw_towards(tp.position - site)
+            {
+                e.yaw = yaw;
+            }
+        }
+        e.nav.reset();
+        e.stranded = 0;
+        e.progress_from = e.feet();
+        e.progress_in = 0;
+        e.progressing = true;
+        let rise = secs_to_ticks(e.def.melt.rise, self.tick_rate, 1) as u32;
+        e.set_state(AiState::Reform, rise);
+    }
+
+    /// Starts jump `jump` of its route (landing on waypoint `landing`): a leap crouches first
+    /// (`LeapDef::crouch`), a pad ride launches at once.
+    fn begin_leap(
+        &mut self,
+        t: &Tuning,
+        e: &mut Enemy,
+        jump: u32,
+        landing: usize,
+        cx: &mut NavCtx,
+    ) {
+        let Some(nav) = cx.nav.as_deref() else {
+            return;
+        };
+        let Some(j) = nav.jump(jump).copied() else {
+            return;
+        };
+        let pad = match j.kind {
+            JumpKind::Pad(i) => Some(i),
+            JumpKind::Leap => None,
+        };
+        e.leap = Some(LeapPlan {
+            jump,
+            waypoint: landing,
+            to: nav.nodes[j.to as usize].pos,
+            pad,
+            launched: false,
+            speed: 0.0,
+        });
+        e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
+        if pad.is_some() {
+            cx.stats.pad_rides += 1;
+            self.launch(t, e);
+        } else {
+            cx.stats.leaps += 1;
+            let crouch = e.def.leap.map_or(0.3, |l| l.crouch);
+            e.set_state(
+                AiState::Leap,
+                secs_to_ticks(crouch, self.tick_rate, 1) as u32,
+            );
+        }
+    }
+
+    /// Is another living Mould standing on `to` (bodies overlapping it) or in the air on a
+    /// leap landing there?
+    fn landing_taken(&self, e: &Enemy, to: Vec3) -> bool {
+        self.enemies.values().any(|o| {
+            o.id != e.id
+                && o.is_alive()
+                && !o.is_flying()
+                && (o
+                    .leap
+                    .is_some_and(|l| l.launched && l.to.distance(to) < e.radius() + o.radius())
+                    || (horizontal(o.feet() - to).length() < e.radius() + o.radius()
+                        && (o.feet().y - to.y).abs() < 1.5))
+        })
+    }
+
+    /// Leaves the ground: the leap arc's launch velocity from where it actually stands to the
+    /// landing (`nav::leap_velocity`, so it flies the arc the nav build swept), or the pad's
+    /// velocity (set, as `movement::step` does for players).
+    fn launch(&mut self, t: &Tuning, e: &mut Enemy) {
+        let Some(plan) = e.leap.as_mut() else {
+            return;
+        };
+        let g = t.movement.gravity.max(1.0);
+        let feet = e.position;
+        let (v, time) = match plan.pad.and_then(|i| self.level.jump_pads.get(i as usize)) {
+            Some(pad) => {
+                let v = pad.velocity;
+                let rise = plan.to.y - feet.y;
+                let disc = v.y * v.y - 2.0 * g * rise;
+                let time = if disc > 0.0 {
+                    (v.y + disc.sqrt()) / g
+                } else {
+                    2.0 * v.y.max(1.0) / g
+                };
+                (v, time)
+            }
+            None => leap_velocity(feet, plan.to, g),
+        };
+        plan.launched = true;
+        plan.speed = horizontal(v).length();
+        if let Some(yaw) = yaw_towards(plan.to - feet) {
+            e.yaw = yaw;
+        }
+        e.velocity = v;
+        e.on_ground = false;
+        e.set_state(AiState::Leap, secs_to_ticks(time, self.tick_rate, 1) as u32);
+    }
+
+    /// One tick of a jump: the crouch (facing the landing; knocked about or off the ground, the
+    /// leap is off), then the flight — ballistic, except that a leap whose horizontal speed a
+    /// wall or a lip stole is re-aimed at the landing — until it lands: on the planned spot it
+    /// follows its route on, anywhere else it re-plans. Returns where to face.
+    fn step_leap(&mut self, t: &Tuning, e: &mut Enemy) -> Option<Vec3> {
+        let Some(plan) = e.leap else {
+            e.set_state(AiState::Chase, 0);
+            return None;
+        };
+        if !plan.launched {
+            if e.stagger > 0 || !e.on_ground {
+                e.leap = None;
+                e.nav.reset();
+                e.set_state(AiState::Chase, 0);
+                return None;
+            }
+            e.velocity = Vec3::new(0.0, e.velocity.y, 0.0);
+            if e.state_ticks >= e.state_len {
+                // Somebody standing on (or flying to) the landing: hold the crouch a little
+                // (up to 0.75 s), then pick another way.
+                if self.landing_taken(e, plan.to) {
+                    if e.state_ticks >= e.state_len + self.tick_rate * 3 / 4 {
+                        e.leap = None;
+                        e.nav.reset();
+                        e.set_state(AiState::Chase, 0);
+                        return None;
+                    }
+                } else {
+                    self.launch(t, e);
+                }
+            }
+            return Some(plan.to);
+        }
+        let dt = self.dt();
+        let flat = horizontal(plan.to - e.feet());
+        if !e.on_ground
+            && plan.pad.is_none()
+            && e.stagger == 0
+            && flat.length() > 0.3
+            && horizontal(e.velocity).length() < plan.speed * 0.5
+        {
+            let left = e.state_len.saturating_sub(e.state_ticks) as f32 * dt;
+            let want = (flat / left.max(0.15)).clamp_length_max(plan.speed.max(2.0) * 1.5);
+            e.velocity.x = want.x;
+            e.velocity.z = want.z;
+        }
+        let landed = e.on_ground && e.state_ticks >= 2;
+        let lost = e.state_ticks > e.state_len + 2 * self.tick_rate;
+        if landed || lost {
+            e.leap = None;
+            let feet = e.feet();
+            let on_spot =
+                horizontal(plan.to - feet).length() < 1.5 && (plan.to.y - feet.y).abs() < 1.0;
+            if landed && on_spot {
+                e.nav.landed(plan.waypoint);
+            } else {
+                e.nav.reset();
+            }
+            e.set_state(AiState::Chase, 0);
+        }
+        None
     }
 
     fn begin_windup(&mut self, e: &mut Enemy, attack: usize, tp: &PlayerView) {
@@ -898,6 +1335,8 @@ impl SimWorld {
         };
         let len = secs_to_ticks(a.windup, rate, 1) as u32;
         let parry = a.parry_window;
+        // Attacking: not stranded.
+        e.stranded = 0;
         e.attack = attack;
         e.attack_seq = e.attack_seq.wrapping_add(1);
         e.shots_fired = 0;
@@ -1289,10 +1728,16 @@ impl SimWorld {
 
     /// One push-apart pass; false when nothing overlapped.
     fn push_pass(&mut self, nav: Option<&crate::sim::nav::NavGrid>) -> bool {
+        // A Mould in the air on a leap isn't shoved off its arc (into the water it is
+        // crossing), and a puddle isn't shoved at all.
         let bodies: Vec<(NetId, Vec3, f32, f32, f32)> = self
             .enemies
             .values()
-            .filter(|e| e.is_alive())
+            .filter(|e| {
+                e.is_alive()
+                    && !matches!(e.state, AiState::Melt | AiState::Reform)
+                    && !e.leap.is_some_and(|l| l.launched)
+            })
             .map(|e| (e.id, e.feet(), e.radius(), e.height(), e.mass()))
             .collect();
         let mut pushes: Vec<(NetId, Vec3)> = Vec::new();

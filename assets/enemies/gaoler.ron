@@ -127,4 +127,9 @@
         parry: (1.0, 0.95, 0.25),
     ),
     death_time: 1.4,
+    // Getting there (docs/enemies.md "Leaps, pads, melting"): far too heavy to leap; it rides
+    // pads, and stranded for 6 s it melts and re-forms 8-16 m from its target, out of sight.
+    leap: None,
+    pads: true,
+    melt: (after: 6.0, sink: 0.6, rise: 0.8, near: 8.0, far: 16.0),
 )

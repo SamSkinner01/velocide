@@ -1707,3 +1707,439 @@ fn frozen_world_stops_enemies() {
         }
     }
 }
+
+// ---- getting there: leaps, pads, prowling, vantage points, melting (docs/enemies.md) ----
+
+fn aware(a: &mut Arena, id: NetId) {
+    a.world.enemies.get_mut(&id).unwrap().aware = true;
+}
+
+fn in_kill_volume(a: &Arena, p: Vec3) -> bool {
+    a.world.level.kill_volumes.iter().any(|v| v.contains(p))
+}
+
+/// The Drowned Chandlery with its doors as they start and no encounters (nothing spawns).
+fn chandlery() -> Arena {
+    let mut level = LevelDef::load_named("drowned_chandlery").expect("level");
+    level.encounters.clear();
+    Arena::new(level)
+}
+
+/// Runs until `id` is within `reach` m (body surfaces, horizontally, about level) of player
+/// `p`, failing on its death or its feet entering a kill volume; returns (ticks taken, leaps
+/// started).
+fn chase_until_close(a: &mut Arena, id: NetId, p: PlayerId, reach: f32, max: u32) -> (u32, u32) {
+    let mut leaps = 0;
+    let mut was = AiState::Idle;
+    for tick in 0..max {
+        let ev = a.tick();
+        for e in &ev {
+            if let SimEvent::Killed(k) = e {
+                assert!(
+                    k.victim != HitTarget::Entity(id),
+                    "it died ({:?}) at tick {tick}",
+                    k.attack
+                );
+            }
+        }
+        let e = &a.world.enemies[&id];
+        assert!(
+            !in_kill_volume(a, e.feet()),
+            "{} in a kill volume at {} (tick {tick})",
+            e.def.name,
+            e.position
+        );
+        if e.state == AiState::Leap && was != AiState::Leap {
+            leaps += 1;
+        }
+        was = e.state;
+        let pp = a.world.players[&p].movement.position;
+        let d =
+            Vec3::new(pp.x - e.position.x, 0.0, pp.z - e.position.z).length() - e.def.radius - 0.4;
+        if d < reach && (pp.y - e.position.y).abs() < 1.0 {
+            return (tick, leaps);
+        }
+    }
+    panic!(
+        "{} never reached the player: at {} ({:?}, {:?})",
+        a.world.enemies[&id].def.name,
+        a.world.enemies[&id].position,
+        a.world.enemies[&id].state,
+        a.world.enemies[&id].nav.reach
+    );
+}
+
+#[test]
+fn a_gnawer_leaps_the_flooded_break_of_the_spool_walk() {
+    // C2 Spool Walk (y 4): a 6 m flooded break (z -4..2, deep water) with a wax floe in it.
+    let mut a = chandlery();
+    let p = a.player(0, Vec3::new(16.5, 4.0, -9.0), 0.0);
+    god(&mut a, p);
+    let g = spawn(&mut a, "gnawer", Vec3::new(16.5, 4.0, 6.5), PI);
+    aware(&mut a, g);
+    let (ticks, leaps) = chase_until_close(&mut a, g, p, 2.0, 8 * 60);
+    println!(
+        "gnawer over the flooded break in {:.2} s ({leaps} leaps)",
+        ticks as f32 / 60.0
+    );
+    assert!(leaps >= 1, "it leapt");
+    assert!(ticks < 5 * 60, "{ticks} ticks");
+    // And then it bites.
+    let mut log = Log::default();
+    run_logged(&mut a, g, 3 * 60, &mut log);
+    assert!(log.strikes_of(attack_index(&a, "gnawer", "bite")) > 0);
+}
+
+#[test]
+fn moulds_reach_a_player_on_a_floe_in_the_wax_press() {
+    // A3's drowned west third (deep water from x -42 west, floor y 11): the player on the
+    // floe at (-45.5, -27.5), 2.25 m out from the edge.
+    for (name, reach) in [("gnawer", 2.0), ("snuffer", 2.5)] {
+        let mut a = chandlery();
+        let p = a.player(0, Vec3::new(-45.5, 11.2, -27.5), 0.0);
+        god(&mut a, p);
+        let id = spawn(&mut a, name, Vec3::new(-34.0, 11.0, -30.0), PI * 0.5);
+        aware(&mut a, id);
+        let (ticks, leaps) = chase_until_close(&mut a, id, p, reach, 10 * 60);
+        println!(
+            "{name} onto the floe in {:.2} s ({leaps} leaps)",
+            ticks as f32 / 60.0
+        );
+        assert!(leaps >= 1, "{name} leapt onto the floe");
+    }
+    // A Gaoler can't leap and doesn't fit on the floe: it prowls the water's edge (it doesn't
+    // melt over and over: re-forming wouldn't bring it any closer).
+    let mut a = chandlery();
+    let p = a.player(0, Vec3::new(-45.5, 11.2, -27.5), 0.0);
+    god(&mut a, p);
+    let id = spawn(&mut a, "gaoler", Vec3::new(-34.0, 11.0, -30.0), PI * 0.5);
+    aware(&mut a, id);
+    for tick in 0..(12 * 60) {
+        a.tick();
+        let e = &a.world.enemies[&id];
+        assert!(!in_kill_volume(&a, e.feet()));
+        assert_ne!(e.state, AiState::Melt, "melted at tick {tick}");
+    }
+    let e = &a.world.enemies[&id];
+    let d = Vec3::new(e.position.x + 45.5, 0.0, e.position.z + 27.5).length();
+    assert!(d < 9.0, "the gaoler waits at the edge, {d} m away");
+}
+
+#[test]
+fn gnawers_ride_a_jump_pad_up_to_a_ledge() {
+    // A 6 m ledge 10..16 m north, no way up but the pad at the origin.
+    let mut level = flat_level(
+        LevelKind::Campaign,
+        vec![brush([-8.0, 0.0, -18.0], [8.0, 6.0, -10.0])],
+    );
+    level.jump_pads.push(shared::level::JumpPad {
+        trigger: Volume {
+            min: Vec3::new(-1.0, 0.0, -1.0),
+            max: Vec3::new(1.0, 0.5, 1.0),
+        },
+        velocity: Vec3::new(0.0, 24.0, -14.0),
+    });
+    let mut a = Arena::new(level);
+    let p = a.player(0, Vec3::new(0.5, 6.0, -15.0), 0.0);
+    god(&mut a, p);
+    let g = spawn(&mut a, "gaoler", Vec3::new(0.5, 0.0, 8.0), PI);
+    aware(&mut a, g);
+    let mut rode = false;
+    for _ in 0..(8 * 60) {
+        a.tick();
+        let e = &a.world.enemies[&g];
+        rode |= e.state == AiState::Leap && e.leap.is_some_and(|l| l.pad == Some(0));
+        if e.position.y > 5.5 && e.on_ground {
+            break;
+        }
+    }
+    let e = &a.world.enemies[&g];
+    assert!(rode, "the gaoler rode the pad");
+    assert!(
+        e.position.y > 5.5 && e.position.z < -10.0,
+        "and landed on the ledge: {}",
+        e.position
+    );
+}
+
+/// A 7 m block (8 x 8 m, no way up or down for a walker) on the flat test floor.
+fn block_level(height: f32) -> LevelDef {
+    flat_level(
+        LevelKind::Campaign,
+        vec![brush([-4.0, 0.0, -4.0], [4.0, height, 4.0])],
+    )
+}
+
+#[test]
+fn a_stranded_gaoler_prowls_then_melts_and_reforms_near_its_target() {
+    let mut a = Arena::new(block_level(7.0));
+    let p = a.player(0, Vec3::new(0.0, 0.0, 22.0), 0.0);
+    god(&mut a, p);
+    let g = spawn(&mut a, "gaoler", Vec3::new(0.0, 7.0, 0.0), 0.0);
+    aware(&mut a, g);
+    let after = a.world.enemy_defs.get("gaoler").unwrap().melt.after;
+    let mut prowled = 0.0f32;
+    let mut last = a.world.enemies[&g].position;
+    let mut melted = None;
+    let mut reformed = None;
+    for tick in 0..(12 * 60) {
+        a.tick();
+        let e = &a.world.enemies[&g];
+        match e.state {
+            AiState::Melt if melted.is_none() => melted = Some(tick),
+            AiState::Reform if reformed.is_none() => reformed = Some((tick, e.position)),
+            AiState::Chase if melted.is_none() => {
+                prowled += (e.position - last).length();
+            }
+            _ => {}
+        }
+        last = e.position;
+        if reformed.is_some() && e.state == AiState::Chase {
+            break;
+        }
+    }
+    let melted = melted.expect("it melted");
+    let (rose, site) = reformed.expect("and re-formed");
+    println!(
+        "gaoler stranded: prowled {prowled:.1} m, melted after {:.2} s, rose at {site} ({:.1} m from the player)",
+        melted as f32 / 60.0,
+        site.distance(a.world.players[&p].movement.position)
+    );
+    assert!(
+        prowled > 2.0,
+        "it paced the edge instead of standing: {prowled}"
+    );
+    // Alert (0.6 s) + the stranded time, give or take a tick.
+    assert!(
+        (melted as f32 / 60.0) < after + 1.0,
+        "melted after {melted} ticks"
+    );
+    assert_eq!(rose - melted, 36, "the slump takes 0.6 s");
+    assert!(site.y.abs() < 0.1, "re-formed on the floor: {site}");
+    assert!(
+        site.x.abs() > 4.5 || site.z.abs() > 4.5,
+        "not on the block: {site}"
+    );
+    let d = Vec3::new(site.x, 0.0, site.z - 22.0).length();
+    assert!((7.5..=19.0).contains(&d), "in its band: {d}");
+    // Then it gets to its target and attacks.
+    let mut log = Log::default();
+    run_logged(&mut a, g, 8 * 60, &mut log);
+    assert!(!log.windups.is_empty(), "it attacked after re-forming");
+}
+
+#[test]
+fn a_gnawer_knocked_onto_a_ledge_it_cant_leave_reforms_near_its_target() {
+    // A 10 m block: higher than any leap goes down.
+    let mut level = flat_level(
+        LevelKind::Campaign,
+        vec![brush([4.0, 0.0, -4.0], [12.0, 10.0, 4.0])],
+    );
+    level.name = "ledge".into();
+    let mut a = Arena::new(level);
+    let p = a.player(0, Vec3::new(-14.0, 0.0, 0.0), 0.0);
+    god(&mut a, p);
+    let g = spawn(&mut a, "gnawer", Vec3::new(-2.0, 0.0, 0.0), 0.0);
+    aware(&mut a, g);
+    a.tick();
+    // A blast flings it up onto the block.
+    let t = a.tuning.clone();
+    let info = DamageInfo::new(1.0, Owner::Player(p), Attack::Dev)
+        .at(a.world.enemies[&g].center(), Vec3::X)
+        .knockback(Vec3::new(8.0, 30.0, 0.0) / 1.25);
+    a.world.apply_damage(&t, HitTarget::Entity(g), info);
+    let mut landed = None;
+    let mut reformed = None;
+    for tick in 0..(12 * 60) {
+        a.tick();
+        let e = &a.world.enemies[&g];
+        if landed.is_none() && e.on_ground && e.position.y > 9.5 {
+            landed = Some(tick);
+        }
+        if e.state == AiState::Reform && reformed.is_none() {
+            reformed = Some((tick, e.position));
+        }
+        if reformed.is_some() && e.state == AiState::Chase {
+            break;
+        }
+    }
+    let landed = landed.expect("knocked onto the block");
+    let (rose, site) = reformed.expect("re-formed");
+    println!(
+        "gnawer knocked onto a 10 m block re-formed {:.2} s after landing, at {site}",
+        (rose - landed) as f32 / 60.0
+    );
+    assert!(rose - landed <= 7 * 60, "{} ticks", rose - landed);
+    assert!(site.y.abs() < 0.1, "back on the floor: {site}");
+    assert!(site.distance(Vec3::new(-14.0, 0.0, 0.0)) < 20.0);
+    let (ticks, _) = chase_until_close(&mut a, g, p, 2.0, 6 * 60);
+    assert!(ticks < 6 * 60);
+}
+
+#[test]
+fn nothing_reforms_in_lava_water_or_a_closed_room() {
+    // The player in the open; lava to the east and water to the west of them (kill volumes
+    // over the floor), a closed room to the north, every spot in the band; Moulds stranded on
+    // 9 m pillars to the south.
+    let mut level = flat_level(
+        LevelKind::Campaign,
+        vec![
+            // The closed room: x -8..8, z -24..-12, a door in its south wall.
+            brush([-9.0, 0.0, -25.0], [9.0, 6.0, -24.0]),
+            brush([-9.0, 0.0, -24.0], [-8.0, 6.0, -12.0]),
+            brush([8.0, 0.0, -24.0], [9.0, 6.0, -12.0]),
+            brush([-9.0, 0.0, -12.0], [-2.0, 6.0, -11.0]),
+            brush([2.0, 0.0, -12.0], [9.0, 6.0, -11.0]),
+            brush([-9.0, 6.0, -25.0], [9.0, 7.0, -11.0]),
+            // Pillars.
+            brush([-22.0, 0.0, 18.0], [-18.0, 9.0, 22.0]),
+            brush([-2.0, 0.0, 26.0], [2.0, 9.0, 30.0]),
+            brush([18.0, 0.0, 18.0], [22.0, 9.0, 22.0]),
+        ],
+    );
+    level.doors.push(shared::level::Door {
+        id: 1,
+        brush: brush([-2.0, 0.0, -12.0], [2.0, 6.0, -11.0]),
+        starts_open: false,
+    });
+    let lava = Volume {
+        min: Vec3::new(6.0, -1.0, -10.0),
+        max: Vec3::new(30.0, 0.3, 10.0),
+    };
+    let water = Volume {
+        min: Vec3::new(-30.0, -1.0, -10.0),
+        max: Vec3::new(-6.0, 0.3, 10.0),
+    };
+    level.kill_volumes = vec![lava, water];
+    let room = Volume {
+        min: Vec3::new(-8.0, -0.5, -24.0),
+        max: Vec3::new(8.0, 6.0, -12.0),
+    };
+    let mut a = Arena::new(level);
+    let p = a.player(0, Vec3::new(0.0, 0.0, -2.0), 0.0);
+    god(&mut a, p);
+    let mut ids = Vec::new();
+    for (i, x) in [-20.0f32, 0.0, 20.0].iter().enumerate() {
+        let z = if i == 1 { 28.0 } else { 20.0 };
+        for name in ["gaoler", "gnawer"] {
+            let dx = if name == "gaoler" { -0.6 } else { 1.2 };
+            let id = spawn(&mut a, name, Vec3::new(x + dx, 9.0, z), 0.0);
+            aware(&mut a, id);
+            ids.push(id);
+        }
+    }
+    let mut sites = BTreeMap::new();
+    for _ in 0..(14 * 60) {
+        a.tick();
+        for &id in &ids {
+            let e = &a.world.enemies[&id];
+            if e.state == AiState::Reform {
+                sites.entry(id).or_insert(e.position);
+            }
+            assert!(
+                !in_kill_volume(&a, e.feet()),
+                "{} at {}",
+                e.def.name,
+                e.position
+            );
+        }
+    }
+    println!("re-formed at: {:?}", sites.values().collect::<Vec<_>>());
+    assert_eq!(sites.len(), ids.len(), "every stranded Mould re-formed");
+    for site in sites.values() {
+        assert!(
+            !room.contains(*site + Vec3::Y * 0.1),
+            "in the closed room: {site}"
+        );
+        for k in [lava, water] {
+            let near = Vec3::new(
+                site.x.clamp(k.min.x, k.max.x),
+                site.y,
+                site.z.clamp(k.min.z, k.max.z),
+            );
+            assert!(
+                near.distance(*site) > 1.0,
+                "{site} re-formed in / at the edge of a kill volume"
+            );
+        }
+        assert!(site.y.abs() < 0.1, "{site} on the floor");
+    }
+    // Two never rose on the same spot.
+    let v: Vec<&Vec3> = sites.values().collect();
+    for (i, s) in v.iter().enumerate() {
+        for t in &v[i + 1..] {
+            assert!(s.distance(**t) > 1.2, "{s} and {t}");
+        }
+    }
+}
+
+#[test]
+fn a_censer_with_no_sight_of_its_target_walks_to_a_spot_that_has_it() {
+    // The player 6 m back on a 5 m plateau no Censer can climb; the Censer at its foot can't
+    // see them over the edge: it backs off to where it can (≥ 9 m out) and lobs.
+    let level = flat_level(
+        LevelKind::Campaign,
+        vec![brush([-10.0, 0.0, -30.0], [10.0, 5.0, -10.0])],
+    );
+    let mut a = Arena::new(level);
+    let p = a.player(0, Vec3::new(0.0, 5.0, -16.0), 0.0);
+    god(&mut a, p);
+    let c = spawn(&mut a, "censer", Vec3::new(0.0, 0.0, -8.0), 0.0);
+    aware(&mut a, c);
+    let mut log = Log::default();
+    run_logged(&mut a, c, 6 * 60, &mut log);
+    let e = &a.world.enemies[&c];
+    println!(
+        "censer moved to {} and fired {} times",
+        e.position,
+        log.fired.len()
+    );
+    assert!(
+        !log.fired.is_empty(),
+        "it found a spot with sight and lobbed"
+    );
+    assert!(log.states.iter().all(|s| s.1 != AiState::Melt));
+}
+
+#[test]
+fn a_harrier_with_a_pillar_in_the_way_flies_round_it() {
+    // A 4 m pillar, 20 m tall, between the player and the Harrier hovering behind it.
+    let level = flat_level(
+        LevelKind::Campaign,
+        vec![brush([-2.0, 0.0, -8.0], [2.0, 20.0, -4.0])],
+    );
+    let mut a = Arena::new(level);
+    hover_only(&mut a);
+    let p = a.player(0, Vec3::new(0.0, 0.0, 6.0), 0.0);
+    god(&mut a, p);
+    let h = spawn(&mut a, "harrier_hover", Vec3::new(0.0, 6.0, -16.0), 0.0);
+    aware(&mut a, h);
+    let mut hidden_from = None;
+    let mut seen_after = None;
+    let mut longest = 0u32;
+    let mut run = 0u32;
+    for tick in 0..(12 * 60) {
+        a.tick();
+        assert_inside_free_space(&a, h, tick);
+        let e = &a.world.enemies[&h];
+        if e.has_los {
+            if hidden_from.is_some() && seen_after.is_none() {
+                seen_after = Some(tick);
+            }
+            run = 0;
+        } else {
+            hidden_from.get_or_insert(tick);
+            run += 1;
+            longest = longest.max(run);
+        }
+    }
+    println!(
+        "harrier behind a pillar: sees the player after {:?} ticks, longest blind spell {longest} ticks, {} detours",
+        seen_after, a.world.ai.stats.detours
+    );
+    assert!(
+        seen_after.is_some_and(|t| t < 4 * 60),
+        "it came round the pillar"
+    );
+    assert!(longest < 3 * 60, "never blind for long: {longest} ticks");
+}

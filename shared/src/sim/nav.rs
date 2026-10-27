@@ -23,14 +23,28 @@
 //! Neighbouring walkable nodes are **linked** (8 directions) when the step up is ≤ [`STEP_UP`]
 //! (or a continuous ramp up to ~50°), the drop is ≤ [`MAX_DROP`] (one-way: enemies can jump
 //! down but not back up), and nothing blocks the way at knee/chest height. Diagonals need both
-//! orthogonal routes (no corner cutting). Jump pads and gaps have no links (enemies can't use
-//! pads). Door brushes are ignored while building; nodes under a door remember it and are
-//! impassable while that door is closed.
+//! orthogonal routes (no corner cutting). Door brushes are ignored while building; nodes under
+//! a door remember it and are impassable while that door is closed.
 //!
-//! Queries: [`NavGrid::node_at`], [`NavGrid::find_path`] (A* with a node budget, partial
-//! results), [`NavGrid::walkable_line`] (straight walk test through the links) used for direct
-//! chasing and string-pulling ([`NavGrid::smooth`]), and [`NavGrid::ground_ok`] (the edge guard
-//! that keeps enemies out of lava and off ledges). See `docs/enemies.md` for measurements.
+//! On top of the walking links the grid has **jump links** ([`NavJump`], one-way):
+//!
+//! * **leaps** from the edge of a floor (a node missing a walking link) across gaps — over
+//!   lava and deep water too — and up / down ledges beyond the step and drop limits, up to
+//!   [`LEAP_MAX_DISTANCE`] across, [`LEAP_MAX_UP`] up and [`LEAP_MAX_DOWN`] down. A leap
+//!   follows a fixed arc ([`leap_point`]: its apex [`leap_apex`] above the higher end) and is
+//!   only linked where clearance capsules swept along that arc are free of the level, the feet
+//!   never pass through a kill volume, and the landing is safe (not deadly, no drop or kill
+//!   volume just past it). Each leap records which agent sizes clear it ([`jump_clear`]);
+//!   agent classes carry their own limits ([`NavClass::with_leaps`]);
+//! * **pad rides**: from the floor under a jump pad to where its launch lands (the pad sets the
+//!   velocity like `movement::step` does; the flight is simulated with each clearance capsule).
+//!
+//! Queries: [`NavGrid::node_at`], [`NavGrid::find_path`] (A* over walking and jump links with a
+//! node budget, partial results), [`NavGrid::walkable_line`] (straight walk test through the
+//! walking links) used for direct chasing and string-pulling ([`NavGrid::smooth_route`]: jumps
+//! stay waypoints of their own), the reverse links ([`NavGrid::for_each_predecessor`]: who can
+//! reach a node) and [`NavGrid::ground_ok`] (the edge guard that keeps enemies out of lava and
+//! off ledges). See `docs/enemies.md` for measurements.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -75,6 +89,36 @@ const MAX_COLUMNS: usize = 4_000_000;
 /// Broadphase bucket size for the build (metres).
 const BUCKET: f32 = 4.0;
 
+/// Longest leap any class makes across (horizontal, metres), highest up and deepest down
+/// ([`NavClass::with_leaps`] sets each class's own, within these).
+pub const LEAP_MAX_DISTANCE: f32 = 8.0;
+pub const LEAP_MAX_UP: f32 = 4.0;
+pub const LEAP_MAX_DOWN: f32 = 8.0;
+/// Shortest leap worth a link (horizontal).
+const LEAP_MIN_DISTANCE: f32 = 1.0;
+/// Extra A* cost of a leap and of a pad ride (metres of walking each is worth): a walk round
+/// that is at most this much longer is taken instead.
+pub const LEAP_COST: f32 = 5.0;
+pub const PAD_COST: f32 = 3.0;
+/// Leap rays per edge node (every 22.5°; only those within ~25° of a missing walking link).
+const LEAP_RAYS: u32 = 16;
+/// Candidate landings swept per ray before giving up on it.
+const LEAP_TRIES: u32 = 3;
+/// The swept clearance capsules ride this far above the feet's arc (kerbs and lips at either
+/// end don't count; collide-and-slide steps over them).
+const ARC_LIFT: f32 = 0.25;
+/// Radius of the narrow clearance capsule swept along leaps (the narrow footprint's, less a
+/// little so a takeoff right by a wall doesn't start in it).
+const ARC_RADIUS: f32 = 0.48;
+/// Heights of the narrow-short and narrow-tall clearance capsules.
+const ARC_HEIGHT: f32 = 2.0;
+const ARC_TALL_HEIGHT: f32 = 3.5;
+/// The wide clearance capsule (pad rides only: heavies don't leap).
+const ARC_WIDE_RADIUS: f32 = 1.3;
+const ARC_WIDE_HEIGHT: f32 = 3.8;
+/// Longest pad flight simulated (seconds).
+const PAD_FLIGHT: f32 = 6.0;
+
 /// Neighbour directions `(dx, dz)`: 4 orthogonal, then 4 diagonal.
 pub const DIRS: [(i32, i32); 8] = [
     (1, 0),
@@ -103,7 +147,19 @@ pub mod node_flags {
     pub const DEADLY: u8 = 1 << 3;
 }
 
-/// Agent size class: a footprint plus the headroom it needs.
+/// [`NavJump::clear`]: the agent sizes whose capsule clears a jump's arc (r 0.48 swept for the
+/// narrow ones; collide-and-slide copes with the last 0.1–0.2 m like on the ground).
+pub mod jump_clear {
+    /// The narrow footprint up to 2.1 m (Gnawer, Snuffer).
+    pub const NARROW: u8 = 1 << 0;
+    /// The narrow footprint up to 3.6 m (Censer, Heron, Bellwether).
+    pub const TALL: u8 = 1 << 1;
+    /// The wide footprint up to 3.9 m (Gaoler, Smelter; pad rides only).
+    pub const WIDE: u8 = 1 << 2;
+}
+
+/// Agent size class: a footprint plus the headroom it needs, and how it may jump (leap
+/// limits, pads).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NavClass {
     /// Needs the wide footprint ([`node_flags::LARGE`]) instead of a single node.
@@ -111,21 +167,36 @@ pub struct NavClass {
     /// Free height needed above the floor (decimetres); 0 = what the `SMALL` clearance
     /// capsule guarantees (2 m) is enough.
     pub headroom_dm: u8,
+    /// Leap limits (decimetres): across (horizontal; 0 = never leaps), up and down.
+    pub leap_dm: u8,
+    pub leap_up_dm: u8,
+    pub leap_down_dm: u8,
+    /// Rides jump pads.
+    pub pads: bool,
 }
 
 impl NavClass {
-    /// Up to r 0.7 × 2.1 m (the Gnawer).
+    /// Up to r 0.7 × 2.1 m (the Gnawer's size), walking only.
     pub const SMALL: NavClass = NavClass {
         wide: false,
         headroom_dm: 0,
+        leap_dm: 0,
+        leap_up_dm: 0,
+        leap_down_dm: 0,
+        pads: false,
     };
-    /// The Gaoler (r 1.3 × 3.7 m).
+    /// The Gaoler (r 1.3 × 3.7 m), walking only.
     pub const LARGE: NavClass = NavClass {
         wide: true,
         headroom_dm: 38,
+        leap_dm: 0,
+        leap_up_dm: 0,
+        leap_down_dm: 0,
+        pads: false,
     };
 
-    /// The class an enemy capsule of this size needs.
+    /// The class an enemy capsule of this size needs (walking only: add
+    /// [`NavClass::with_leaps`] / [`NavClass::with_pads`]).
     pub fn for_size(radius: f32, height: f32) -> NavClass {
         let wide = radius > NARROW_RADIUS;
         let headroom_dm = if !wide && height <= SMALL_HEIGHT + HEADROOM_MARGIN {
@@ -133,7 +204,58 @@ impl NavClass {
         } else {
             ((height + HEADROOM_MARGIN) * 10.0).ceil().clamp(0.0, 60.0) as u8
         };
-        NavClass { wide, headroom_dm }
+        NavClass {
+            headroom_dm,
+            wide,
+            ..NavClass::SMALL
+        }
+    }
+
+    /// The same class leaping up to `distance` across, `up` and `down` (metres, within the
+    /// build's [`LEAP_MAX_DISTANCE`] / [`LEAP_MAX_UP`] / [`LEAP_MAX_DOWN`]).
+    pub fn with_leaps(self, distance: f32, up: f32, down: f32) -> NavClass {
+        let dm = |m: f32, max: f32| (m.clamp(0.0, max) * 10.0).floor() as u8;
+        NavClass {
+            leap_dm: dm(distance, LEAP_MAX_DISTANCE),
+            leap_up_dm: dm(up, LEAP_MAX_UP),
+            leap_down_dm: dm(down, LEAP_MAX_DOWN),
+            ..self
+        }
+    }
+
+    /// The same class riding jump pads or not.
+    pub fn with_pads(self, pads: bool) -> NavClass {
+        NavClass { pads, ..self }
+    }
+
+    /// The clearance capsule ([`jump_clear`]) this class needs along a jump (0: none fits).
+    pub fn clear_bit(self) -> u8 {
+        if self.wide {
+            jump_clear::WIDE
+        } else if self.headroom_dm == 0 {
+            jump_clear::NARROW
+        } else if self.headroom_dm as f32 * 0.1 <= ARC_TALL_HEIGHT + HEADROOM_MARGIN + 0.01 {
+            jump_clear::TALL
+        } else {
+            0
+        }
+    }
+
+    /// May an agent of this class take jump `j` (its size clears the arc, within its leap
+    /// limits / it rides pads)? Doors and the landing's passability are checked separately.
+    pub fn can_jump(self, j: &NavJump) -> bool {
+        if self.clear_bit() & j.clear == 0 {
+            return false;
+        }
+        match j.kind {
+            JumpKind::Leap => {
+                self.leap_dm > 0
+                    && j.dist <= self.leap_dm as f32 * 0.1 + 1e-3
+                    && j.rise <= self.leap_up_dm as f32 * 0.1 + 1e-3
+                    && -j.rise <= self.leap_down_dm as f32 * 0.1 + 1e-3
+            }
+            JumpKind::Pad(_) => self.pads,
+        }
     }
 
     pub fn flag(self) -> u8 {
@@ -170,6 +292,43 @@ impl NavNode {
     }
 }
 
+/// What a jump link is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JumpKind {
+    /// A leap on the arc of [`leap_point`] (a crouch, then airborne: `sim::enemy`).
+    Leap,
+    /// Riding jump pad `n` (`LevelDef::jump_pads` index) from the floor under it.
+    Pad(u16),
+}
+
+/// A one-way off-mesh link: a leap across a gap / up or down a ledge, or a pad ride.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NavJump {
+    /// Takeoff node (the floor under the pad for a ride).
+    pub from: u32,
+    /// Landing node.
+    pub to: u32,
+    pub kind: JumpKind,
+    /// Horizontal distance and height change (landing − takeoff), metres.
+    pub dist: f32,
+    pub rise: f32,
+    /// [`jump_clear`] bits: the agent sizes whose capsule clears the arc.
+    pub clear: u8,
+    /// Door slot + 1 (0 = none) whose brush the arc passes: impassable while it is closed.
+    pub door: u8,
+}
+
+/// One waypoint of a route ([`NavGrid::smooth_route`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Waypoint {
+    /// Floor point (feet).
+    pub pos: Vec3,
+    pub node: u32,
+    /// Reached from the previous waypoint (its takeoff) by this jump (index for
+    /// [`NavGrid::jump`]); `None` = walked to.
+    pub jump: Option<u32>,
+}
+
 /// Build statistics.
 #[derive(Clone, Debug, Default)]
 pub struct NavStats {
@@ -184,6 +343,14 @@ pub struct NavStats {
     pub links: usize,
     pub rays: usize,
     pub capsule_tests: usize,
+    /// Jump links: leaps (and how many reach over a deadly floor: lava, deep water) and pad
+    /// rides.
+    pub leaps: usize,
+    pub leaps_over_deadly: usize,
+    pub pad_links: usize,
+    /// Arc sweeps (capsule casts along candidate arcs) and the time the jump links took.
+    pub arc_sweeps: usize,
+    pub jumps_ms: f32,
 }
 
 /// Result of [`NavGrid::find_path`].
@@ -209,6 +376,33 @@ pub struct NavScratch {
     heap: BinaryHeap<(Reverse<u32>, u32)>,
     /// Nodes expanded by the last search.
     pub last_expanded: usize,
+    /// The last A* stopped at its node budget (a `Partial` result that may still be
+    /// reachable) rather than running out of nodes (unreachable).
+    pub last_budget_hit: bool,
+}
+
+impl NavScratch {
+    /// Starts a search over `n` nodes: a fresh generation (buffers resized when the grid
+    /// changed).
+    fn begin(&mut self, n: usize) -> u32 {
+        if self.g.len() != n {
+            self.g = vec![0.0; n];
+            self.parent = vec![NONE; n];
+            self.seen = vec![0; n];
+            self.closed = vec![0; n];
+            self.generation = 0;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.seen.fill(0);
+            self.closed.fill(0);
+            self.generation = 1;
+        }
+        self.heap.clear();
+        self.last_expanded = 0;
+        self.last_budget_hit = false;
+        self.generation
+    }
 }
 
 /// The navigation grid of a level.
@@ -224,6 +418,14 @@ pub struct NavGrid {
     /// Door id per door slot (`NavNode::door - 1`).
     pub door_ids: Vec<u32>,
     pub stats: NavStats,
+    /// Jump links sorted by takeoff: `jumps[jump_start[n]..jump_start[n + 1]]` leave node `n`
+    /// (empty when the grid has none).
+    jumps: Vec<NavJump>,
+    jump_start: Vec<u32>,
+    /// Reverse index: `jumps_in[jump_in_start[n]..jump_in_start[n + 1]]` are the jumps (indices)
+    /// landing on `n`.
+    jumps_in: Vec<u32>,
+    jump_in_start: Vec<u32>,
 }
 
 /// Collider AABBs bucketed on a coarse XZ grid (build-time broadphase).
@@ -319,6 +521,101 @@ fn brush_aabb(b: &crate::level::Brush) -> (Vec3, Vec3) {
     (b.center() - ext, b.center() + ext)
 }
 
+fn flat_distance(a: Vec3, b: Vec3) -> f32 {
+    Vec2::new(b.x - a.x, b.z - a.z).length()
+}
+
+/// The penalty A* adds to a jump's distance.
+fn jump_cost(j: &NavJump) -> f32 {
+    match j.kind {
+        JumpKind::Leap => LEAP_COST,
+        JumpKind::Pad(_) => PAD_COST,
+    }
+}
+
+/// Apex height (feet) of the leap arc from `from` to `to`: above the higher end by 0.5 m +
+/// 15 % of the horizontal distance (a readable hop that clears the lip it lands over).
+pub fn leap_apex(from: Vec3, to: Vec3) -> f32 {
+    from.y.max(to.y) + 0.5 + 0.15 * flat_distance(from, to)
+}
+
+/// Feet on the leap arc from `from` to `to` after fraction `s` (0..1) of its flight time: a
+/// parabola through both ends with its apex at [`leap_apex`]. Its shape doesn't depend on
+/// gravity (only its timing does), so the nav build sweeps exactly the path an agent flies.
+pub fn leap_point(from: Vec3, to: Vec3, s: f32) -> Vec3 {
+    let apex = leap_apex(from, to);
+    let a = (apex - from.y).max(1e-4).sqrt();
+    let b = (apex - to.y).max(1e-4).sqrt();
+    let peak = a / (a + b);
+    let flat = from.lerp(to, s);
+    Vec3::new(
+        flat.x,
+        apex - (a + b) * (a + b) * (s - peak) * (s - peak),
+        flat.z,
+    )
+}
+
+/// Flies a capsule (`r`, `h`, feet at `feet`) launched at `velocity` under gravity the way an
+/// airborne enemy moves (60 Hz, collide-and-slide against [`NAV_MASK`]) until it lands on a
+/// walkable surface: its feet there, or `None` (never landed, or the feet entered a kill
+/// volume).
+fn simulate_flight(
+    level: &LevelDef,
+    world: &CollisionWorld,
+    feet: Vec3,
+    velocity: Vec3,
+    r: f32,
+    h: f32,
+    gravity: f32,
+) -> Option<Vec3> {
+    let dt = 1.0 / 60.0;
+    let half = (h * 0.5 - r).max(0.0);
+    let lift = Vec3::Y * (h * 0.5);
+    let mut c = feet + lift + Vec3::Y * 0.05;
+    let mut v = velocity;
+    for _ in 0..(PAD_FLIGHT * 60.0) as u32 {
+        v.y -= gravity * dt;
+        let mut motion = v * dt;
+        for _ in 0..4 {
+            if motion.length_squared() < 1e-10 {
+                break;
+            }
+            let Some(hit) = world.cast_capsule(c, half, r, motion, 0.01, NAV_MASK) else {
+                c += motion;
+                break;
+            };
+            c += motion * hit.fraction;
+            let n = hit.normal;
+            if n.y > 0.7 && v.y <= 0.5 {
+                return Some(c - lift);
+            }
+            let rest = motion * (1.0 - hit.fraction);
+            motion = rest - n * rest.dot(n);
+            let into = v.dot(n);
+            if into < 0.0 {
+                v -= n * into;
+            }
+            c += n * 0.002;
+        }
+        if !c.is_finite() || level.kill_volumes.iter().any(|k| k.contains(c - lift)) {
+            return None;
+        }
+    }
+    None
+}
+
+/// Launch velocity and flight time of the leap arc from `from` to `to` under gravity `g`
+/// (the arc of [`leap_point`]).
+pub fn leap_velocity(from: Vec3, to: Vec3, g: f32) -> (Vec3, f32) {
+    let g = g.max(1.0);
+    let apex = leap_apex(from, to);
+    let up = (2.0 * (apex - from.y).max(1e-4) / g).sqrt();
+    let down = (2.0 * (apex - to.y).max(1e-4) / g).sqrt();
+    let time = up + down;
+    let flat = Vec3::new(to.x - from.x, 0.0, to.z - from.z) / time;
+    (flat + Vec3::Y * (g * up), time)
+}
+
 impl NavGrid {
     /// Builds the grid for `level` from its collision world (doors are ignored; see the module
     /// docs). Deterministic.
@@ -357,6 +654,10 @@ impl NavGrid {
             nodes: Vec::new(),
             door_ids: Vec::new(),
             stats: NavStats::default(),
+            jumps: Vec::new(),
+            jump_start: Vec::new(),
+            jumps_in: Vec::new(),
+            jump_in_start: Vec::new(),
         };
         stats.columns = (nx * nz) as usize;
 
@@ -538,6 +839,9 @@ impl NavGrid {
             grid.nodes[n].flags |= node_flags::LARGE;
         }
 
+        // 6. Jump links: leaps off every floor's edges, pad rides.
+        grid.build_jumps(level, world, &mut stats);
+
         for node in &grid.nodes {
             stats.small += node.is(node_flags::SMALL) as usize;
             stats.large += node.is(node_flags::LARGE) as usize;
@@ -614,6 +918,475 @@ impl NavGrid {
             best = Some((dy.abs(), m));
         }
         best.map(|(_, m)| m)
+    }
+
+    /// Builds the jump links (step 6 of the build): leaps off every floor's edges, then a ride
+    /// per pad and clearance capsule; sorted by takeoff with a reverse index.
+    fn build_jumps(&mut self, level: &LevelDef, world: &CollisionWorld, stats: &mut NavStats) {
+        let started = Instant::now();
+        let doors: Vec<(Vec3, Vec3)> = level
+            .doors
+            .iter()
+            .take(254)
+            .map(|d| brush_aabb(&d.brush))
+            .collect();
+        let mut jumps = Vec::new();
+        // Leaps: rays fanned towards the missing walking links of every edge node.
+        let mut missing = Vec::with_capacity(8);
+        for n in 0..self.nodes.len() as u32 {
+            let node = &self.nodes[n as usize];
+            if !node.is(node_flags::SMALL) || node.is(node_flags::DEADLY) {
+                continue;
+            }
+            missing.clear();
+            missing.extend(
+                DIRS.iter()
+                    .zip(node.links)
+                    .filter(|(_, l)| *l == NONE)
+                    .map(|(&(dx, dz), _)| Vec2::new(dx as f32, dz as f32).normalize()),
+            );
+            if missing.is_empty() {
+                continue;
+            }
+            for k in 0..LEAP_RAYS {
+                let angle = k as f32 * std::f32::consts::TAU / LEAP_RAYS as f32;
+                let dir = Vec2::new(angle.cos(), angle.sin());
+                if missing.iter().any(|m| m.dot(dir) > 0.9) {
+                    self.leap_ray(level, world, &doors, n, dir, &mut jumps, stats);
+                }
+            }
+        }
+        // Pad rides, per clearance capsule.
+        let gravity = crate::tuning::MovementTuning::default().gravity;
+        for (i, pad) in level.jump_pads.iter().enumerate().take(u16::MAX as usize) {
+            self.pad_rides(level, world, i as u16, pad, gravity, &mut jumps);
+        }
+        // One link per (takeoff, landing): merge the clearance of duplicates.
+        jumps.sort_by(|a: &NavJump, b: &NavJump| {
+            (a.from, a.to, a.kind == JumpKind::Leap).cmp(&(b.from, b.to, b.kind == JumpKind::Leap))
+        });
+        jumps.dedup_by(|later, kept| {
+            let same = later.from == kept.from && later.to == kept.to && later.kind == kept.kind;
+            if same {
+                kept.clear |= later.clear;
+            }
+            same
+        });
+        let n = self.nodes.len();
+        self.jump_start = vec![0; n + 1];
+        self.jump_in_start = vec![0; n + 1];
+        for j in &jumps {
+            self.jump_start[j.from as usize + 1] += 1;
+            self.jump_in_start[j.to as usize + 1] += 1;
+            match j.kind {
+                JumpKind::Leap => {
+                    stats.leaps += 1;
+                    let a = self.nodes[j.from as usize].pos;
+                    let b = self.nodes[j.to as usize].pos;
+                    if self.crosses_deadly(a, b) {
+                        stats.leaps_over_deadly += 1;
+                    }
+                }
+                JumpKind::Pad(_) => stats.pad_links += 1,
+            }
+        }
+        for i in 0..n {
+            self.jump_start[i + 1] += self.jump_start[i];
+            self.jump_in_start[i + 1] += self.jump_in_start[i];
+        }
+        let mut fill = self.jump_in_start.clone();
+        self.jumps_in = vec![0; jumps.len()];
+        for (i, j) in jumps.iter().enumerate() {
+            let slot = &mut fill[j.to as usize];
+            self.jumps_in[*slot as usize] = i as u32;
+            *slot += 1;
+        }
+        self.jumps = jumps;
+        stats.jumps_ms = started.elapsed().as_secs_f32() * 1000.0;
+    }
+
+    /// Marches one leap ray from edge node `n` along `dir` (0.5 m steps up to
+    /// [`LEAP_MAX_DISTANCE`]): the first floor past a gap (or above / below the step and drop
+    /// limits) whose arc is clear becomes a leap.
+    #[allow(clippy::too_many_arguments)]
+    fn leap_ray(
+        &self,
+        level: &LevelDef,
+        world: &CollisionWorld,
+        doors: &[(Vec3, Vec3)],
+        n: u32,
+        dir: Vec2,
+        out: &mut Vec<NavJump>,
+        stats: &mut NavStats,
+    ) {
+        let from = self.nodes[n as usize].pos;
+        // Passed over a column with no floor at our level (a gap, a pit, a wall).
+        let mut gap = false;
+        let mut tries = 0;
+        let mut last = None;
+        let steps = (LEAP_MAX_DISTANCE / 0.5) as i32;
+        for step in (LEAP_MIN_DISTANCE / 0.5) as i32..=steps {
+            let s = step as f32 * 0.5;
+            let p = Vec3::new(from.x + dir.x * s, from.y, from.z + dir.y * s);
+            let Some(col) = self.column_at(p) else {
+                gap = true;
+                continue;
+            };
+            if last == Some(col) {
+                continue;
+            }
+            last = Some(col);
+            let mut level_floor = false;
+            let mut cand: Option<(f32, u32)> = None;
+            for m in self.column_nodes(col) {
+                let o = &self.nodes[m as usize];
+                let rise = o.pos.y - from.y;
+                let walkable = o.is(node_flags::SMALL) && !o.is(node_flags::DEADLY);
+                if walkable && rise.abs() <= STEP_UP + 0.15 {
+                    level_floor = true;
+                }
+                if !walkable || !(-LEAP_MAX_DOWN..=LEAP_MAX_UP).contains(&rise) {
+                    continue;
+                }
+                // More of our own floor isn't worth a leap: a ledge or the far side of a gap is.
+                if !gap && rise.abs() <= STEP_UP + 0.15 {
+                    continue;
+                }
+                if cand.is_none_or(|(r, _)| rise.abs() < r) {
+                    cand = Some((rise.abs(), m));
+                }
+            }
+            if let Some((_, m)) = cand
+                && !self.nodes[n as usize].links.contains(&m)
+            {
+                tries += 1;
+                if self.try_leap(level, world, doors, n, m, dir, out, stats) || tries >= LEAP_TRIES
+                {
+                    return;
+                }
+            }
+            if !level_floor {
+                gap = true;
+            }
+        }
+    }
+
+    /// A leap from `n` (or, climbing, from up to two cells further back along the ray, so the
+    /// arc clears the lip) onto `m`, if its landing is safe and its arc is clear.
+    #[allow(clippy::too_many_arguments)]
+    fn try_leap(
+        &self,
+        level: &LevelDef,
+        world: &CollisionWorld,
+        doors: &[(Vec3, Vec3)],
+        n: u32,
+        m: u32,
+        dir: Vec2,
+        out: &mut Vec<NavJump>,
+        stats: &mut NavStats,
+    ) -> bool {
+        let to = self.nodes[m as usize].pos;
+        if !self.overshoot_safe(to, dir) {
+            return false;
+        }
+        let base = self.nodes[n as usize].pos.y;
+        let mut takeoff = n;
+        for back in 0..3 {
+            if back > 0 {
+                let Some(b) = self.link_towards(takeoff, -dir) else {
+                    break;
+                };
+                if (self.nodes[b as usize].pos.y - base).abs() > 0.3 {
+                    break;
+                }
+                takeoff = b;
+            }
+            let from = self.nodes[takeoff as usize].pos;
+            let dist = flat_distance(from, to);
+            if dist > LEAP_MAX_DISTANCE {
+                break;
+            }
+            if dist >= LEAP_MIN_DISTANCE
+                && let Some(j) = self.leap_link(level, world, doors, takeoff, m, stats)
+            {
+                out.push(j);
+                return true;
+            }
+            // Only climbs gain from a run-up.
+            if to.y - from.y <= 1.0 {
+                break;
+            }
+        }
+        false
+    }
+
+    /// The leap `a` → `b` if a capsule clears its arc (narrow, and tall if that clears too).
+    fn leap_link(
+        &self,
+        level: &LevelDef,
+        world: &CollisionWorld,
+        doors: &[(Vec3, Vec3)],
+        a: u32,
+        b: u32,
+        stats: &mut NavStats,
+    ) -> Option<NavJump> {
+        let (from, to) = (self.nodes[a as usize].pos, self.nodes[b as usize].pos);
+        if !self.arc_columns_free(from, to, ARC_HEIGHT) {
+            return None;
+        }
+        // Most arcs are in the open: the tall capsule first (it clears for both), the narrow
+        // one only when it doesn't.
+        let tall = self
+            .arc_columns_free(from, to, ARC_TALL_HEIGHT)
+            .then(|| {
+                self.sweep_arc(
+                    level,
+                    world,
+                    doors,
+                    from,
+                    to,
+                    ARC_RADIUS,
+                    ARC_TALL_HEIGHT,
+                    stats,
+                )
+            })
+            .flatten();
+        let (clear, door) = match tall {
+            Some(door) => (jump_clear::NARROW | jump_clear::TALL, door),
+            None => (
+                jump_clear::NARROW,
+                self.sweep_arc(level, world, doors, from, to, ARC_RADIUS, ARC_HEIGHT, stats)?,
+            ),
+        };
+        Some(NavJump {
+            from: a,
+            to: b,
+            kind: JumpKind::Leap,
+            dist: flat_distance(from, to),
+            rise: to.y - from.y,
+            clear,
+            door,
+        })
+    }
+
+    /// Cheap pre-filter on the grid's own data: along the arc, every column's free space (the
+    /// floor below the capsule and its headroom) holds a capsule of height `h`. Columns with a
+    /// floor inside the capsule's span, or with floors only above it (inside a solid), fail.
+    fn arc_columns_free(&self, from: Vec3, to: Vec3, h: f32) -> bool {
+        let d = flat_distance(from, to);
+        let n = ((d / 0.5).ceil() as u32).max(4);
+        for i in 1..n {
+            let p = leap_point(from, to, i as f32 / n as f32);
+            // The takeoff and landing columns are the end floors themselves.
+            if flat_distance(p, from) < 0.6 || flat_distance(p, to) < 0.6 {
+                continue;
+            }
+            let Some(col) = self.column_at(p) else {
+                continue;
+            };
+            let (lo, hi) = (p.y + ARC_LIFT - 0.05, p.y + ARC_LIFT + h);
+            let mut below: Option<&NavNode> = None;
+            let mut above = false;
+            for m in self.column_nodes(col) {
+                let f = &self.nodes[m as usize];
+                if f.pos.y <= lo {
+                    below = Some(f);
+                } else if f.pos.y < hi {
+                    return false;
+                } else {
+                    above = true;
+                }
+            }
+            match below {
+                // A measured headroom (< 6 m) that ends inside the capsule: a ceiling, a beam.
+                Some(f) if f.headroom < 5.9 && f.pos.y + f.headroom < hi => return false,
+                None if above => return false,
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// Sweeps a capsule (`r`, `h`) along the arc `from` → `to` in chords ([`ARC_LIFT`] above the
+    /// feet) and checks the feet never pass through a kill volume. `Some(door slot + 1)` of a
+    /// door brush the arc passes (0: none) when clear, `None` when blocked.
+    #[allow(clippy::too_many_arguments)]
+    fn sweep_arc(
+        &self,
+        level: &LevelDef,
+        world: &CollisionWorld,
+        doors: &[(Vec3, Vec3)],
+        from: Vec3,
+        to: Vec3,
+        r: f32,
+        h: f32,
+        stats: &mut NavStats,
+    ) -> Option<u8> {
+        // Chords of ~2 m: they sag less than 5 cm from the parabola.
+        let apex = leap_apex(from, to);
+        let length = flat_distance(from, to) + (apex - from.y) + (apex - to.y);
+        let n = ((length / 2.0).ceil() as u32).clamp(4, 12);
+        let half = (h * 0.5 - r).max(0.0);
+        let lift = Vec3::Y * (ARC_LIFT + h * 0.5);
+        let mut door = 0u8;
+        let mut prev = from;
+        for i in 1..=n {
+            let p = leap_point(from, to, i as f32 / n as f32);
+            if i < n && level.kill_volumes.iter().any(|v| v.contains(p)) {
+                return None;
+            }
+            stats.arc_sweeps += 1;
+            if world
+                .cast_capsule(prev + lift, half, r, p - prev, 0.0, NAV_MASK)
+                .is_some()
+            {
+                return None;
+            }
+            if door == 0 {
+                let lo = prev.min(p) + Vec3::new(-r, ARC_LIFT, -r);
+                let hi = prev.max(p) + Vec3::new(r, ARC_LIFT + h, r);
+                if let Some(slot) = doors
+                    .iter()
+                    .position(|(a, b)| a.cmple(hi).all() && b.cmpge(lo).all())
+                {
+                    door = slot as u8 + 1;
+                }
+            }
+            prev = p;
+        }
+        Some(door)
+    }
+
+    /// Is it safe to land on `to` coming along `dir`: 0.75 m further on there is floor that
+    /// isn't deadly and no more than a metre lower, or a wall to bump into (not a drop, not
+    /// lava or water)?
+    fn overshoot_safe(&self, to: Vec3, dir: Vec2) -> bool {
+        let p = Vec3::new(to.x + dir.x * 0.75, to.y, to.z + dir.y * 0.75);
+        let Some(col) = self.column_at(p) else {
+            return false;
+        };
+        let mut floor = None;
+        let mut above = false;
+        for m in self.column_nodes(col) {
+            let f = &self.nodes[m as usize];
+            if f.pos.y <= to.y + 0.6 {
+                floor = Some(f);
+            } else {
+                above = true;
+            }
+        }
+        match floor {
+            Some(f) => !f.is(node_flags::DEADLY) && f.pos.y >= to.y - 1.0,
+            None => above,
+        }
+    }
+
+    /// The walking link of `n` closest to direction `dir` (within ~25°).
+    fn link_towards(&self, n: u32, dir: Vec2) -> Option<u32> {
+        DIRS.iter()
+            .zip(self.nodes[n as usize].links)
+            .filter(|(_, l)| *l != NONE)
+            .map(|(&(dx, dz), l)| (Vec2::new(dx as f32, dz as f32).normalize().dot(dir), l))
+            .filter(|(d, _)| *d > 0.9)
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, l)| l)
+    }
+
+    /// Does the straight line between two floor points pass over a deadly floor (statistics)?
+    fn crosses_deadly(&self, a: Vec3, b: Vec3) -> bool {
+        let steps = (flat_distance(a, b) / 0.5).ceil().max(1.0) as u32;
+        (1..steps).any(|i| {
+            let p = a.lerp(b, i as f32 / steps as f32);
+            self.column_at(p).is_some_and(|col| {
+                let top = self
+                    .column_nodes(col)
+                    .map(|m| &self.nodes[m as usize])
+                    .filter(|f| f.pos.y <= a.y.max(b.y) + 0.5)
+                    .max_by(|x, y| x.pos.y.total_cmp(&y.pos.y));
+                top.is_some_and(|f| f.is(node_flags::DEADLY))
+            })
+        })
+    }
+
+    /// The rides of pad `index`: from the walkable floor under its trigger, the launch (the
+    /// pad sets the velocity, as `movement::step` does) flown with each clearance capsule
+    /// until it lands on a floor that capsule's class can stand on.
+    fn pad_rides(
+        &self,
+        level: &LevelDef,
+        world: &CollisionWorld,
+        index: u16,
+        pad: &crate::level::JumpPad,
+        gravity: f32,
+        out: &mut Vec<NavJump>,
+    ) {
+        let c = pad.trigger.center();
+        let Some(col) = self.column_at(c) else {
+            return;
+        };
+        let Some(start) = self
+            .column_nodes(col)
+            .filter(|&m| {
+                let f = &self.nodes[m as usize];
+                f.is(node_flags::SMALL)
+                    && !f.is(node_flags::DEADLY)
+                    && f.pos.y >= pad.trigger.min.y - 1.0
+                    && f.pos.y <= pad.trigger.max.y
+            })
+            .max_by(|&a, &b| {
+                self.nodes[a as usize]
+                    .pos
+                    .y
+                    .total_cmp(&self.nodes[b as usize].pos.y)
+            })
+        else {
+            return;
+        };
+        let from = self.nodes[start as usize].pos;
+        for (bit, r, h, flag) in [
+            (jump_clear::NARROW, 0.6, 2.0, node_flags::SMALL),
+            (jump_clear::TALL, 0.6, ARC_TALL_HEIGHT, node_flags::SMALL),
+            (
+                jump_clear::WIDE,
+                ARC_WIDE_RADIUS,
+                ARC_WIDE_HEIGHT,
+                node_flags::LARGE,
+            ),
+        ] {
+            if !self.nodes[start as usize].is(flag) {
+                continue;
+            }
+            let Some(feet) = simulate_flight(level, world, from, pad.velocity, r, h, gravity)
+            else {
+                continue;
+            };
+            let Some(m) = self.column_at(feet).and_then(|col| {
+                self.column_nodes(col)
+                    .filter(|&m| {
+                        let f = &self.nodes[m as usize];
+                        f.is(flag) && !f.is(node_flags::DEADLY) && (f.pos.y - feet.y).abs() < 0.7
+                    })
+                    .min_by(|&a, &b| {
+                        let da = (self.nodes[a as usize].pos.y - feet.y).abs();
+                        da.total_cmp(&(self.nodes[b as usize].pos.y - feet.y).abs())
+                    })
+            }) else {
+                continue;
+            };
+            if m == start {
+                continue;
+            }
+            let to = self.nodes[m as usize].pos;
+            out.push(NavJump {
+                from: start,
+                to: m,
+                kind: JumpKind::Pad(index),
+                dist: flat_distance(from, to),
+                rise: to.y - from.y,
+                clear: bit,
+                door: 0,
+            });
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -806,8 +1579,126 @@ impl NavGrid {
         cur == to
     }
 
-    /// A* from `from` to `to` for `class`, expanding at most `max_expand` nodes. The start node
-    /// doesn't need to be passable (agents pushed onto cramped floors still find their way).
+    /// The jump links leaving node `n`.
+    pub fn jumps_from(&self, n: u32) -> &[NavJump] {
+        match (
+            self.jump_start.get(n as usize),
+            self.jump_start.get(n as usize + 1),
+        ) {
+            (Some(&a), Some(&b)) => &self.jumps[a as usize..b as usize],
+            _ => &[],
+        }
+    }
+
+    /// Jump link `i` (a [`Waypoint::jump`]).
+    pub fn jump(&self, i: u32) -> Option<&NavJump> {
+        self.jumps.get(i as usize)
+    }
+
+    /// Every jump link.
+    pub fn jumps(&self) -> &[NavJump] {
+        &self.jumps
+    }
+
+    /// Index of the jump `from` → `to` that `class` may take (doors as given), if any.
+    pub fn jump_between(
+        &self,
+        from: u32,
+        to: u32,
+        class: NavClass,
+        doors_open: &[bool],
+    ) -> Option<u32> {
+        let start = *self.jump_start.get(from as usize)?;
+        self.jumps_from(from)
+            .iter()
+            .position(|j| j.to == to && class.can_jump(j) && self.jump_open(j, doors_open))
+            .map(|i| start + i as u32)
+    }
+
+    /// Is no door that the jump's arc passes closed?
+    pub fn jump_open(&self, j: &NavJump, doors_open: &[bool]) -> bool {
+        j.door == 0 || doors_open.get(j.door as usize - 1).copied().unwrap_or(true)
+    }
+
+    /// Calls `f(m, cost)` for every node `m` an agent of `class` can step, drop, leap or ride
+    /// onto `n` from (the reverse of the links; `cost` as A* counts it). With it a search from
+    /// a target finds everywhere that can reach the target.
+    pub fn for_each_predecessor(
+        &self,
+        n: u32,
+        class: NavClass,
+        doors_open: &[bool],
+        mut f: impl FnMut(u32, f32),
+    ) {
+        let node = &self.nodes[n as usize];
+        let (i, j) = self.column_coords(node.pos.x, node.pos.z);
+        let hazard = if node.is(node_flags::HAZARD) {
+            HAZARD_COST
+        } else {
+            0.0
+        };
+        for (d, &(dx, dz)) in DIRS.iter().enumerate() {
+            let Some(col) = self.column_index(i - dx, j - dz) else {
+                continue;
+            };
+            for m in self.column_nodes(col) {
+                let o = &self.nodes[m as usize];
+                if o.links[d] == n && self.passable(m, class, doors_open) {
+                    let step = if d < 4 {
+                        CELL
+                    } else {
+                        CELL * std::f32::consts::SQRT_2
+                    };
+                    f(m, step + (node.pos.y - o.pos.y).abs() * CLIMB_COST + hazard);
+                }
+            }
+        }
+        let (Some(&a), Some(&b)) = (
+            self.jump_in_start.get(n as usize),
+            self.jump_in_start.get(n as usize + 1),
+        ) else {
+            return;
+        };
+        for &ji in &self.jumps_in[a as usize..b as usize] {
+            let jl = &self.jumps[ji as usize];
+            if class.can_jump(jl)
+                && self.jump_open(jl, doors_open)
+                && self.passable(jl.from, class, doors_open)
+            {
+                f(
+                    jl.from,
+                    jl.dist + jl.rise.abs() * CLIMB_COST + jump_cost(jl) + hazard,
+                );
+            }
+        }
+    }
+
+    /// Calls `f(m)` for every node an agent of `class` can step, drop, leap or ride to from `n`.
+    pub fn for_each_successor(
+        &self,
+        n: u32,
+        class: NavClass,
+        doors_open: &[bool],
+        mut f: impl FnMut(u32),
+    ) {
+        for &m in &self.nodes[n as usize].links {
+            if m != NONE && self.passable(m, class, doors_open) {
+                f(m);
+            }
+        }
+        for j in self.jumps_from(n) {
+            if class.can_jump(j)
+                && self.jump_open(j, doors_open)
+                && self.passable(j.to, class, doors_open)
+            {
+                f(j.to);
+            }
+        }
+    }
+
+    /// A* from `from` to `to` for `class` over the walking links and the jumps the class may
+    /// take, expanding at most `max_expand` nodes. The start node doesn't need to be passable
+    /// (agents pushed onto cramped floors still find their way).
     pub fn find_path(
         &self,
         s: &mut NavScratch,
@@ -821,22 +1712,7 @@ impl NavGrid {
         if from as usize >= n || to as usize >= n {
             return PathResult::NotFound;
         }
-        if s.g.len() != n {
-            s.g = vec![0.0; n];
-            s.parent = vec![NONE; n];
-            s.seen = vec![0; n];
-            s.closed = vec![0; n];
-            s.generation = 0;
-        }
-        s.generation = s.generation.wrapping_add(1);
-        if s.generation == 0 {
-            s.seen.fill(0);
-            s.closed.fill(0);
-            s.generation = 1;
-        }
-        let generation = s.generation;
-        s.heap.clear();
-        s.last_expanded = 0;
+        let generation = s.begin(n);
         let goal = self.nodes[to as usize].pos;
         let h = |p: Vec3| Vec2::new(p.x - goal.x, p.z - goal.z).length() * 1.1;
         let key = |f: f32| Reverse((f.max(0.0) * 100.0) as u32);
@@ -864,6 +1740,7 @@ impl NavGrid {
                 best = (hc, cur);
             }
             if s.last_expanded >= max_expand {
+                s.last_budget_hit = true;
                 break;
             }
             for (d, &m) in node.links.iter().enumerate() {
@@ -892,6 +1769,31 @@ impl NavGrid {
                     s.heap.push((key(g + h(other.pos)), m));
                 }
             }
+            // Leaps and pad rides the class may take.
+            for j in self.jumps_from(cur) {
+                if !class.can_jump(j)
+                    || !self.jump_open(j, doors_open)
+                    || !self.passable(j.to, class, doors_open)
+                {
+                    continue;
+                }
+                let mi = j.to as usize;
+                if s.closed[mi] == generation {
+                    continue;
+                }
+                let other = &self.nodes[mi];
+                let mut cost = j.dist + j.rise.abs() * CLIMB_COST + jump_cost(j);
+                if other.is(node_flags::HAZARD) {
+                    cost += HAZARD_COST;
+                }
+                let g = s.g[ci] + cost;
+                if s.seen[mi] != generation || g < s.g[mi] {
+                    s.seen[mi] = generation;
+                    s.g[mi] = g;
+                    s.parent[mi] = cur;
+                    s.heap.push((key(g + h(other.pos)), j.to));
+                }
+            }
         }
         let end = if reached { to } else { best.1 };
         if !reached && end == from {
@@ -911,25 +1813,153 @@ impl NavGrid {
         }
     }
 
-    /// String-pulls a node path into waypoints: from each kept node, skip ahead to the
-    /// farthest node still reachable by [`NavGrid::walkable_line`]. The first node (where the
-    /// agent stands) is dropped.
+    /// Dijkstra from `start` over the links `class` may take (walking and jumps, doors as
+    /// given), or over their reverse (`reverse`: every node settled can reach `start`). Calls
+    /// `visit(node, cost)` for each node in cost order (`start` first, cost 0) until the cost
+    /// passes `max_cost` or `max_nodes` were settled; `visit` returning false stops the search.
+    #[allow(clippy::too_many_arguments)]
+    pub fn search(
+        &self,
+        s: &mut NavScratch,
+        start: u32,
+        class: NavClass,
+        doors_open: &[bool],
+        reverse: bool,
+        max_cost: f32,
+        max_nodes: usize,
+        mut visit: impl FnMut(u32, f32) -> bool,
+    ) {
+        let n = self.nodes.len();
+        if start as usize >= n {
+            return;
+        }
+        let generation = s.begin(n);
+        let key = |f: f32| Reverse((f.max(0.0) * 100.0) as u32);
+        s.g[start as usize] = 0.0;
+        s.seen[start as usize] = generation;
+        s.heap.push((key(0.0), start));
+        let mut next = Vec::with_capacity(16);
+        while let Some((_, cur)) = s.heap.pop() {
+            let ci = cur as usize;
+            if s.closed[ci] == generation {
+                continue;
+            }
+            s.closed[ci] = generation;
+            s.last_expanded += 1;
+            let g = s.g[ci];
+            if g > max_cost || !visit(cur, g) || s.last_expanded >= max_nodes {
+                break;
+            }
+            next.clear();
+            if reverse {
+                self.for_each_predecessor(cur, class, doors_open, |m, c| next.push((m, c)));
+            } else {
+                let node = &self.nodes[ci];
+                for (d, &m) in node.links.iter().enumerate() {
+                    if m != NONE && self.passable(m, class, doors_open) {
+                        let o = &self.nodes[m as usize];
+                        let step = if d < 4 {
+                            CELL
+                        } else {
+                            CELL * std::f32::consts::SQRT_2
+                        };
+                        let hazard = if o.is(node_flags::HAZARD) {
+                            HAZARD_COST
+                        } else {
+                            0.0
+                        };
+                        next.push((m, step + (o.pos.y - node.pos.y).abs() * CLIMB_COST + hazard));
+                    }
+                }
+                for j in self.jumps_from(cur) {
+                    if class.can_jump(j)
+                        && self.jump_open(j, doors_open)
+                        && self.passable(j.to, class, doors_open)
+                    {
+                        let hazard = if self.nodes[j.to as usize].is(node_flags::HAZARD) {
+                            HAZARD_COST
+                        } else {
+                            0.0
+                        };
+                        next.push((
+                            j.to,
+                            j.dist + j.rise.abs() * CLIMB_COST + jump_cost(j) + hazard,
+                        ));
+                    }
+                }
+            }
+            for &(m, c) in &next {
+                let mi = m as usize;
+                if s.closed[mi] == generation {
+                    continue;
+                }
+                let gm = g + c;
+                if s.seen[mi] != generation || gm < s.g[mi] {
+                    s.seen[mi] = generation;
+                    s.g[mi] = gm;
+                    s.heap.push((key(gm), m));
+                }
+            }
+        }
+    }
+
+    /// String-pulls a node path into waypoint positions ([`NavGrid::smooth_route`] without the
+    /// jumps).
     pub fn smooth(&self, path: &[u32], class: NavClass, doors_open: &[bool]) -> Vec<Vec3> {
+        self.smooth_route(path, class, doors_open)
+            .into_iter()
+            .map(|w| w.pos)
+            .collect()
+    }
+
+    /// String-pulls a node path into waypoints: from each kept node, skip ahead to the
+    /// farthest node still reachable by [`NavGrid::walkable_line`], never past a jump: a jump's
+    /// takeoff and landing are waypoints of their own (the landing carries the jump). The
+    /// first node (where the agent stands) is dropped.
+    pub fn smooth_route(
+        &self,
+        path: &[u32],
+        class: NavClass,
+        doors_open: &[bool],
+    ) -> Vec<Waypoint> {
+        let walked = |a: u32, b: u32| self.nodes[a as usize].links.contains(&b);
+        let jump = |a: u32, b: u32| {
+            if walked(a, b) {
+                None
+            } else {
+                self.jump_between(a, b, class, doors_open)
+            }
+        };
         let mut out = Vec::new();
         let mut i = 0;
         while i + 1 < path.len() {
+            if let Some(j) = jump(path[i], path[i + 1]) {
+                out.push(Waypoint {
+                    pos: self.nodes[path[i + 1] as usize].pos,
+                    node: path[i + 1],
+                    jump: Some(j),
+                });
+                i += 1;
+                continue;
+            }
             let mut k = i + 1;
-            while k + 1 < path.len() && self.walkable_line(path[i], path[k + 1], class, doors_open)
+            while k + 1 < path.len()
+                && jump(path[k], path[k + 1]).is_none()
+                && self.walkable_line(path[i], path[k + 1], class, doors_open)
             {
                 k += 1;
             }
-            out.push(self.nodes[path[k] as usize].pos);
+            out.push(Waypoint {
+                pos: self.nodes[path[k] as usize].pos,
+                node: path[k],
+                jump: None,
+            });
             i = k;
         }
         out
     }
 
-    /// Debug: every link as a line segment (for overlays / tests).
+    /// Debug: every walking link as a line segment (for overlays / tests).
     pub fn link_segments(&self) -> impl Iterator<Item = (Vec3, Vec3)> + '_ {
         self.nodes.iter().flat_map(move |n| {
             n.links
@@ -943,7 +1973,7 @@ impl NavGrid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::level::{Brush, LevelDef};
+    use crate::level::{Brush, JumpPad, LevelDef, Volume};
 
     fn brush(min: [f32; 3], max: [f32; 3]) -> Brush {
         Brush {
@@ -1117,5 +2147,317 @@ mod tests {
                 node.pos
             );
         }
+    }
+
+    fn vol(min: [f32; 3], max: [f32; 3]) -> Volume {
+        Volume {
+            min: Vec3::from(min),
+            max: Vec3::from(max),
+        }
+    }
+
+    /// A Gnawer-like class (leaps 8 m across, 3.5 m up, 8 m down, rides pads).
+    fn leaper() -> NavClass {
+        NavClass::SMALL.with_leaps(8.0, 3.5, 8.0).with_pads(true)
+    }
+
+    /// Floor A (x < 0) and floor B (x > 6) with a 6 m strip of deep water between them (a
+    /// bed 4 m down, a kill volume to just over the surface), plus `extra` brushes.
+    fn water_gap(extra: Vec<Brush>) -> LevelDef {
+        let mut brushes = vec![
+            brush([-12.0, -1.0, -6.0], [0.0, 0.0, 6.0]),
+            brush([0.0, -5.0, -6.0], [6.0, -4.0, 6.0]),
+            brush([6.0, -1.0, -6.0], [18.0, 0.0, 6.0]),
+        ];
+        brushes.extend(extra);
+        LevelDef {
+            brushes,
+            kill_volumes: vec![
+                vol([0.0, -5.0, -6.0], [6.0, -0.5, 6.0]),
+                vol([-100.0, -40.0, -100.0], [100.0, -20.0, 100.0]),
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn at(g: &NavGrid, p: [f32; 3]) -> u32 {
+        g.node_at(Vec3::from(p), 1.0, NavClass::SMALL, &[])
+            .unwrap_or_else(|| panic!("no node at {p:?}"))
+    }
+
+    fn in_kill_volume(level: &LevelDef, p: Vec3) -> bool {
+        level.kill_volumes.iter().any(|v| v.contains(p))
+    }
+
+    #[test]
+    fn the_leap_arc_passes_both_ends_and_its_apex() {
+        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(6.0, 2.0, 1.0));
+        assert!(leap_point(a, b, 0.0).distance(a) < 1e-4);
+        assert!(leap_point(a, b, 1.0).distance(b) < 1e-4);
+        let top = (0..=100)
+            .map(|i| leap_point(a, b, i as f32 / 100.0).y)
+            .fold(f32::MIN, f32::max);
+        assert!((top - leap_apex(a, b)).abs() < 0.01, "{top}");
+        // The launch velocity flies exactly that arc (any gravity).
+        for g in [20.0, 38.0, 60.0] {
+            let (v, time) = leap_velocity(a, b, g);
+            for i in 0..=10 {
+                let t = time * i as f32 / 10.0;
+                let p = a + v * t - Vec3::Y * (0.5 * g * t * t);
+                let q = leap_point(a, b, i as f32 / 10.0);
+                assert!(p.distance(q) < 1e-3, "g {g}: {p} vs {q}");
+            }
+        }
+    }
+
+    #[test]
+    fn leaps_cross_a_water_strip_within_the_class_limits() {
+        let level = water_gap(Vec::new());
+        let g = grid(&level);
+        assert!(g.stats.leaps > 10, "{:?}", g.stats);
+        assert!(g.stats.leaps_over_deadly > 10);
+        let (a, b) = (at(&g, [-4.5, 0.0, 0.5]), at(&g, [10.5, 0.0, 0.5]));
+        let mut s = NavScratch::default();
+        // Walking only: no way across.
+        assert!(matches!(
+            g.find_path(&mut s, a, b, NavClass::SMALL, &[], 20_000),
+            PathResult::Partial(_) | PathResult::NotFound
+        ));
+        // A 4.5 m leaper can't make 7 m either; an 8 m one can.
+        let short = NavClass::SMALL.with_leaps(4.5, 2.0, 6.0);
+        assert!(!matches!(
+            g.find_path(&mut s, a, b, short, &[], 20_000),
+            PathResult::Found(_)
+        ));
+        let PathResult::Found(path) = g.find_path(&mut s, a, b, leaper(), &[], 20_000) else {
+            panic!("an 8 m leaper crosses the water");
+        };
+        let route = g.smooth_route(&path, leaper(), &[]);
+        let leaps: Vec<&Waypoint> = route.iter().filter(|w| w.jump.is_some()).collect();
+        assert_eq!(leaps.len(), 1, "{route:?}");
+        let j = g.jump(leaps[0].jump.unwrap()).unwrap();
+        assert_eq!(j.kind, JumpKind::Leap);
+        assert!(j.dist > 6.0 && j.dist <= 8.0, "{j:?}");
+        // Nothing on the arc or the path is in the water.
+        let from = g.nodes[j.from as usize].pos;
+        let to = g.nodes[j.to as usize].pos;
+        assert!(from.x < 0.0 && to.x > 6.0);
+        for i in 0..=40 {
+            let p = leap_point(from, to, i as f32 / 40.0);
+            assert!(!in_kill_volume(&level, p), "arc in the water at {p}");
+        }
+        for &n in &path {
+            assert!(!g.nodes[n as usize].is(node_flags::DEADLY));
+        }
+        // No leap ever lands on (or takes off from) a deadly floor.
+        for j in g.jumps() {
+            assert!(!g.nodes[j.to as usize].is(node_flags::DEADLY));
+            assert!(!g.nodes[j.from as usize].is(node_flags::DEADLY));
+        }
+    }
+
+    #[test]
+    fn walking_round_beats_a_leap_that_saves_little() {
+        // A 2 m bridge at z 4..6 where the water ends (z 4): its far half isn't a hazard.
+        let mut level = water_gap(vec![brush([0.0, -1.0, 4.0], [6.0, 0.0, 6.0])]);
+        level.kill_volumes[0].max.z = 4.0;
+        let g = grid(&level);
+        let (a, b) = (at(&g, [-3.5, 0.0, 2.5]), at(&g, [9.5, 0.0, 2.5]));
+        let mut s = NavScratch::default();
+        let PathResult::Found(path) = g.find_path(&mut s, a, b, leaper(), &[], 20_000) else {
+            panic!("path");
+        };
+        let route = g.smooth_route(&path, leaper(), &[]);
+        assert!(route.iter().all(|w| w.jump.is_none()), "{route:?}");
+        // Far from the bridge the leap wins.
+        let (a, b) = (at(&g, [-3.5, 0.0, -4.5]), at(&g, [9.5, 0.0, -4.5]));
+        let PathResult::Found(path) = g.find_path(&mut s, a, b, leaper(), &[], 20_000) else {
+            panic!("path");
+        };
+        let route = g.smooth_route(&path, leaper(), &[]);
+        assert!(route.iter().any(|w| w.jump.is_some()), "{route:?}");
+    }
+
+    #[test]
+    fn no_leap_where_the_arc_is_blocked() {
+        // A block hanging low over the strip (from 1.2 m above the floors, too high to climb
+        // onto): no headroom for the arc.
+        let level = water_gap(vec![brush([0.0, 1.2, -6.0], [6.0, 12.0, 6.0])]);
+        let g = grid(&level);
+        let (a, b) = (at(&g, [-4.5, 0.0, 0.5]), at(&g, [10.5, 0.0, 0.5]));
+        let mut s = NavScratch::default();
+        assert!(!matches!(
+            g.find_path(&mut s, a, b, leaper(), &[], 20_000),
+            PathResult::Found(_)
+        ));
+        for j in g.jumps() {
+            let (p, q) = (g.nodes[j.from as usize].pos, g.nodes[j.to as usize].pos);
+            assert!(
+                !(p.x < 0.0 && q.x > 6.0) && !(p.x > 6.0 && q.x < 0.0),
+                "leap under the slab {p} -> {q}"
+            );
+        }
+        // A 4 m high overhang: the narrow (2 m) arc fits under it, a tall (3.5 m) one doesn't.
+        let level = water_gap(vec![brush([0.0, 4.0, -6.0], [6.0, 4.5, 6.0])]);
+        let g = grid(&level);
+        let (a, b) = (at(&g, [-4.5, 0.0, 0.5]), at(&g, [10.5, 0.0, 0.5]));
+        let tall = NavClass::for_size(0.5, 3.4).with_leaps(8.0, 3.5, 8.0);
+        assert_eq!(tall.clear_bit(), jump_clear::TALL);
+        assert!(matches!(
+            g.find_path(&mut s, a, b, leaper(), &[], 20_000),
+            PathResult::Found(_)
+        ));
+        assert!(!matches!(
+            g.find_path(&mut s, a, b, tall, &[], 20_000),
+            PathResult::Found(_)
+        ));
+        // A wide class never leaps (no clearance bit for it on a leap).
+        let wide = NavClass::LARGE.with_leaps(8.0, 3.5, 8.0);
+        assert!(g.jumps().iter().all(|j| !wide.can_jump(j)));
+    }
+
+    #[test]
+    fn no_leap_onto_a_floor_with_lava_right_past_it() {
+        // Floor A (x < 0), then lava to x 12 with a 1 m island at x 4..5 in it, floor B past.
+        let level = LevelDef {
+            brushes: vec![
+                brush([-12.0, -1.0, -6.0], [0.0, 0.0, 6.0]),
+                brush([0.0, -3.0, -6.0], [12.0, -2.0, 6.0]),
+                brush([4.0, -2.0, -6.0], [5.0, 0.0, 6.0]),
+                brush([12.0, -1.0, -6.0], [24.0, 0.0, 6.0]),
+            ],
+            kill_volumes: vec![vol([0.0, -3.0, -6.0], [12.0, -1.0, 6.0])],
+            ..Default::default()
+        };
+        let g = grid(&level);
+        let island = at(&g, [4.5, 0.0, 0.5]);
+        assert!(!g.nodes[island as usize].is(node_flags::DEADLY));
+        for j in g.jumps() {
+            let (p, q) = (g.nodes[j.from as usize].pos, g.nodes[j.to as usize].pos);
+            assert!(
+                !(q.x > 4.0 && q.x < 5.0 && p.x < 4.0),
+                "a leap from {p} lands on the island at {q}: lava right past it"
+            );
+            assert!(!g.nodes[j.to as usize].is(node_flags::DEADLY));
+        }
+    }
+
+    #[test]
+    fn leaps_climb_a_ledge_with_a_run_up_and_drop_from_high_ones() {
+        // A 3 m block (no ramp) and a 7.5 m one.
+        let level = LevelDef {
+            brushes: vec![
+                brush([-20.0, -1.0, -20.0], [20.0, 0.0, 20.0]),
+                brush([2.0, 0.0, -5.0], [10.0, 3.0, 5.0]),
+                brush([-12.0, 0.0, -5.0], [-6.0, 7.5, 5.0]),
+            ],
+            ..Default::default()
+        };
+        let g = grid(&level);
+        let (floor, top) = (at(&g, [-2.5, 0.0, 0.5]), at(&g, [6.5, 3.0, 0.5]));
+        let high = g
+            .node_at(Vec3::new(-8.5, 7.5, 0.5), 1.0, NavClass::SMALL, &[])
+            .unwrap();
+        let mut s = NavScratch::default();
+        let PathResult::Found(up) = g.find_path(&mut s, floor, top, leaper(), &[], 20_000) else {
+            panic!("a 3.5 m climber gets onto the 3 m block");
+        };
+        let route = g.smooth_route(&up, leaper(), &[]);
+        let j = route
+            .iter()
+            .find_map(|w| w.jump)
+            .and_then(|j| g.jump(j))
+            .unwrap();
+        assert!(j.rise > 2.9, "{j:?}");
+        // The takeoff is a run-up away from the wall (the arc clears the lip).
+        let from = g.nodes[j.from as usize].pos;
+        assert!(from.x < 1.0, "takeoff at {from}");
+        // A 2 m climber can't; nobody gets onto the 7.5 m one, but a leaper comes down.
+        let low = NavClass::SMALL.with_leaps(8.0, 2.0, 8.0);
+        assert!(!matches!(
+            g.find_path(&mut s, floor, top, low, &[], 20_000),
+            PathResult::Found(_)
+        ));
+        assert!(!matches!(
+            g.find_path(&mut s, floor, high, leaper(), &[], 20_000),
+            PathResult::Found(_)
+        ));
+        assert!(matches!(
+            g.find_path(&mut s, high, floor, leaper(), &[], 20_000),
+            PathResult::Found(_)
+        ));
+        assert!(!matches!(
+            g.find_path(&mut s, high, floor, NavClass::SMALL, &[], 20_000),
+            PathResult::Found(_)
+        ));
+    }
+
+    #[test]
+    fn pad_rides_land_where_the_pad_throws() {
+        // A pad at the origin throwing onto a 5 m platform 10..16 m north.
+        let level = LevelDef {
+            brushes: vec![
+                brush([-20.0, -1.0, -30.0], [20.0, 0.0, 20.0]),
+                brush([-4.0, 0.0, -16.0], [4.0, 5.0, -10.0]),
+            ],
+            jump_pads: vec![JumpPad {
+                trigger: vol([-1.0, 0.0, -1.0], [1.0, 0.5, 1.0]),
+                velocity: Vec3::new(0.0, 22.0, -15.0),
+            }],
+            ..Default::default()
+        };
+        let g = grid(&level);
+        assert!(g.stats.pad_links >= 1, "{:?}", g.stats);
+        let rides: Vec<&NavJump> = g
+            .jumps()
+            .iter()
+            .filter(|j| j.kind == JumpKind::Pad(0))
+            .collect();
+        for j in &rides {
+            let (p, q) = (g.nodes[j.from as usize].pos, g.nodes[j.to as usize].pos);
+            assert!(p.length() < 1.0, "the ride starts on the pad: {p}");
+            assert!(
+                (q.y - 5.0).abs() < 0.1 && q.z < -10.0 && q.z > -16.0,
+                "lands on the platform: {q}"
+            );
+        }
+        assert!(rides.iter().any(|j| j.clear & jump_clear::WIDE != 0));
+        let (pad, top) = (at(&g, [0.5, 0.0, 0.5]), at(&g, [0.5, 5.0, -12.5]));
+        let mut s = NavScratch::default();
+        let walker = NavClass::SMALL;
+        assert!(!matches!(
+            g.find_path(&mut s, pad, top, walker, &[], 20_000),
+            PathResult::Found(_)
+        ));
+        let rider = walker.with_pads(true);
+        let PathResult::Found(p) = g.find_path(&mut s, pad, top, rider, &[], 20_000) else {
+            panic!("the pad takes it up");
+        };
+        let route = g.smooth_route(&p, rider, &[]);
+        let j = route.iter().find_map(|w| w.jump).and_then(|j| g.jump(j));
+        assert_eq!(j.map(|j| j.kind), Some(JumpKind::Pad(0)));
+    }
+
+    #[test]
+    fn predecessors_are_the_reverse_of_successors() {
+        let level = water_gap(vec![brush([10.0, 0.0, -3.0], [14.0, 3.0, 3.0])]);
+        let g = grid(&level);
+        let class = leaper();
+        let mut checked = 0;
+        for n in 0..g.nodes.len() as u32 {
+            if !g.passable(n, class, &[]) {
+                continue;
+            }
+            g.for_each_successor(n, class, &[], |m| {
+                let mut found = false;
+                g.for_each_predecessor(m, class, &[], |p, cost| {
+                    found |= p == n;
+                    assert!(cost > 0.0);
+                });
+                assert!(found, "{n} -> {m} has no reverse");
+                checked += 1;
+            });
+        }
+        assert!(checked > 1000, "{checked}");
     }
 }

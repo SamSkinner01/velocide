@@ -84,4 +84,9 @@
         parry: (1.0, 0.9, 0.1),
     ),
     death_time: 1.0,
+    // A flyer: no leaps, pads or melting (with no sight of its target it routes over or round
+    // what is in the way instead, docs/enemies.md "Flying").
+    leap: None,
+    pads: false,
+    melt: (after: 0.0),
 )

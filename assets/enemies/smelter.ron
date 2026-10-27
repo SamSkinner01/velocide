@@ -105,4 +105,10 @@
     death_time: 1.4,
     // Elite Smelters are already slow and huge: a little less health, a little more speed.
     elite: (health: 2.0, aggression: 1.25, speed: 1.2, knockback: 0.6, heat: 2.0),
+    // Getting there (docs/enemies.md "Leaps, pads, melting"): a hulk with a full crucible
+    // doesn't leap; it rides pads, and stranded for 6 s it melts and re-forms 8-18 m from its
+    // target, out of sight.
+    leap: None,
+    pads: true,
+    melt: (after: 6.0, sink: 0.6, rise: 0.8, near: 8.0, far: 18.0),
 )
