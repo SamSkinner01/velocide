@@ -11,20 +11,29 @@
     name: "Gnawer",
     net_kind: 20,
     model: "gnawer",
+    // Drawn 1.25x its built size so a pack reads (and is easier to hit); the movement capsule
+    // (`radius`, `height`) stays the size the levels and the nav grid were built for.
+    model_scale: 1.25,
     health: 45.0,
     speed: 10.0,
     acceleration: 60.0,
     turn_rate: 600.0,
     radius: 0.6,
     height: 2.0,
-    // The body hitbox stops at the hunched shoulders; the head juts out in front of them.
-    body_top: Some(1.55),
-    eye_height: 1.65,
+    // Hit shapes cover the drawn model: the body capsule the hunched back up to the shoulders,
+    // a bar across the fists it knuckle-walks on (the legs by the hit assist's body pad); the
+    // head (skull and jaw) juts out in front of it.
+    hit_radius: Some(0.78),
+    body_top: Some(2.3),
+    body_shapes: [
+        (a: (-0.68, 0.32, -0.66), b: (0.68, 0.32, -0.66), radius: 0.3),
+    ],
+    eye_height: 2.05,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 1.25,
     weak_points: [
-        (name: "head", kind: Head, offset: (0.0, 1.62, -0.38), radius: 0.38, multiplier: 2.0),
+        (name: "head", kind: Head, offset: (0.0, 1.95, -0.65), radius: 0.52, multiplier: 2.0),
     ],
     armour: None,
     attacks: [

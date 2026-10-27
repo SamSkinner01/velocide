@@ -981,7 +981,7 @@ fn gaoler_front_armour_and_weak_points() {
     let e = &a.world.enemies[&id];
     let lantern_at = e.local_to_world(e.def.weak_points[1].offset);
     assert!(
-        lantern_at.z > 0.9 && (lantern_at.y - 2.2).abs() < 1e-4,
+        lantern_at.z > 0.9 && (lantern_at.y - 2.46).abs() < 1e-4,
         "{lantern_at}"
     );
 }

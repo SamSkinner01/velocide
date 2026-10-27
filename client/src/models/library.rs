@@ -78,6 +78,11 @@ pub(crate) fn match_parts(
         .collect()
 }
 
+/// An enemy model's root with its drawn scale (`EnemyKind::scale`, about the model origin).
+fn enemy_root(anim: &EnemyAnim, root: Mat4) -> Mat4 {
+    root * Mat4::from_scale(Vec3::splat(anim.kind.scale()))
+}
+
 fn texture_key(t: &TextureData) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (t.width, t.height).hash(&mut h);
@@ -229,11 +234,11 @@ impl ModelLibrary {
     }
 
     /// Draws an enemy posed from `anim` with its model origin (feet; the Harrier's hover
-    /// centre) at `root`.
+    /// centre) at `root`, [`EnemyKind::scale`](enemies::EnemyKind::scale) times its built size.
     pub fn draw_enemy(&self, anim: &EnemyAnim, root: Mat4, tint: &Tint, out: &mut Vec<DrawItem>) {
         let id = anim.kind.model();
         let pose = enemies::pose(anim);
-        self.get(id).draw(&pose, root, tint, out);
+        self.get(id).draw(&pose, enemy_root(anim, root), tint, out);
     }
 
     /// World-space point an enemy attacks from in its current pose: the Gnawer's jaw, the
@@ -267,7 +272,7 @@ impl ModelLibrary {
         };
         let pose = enemies::pose(anim);
         self.get(anim.kind.model())
-            .part_transform(&pose, root, part)
+            .part_transform(&pose, enemy_root(anim, root), part)
             .transform_point3(offset)
     }
 

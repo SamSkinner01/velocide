@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use super::combat::{Blocked, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner};
 use super::nav::NavClass;
 use super::trail::Trail;
-use super::{HitPart, HitShape, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
+use super::{HitPart, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
 use crate::input::look_dir;
 use crate::protocol::{EntityState, NetId, OWNER_NONE, enemy_flags};
 use crate::tuning::Tuning;
@@ -379,28 +379,11 @@ impl Enemy {
         self.position + Quat::from_rotation_y(self.yaw) * offset
     }
 
-    /// Body capsule + weak point spheres (`HitPart::Weak(i)`).
+    /// Body capsule + extra body shapes + weak point spheres (`HitPart::Weak(i)`), sized to
+    /// the drawn model rather than the movement capsule ([`EnemyDef::hitbox`]).
     pub fn hitbox(&self) -> Hitbox {
-        let r = self.def.radius;
-        let h = self.def.body_top.unwrap_or(self.def.height).max(2.0 * r);
-        let feet = self.feet();
-        let mut shapes = vec![HitShape::capsule(
-            HitPart::Body,
-            feet + Vec3::Y * r,
-            feet + Vec3::Y * (h - r),
-            r,
-        )];
-        for (i, w) in self.def.weak_points.iter().enumerate() {
-            shapes.push(HitShape::sphere(
-                HitPart::Weak(i.min(u8::MAX as usize) as u8),
-                self.local_to_world(w.offset),
-                w.radius,
-            ));
-        }
-        Hitbox {
-            target: HitTarget::Entity(self.id),
-            shapes,
-        }
+        self.def
+            .hitbox(HitTarget::Entity(self.id), self.feet(), self.yaw)
     }
 
     /// Changes state. The last attack's parry window survives Strike/Recover/Chase: a lagging
@@ -855,7 +838,7 @@ mod tests {
                 2.0,
                 45.0,
                 10.0,
-                &[("head", [0.0, 1.62, -0.38], 0.38, 2.0)],
+                &[("head", [0.0, 1.95, -0.65], 0.52, 2.0)],
             ),
             (
                 "censer",
@@ -865,7 +848,7 @@ mod tests {
                 2.5,
                 80.0,
                 5.0,
-                &[("lantern", [0.0, 2.22, -0.1], 0.42, 2.0)],
+                &[("lantern", [0.0, 2.68, -0.12], 0.5, 2.0)],
             ),
             (
                 "harrier",
@@ -875,7 +858,7 @@ mod tests {
                 1.3,
                 40.0,
                 15.0,
-                &[("heart", [0.0, 0.35, -0.15], 0.35, 2.5)],
+                &[("heart", [0.0, 0.26, -0.2], 0.44, 2.5)],
             ),
             (
                 "gaoler",
@@ -886,8 +869,8 @@ mod tests {
                 520.0,
                 4.5,
                 &[
-                    ("head", [0.0, 3.32, -0.35], 0.45, 1.5),
-                    ("lantern", [0.0, 2.2, 0.95], 0.55, 2.5),
+                    ("head", [0.0, 3.72, -0.35], 0.5, 1.5),
+                    ("lantern", [0.0, 2.46, 1.06], 0.6, 2.5),
                 ],
             ),
             (
@@ -898,7 +881,7 @@ mod tests {
                 3.4,
                 60.0,
                 7.0,
-                &[("head", [0.0, 3.12, -0.4], 0.35, 2.5)],
+                &[("head", [0.0, 3.74, -0.48], 0.42, 2.5)],
             ),
             // The third roster (docs/enemies.md).
             (
@@ -909,7 +892,7 @@ mod tests {
                 3.1,
                 220.0,
                 5.5,
-                &[("bell", [0.0, 2.62, 0.3], 0.6, 2.0)],
+                &[("bell", [0.0, 3.17, 0.36], 0.72, 2.0)],
             ),
             (
                 "snuffer",
@@ -919,7 +902,7 @@ mod tests {
                 1.4,
                 70.0,
                 12.5,
-                &[("wick", [0.0, 0.62, -1.0], 0.32, 2.5)],
+                &[("wick", [0.0, 0.82, -1.32], 0.42, 2.5)],
             ),
             (
                 "smelter",
@@ -930,8 +913,8 @@ mod tests {
                 420.0,
                 3.6,
                 &[
-                    ("hatch", [0.0, 1.45, -1.25], 0.45, 2.5),
-                    ("head", [0.0, 3.0, -0.35], 0.4, 1.5),
+                    ("hatch", [0.0, 1.62, -1.45], 0.5, 2.5),
+                    ("head", [0.0, 3.4, -0.37], 0.45, 1.5),
                 ],
             ),
             (
@@ -943,8 +926,8 @@ mod tests {
                 1000.0,
                 0.0,
                 &[
-                    ("head", [0.0, 1.97, -0.04], 0.3, 2.0),
-                    ("sigil", [0.0, 1.35, -0.28], 0.22, 1.5),
+                    ("head", [0.0, 2.46, -0.05], 0.37, 2.0),
+                    ("sigil", [0.0, 1.69, -0.35], 0.27, 1.5),
                 ],
             ),
         ];
@@ -971,6 +954,14 @@ mod tests {
             }
             // Biggest dimension at least ~2 m (docs/roster.md "big and readable").
             assert!(height.max(radius * 2.0) >= 1.3, "{name}");
+            // The refit (docs/enemies.md "Sizes and hit shapes"): drawn bigger than built, and
+            // the body hit capsule at least as big as the movement capsule it is drawn around.
+            assert!(d.draw_scale() >= 1.1, "{name} is drawn bigger");
+            let hit_r = d.hit_radius.unwrap_or(d.radius);
+            assert!(
+                hit_r >= radius,
+                "{name}: hit radius {hit_r} < capsule {radius}"
+            );
         }
         assert!(
             r.get("husk").is_none() && r.by_kind(16).is_none(),

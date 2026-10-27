@@ -13,18 +13,28 @@
     name: "Harrier",
     net_kind: 22,
     model: "harrier",
+    // Drawn 1.3x its built size (3.9 m wingspan); the flight capsule stays as it was.
+    model_scale: 1.3,
     health: 40.0,
     speed: 15.0,
     acceleration: 32.0,
     turn_rate: 540.0,
     radius: 0.7,
     height: 1.3,
-    eye_height: 0.8,
+    // Hit shapes (offsets from the feet; the hover centre is 0.65 m up): the body, the neck and
+    // beak, the wings in their shallow V (where they are mid-flap), the heart under the chest.
+    hit_radius: Some(0.7),
+    body_shapes: [
+        (a: (0.0, 0.95, -0.55), b: (0.0, 1.0, -1.35), radius: 0.26),
+        (a: (-0.3, 0.88, 0.3), b: (-1.8, 1.28, 0.25), radius: 0.32),
+        (a: (0.3, 0.88, 0.3), b: (1.8, 1.28, 0.25), radius: 0.32),
+    ],
+    eye_height: 0.85,
     step_height: 0.0,
     locomotion: Flying(min_height: 5.0, max_height: 10.0),
     knockback_scale: 1.5,
     weak_points: [
-        (name: "heart", kind: Core, offset: (0.0, 0.35, -0.15), radius: 0.35, multiplier: 2.5),
+        (name: "heart", kind: Core, offset: (0.0, 0.26, -0.2), radius: 0.44, multiplier: 2.5),
     ],
     armour: None,
     attacks: [

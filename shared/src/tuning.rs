@@ -423,8 +423,8 @@ pub struct HitAssistTuning {
 impl Default for HitAssistTuning {
     fn default() -> Self {
         Self {
-            enemy_body_pad: 0.2,
-            enemy_weak_pad: 0.1,
+            enemy_body_pad: 0.35,
+            enemy_weak_pad: 0.15,
             player_body_pad: 0.12,
             player_head_pad: 0.06,
         }

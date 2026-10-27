@@ -953,7 +953,10 @@ impl InGame {
                 // Accessibility: a parry icon over enemies in their parryable window.
                 if palette::shape_cues() {
                     let defs = net.world().map(|w| &w.enemy_defs);
-                    let height = |k: u16| defs.and_then(|d| d.by_kind(k)).map(|d| d.height);
+                    let height = |k: u16| {
+                        let def = defs.and_then(|d| d.by_kind(k));
+                        def.map(|d| d.height * d.draw_scale())
+                    };
                     cues::parry_icons(
                         list,
                         &cam,
