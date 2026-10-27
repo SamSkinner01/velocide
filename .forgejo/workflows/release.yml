@@ -3,7 +3,7 @@
 # (`/releases/latest` always points at the newest). Older `build-*` releases are pruned (the
 # newest 10 stay). Notes: docs/hosting.md ("Releases from CI").
 #
-# Runs on the `mac-studio-docker` runner in plain Ubuntu containers. Every step is a shell script
+# Runs on runners labelled `docker`, in plain Ubuntu containers. Every step is a shell script
 # in the repo (scripts/ci/*), so nothing is fetched from an action registry: the containers need
 # only Ubuntu's archive, rustup and crates.io. The packages are x86_64 whatever the runner's
 # architecture (an arm64 runner cross-compiles, scripts/ci/setup.sh).
@@ -36,7 +36,7 @@ jobs:
   # fmt, clippy and the whole test suite (natively: the tests don't care about the package
   # architecture). Nothing is released unless they pass.
   check:
-    runs-on: mac-studio-docker
+    runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 90
     steps:
@@ -62,7 +62,7 @@ jobs:
   # The release to fill: a draft until every package is attached.
   draft:
     needs: check
-    runs-on: mac-studio-docker
+    runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 10
     outputs:
@@ -107,7 +107,7 @@ jobs:
 
   linux:
     needs: draft
-    runs-on: mac-studio-docker
+    runs-on: docker
     # 20.04 keeps the binaries on glibc 2.31 (any distro from about 2020 on).
     container: ubuntu:20.04
     timeout-minutes: 90
@@ -131,7 +131,7 @@ jobs:
 
   windows:
     needs: draft
-    runs-on: mac-studio-docker
+    runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 90
     steps:
@@ -154,7 +154,7 @@ jobs:
 
   publish:
     needs: [draft, linux, windows]
-    runs-on: mac-studio-docker
+    runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 10
     steps:
@@ -177,7 +177,7 @@ jobs:
   discard:
     needs: [draft, linux, windows, publish]
     if: ${{ failure() && needs.draft.outputs.id != '' }}
-    runs-on: mac-studio-docker
+    runs-on: docker
     container: ubuntu:24.04
     timeout-minutes: 10
     steps:

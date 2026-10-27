@@ -147,7 +147,7 @@ Every release carries `velocide-<version>-linux-x86_64.tar.gz` and
 `PLAY.txt` shows: everyone must run the same one). `/sam/velocide/releases/latest` always opens
 the newest.
 
-A run has five stages, each a job in a fresh Ubuntu container on the `mac-studio-docker` runner:
+A run has five stages, each a job in a fresh Ubuntu container on a runner labelled `docker`:
 
 1. **check**: `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test --workspace`.
    Nothing is released unless they pass.
@@ -166,8 +166,8 @@ How it is built:
   so the workflow needs no actions from a registry: the runner only needs Ubuntu's archive,
   rustup and crates.io. `scripts/package.sh` runs the same two build scripts in local
   containers, so a local package and a CI one are built the same way.
-- The packages are always x86_64. A Mac's Docker runs arm64 Linux containers, so there the Linux
-  package is cross-compiled (`gcc-x86-64-linux-gnu` and the amd64 builds of ALSA, udev and
+- The packages are always x86_64, on an x86_64 or an arm64 runner. A Mac's Docker runs arm64
+  Linux containers, so there the Linux package is cross-compiled (`gcc-x86-64-linux-gnu` and the amd64 builds of ALSA, udev and
   D-Bus from Ubuntu's amd64 archive); MinGW cross-compiles to Windows from either.
 - The toolchain is pinned by `RUST_VERSION` at the top of the workflow; bump it with the
   machine you develop on.
@@ -175,7 +175,8 @@ How it is built:
   instance restricts it, add a repository secret `RELEASE_TOKEN` (an access token with
   repository write) and the workflow uses that instead.
 - Each run compiles from scratch (there's no cache): a few minutes per job on the Mac Studio.
-  With runner capacity 2, `linux` and `windows` build at the same time.
+  With two `docker` runners free (or one with capacity 2), `linux` and `windows` build at the
+  same time.
 
 ## Notes
 
