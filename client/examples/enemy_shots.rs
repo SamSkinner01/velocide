@@ -11,12 +11,15 @@
 //! (smothering the view) and punched off; the Smelter's slag line as a telegraph and burning;
 //! the Effigy flinching under fire. The refit (docs/enemies.md "Sizes and hit shapes"): the
 //! lineup again with every Mould's hit shapes drawn over it (white: the plain shapes, cyan: as
-//! padded by the hit assist for the player's attacks), from the front and from above behind.
+//! padded by the hit assist for the player's attacks), from the front and from above behind;
+//! and spectating (docs/style_modes.md): two clients in campaign co-op on a real server, one
+//! goes down and watches the other fight a Gnawer pack from their eyes, then from the chase
+//! camera.
 //!
 //! ```text
-//! cargo run -p client --release --example enemy_shots -- [out_dir] [--third]
+//! cargo run -p client --release --example enemy_shots -- [out_dir] [--third] [--spectate]
 //! # default out_dir target/enemy_shots; --third: only the third roster (Bellwether, Snuffer,
-//! # Smelter, Effigy, elites)
+//! # Smelter, Effigy, elites); --spectate: only spectating
 //! ```
 
 use std::path::PathBuf;
@@ -29,10 +32,11 @@ use client::ingame::InGame;
 use client::settings::Settings;
 use engine::audio::Audio;
 use engine::gfx::{DebugLine, RetroSettings, UiDrawList};
-use engine::input::InputState;
+use engine::input::{GamepadButton, GamepadEvent, InputState};
 use engine::render::Renderer;
 use engine::ui::UiInput;
 use glam::{Vec2, Vec3, Vec4};
+use server::{ServerConfig, ServerHandle};
 use shared::input::Buttons;
 use shared::protocol::{EntityState, enemy_flags, kind};
 use shared::sim::{AiState, EnemyRegistry, HitPads, HitPart, HitTarget};
@@ -54,27 +58,42 @@ struct Harness {
     hit_shapes: bool,
 }
 
+/// A second player's screen (spectating shots): its own settings and input.
+struct Other {
+    common: Common,
+    input: InputState,
+}
+
 impl Harness {
     fn frame(&mut self, game: &mut InGame) {
         std::thread::sleep(Duration::from_secs_f32(DT));
         self.time += DT as f64;
         self.common.stats.update(DT);
+        self.render(game, None);
+    }
+
+    /// One frame of `game` (as `other`'s screen when given), rendered.
+    fn render(&mut self, game: &mut InGame, other: Option<&mut Other>) {
         let ui = UiInput {
             mouse_pos: Vec2::splat(-100.0),
             time: self.time,
             ..Default::default()
         };
         self.buffers.clear(UiDrawList::canvas_for_window(W, H));
+        let (common, input) = match other {
+            Some(o) => (&mut o.common, &mut o.input),
+            None => (&mut self.common, &mut self.input),
+        };
         let out = {
             let mut io = FrameIo {
                 renderer: &mut self.renderer,
-                input: &self.input,
+                input,
                 ui_input: &ui,
                 dt: DT,
                 time: self.time,
                 window_size: (W, H),
             };
-            game.frame(&mut self.common, &mut io, &mut self.buffers)
+            game.frame(common, &mut io, &mut self.buffers)
         };
         if self.hit_shapes {
             hit_shape_lines(game, &mut self.buffers.lines);
@@ -82,7 +101,18 @@ impl Harness {
         if let Err(e) = self.renderer.render(&self.buffers.desc(&out.scene), None) {
             eprintln!("render: {e:#}");
         }
-        self.input.end_frame();
+        input.end_frame();
+    }
+
+    /// `n` frames of two players' screens (the second one rendered last: shots show it).
+    fn frames2(&mut self, a: &mut InGame, b: &mut InGame, other: &mut Other, n: usize) {
+        for _ in 0..n {
+            std::thread::sleep(Duration::from_secs_f32(DT));
+            self.time += DT as f64;
+            a.controls.override_move = Some(self.moving);
+            self.render(a, None);
+            self.render(b, Some(other));
+        }
     }
 
     fn frames(&mut self, game: &mut InGame, n: usize) {
@@ -480,6 +510,87 @@ fn third_roster(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 60);
 }
 
+/// Spectating (docs/style_modes.md "Spectating"): two clients in campaign co-op on a real
+/// server. Bravo goes down and, after a moment of the death view, watches Alpha fight a
+/// Gnawer pack from Alpha's eyes (Alpha's weapon in hand), then from the chase camera.
+fn spectating(h: &mut Harness) -> anyhow::Result<()> {
+    let server = ServerHandle::spawn(ServerConfig {
+        bind: "127.0.0.1:0".parse()?,
+        level: "crucible_of_veins".into(),
+        max_players: 4,
+        watch_tuning: false,
+        dev_commands: true,
+        ..Default::default()
+    })?;
+    let address = server.connect_addr().to_string();
+    let join = StartMode::Join { address };
+    h.common.name_override = Some("Alpha".into());
+    let mut a = InGame::start(&join, &mut h.common, &mut h.renderer)?;
+    let scratch = std::env::temp_dir().join("velocide-enemy-shots-bravo.ron");
+    let mut other = Other {
+        common: Common::new(
+            Settings::default(),
+            scratch,
+            Audio::disabled(),
+            LaunchOptions::default(),
+        ),
+        input: InputState::new(),
+    };
+    other.common.name_override = Some("Bravo".into());
+    let mut b = InGame::start(&join, &mut other.common, &mut h.renderer)?;
+    for _ in 0..900 {
+        h.frames2(&mut a, &mut b, &mut other, 1);
+        if a.is_playing() && b.is_playing() {
+            break;
+        }
+    }
+    h.frames2(&mut a, &mut b, &mut other, 60);
+    a.send_chat("/god");
+    h.frames2(&mut a, &mut b, &mut other, 10);
+    // Bravo goes down; Alpha calls in a pack and turns on it.
+    b.send_chat("/kill");
+    a.send_chat("/spawn gnawer 3");
+    h.frames2(&mut a, &mut b, &mut other, 30);
+    h.shot("spectate_downed");
+    for _ in 0..60 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    println!("spectating: {:?}", b.spectate.target());
+    h.moving = (0.0, 0.0, Buttons::FIRE);
+    for _ in 0..14 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    h.shot("spectate_eyes");
+    // JUMP (gamepad A): the chase camera.
+    other
+        .input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::South, true));
+    h.frames2(&mut a, &mut b, &mut other, 1);
+    other
+        .input
+        .handle_gamepad_event(GamepadEvent::Button(GamepadButton::South, false));
+    for _ in 0..50 {
+        if let Some(g) = nearest(&a, kind::GNAWER) {
+            aim_at(&mut a, chest(&g));
+        }
+        h.frames2(&mut a, &mut b, &mut other, 1);
+    }
+    h.moving = (0.0, 0.0, Buttons::NONE);
+    println!("chase camera: {}", b.spectate.chase());
+    h.shot("spectate_chase");
+    a.shutdown(&mut h.renderer, &mut h.common);
+    b.shutdown(&mut h.renderer, &mut other.common);
+    server.stop();
+    h.common.name_override = None;
+    Ok(())
+}
+
 fn session(h: &mut Harness, level: &str) -> anyhow::Result<InGame> {
     let mut game = InGame::start(
         &StartMode::SinglePlayer {
@@ -509,6 +620,7 @@ fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target/enemy_shots"));
     let only_third = std::env::args().any(|a| a == "--third");
+    let only_spectate = std::env::args().any(|a| a == "--spectate");
     std::fs::create_dir_all(&out)?;
     let renderer = Renderer::new_headless(W, H, &RetroSettings::default())?;
     let scratch = std::env::temp_dir().join("velocide-enemy-shots-settings.ron");
@@ -527,6 +639,10 @@ fn main() -> anyhow::Result<()> {
         moving: (0.0, 0.0, Buttons::NONE),
         hit_shapes: false,
     };
+
+    if only_spectate {
+        return spectating(&mut h);
+    }
 
     // ---- Proving ground: one type at a time. ----
     let mut game = session(&mut h, shared::sim::BUILTIN_LEVEL)?;
@@ -764,5 +880,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 60);
     h.shot("arena4_cleared");
     game.shutdown(&mut h.renderer, &mut h.common);
-    Ok(())
+
+    // ---- Spectating a teammate (campaign co-op, a real server). ----
+    spectating(&mut h)
 }

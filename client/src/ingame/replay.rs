@@ -412,7 +412,7 @@ pub fn display_text(s: &str) -> String {
 /// What a replicated player holds, for the viewmodel: the weapon, the selected ability (its
 /// glow) and the charge / draw level 0..1 while charging or drawing
 /// (`shared::protocol::player_weapon`).
-fn held_weapon(e: &EntityState) -> (WeaponKind, Ability, f32) {
+pub(super) fn held_weapon(e: &EntityState) -> (WeaponKind, Ability, f32) {
     let (weapon, ability, charge) = player_weapon(e.state);
     let charging = e.flags & (player_flags::CHARGING | player_flags::DRAWING) != 0;
     (
@@ -423,7 +423,7 @@ fn held_weapon(e: &EntityState) -> (WeaponKind, Ability, f32) {
 }
 
 /// A movement state for the camera rig and the viewmodel from a replicated player.
-fn move_state(e: &EntityState) -> MoveState {
+pub(super) fn move_state(e: &EntityState) -> MoveState {
     let f = |bit: u32| e.flags & bit != 0;
     let on_ground = f(player_flags::ON_GROUND);
     MoveState {
