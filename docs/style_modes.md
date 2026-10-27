@@ -16,7 +16,7 @@ grades. Everything is server-authoritative and runs inside `SimWorld::step`; num
 | `shared::sim::modes` | `ModeRules`, `ModeState` (`SimWorld::mode`), `ModePlayer`, `LifeState`, `MatchPhase`, `PlayerStats`, `ModeEvent`, `Scoreboard`, `MatchResults`, `Grade` / `Grades` / `grade_player`, the death rule, checkpoints, revives, exit, deathmatch, `end_match`, results |
 | `shared::sim::difficulty` | `PveScaling` (difficulty × players: health, count, elite chance, `EnemyScale`, downed time, revive health), `SimWorld::pve_scaling`, `spawn_pve_enemy`, `ModeRng` |
 | `shared::sim::grind` | `GrindState` (`ModeState::grind`), `GrindStatus`, `GrindEvent`, `GrindResult`, `plan_wave` / `wave_budget`, the grind step, spawn points |
-| `shared::sim::gungame` | `GunGameEvent`, `GunGameResult`, `Tier` / `tier_of` / `tier_loadout` / `fist_tier`, the gun game step (promotions, punch demotions, the ladder win) |
+| `shared::sim::gungame` | `GunGameEvent`, `GunGameResult`, `Tier` / `tier_of` / `tier_loadout` / `finale_tier`, the gun game step (promotions, punch demotions, the finale win) |
 | `shared::tuning` | `StyleTuning`, `ModeTuning`, `DifficultyTuning`, `GrindTuning`, `GunGameTuning` (sections `style`, `modes`, `difficulty`, `grind`, `gun_game`) |
 | `server::modes` | routing (`GameEvent::Style` to the owner, `GameEvent::Mode` to everyone), match end → `Server::end_match` |
 | `client::ingame::style_hud` | `StyleHud`: meter, rank animation, STALE + freshness pips, style feed, rank-up banner, rank sounds, music floor |
@@ -330,29 +330,32 @@ cistern_nine`.
 ### Gun game (`sim::gungame`)
 
 A PvP free-for-all on an arena (up to 8 players) where everyone climbs the same fixed ladder of
-weapon builds (`gun_game.ladder`), then the **Fist**. Host it from the lobby (MODE GUN GAME, a
-TIME LIMIT, no frag limit), `velocide-server --mode gungame --level knell_yard`.
+weapon builds (`gun_game.ladder`), then the **melee finale** (`gun_game.finale`). Host it from
+the lobby (MODE GUN GAME, a TIME LIMIT, no frag limit), `velocide-server --mode gungame --level
+knell_yard`.
 
-* **The ladder** (one tier per weapon, each with its default build, from forgiving to
+* **The ladder** (one tier per gun, each with its default build, from forgiving to
   demanding): 1 Arclash, 2 Kiln, 3 Thresher, 4 Riveter, 5 Bellows, 6 Tumbler, 7 Cinderbox, 8
-  Lancet, 9 Quill, 10 Longwick, 11 the Fist. Each player carries only their tier's build: a
-  forced loadout (`SimWorld::force_loadout`, the arsenal's API), so it survives respawns and
-  wins over the player's own loadout; `step_gun_game` keeps everyone's forced loadout on their
-  tier every tick (joins, restarts, a hot-reloaded ladder).
+  Lancet, 9 Quill, 10 Longwick, 11 the finale: the **Trimmer** `[Lunge, Hurl]` by default
+  (`gun_game.finale`, any build; `docs/arsenal.md`, "Melee"). Each player carries only their
+  tier's build with the knack they picked (in PvP the Thorn applies as Surge): a forced loadout
+  (`SimWorld::force_loadout`, the arsenal's API), so it survives respawns and wins over the
+  player's own loadout; `step_gun_game` keeps everyone's forced loadout on their tier every tick
+  (joins, restarts, a hot-reloaded ladder).
 * **Promotion**: a kill with the weapon of your tier (`KillInfo::weapon`: the weapon that fired
   the killing blow, its abilities included) moves you up a tier at once (the next build
   replaces the weapon in your hands, slot 1 selected) — `GunGameEvent::Promoted`. Kills with
-  anything else don't count: a bomb of your previous weapon still bouncing, slams, thorns
-  (off anyway: the PvP balance profile), knocking someone into a kill volume.
+  anything else don't count: a bomb of your previous weapon still bouncing, slams, knacks,
+  knocking someone into a kill volume.
 * **Punch kills** (`Attack::Fist`) knock the victim down `punch_demotes` (1) tier, whatever
-  tiers either player is on (never below the first) — `GunGameEvent::Demoted`. The puncher only
-  climbs if the Fist is their tier: **a punch kill on the Fist tier wins** the match
-  (`EndReason::Ladder`; the winner's tier is set one past the Fist).
-* **The Fist tier** is fists only: `tier_loadout` forces `Loadout::unarmed()` (no weapon: the
-  trigger and abilities do nothing, the fist punches; replicated as unarmed,
-  `protocol::player_armed`; `docs/arsenal.md`). Kills with anything but the fist on the Fist
-  tier (a projectile of the last weapon still flying) count for nothing; the HUD says PUNCH A
-  KILL TO WIN.
+  tiers either player is on (never below the first) — `GunGameEvent::Demoted`. The puncher
+  doesn't climb.
+* **The finale** (the tier after the ladder; `Tier::Finale`): the finale's build like every
+  tier. **A kill with the finale weapon** — a swing or one of its abilities (a Lunge, a Hurl's
+  blade) — **wins** the match (`EndReason::Ladder`; the winner's tier is set one past the
+  finale). Kills with anything else on the finale (a projectile of the last gun still flying, a
+  punch) count for nothing. (Until the refit the last tier was the Fist: fists only, a punch
+  kill to win — too rough: one punch's reach against a field of guns.)
 * **Respawns, protection, time limit**: deathmatch's. When time runs out the most tiers wins,
   then kills, then fewer deaths, then style. Gun game has no frag limit
   (`ModeRules::gun_game(time_limit_secs)`); frags aren't counted, kills are.
@@ -481,8 +484,9 @@ player) to everyone.
   TEAM WIPED banner + "REGROUPING AT THE CHECKPOINT" (the death view counts down); EXTRACTION countdown (urgent red in the
   last seconds, `Countdown` beeps); solo death: "BACK TO THE CHECKPOINT".
 * **Deathmatch**: frags / limit and place (top left), TIME LEFT (top centre).
-* **Gun game** (top left): "TIER 5 / 11 BELLOWS", "NEXT: TUMBLER" (on the Fist tier "FIST",
-  flashing, and "PUNCH A KILL TO WIN"), the place (1ST / TIED / 2ND…), under it the leader
+* **Gun game** (top left): "TIER 5 / 11 BELLOWS", "NEXT: TUMBLER" (on the finale its weapon,
+  flashing, and "A KILL TO WIN"; arsenal-client is finishing the finale's banners and feed
+  lines), the place (1ST / TIED / 2ND…), under it the leader
   ("LEADER: VEX - 8 LANCET") or "YOU LEAD - NEXT BEST: …"; TIME LEFT top centre. Banners: your
   promotion "TIER 5 - BELLOWS" (`RankUp`), "THE FIST" (`RankUp`, lower), "PUNCHED DOWN"
   (`RankDown`); feed lines "VEX HAS THE FIST", "VEX PUNCHED YOU DOWN A TIER".
@@ -557,13 +561,14 @@ Difficulty section above.
 `min_spawn_distance` 14, `end_delay` 2.5, `grade_wave` (20, 15, 10, 5), `roster` (the table in
 the Grind section).
 
-`gun_game` (`GunGameTuning`): `ladder` (the ten builds above, first to last), `punch_demotes` 1.
+`gun_game` (`GunGameTuning`): `ladder` (the ten builds above, first to last), `finale` (the
+Trimmer `[Lunge, Hurl]`), `punch_demotes` 1.
 
 ## Tests and tools
 
 ```text
 cargo test -p shared --test style      # style math + scoring real combat in the sim (15)
-cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind, gun game (43)
+cargo test -p shared --test modes      # checkpoints, deaths, revive, wipe, exit, DM, grades, difficulty, grind, gun game (45)
 cargo test -p shared --lib difficulty grind gungame   # scaling numbers, wave plans, budgets, unlocks, heavies / bosses, the ladder
 cargo test -p server --test modes_net  # over UDP with real clients (7)
 cargo run -p client --release --example style_shots -- out/   # PNGs of the HUD / results / co-op revive / grind
@@ -607,21 +612,22 @@ cargo run -p client --release --example enemy_shots -- out/ --spectate   # spect
   everyone starts with the first build only; a kill with another weapon or a slam counts
   nothing, a kill with the tier's weapon promotes at once (event, the next build in hand) and
   survives a respawn, tiers ride on the scoreboard; a punch kill knocks the victim down a tier
-  (never below the first) without promoting the puncher; on the Fist tier weapon kills count for
-  nothing and a punch kill wins (winner one past the Fist, standings by tier, the ladder in the
-  results, a frozen world); the Fist tier is fists only (unarmed, replicated as such, nothing
-  but punches fires, still unarmed after a respawn, armed again when punched down); the time
-  limit ranks by tier, not kills, and gun game never ends on frags; late joiners start on the
-  lowest tier; lobby settings start a gun game.
+  (never below the first) without promoting the puncher; on the finale other weapons' kills and
+  punch kills count for nothing and a kill with the finale weapon's ability wins (winner one
+  past the finale, standings by tier, the ladder in the results, a frozen world); the finale is
+  the Trimmer in hand (replicated as held, its trigger swings, still there after a respawn, the
+  last gun again when punched down); every tier carries the player's own knack (PvP: Surge for
+  the Thorn); the time limit ranks by tier, not kills, and gun game never ends on frags; late
+  joiners start on the lowest tier; lobby settings start a gun game.
 * `modes_net.rs`: style events reach only the killer, `OwnState` carries the meter, everyone's
   scoreboard shows the frag and rank; a frag limit ends the match into the Results phase on every
   client; ending from the lobby flow builds results; a client holding USE revives a downed
   teammate (both clients see DOWNED, Reviving, Revived); the campaign exit sends graded results;
   a grind run on HARD for two: wave 1 (eleven Gnawers) and its scoreboard status on both
   clients, the breather, wave 2, both killed → Overrun → grind results and the Results phase;
-  a gun game for two: the PvP profile (no Thorns), the first build in every owner's own state,
-  a promotion reaching everyone and the next build in the owner's prediction, a punch kill on
-  the Fist tier → results (`Ladder`) and the Results phase.
+  a gun game for two: the first build (with Surge for the Thorn) in every owner's own state,
+  a promotion reaching everyone and the next build in the owner's prediction, a kill with the
+  finale weapon on the finale → results (`Ladder`) and the Results phase.
 * `style_shots`: the style meter at DULL / FERAL / MERCILESS (STALE) / SEARING (grouped
   multikill feed) / VELOCIDE, the rank-up banner, CHECKPOINT, the deathmatch HUD and Tab
   scoreboard, solo / perfect / co-op / deathmatch results mid-reveal and finished, and a real
@@ -657,9 +663,8 @@ cargo run -p client --release --example enemy_shots -- out/ --spectate   # spect
   reach the player spawns; a Mould may still appear somewhere awkward on an arena with odd
   geometry (the maps area adds `grind_spawns` to every arena).
 * Grind best waves are per machine (settings file), not per player profile or server.
-* Gun game's Fist tier is fists only in the sim, the replicated state and the prediction; until
-  the arsenal-client work lands the HUD's weapon block and the viewmodel don't follow forced
-  loadouts yet (an unarmed player is still drawn with the default weapon).
+* Gun game's finale: the Trimmer and the Tamper borrow other weapons' models until the
+  arsenal-client work lands (`docs/refit.md`).
 * Spectating from a teammate's eyes shows them at the render tick (about 0.1 s behind them),
   their shots' tracers start at their (hidden) model's muzzle by the eye rather than at the
   viewmodel's, and a Snuffer latched onto them is drawn from outside, not as their smothered

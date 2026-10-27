@@ -1,20 +1,24 @@
 # Arsenal: loadouts, builds, weapons, abilities, balance per mode
 
 The third-generation arsenal (`docs/expansion.md` is the contract it implements; the
-second-generation weapons and their as-built notes are in `docs/roster.md`). Ten weapons in
-five classes, nineteen abilities, loadouts of up to four builds, the Burn and Pinned status
-effects, and separate balance for PvE and PvP. Everything a weapon decides is integer-tick and
-predicted by its owner; the server stays authoritative for everything else.
+second-generation weapons and their as-built notes are in `docs/roster.md`), with the refit's
+melee class and knacks (`docs/refit.md`). Twelve weapons in six classes, twenty-three abilities,
+six knacks on Q, loadouts of up to four builds, the Burn and Pinned status effects, and separate
+balance for PvE and PvP. Everything a weapon decides is integer-tick and predicted by its owner;
+the server stays authoritative for everything else.
 
 ## Code map
 
 | where | what |
 |---|---|
-| `shared::loadout` | `WeaponKind` (10), `WeaponClass` (5), `Ability` (19), `WeaponBuild`, `Loadout`: ids, names, pools, defaults, `sanitized()` (plain data) |
+| `shared::loadout` | `WeaponKind` (12), `WeaponClass` (6), `Ability` (23), `Knack` (6), `WeaponBuild`, `Loadout`: ids, names, pools, defaults, `sanitized()`, `Knack::pvp_allowed` (plain data) |
 | `shared::sim::weapons` | `WeaponState`, `step_weapons` (predicted), `FireIntent`, firing styles, `SimWorld::resolve_intent` (what every primary and ability does), `ability_tuning` |
-| `shared::sim::loadouts` | `SimWorld::request_loadout` / `force_loadout` / `loadout` / `spawn_loadout`: when loadouts apply |
+| `shared::sim::loadouts` | `SimWorld::request_loadout` / `force_loadout` / `loadout` / `spawn_loadout`: when loadouts apply; `pvp_world` / `fit_loadout`: the knack rule |
+| `shared::sim::melee` | the Trimmer and Tamper swings (`in_arc`), Lunge / Whirl / Hurl / Upswing, lunges in progress (`SimWorld::melee`) |
+| `shared::sim::knacks` | `Knack::charges` / `recharge_time`, `SimWorld::use_knack`, Kindle pools, snares, soot clouds (`soot_blocks`), Tallow Skin (`SimWorld::knacks`) |
 | `shared::sim::{hitscan, area, projectiles}` | rays (Skewer's pierce), cones / novas / blasts (the Kiln spray), projectiles and explosions |
-| `shared::sim::payload` | what the new projectiles do on contact: the Flak ring, Limpets, the Flare's patch, the special arrows |
+| `shared::sim::payload` | what the new projectiles do on contact: the Flak ring, Limpets, the Flare's patch, the special arrows, the flask / pot breaking, the snare settling |
+| `shared::sim::parry` | punch parries; the Trimmer's deflect (`deflect_in_arc`) shares the projectile part |
 | `shared::sim::status` | Burn, Pinned, burning patches |
 | `shared::sim::combat` | `Attack` (a variant per primary and ability), `KillInfo::weapon`, `SimWorld::attack_weapon`, `DamageFlags::{BURN, PIERCED}` |
 | `shared::sim::style` | `StyleKey` for every primary and ability |
@@ -39,6 +43,9 @@ Quill, Bellows, Arclash, Tumbler with their second-generation abilities).
 | Rapid | Arclash, Riveter, Kiln | Wisp, Discharge, Volley, Flare |
 | Explosive | Tumbler, Cinderbox | Breach, Gravewell, Limpet, Mortar |
 | Draw | Longwick | Brand, Triple Nock, Pinning Arrow, Ember Arrow |
+| Melee | Trimmer, Tamper | Lunge, Whirl, Hurl, Upswing |
+
+The loadout also holds the **knack** on Q (`Loadout::knack`, the Thorn by default; below).
 
 ### When a loadout applies
 
@@ -64,14 +71,16 @@ impl SimWorld {
   (re)spawn: `place_at_spawn` (deathmatch respawns, campaign checkpoint respawns, team wipes),
   `restart_level` and `add_player` all hand out `spawn_loadout`.
 * Applying keeps the selected slot when it still holds a weapon (else the first weapon), the
-  mode, fist / parry / thorn state and edge detection; every weapon's cooldowns, charges and
-  bursts start afresh (`WeaponState::with_loadout`; at a spawn: `WeaponState::respawned`).
+  mode, fist / parry state, the knack's spent charges (if it is the same knack; a new one
+  starts full) and edge detection; every weapon's cooldowns, charges and bursts start afresh
+  (`WeaponState::with_loadout`; at a spawn: `WeaponState::respawned`).
 * A forced loadout applies at once (first slot selected) and wins over requests, also at
   respawns, until `force_loadout(id, None)`.
-* **Unarmed** (`Loadout::unarmed()`, no weapon at all: gun game's Fist tier) exists only as a
-  forced loadout: `force_loadout` keeps it as it is, while requests (clients, `/loadout`) are
-  always sanitised to at least one weapon. Unarmed, `step_weapons` fires nothing but the fist
-  (and the thorn, per tuning): there is no slot to select, no primary, no ability, no charge.
+* **Unarmed** (`Loadout::unarmed()`, no weapon at all; gun game's old Fist tier — no mode hands
+  it out since the melee finale) exists only as a forced loadout: `force_loadout` keeps it as it
+  is, while requests (clients, `/loadout`) are always sanitised to at least one weapon. Unarmed,
+  `step_weapons` fires nothing but the fist (and the knack): there is no slot to select, no
+  primary, no ability, no charge.
   `WeaponState::is_unarmed()` / `held() == None` say so (`build()` / `current()` fall back to
   the default build — check first); the player entity carries the `UNARMED_WEAPON_ID`
   sentinel (below).
@@ -101,7 +110,8 @@ name prefix, missing ones = the weapon's defaults) sets the loadout **now** (and
 | `armed` | Longwick: ability armed for the next release (0 none, 1 A, 2 B) |
 | `bloom` | Lancet heat (ticks) |
 | `burst` | a burst in progress: shots left, ticks to the next, which ability (`None` = the primary salvo) |
-| `punch_cooldown`, `parry`, `thorns_used`, `thorn_recharge` | fist and Thorn (unchanged) |
+| `punch_cooldown`, `parry` | fist and parry window (unchanged) |
+| `knack_used`, `knack_recharge` | knack charges spent and ticks towards the next (were `thorns_used` / `thorn_recharge`) |
 
 Selection: `PlayerInput::weapon` picks a slot; an empty slot or an out-of-range value keeps
 the current weapon. Switching weapon cancels the charge, the draw, the arming and a burst;
@@ -109,7 +119,7 @@ switching ability cancels the charge and the arming.
 
 | primary style | weapons | rule |
 |---|---|---|
-| automatic | Quill, Bellows, Arclash, Tumbler, Lancet, Thresher, Riveter, Kiln | while `FIRE` is held, one shot per interval |
+| automatic | Quill, Bellows, Arclash, Tumbler, Lancet, Thresher, Riveter, Kiln, Trimmer, Tamper | while `FIRE` is held, one shot (swing) per interval |
 | salvo | Cinderbox | a pull fires `cinderbox.rockets` rockets `salvo_gap` apart (a `burst`) |
 | draw | Longwick | hold to draw (only once off its interval), release looses (`charge` = draw 0..1) |
 
@@ -122,9 +132,10 @@ switching ability cancels the charge and the arming.
 | armed (any ability on a Draw weapon) | Brand, Triple Nock, Pinning Arrow, Ember Arrow on the Longwick | pressing `ALT_FIRE` (off cooldown) arms it, pressing again disarms; the next release fires it with the draw, and starts its cooldown. Triple Nock below `min_draw` looses a plain arrow and stays armed |
 
 `FireIntent::{Primary { weapon, charge }, Ability { weapon, ability, charge }, Punch,
-ThrowThorn}`: `charge` is the draw (Longwick), the bloom (Lancet: the first shot is exact,
-sustained fire settles at 75 % of `bloom_degrees`) or the ability charge. THROW does nothing
-while `thorn.charges` is 0 (the PvP profile).
+Knack(knack)}`: `charge` is the draw (Longwick), the bloom (Lancet: the first shot is exact,
+sustained fire settles at 75 % of `bloom_degrees`) or the ability charge. THROW (KNACK) fires
+the loadout's knack while it has a charge; one recharges every `recharge_time` (the Thorn's
+numbers are `combat.thorn`, the others' `combat.knacks.*`).
 
 ## Weapons
 
@@ -140,6 +151,8 @@ while `thorn.charges` is 0 (the PvP profile).
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
 | 8 | Longwick | Draw | hold to draw (0.62 s to full), release: arrow 55–135 m/s, 22–105 dmg by draw, gravity 10, 0.25 s before the next draw; a tap looses a weak, slow arrow (handling: `docs/feel.md`) |
 | 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 16° cone: 3 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
+| 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 30 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
+| 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16 |
 
 Only the Quill's shots ricochet off Thorns, whichever ability fires them (its identity): Brand,
 Splinter and Flurry ricochet on the Quill and not on the Lancet; Skewer pierces instead.
@@ -200,8 +213,11 @@ keep swinging). Code: `shared::sim::melee`.
 | Tamper | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16; no deflect |
 
 A swing tests the arc against the hit shapes the swinger saw (lag compensation, like
-hitscan), with hit assist and line of sight from the eye (`area::in_cone`: along the aim, or
-the nearest surface within reach with the centre inside the arc). Melee **ignores weak
+hitscan), with hit assist and line of sight from the eye. `melee::in_arc`: along the aim within
+reach; or a (padded) shape whose surface is within reach of the eye and that the arc's cone
+touches — the angle from the aim to the point of the shape's axis nearest the eye, less the
+angle the shape's radius covers from there. Measuring to a target's centre (as the punch does)
+missed a low Mould right at your feet while you looked ahead; this doesn't. Melee **ignores weak
 points**: the arc already forgives where a ray wouldn't, and a hammer that headshots for ×2
 would one-shot. All melee damage carries `DamageFlags::MELEE`; its embers heal at
 `embers.melee_weapon_heal_fraction` (0.5: between a gun's 0.4 and the fist's 1.0 — the melee
@@ -209,14 +225,19 @@ weapons hit often and several targets at once, the fist's rate made them near-im
 
 | id | ability | as built (damage = `damage_scale` × the carrier's primary damage) |
 |---|---|---|
-| 19 | Lunge | an impulse along the aim (16 m/s, 35 % of its vertical part kept); for 0.35 s the first hostile within 0.8 m of the body (current shapes, hit assist, line of sight) takes 1.5×, kb 10 (`Fx::LungeStruck`). 3.0 s |
+| 19 | Lunge | an impulse along the aim (16 m/s, 35 % of its vertical part kept) and at least 4.5 m/s up (`lunge.lift`: off the ground it glides some 5 m; ground friction stopped a standing lunge within 1.5 m); for 0.35 s the first hostile within 0.8 m of the body (current shapes — the body is really there — hit assist, line of sight) takes 1.5×, kb 10 (`Fx::LungeStruck`). 3.0 s |
 | 20 | Whirl | everything within 3.5 m of the body (lag-compensated, line of sight) takes 1.2×, knocked outward (kb 12, up bias 0.35). 4.0 s |
 | 21 | Hurl | a spinning blade / hammer-head (30 m/s, gravity 6, r 0.25 m, 2 s), 1.5× on contact, kb 6. 2.5 s |
 | 22 | Upswing | the carrier's arc: 0.8× and an upward launch of 14 m/s (enemies × their knockback scale); the swinger hops (vertical speed at least 5 m/s). 3.0 s |
 
 Defaults: Trimmer `[Lunge, Hurl]`, Tamper `[Whirl, Upswing]` (the home weapons for
-`ability_power`, both 1.0). The impulses (Lunge, Upswing's hop) are server-side like Both
-Barrels' recoil: the owner's client reconciles.
+`ability_power`, both 1.0: the abilities follow the carrier's swing, `ability_power` scales them
+like any ability). The impulses (Lunge, Upswing's hop) are server-side like Both Barrels'
+recoil: the owner's client reconciles.
+
+PvP: no headshots, so the rules are the body ones. The Trimmer kills in 4 slashes (0.95 s), the
+Tamper (×0.8: 60) in 2 swings (0.85 s); with the abilities at 1.5 × 75 a Lunge or a Hurl would
+have one-shot (`combat_melee.rs` checks every swing and ability stays under 100).
 
 ## Knacks (refit)
 
@@ -228,9 +249,9 @@ fires `FireIntent::Knack(knack)`; `SimWorld::use_knack` (`shared::sim::knacks`) 
 | id | knack | as built | charges / recharge |
 |---|---|---|---|
 | 0 | Thorn | the relay spike (`thorn.rs`, `combat.thorn`). **PvE only** | 3 / 3 s |
-| 1 | Kindle Flask | lobbed 15° above the aim (16 m/s); where it breaks a 3.5 m pool for 4 s heals the Shrikes inside 10 HP/s | 1 / 14 s |
-| 2 | Snare | thrown (12 m/s) to the floor, lies there `STUCK`; arms after 0.6 s; the first hostile within 1.8 m is Pinned and takes 15. Up to 2 out, 20 s each | 2 / 10 s |
-| 3 | Soot Pot | thrown (18 m/s); bursts on contact (or after 2 s) into a 5 m cloud for 7 s | 1 / 15 s |
+| 1 | Kindle Flask | lobbed 15° above the aim (16 m/s); where it breaks (on a body: at its feet) a 3.5 m pool for 4 s heals every living Shrike whose feet are inside 2.5 HP every 0.25 s (10 HP/s, 40 in all) through `PlayerCombat::heal` — never above the effective max, so hard damage still caps it; in PvP only the thrower | 1 / 14 s |
+| 2 | Snare | thrown (12 m/s, passes through bodies) to the floor, lies there `STUCK` (off a wall it drops on); 0.6 s after landing it is armed (`ARMED`); the nearest hostile whose feet come within 1.8 m (and at most 2 m above) springs it: 15 dmg (`Attack::Snare`) and Pinned (the Pinning Arrow's times: a Mould rooted 1.4 s, heavies 0.6 s, a player slowed to half for 1 s). Teammates and the owner walk over it. Up to 2 out (a throw with 2 out retires the oldest), 20 s each | 2 / 10 s |
+| 3 | Soot Pot | thrown (18 m/s); bursts on contact (or after 2 s) into a 5 m cloud for 7 s: `soot_blocks` — a Mould whose eye or target is inside it, or whose line of sight crosses it, can't see that player: never picked as a target (aware arena spawns included), a target hidden this way is lost at once, a Heron's laser wind-up breaks off. Players' shots pass through | 1 / 15 s |
 | 4 | Tallow Skin | for 3 s: damage × 0.5 and no knockback (your own blasts still push: blast jumps work); `TALLOW` player flag | 1 / 16 s |
 | 5 | Surge | an impulse of 18 m/s along the look (30 % of its vertical part kept) | 2 / 6 s |
 
@@ -240,9 +261,6 @@ warm-up before one: `SimWorld::pvp_world`, `fit_loadout`); the stored request ke
 The old `"thorn.charges": 0` PvP override is gone. Gun game keeps the requested knack in its
 forced loadouts. `/loadout ... knack:<name>` sets it (alone: keeps the weapons).
 
-Milestone 1 status (`docs/refit.md`): the API, melee, the Thorn, Tallow Skin, Surge and the
-flask / snare / pot flights and landings work; the pool's healing, the snare's trigger and the
-soot cloud's effect on Moulds come with milestone 2.
 
 ## Status effects
 
@@ -396,9 +414,10 @@ of the Moulds are the modes area's (`difficulty` section), not a weapon profile.
 **PvP** is tuned for players killing players: 100 HP, headshots ×2 (`player_head_multiplier`)
 for everything that isn't explosive, a time to kill of **0.8–1.6 s** for a skilled player at
 the weapon's range, and **one-shots only from a full-draw bow headshot, a Slug headshot and a
-full-charge Skewer headshot**. The Thorn is off (`thorn.charges` 0: THROW does nothing; hiding
-the pips is the HUD's) and a brand multiplies by 1.25 instead of 1.35 (in a free-for-all a
-brand invites everyone, the extra was too much on top of a third party).
+full-charge Skewer headshot**. No Thorns (the knack rule: the Thorn isn't `pvp_allowed` and
+applies as Surge; it used to be a `"thorn.charges": 0` override) and a brand multiplies by 1.25
+instead of 1.35 (in a free-for-all a brand invites everyone, the extra was too much on top of a
+third party).
 
 | weapon / ability | PvP | after | time to kill (all on the body; heads faster) and why |
 |---|---|---|---|
@@ -424,6 +443,8 @@ brand invites everyone, the extra was too much on top of a third party).
 | Limpet | damage 0.6 | 30 a charge | three charges on one player (90) is a kill only with a hit before it |
 | Mortar | damage 0.75, radius 0.85 | 64, r 5.1 m | a huge blast is area denial in PvE but a free kill on a corner in PvP |
 | Triple Nock | damage 0.5 | 3 × 26 | three full arrows (315 PvE, 158 at the bow's PvP damage) |
+| Tamper | damage 0.8 | 60 a swing | 2 swings: 0.85 s; its abilities are multiples of the swing, and 1.5 × 75 (Lunge, Hurl) was a body one-shot |
+| Trimmer | 1.0 | 30 / 0.32 s | 4 slashes: 0.95 s (no headshots: melee); its Lunge / Hurl hit 45 |
 | everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Splinter, Slug (55: its headshot is the allowed one-shot), Flare (burn), Pinning / Ember / Brand arrows (they ride the bow's 0.5) |
 
 `shared/tests/combat_arsenal.rs::pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band`
@@ -442,28 +463,61 @@ use, exactly the allowed headshot one-shots, and every weapon's all-body time to
   flight, arrows): they keep their contact rules and become the deflector's, attack `Gust`.
 * Stuck Limpets follow their carrier; when it dies they stay where it was (like the Gravewell).
 * Kill-feed weapon, potg titles: `KillInfo::weapon` / `combat::weapon_attack_label` (potg).
+* Melee swings, Whirls and Upswings are lag-compensated (what the swinger saw); a Lunge's strike,
+  snares and pools test the current positions, like projectiles.
+* A Trimmer deflect happens at the swing only (no window like the punch's): held, it swings
+  every 0.32 s, and a window would have made it a permanent shield.
+* Soot hides players from Moulds only; their projectiles already flying keep flying.
 
 ## Tests
 
+* `shared/src/loadout.rs` (unit): ids never move (melee 10, 11, 19–22; knacks 0–5), every class
+  offers four abilities, the knack defaults to the Thorn and falls back to Surge in PvP, old
+  presets without a knack load.
 * `shared/src/sim/weapons.rs` (unit): intervals, switching, charges, Both Barrels, punch /
-  thorns (none at 0 charges), empty slots, every weapon × ability fires, salvo / Flurry bursts,
-  bow draw + arming + Triple Nock's minimum, Lancet bloom, Limpet tap / hold, ability homes and
-  power, lossless loadout packing.
-* `shared/src/tuning/balance.rs` (unit): override paths, PvE = reference / PvP no Thorns /
-  idempotent, the multiplier table covers everything, profiles from RON.
+  knack charges (none at 0), every knack's own charges and recharge, a new knack starting
+  full, empty slots, every weapon × ability fires, salvo / Flurry bursts, bow draw + arming +
+  Triple Nock's minimum, Lancet bloom, Limpet tap / hold, ability homes and power, lossless
+  loadout packing (every knack with every slot pattern).
+* `shared/src/sim/knacks.rs` (unit): segments meeting soot spheres; every knack has charges.
+* `shared/src/tuning/balance.rs` (unit): override paths, PvE = reference / PvP neutral once
+  applied, the multiplier table covers everything (melee included), profiles from RON.
 * `shared/tests/combat_loadouts.rs`: when requests apply (fresh / dead / warm-up / respawn),
   sanitising, forced loadouts, unarmed (forced only, kept through respawns, replicated, fists
   only, exact prediction, no default-build kill credit), bodiless players and leaving,
   `restart_level`, the replicated weapon / ability / draw, every weapon and ability firing in a
   live world, `KillInfo::weapon` for a shared ability, exact prediction with a custom loadout.
-* `shared/tests/modes.rs` (`the_fist_tier_is_fists_only`): gun game's Fist tier.
+* `shared/tests/modes.rs`: gun game's melee finale (`a_kill_with_the_finale_weapon_wins_the_gun_game`,
+  `the_finale_tier_is_the_melee_weapon`) and the knack kept on every tier
+  (`gun_game_keeps_the_players_knack`).
+* `shared/tests/combat_melee.rs`: the Trimmer's three nearest and its interval, no weak points
+  (Moulds and PvP heads), reach / arc (a low target at your feet) / walls, lag compensation (hit
+  as seen, a miss without), the Tamper's everything-in-the-arc and knockback, the Trimmer's
+  deflect with a parry's reward (the Tamper doesn't), Lunge (impulse and lift, the first target
+  only, running out, 1.5 × the carrier), Whirl (all around, outward, on either weapon), Hurl
+  (blade or hammer-head on the wire, 1.5 × the carrier), Upswing (launch and hop), kill credit
+  for a shared ability, the melee ember rate, `ability_power`, exact prediction with a melee
+  loadout and a knack, the PvP numbers inside the one-shot rules and the time-to-kill band.
+* `shared/tests/combat_knacks.rs`: the PvP rule (Surge in hand, the request kept, the warm-up
+  following the next mode), Surge's impulse and charges, Tallow Skin (half damage, no
+  knockback, own blasts still push, replicated, wears off), Kindle pools (the hard-damage cap,
+  the teammate, PvP only the thrower, replicated, dry after 4 s), Snares (held until armed,
+  springing at the arm tick: damage, Pinned, gone; armed and replicated, teammates walk over;
+  two out; a PvP player slowed), the Soot Pot (a Gnawer loses the player and finds them again
+  when it clears; a Heron's lock breaks, no needle), the thrown knacks' kinds and landings,
+  exact prediction for every knack.
 * `shared/tests/combat_arsenal.rs`: every new primary (Lancet bloom, Thresher, Riveter flight,
   Cinderbox salvo, Longwick draw, Kiln + Burn), Burn stacks / refresh / kill credit / no
   LONGSHOT, Skewer pierce and falloff, Flurry, Slug, the Flak airburst and contact burst,
   Volley, Flare patches, Limpets (stick, follow, hold, the fourth throw), Mortar, Triple Nock's
   fan, Pinning Arrow (enemy root, heavy, PvP slow at half speed, predicted), Ember Arrow, the
   bow's Brand, Burn on PvP players but not teammates, ability power, the PvP profile's rules.
-* `server/tests/arsenal_net.rs`: PvP clients get 0 thorn charges, co-op clients 3, a reload
-  recomputes; a loadout sent in the lobby is what the match spawns (sanitised), a change in
-  play waits for the respawn.
-* `server/src/commands.rs` (unit): `/loadout` argument parsing.
+* `server/tests/arsenal_net.rs`: PvP clients carry Surge for the Thorn (world and own state),
+  co-op clients the Thorn with 3 charges, a reload recomputes; a loadout (with its knack) sent
+  in the lobby is what the match spawns (sanitised), a change in play waits for the respawn;
+  melee swings and knack uses reach the other client as `Fx::Swing` / `Fx::Knack` but not the
+  user, a thrown snare replicates `STUCK`.
+* `client/tests/client_combat.rs`: the client's `WeaponPredictor` stays exact over the network
+  with the default loadout (Surge in PvP) and with both melee weapons and the Snare.
+* `server/src/commands.rs` (unit): `/loadout` argument parsing (melee builds, `knack:<name>`
+  anywhere, a knack alone keeping the weapons).

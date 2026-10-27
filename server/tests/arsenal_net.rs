@@ -2,7 +2,8 @@
 //! the balance profile of their mode and clients get that effective tuning, hot reloads
 //! recompute it, PvP has no Thorns (the knack applies as Surge), and
 //! `ClientMessage::SetLoadout` chosen in the lobby is what the player spawns with (sanitised,
-//! knack included; while alive in a match it waits for the respawn).
+//! knack included; while alive in a match it waits for the respawn). Melee swings and knack uses
+//! reach the other clients as `Fx` (the user predicts its own), thrown knacks replicate.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -10,10 +11,10 @@ use std::time::Duration;
 use client::net::{ClientConfig, NetClient};
 use engine::time::FixedTimestep;
 use server::{LobbyConfig, Server, ServerConfig};
-use shared::input::PlayerInput;
+use shared::input::{Buttons, PlayerInput};
 use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::lobby::LobbyPhase;
-use shared::protocol::{self, ClientMessage};
+use shared::protocol::{self, ClientMessage, Fx, kind};
 use shared::sim::Attack;
 
 const STEP: Duration = Duration::from_millis(2);
@@ -61,6 +62,32 @@ impl Net {
                 for _ in 0..ts.advance(STEP.as_secs_f64()) {
                     if c.is_in_game() {
                         c.tick(PlayerInput::default());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Like `run`, each client sending `input(client, its tick)`; every `Fx` it receives is
+    /// collected in `fx[client]`.
+    fn run_with(
+        &mut self,
+        secs: f64,
+        input: &dyn Fn(usize, u32) -> PlayerInput,
+        fx: &mut [Vec<Fx>],
+    ) {
+        let mut ticks = vec![0u32; self.clients.len()];
+        for _ in 0..(secs / STEP.as_secs_f64()).round() as u32 {
+            self.server.update(STEP);
+            for (i, (c, ts)) in self.clients.iter_mut().enumerate() {
+                c.update(STEP);
+                c.drain_events();
+                fx[i].extend(c.drain_fx().into_iter().map(|e| e.fx));
+                ts.set_hz(c.tick_rate() as f64);
+                for _ in 0..ts.advance(STEP.as_secs_f64()) {
+                    if c.is_in_game() {
+                        c.tick(input(i, ticks[i]));
+                        ticks[i] += 1;
                     }
                 }
             }
@@ -175,4 +202,49 @@ fn a_loadout_chosen_in_the_lobby_is_what_the_match_spawns() {
     assert_eq!(p.combat.weapons.loadout, kiln);
     let own = n.clients[c].0.own_combat().expect("own state");
     assert_eq!(own.combat.weapons.loadout, kiln);
+}
+
+#[test]
+fn swings_and_knacks_reach_the_other_players_but_not_the_user() {
+    // proving_ground: PvP, both see each other.
+    let mut n = Net::new(config(shared::sim::BUILTIN_LEVEL));
+    let a = n.add();
+    let b = n.add();
+    n.run(1.5);
+    let ida = n.clients[a].0.local_player_id().expect("joined");
+    let trimmer = Loadout::single(WeaponKind::Trimmer.default_build()).with_knack(Knack::Snare);
+    n.server.world_mut().force_loadout(ida, Some(trimmer));
+    let mut fx = vec![Vec::new(), Vec::new()];
+    // A swings (held) and throws a snare at the floor in front.
+    let input = |c: usize, t: u32| {
+        let mut i = PlayerInput {
+            pitch: -0.7,
+            ..Default::default()
+        };
+        if c == 0 {
+            i.buttons.set(Buttons::FIRE, t % 40 < 20);
+            i.buttons.set(Buttons::THROW, t == 30);
+        }
+        i
+    };
+    n.run_with(1.5, &input, &mut fx);
+    let swing =
+        |f: &Fx| matches!(f, Fx::Swing { player, attack: Attack::Trimmer, .. } if *player == ida);
+    let knack = |f: &Fx| matches!(f, Fx::Knack { player, knack: Knack::Snare } if *player == ida);
+    assert!(fx[b].iter().any(swing), "B sees A swing");
+    assert!(fx[b].iter().any(knack), "and throw the snare");
+    assert!(!fx[a].iter().any(swing), "A predicts its own swings");
+    assert!(!fx[a].iter().any(knack));
+    // The snare lies on the floor in B's snapshots; A's own state knows its knack.
+    let snare = n.clients[b]
+        .0
+        .remote_entities()
+        .iter()
+        .find(|e| e.kind == kind::SNARE)
+        .copied()
+        .expect("the snare replicated");
+    assert!(snare.flags & protocol::projectile_flags::STUCK != 0);
+    let own = n.clients[a].0.own_combat().expect("own state");
+    assert_eq!(own.combat.weapons.knack(), Knack::Snare);
+    assert_eq!(own.combat.weapons.current(), WeaponKind::Trimmer);
 }

@@ -461,6 +461,7 @@
         lunge: (
             speed: 16.0,           // impulse along the aim ...
             vertical: 0.35,        // ... keeping this share of its vertical part
+            lift: 4.5,             // and at least this upward: it glides (friction stops a ground lunge)
             window: 0.35,          // the first target the body reaches in this time is hit
             reach: 0.8,            // beyond the hit shapes
             damage_scale: 1.5,
