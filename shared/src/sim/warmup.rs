@@ -132,6 +132,8 @@ impl SimWorld {
             friendly_fire: w.pvp,
             coop_enemy_scaling: false,
         };
+        // PvP or not decides which knacks apply (docs/arsenal.md, "Knacks").
+        self.refit_knacks();
     }
 
     /// This world is the lobby's warm-up.

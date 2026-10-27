@@ -32,44 +32,7 @@ use super::Rng;
 use super::fx::Beams;
 use crate::models::{ModelId, ModelLibrary, Tint, knacks as props};
 
-/// The knack in the Q slot (wire ids as `shared::loadout::Knack`: 0 Thorn, 1 Kindle Flask,
-/// 2 Snare, 3 Soot Pot, 4 Tallow Skin, 5 Surge).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Knack {
-    #[default]
-    Thorn,
-    KindleFlask,
-    Snare,
-    SootPot,
-    TallowSkin,
-    Surge,
-}
-
-impl Knack {
-    pub const ALL: [Knack; 6] = [
-        Knack::Thorn,
-        Knack::KindleFlask,
-        Knack::Snare,
-        Knack::SootPot,
-        Knack::TallowSkin,
-        Knack::Surge,
-    ];
-
-    pub fn from_id(id: u8) -> Option<Knack> {
-        Self::ALL.get(id as usize).copied()
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Knack::Thorn => "Thorn",
-            Knack::KindleFlask => "Kindle Flask",
-            Knack::Snare => "Snare",
-            Knack::SootPot => "Soot Pot",
-            Knack::TallowSkin => "Tallow Skin",
-            Knack::Surge => "Surge",
-        }
-    }
-}
+pub use shared::loadout::Knack;
 
 // ---------------------------------------------------------------------------------------------
 // HUD
@@ -1064,9 +1027,7 @@ mod tests {
             assert!(rows.iter().all(|r| r.len() == 12), "{k:?}");
             assert!(rows.iter().any(|r| r.contains('#')), "{k:?}");
             assert!(!k.name().is_empty());
-            assert_eq!(Knack::from_id(k as u8), Some(k));
         }
-        assert_eq!(Knack::from_id(6), None);
         // Different icons for every knack.
         for a in Knack::ALL {
             for b in Knack::ALL {

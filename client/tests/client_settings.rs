@@ -235,7 +235,7 @@ fn old_settings_files_keep_their_throw_binding() {
 #[test]
 fn loadout_and_presets_round_trip_and_garbage_falls_back() {
     use client::settings::{LoadoutPreset, MAX_PRESETS};
-    use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+    use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
     let path = scratch("loadout");
     let mut s = Settings::default();
     s.loadout.current = Loadout {
@@ -248,6 +248,7 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
             Some(WeaponKind::Kiln.default_build()),
             None,
         ],
+        knack: Knack::SootPot,
     };
     s.loadout.presets.push(LoadoutPreset {
         name: "BOWS".into(),
@@ -257,6 +258,19 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
     let back = Settings::load(&path);
     assert_eq!(back.loadout, s.loadout);
     assert_eq!(back, s);
+    assert!(s.to_ron().contains("Knack: Soot Pot"));
+    // Files from before knacks (four slot entries only) load with the Thorn.
+    let old = s
+        .to_ron()
+        .replace("\"Knack: Soot Pot\",", "")
+        .replace(", \"Knack: Soot Pot\"", "")
+        .replace(", \"Knack: Thorn\"", "");
+    assert!(!old.contains("Knack:"), "{old}");
+    let old = Settings::from_ron(&old).unwrap();
+    assert_eq!(
+        old.loadout.current,
+        s.loadout.current.with_knack(Knack::Thorn)
+    );
 
     // Loadouts are text: an unknown weapon empties its slot, an unknown ability falls back to
     // the weapon's default, and everything else survives.
@@ -274,13 +288,16 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
     assert_eq!(broken.loadout.presets.len(), s.loadout.presets.len());
     assert_eq!(broken.fov, s.fov);
     assert_eq!(broken.bindings, s.bindings);
-    // A loadout with nothing left is the default one.
+    // A loadout with no weapon left gets the default weapons (and keeps its knack).
     let text = s
         .to_ron()
         .replace("Kiln:", "Nothing:")
         .replace("Longwick:", "Nothing:");
     let empty = Settings::from_ron(&text).unwrap();
-    assert_eq!(empty.loadout.current, Loadout::default());
+    assert_eq!(
+        empty.loadout.current,
+        Loadout::default().with_knack(Knack::SootPot)
+    );
 
     // Invalid builds and loadouts are repaired, too many presets dropped, names cleaned.
     let mut s = Settings::default();
@@ -294,11 +311,12 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
             None,
             None,
         ],
+        ..Default::default()
     };
     s.loadout.presets = vec![
         LoadoutPreset {
             name: "   ".into(),
-            loadout: Loadout { slots: [None; 4] },
+            loadout: Loadout::unarmed(),
         };
         MAX_PRESETS + 3
     ];

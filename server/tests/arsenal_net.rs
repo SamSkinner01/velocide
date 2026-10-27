@@ -1,7 +1,8 @@
 //! The arsenal over the real network stack (UDP loopback, virtual clock): matches run with
-//! the balance profile of their mode and clients get that effective tuning (PvP: no Thorns),
-//! hot reloads recompute it, and `ClientMessage::SetLoadout` chosen in the lobby is what the
-//! player spawns with (sanitised; while alive in a match it waits for the respawn).
+//! the balance profile of their mode and clients get that effective tuning, hot reloads
+//! recompute it, PvP has no Thorns (the knack applies as Surge), and
+//! `ClientMessage::SetLoadout` chosen in the lobby is what the player spawns with (sanitised,
+//! knack included; while alive in a match it waits for the respawn).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use client::net::{ClientConfig, NetClient};
 use engine::time::FixedTimestep;
 use server::{LobbyConfig, Server, ServerConfig};
 use shared::input::PlayerInput;
-use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::lobby::LobbyPhase;
 use shared::protocol::{self, ClientMessage};
 use shared::sim::Attack;
@@ -83,27 +84,37 @@ fn bow_and_kiln() -> Loadout {
             Some(WeaponKind::Kiln.default_build()),
             None,
         ],
+        knack: Knack::KindleFlask,
     }
 }
 
 #[test]
-fn pvp_clients_get_no_thorns_coop_clients_get_three() {
+fn pvp_clients_get_surge_for_the_thorn_coop_clients_keep_it() {
     // proving_ground is an arena: deathmatch, the PvP profile.
     let mut pvp = Net::new(config(shared::sim::BUILTIN_LEVEL));
     let c = pvp.add();
     pvp.run(1.5);
     assert!(pvp.clients[c].0.is_in_game());
-    assert_eq!(pvp.server.tuning().combat.thorn.charges, 0);
-    assert_eq!(pvp.server.base_tuning().combat.thorn.charges, 3);
-    assert_eq!(pvp.clients[c].0.tuning().combat.thorn.charges, 0);
     assert_eq!(pvp.clients[c].0.tuning(), pvp.server.tuning());
+    // No Thorns in PvP: the default loadout's Thorn applies as Surge, in the world and in the
+    // owner's own state (what its prediction runs).
+    let id = pvp.clients[c].0.local_player_id().expect("joined");
+    assert_eq!(
+        pvp.server.world().players[&id].combat.weapons.knack(),
+        Knack::Surge
+    );
+    let own = pvp.clients[c].0.own_combat().expect("own state");
+    assert_eq!(own.combat.weapons.loadout.knack, Knack::Surge);
 
-    // A campaign level: co-op, the PvE profile (the reference: Thorns as listed).
+    // A campaign level: co-op, the PvE profile (the reference): the Thorn, three charges.
     let mut coop = Net::new(config("crucible_of_veins"));
     let c = coop.add();
     coop.run(1.5);
     assert!(coop.clients[c].0.is_in_game());
-    assert_eq!(coop.clients[c].0.tuning().combat.thorn.charges, 3);
+    let own = coop.clients[c].0.own_combat().expect("own state");
+    assert_eq!(own.combat.weapons.knack(), Knack::Thorn);
+    let t = coop.clients[c].0.tuning();
+    assert_eq!(own.combat.weapons.knack_charges(&t.combat), 3);
     assert_eq!(
         coop.clients[c].0.tuning().combat,
         coop.server.base_tuning().combat

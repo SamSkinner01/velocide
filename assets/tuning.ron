@@ -122,6 +122,7 @@
         embers: (
             heal_fraction: 0.4,       // of damage dealt becomes the burst's heal pool
             melee_heal_fraction: 1.0, // punches and parries
+            melee_weapon_heal_fraction: 0.5, // the melee weapons' strikes
             radius: 3.5,
             lifetime: 0.6,
             death_pool: 25.0,
@@ -434,6 +435,107 @@
             needle_gravity: 0.0,
             needle_lifetime: 2.0,
         ),
+        // ---- refit (docs/refit.md, docs/arsenal.md "Melee"): the melee weapons ----
+        // Swings test an arc in front of the eye (reach from the eye, full aperture), against
+        // the hit shapes the swinger saw (lag compensation) with hit assist, line of sight.
+        trimmer: (
+            damage: 30.0,
+            interval: 0.32,
+            reach: 3.0,
+            arc_degrees: 70.0,
+            max_targets: 3,        // nearest first; a swing also deflects parryable projectiles
+            knockback: 4.0,
+            ability_power: 1.0,
+        ),
+        tamper: (
+            damage: 75.0,          // to everything in the arc
+            interval: 0.85,
+            reach: 3.4,
+            arc_degrees: 100.0,
+            knockback: 16.0,
+            ability_power: 1.0,
+        ),
+        // Melee abilities: damage is `damage_scale` x the carrier's primary damage.
+        lunge: (
+            speed: 16.0,           // impulse along the aim ...
+            vertical: 0.35,        // ... keeping this share of its vertical part
+            window: 0.35,          // the first target the body reaches in this time is hit
+            reach: 0.8,            // beyond the hit shapes
+            damage_scale: 1.5,
+            knockback: 10.0,
+            cooldown: 3.0,
+        ),
+        whirl: (
+            radius: 3.5,
+            damage_scale: 1.2,
+            knockback: 12.0,       // outward ...
+            up: 0.35,              // ... with this upward bias
+            cooldown: 4.0,
+        ),
+        hurl: (
+            speed: 30.0,
+            gravity: 6.0,
+            projectile_radius: 0.25,
+            flight_time: 2.0,
+            damage_scale: 1.5,
+            knockback: 6.0,
+            cooldown: 2.5,
+        ),
+        upswing: (
+            damage_scale: 0.8,     // in the carrier's arc
+            launch: 14.0,          // upward speed for what it hits
+            hop: 5.0,              // and for the swinger
+            cooldown: 3.0,
+        ),
+        // The knacks on Q (shared/src/sim/knacks.rs); the Thorn keeps `thorn` above.
+        knacks: (
+            kindle_flask: (
+                charges: 1,
+                recharge_time: 14.0,
+                speed: 16.0,
+                angle_degrees: 15.0,   // lobbed above the aim
+                gravity: 16.0,
+                projectile_radius: 0.15,
+                flight_time: 3.0,
+                radius: 3.5,           // the pool where it lands ...
+                duration: 4.0,
+                heal_rate: 10.0,       // ... heals HP/s (teammates and you; PvP: only you)
+            ),
+            snare: (
+                charges: 2,
+                recharge_time: 10.0,
+                speed: 12.0,
+                gravity: 20.0,
+                projectile_radius: 0.15,
+                arm_time: 0.6,
+                trigger_radius: 1.8,   // the first hostile this close is Pinned ...
+                damage: 15.0,          // ... and takes this
+                lifetime: 20.0,
+                max_live: 2,
+            ),
+            soot_pot: (
+                charges: 1,
+                recharge_time: 15.0,
+                speed: 18.0,
+                gravity: 16.0,
+                projectile_radius: 0.15,
+                flight_time: 2.0,
+                radius: 5.0,           // Moulds can't see into, out of or through the cloud
+                duration: 7.0,
+            ),
+            tallow_skin: (
+                charges: 1,
+                recharge_time: 16.0,
+                duration: 3.0,
+                damage_scale: 0.5,     // and no knockback
+            ),
+            surge: (
+                charges: 2,
+                recharge_time: 6.0,
+                speed: 18.0,           // impulse along the look ...
+                vertical: 0.3,         // ... keeping this share of its vertical part
+            ),
+        ),
     ),
     // Style meter (shared/src/sim/style.rs, docs/gameplay.md "Style", docs/style_modes.md).
     // Points fill the current rank's bar; gains are multiplied by the freshness of the weapon
@@ -550,8 +652,8 @@
         ],
     ),
     // Gun game (shared/src/sim/gungame.rs): a kill with your tier's weapon moves you up; after
-    // the last tier comes the Fist, and a punch kill there wins. A punch kill knocks the victim
-    // down `punch_demotes` tiers.
+    // the last tier comes the melee `finale`, and a kill with it there wins. A punch kill
+    // knocks the victim down `punch_demotes` tiers.
     gun_game: (
         ladder: [
             (weapon: Arclash, abilities: (Wisp, Discharge)),
@@ -565,6 +667,7 @@
             (weapon: Quill, abilities: (Brand, Splinter)),
             (weapon: Longwick, abilities: (TripleNock, PinningArrow)),
         ],
+        finale: (weapon: Trimmer, abilities: (Lunge, Hurl)),
         punch_demotes: 1,
     ),
     // Balance per mode (docs/arsenal.md). `combat` above is the reference; a profile scales
@@ -589,6 +692,7 @@
                 Cinderbox: (damage: 0.75),
                 Longwick: (damage: 0.5, interval: 0.85),
                 Kiln: (damage: 1.2),
+                Tamper: (damage: 0.8),          // its abilities are multiples of the swing
             },
             abilities: {
                 BothBarrels: (damage: 0.4),
@@ -605,7 +709,6 @@
                 TripleNock: (damage: 0.5),
             },
             overrides: {
-                "thorn.charges": 0.0,           // no Thorns in PvP: THROW does nothing
                 "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
             },
         ),

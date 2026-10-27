@@ -869,7 +869,8 @@ impl InGame {
                         viewmodel.punch();
                         common.audio.play_2d(Sfx::Punch);
                     }
-                    FireIntent::ThrowThorn => {
+                    // Every knack throws like the Thorn until arsenal-client gives each its own.
+                    FireIntent::Knack(_) => {
                         viewmodel.throw_thorn();
                         common.audio.play_2d(Sfx::ThornThrow);
                     }
@@ -1157,23 +1158,27 @@ impl InGame {
             })
             .map_or(0, |e| e.flags);
         let branded = own_flags & player_flags::BRANDED != 0;
-        // The Q slot: the Thorn's charges until the loadout carries a knack.
-        let knack = (t.thorn.charges > 0).then(|| {
-            let max = t.thorn.charges;
-            let ready = weapons.thorns(t);
-            knacks::KnackSlot {
-                knack: knacks::Knack::Thorn,
+        // The Q slot: the loadout's knack (none when it holds no charges: a PvP Thorn).
+        let knack = {
+            let k = weapons.knack();
+            let max = k.charges(t);
+            let ready = weapons.knack_charges(t);
+            (max > 0).then(|| knacks::KnackSlot {
+                knack: k,
                 charges: ready,
                 max_charges: max,
                 recharge: if ready < max {
-                    (weapons.thorn_recharge as f32 / (t.thorn.recharge_time * rate as f32).max(1.0))
-                        .min(1.0)
+                    weapons.knack_recharge_fraction(t, rate)
                 } else {
                     0.0
                 },
-                active: 0.0,
-            }
-        });
+                active: if k == knacks::Knack::TallowSkin {
+                    self.combat.knacks.tallow_self()
+                } else {
+                    0.0
+                },
+            })
+        };
         let info = CombatHudInfo {
             camera: &self.last_camera,
             yaw: self.controls.yaw,
