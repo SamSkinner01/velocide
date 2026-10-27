@@ -109,6 +109,23 @@ holds one **knack** the player picks in the loadout screen. `shared::loadout::Kn
 - New projectile / hazard kinds, statuses and flag bits are **arsenal**'s to allocate and
   document in `docs/arsenal.md` ("Replication and wire ids"); **arsenal-client** draws them.
 
+### As built (arsenal), where it adds to or departs from the above
+
+- Wire: projectile kinds 77 `HURL` (`state` = the carrier's weapon id), 78 `KINDLE_FLASK`,
+  79 `SNARE` (lies `STUCK`, projectile flag bit 4 `ARMED`), 96 `SOOT_POT` (77–79 were full);
+  hazards 137 `KINDLE_POOL`, 138 `SOOT_CLOUD`; player flag bit 16 `TALLOW`; swings and knack
+  uses are events (`Fx::Swing`, `Fx::LungeStruck`, `Fx::Knack`, `Fx::SnareSprung`). Details:
+  `docs/arsenal.md`, "Melee and knacks on the wire".
+- Gun game API: `gungame::Tier::Fist` became `Tier::Finale(WeaponBuild)`, `fist_tier` became
+  `finale_tier`. A punch kill still demotes but no longer wins anything.
+- Embers: melee weapons' strikes heal at a new `embers.melee_weapon_heal_fraction` (0.5), not
+  the fist's 1.0 (with three targets a swing that made the Trimmer near-immortal).
+- Tallow Skin keeps your own blasts' knockback (blast jumps still work).
+- PvP: the Tamper's damage × 0.8 (its abilities are multiples of the swing; 1.5 × 75 was a
+  body one-shot).
+- Client settings: a loadout's text gains a `"Knack: <name>"` entry after the slots (files
+  without it load with the Thorn).
+
 ### Milestones
 
 1. **API** (merge early; others build on it): `WeaponClass::Melee`, `WeaponKind::{Trimmer,

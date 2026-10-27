@@ -5,6 +5,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+use crate::loadout::Knack;
 use crate::sim::{Attack, Blocked, DamageFlags, HitTarget, Owner, PlayerId};
 
 use super::NetId;
@@ -207,6 +208,23 @@ pub enum Fx {
         kind: u16,
         position: QPos,
     },
+    // ---- refit (docs/arsenal.md, "Replication and wire ids"): melee and knacks ----
+    /// Another player swung a melee weapon: a Trimmer / Tamper primary, a Whirl, an Upswing or
+    /// the start of a Lunge (`attack`); `hits` = targets it struck. Remote swing animation,
+    /// whoosh, hit sparks. Not sent to the swinger (it predicts its own).
+    Swing {
+        player: PlayerId,
+        attack: Attack,
+        hits: u8,
+    },
+    /// A Lunge reached its target (impact flash and sound at `position`). Sent to everyone.
+    LungeStruck { player: PlayerId, position: QPos },
+    /// Another player used a knack other than the Thorn (that one is `ThornThrown`): throw
+    /// animation, the Surge streak, the start of Tallow Skin (the sheen itself is the
+    /// `TALLOW` player flag), sound. Not sent to that player.
+    Knack { player: PlayerId, knack: Knack },
+    /// A Snare sprang on something at `position` (wax splash, snap). Sent to everyone.
+    SnareSprung { position: QPos },
 }
 
 impl Fx {
@@ -226,6 +244,8 @@ impl Fx {
                 | Fx::EnemyShockwave { .. }
                 | Fx::EnemyAttack { .. }
                 | Fx::EnemySpawned { .. }
+                | Fx::LungeStruck { .. }
+                | Fx::SnareSprung { .. }
         )
     }
 }

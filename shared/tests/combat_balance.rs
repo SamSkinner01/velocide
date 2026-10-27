@@ -9,7 +9,7 @@ mod balance_support;
 use std::path::Path;
 
 use balance_support::*;
-use shared::loadout::{Ability, WeaponClass, WeaponKind};
+use shared::loadout::Ability;
 use shared::tuning::{BalanceTuning, Tuning};
 
 #[test]
@@ -27,7 +27,7 @@ fn the_shipped_balance_profiles_are_the_defaults() {
 fn every_primary_sustains_damage_inside_the_band() {
     let base = Tuning::default();
     let mut out = Vec::new();
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let t = on_mould(
             &base,
             Assume::default(),
@@ -56,7 +56,7 @@ fn every_primary_sustains_damage_inside_the_band() {
 #[test]
 fn every_mould_dies_to_every_weapon_in_a_sane_time() {
     let base = Tuning::default();
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         for m in MOULDS {
             let behind = m == "gaoler";
             let health = mould_health(&base, m, 1);
@@ -104,7 +104,7 @@ fn no_ability_dominates_its_class_and_none_is_dead_weight() {
     let base = Tuning::default();
     let a = Assume::default();
     let mut best_anywhere: Vec<(Ability, f32)> = Vec::new();
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let mut gains: Vec<(Ability, f32)> = Vec::new();
         for &ability in w.abilities() {
             let build = build_with(w, ability);
@@ -137,7 +137,7 @@ fn no_ability_dominates_its_class_and_none_is_dead_weight() {
         }
     }
     // Every class's pool was looked at.
-    for class in WeaponClass::ALL {
-        assert!(WeaponKind::ALL.iter().any(|w| w.class() == class));
+    for class in classes() {
+        assert!(weapons().iter().any(|w| w.class() == class));
     }
 }

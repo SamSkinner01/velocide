@@ -436,9 +436,9 @@ fn gun_game_ladder_over_the_network() {
     n.wait_in_game();
     let (pa, pb) = (n.clients[a].id(), n.clients[b].id());
     let ladder = n.server.tuning().gun_game.ladder.clone();
-    // The PvP profile (no Thorns) and the first build, in every owner's own state.
-    assert_eq!(n.clients[a].net.tuning().combat.thorn.charges, 0);
-    let first = shared::loadout::Loadout::single(ladder[0]);
+    // The first build, in every owner's own state, with their knack (PvP: no Thorn, Surge).
+    let surge = shared::loadout::Knack::Surge;
+    let first = shared::loadout::Loadout::single(ladder[0]).with_knack(surge);
     let ok = n.run_until(1.0, |n| {
         n.clients.iter().all(|c| {
             c.net
@@ -465,7 +465,7 @@ fn gun_game_ladder_over_the_network() {
         })
     };
     assert!(n.run_until(1.0, |n| n.clients.iter().all(promoted)));
-    let second = shared::loadout::Loadout::single(ladder[1]);
+    let second = shared::loadout::Loadout::single(ladder[1]).with_knack(surge);
     let ok = n.run_until(1.0, |n| {
         n.clients[a]
             .net
@@ -473,17 +473,18 @@ fn gun_game_ladder_over_the_network() {
             .is_some_and(|o| o.combat.weapons.loadout == second)
     });
     assert!(ok, "the owner's prediction sees the new build");
-    // On the Fist tier a punch kill ends the match.
-    let fist = ladder.len() as u8;
-    n.server.world_mut().mode.player(pa).stats.tier = fist;
+    // On the finale tier a kill with the finale weapon ends the match.
+    let finale = ladder.len() as u8;
+    n.server.world_mut().mode.player(pa).stats.tier = finale;
     n.run(2.5); // B respawns
-    kill(&mut n, pb, pa, Attack::Fist);
+    let weapon = n.server.tuning().gun_game.finale.weapon;
+    kill(&mut n, pb, pa, Attack::primary(weapon));
     let ok = n.run_until(2.0, |n| n.clients.iter().all(|c| c.results().is_some()));
     assert!(ok, "results reached everyone");
     let r = n.clients[b].results().unwrap();
     assert_eq!(r.reason, EndReason::Ladder);
     assert_eq!(r.winner, Some(pa));
-    assert_eq!(r.players[0].stats.tier, fist + 1);
+    assert_eq!(r.players[0].stats.tier, finale + 1);
     assert!(r.gun_game.is_some());
     assert_eq!(n.server.lobby_phase(), LobbyPhase::Results);
 }

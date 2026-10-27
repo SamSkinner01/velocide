@@ -38,6 +38,9 @@
 //!
 //! **Reward**: heal to the effective max after clearing `parry_hard_damage_clear` of the hard
 //! damage; [`SimEvent::Parried`] (client: hitstop, white flash, `Sfx::Parry`).
+//!
+//! **Blade deflects**: a Trimmer swing deflects the parryable projectiles in its arc the same
+//! way, with the same reward ([`SimWorld::deflect_in_arc`], `melee.rs`); only at the swing.
 
 use engine::physics::MASK_SHOTS;
 use glam::Vec3;
@@ -219,41 +222,7 @@ impl SimWorld {
             (d <= c.parry_close_range && angle <= std::f32::consts::FRAC_PI_2)
                 || (d <= c.parry_range && angle <= half_cone)
         };
-
-        let mut projectiles = Vec::new();
-        for proj in self.projectiles.values() {
-            if !proj.kind.parryable() || proj.stuck.is_some() {
-                continue;
-            }
-            // Something you just deflected stays deflected.
-            if proj.parried && proj.owner == Owner::Player(id) {
-                continue;
-            }
-            // Own / teammates' projectiles only for kinds made to be punched.
-            let friendly = match proj.owner {
-                Owner::Player(o) => o == id || !self.rules.friendly_fire,
-                _ => false,
-            };
-            if friendly && !proj.kind.owner_can_parry() {
-                continue;
-            }
-            let rewound = proj.trail.at(view_time);
-            let current = match proj.pending {
-                Some(pending) => {
-                    if pending.victim != id {
-                        // Someone else's incoming hit: only what we saw counts.
-                        None
-                    } else {
-                        Some(proj.position - pending.incoming * 0.6)
-                    }
-                }
-                None => Some(proj.position),
-            };
-            if rewound.is_some_and(in_zone) || current.is_some_and(in_zone) {
-                let late = proj.pending.map_or(0, |pd| now.saturating_sub(pd.hit_tick));
-                projectiles.push((proj.id, late));
-            }
-        }
+        let projectiles = self.parryable_projectiles(id, view_time, in_zone);
 
         // Telegraphed melee attacks in their parryable phase.
         let mut melee = Vec::new();
@@ -284,10 +253,102 @@ impl SimWorld {
                 melee.push((e.id, now.saturating_sub(window.end)));
             }
         }
+        self.apply_parries(t, id, projectiles, melee)
+    }
 
+    /// A Trimmer swing (`melee.rs`): deflects the parryable projectiles within `reach` of
+    /// player `id`'s eye inside the `arc_degrees` arc (or touching close in front), as the
+    /// player saw them or where they are now, with a punch parry's reward. True if anything
+    /// was deflected.
+    pub(crate) fn deflect_in_arc(
+        &mut self,
+        t: &Tuning,
+        id: PlayerId,
+        reach: f32,
+        arc_degrees: f32,
+    ) -> bool {
+        let Some(p) = self.players.get(&id) else {
+            return false;
+        };
+        if p.combat.dead {
+            return false;
+        }
+        let c = &t.combat;
+        let eye = p.movement.eye_position(&t.movement);
+        let aim = look_dir(p.yaw, p.pitch);
+        let max_lag = self.max_rewind_ticks(t, id);
+        let view_time = self.tick as f64 - (p.view_lag_ticks as f64).clamp(0.0, max_lag);
+        let half_arc = (arc_degrees * 0.5).to_radians();
+        let in_zone = |pos: Vec3| {
+            let to = pos - eye;
+            let d = to.length();
+            let angle = to.normalize_or(aim).angle_between(aim);
+            (d <= c.parry_close_range && angle <= std::f32::consts::FRAC_PI_2)
+                || (d <= reach && angle <= half_arc)
+        };
+        let projectiles = self.parryable_projectiles(id, view_time, in_zone);
+        self.apply_parries(t, id, projectiles, Vec::new())
+    }
+
+    /// The parryable projectiles player `id` may deflect whose position at `view_time` (what
+    /// they saw) or now is `in_zone`: (projectile, ticks since it touched them).
+    fn parryable_projectiles(
+        &self,
+        id: PlayerId,
+        view_time: f64,
+        in_zone: impl Fn(Vec3) -> bool,
+    ) -> Vec<(NetId, u32)> {
+        let now = self.tick;
+        let mut projectiles = Vec::new();
+        for proj in self.projectiles.values() {
+            if !proj.kind.parryable() || proj.stuck.is_some() {
+                continue;
+            }
+            // Something you just deflected stays deflected.
+            if proj.parried && proj.owner == Owner::Player(id) {
+                continue;
+            }
+            // Own / teammates' projectiles only for kinds made to be punched.
+            let friendly = match proj.owner {
+                Owner::Player(o) => o == id || !self.rules.friendly_fire,
+                _ => false,
+            };
+            if friendly && !proj.kind.owner_can_parry() {
+                continue;
+            }
+            let rewound = proj.trail.at(view_time);
+            let current = match proj.pending {
+                Some(pending) => {
+                    if pending.victim != id {
+                        // Someone else's incoming hit: only what we saw counts.
+                        None
+                    } else {
+                        Some(proj.position - pending.incoming * 0.6)
+                    }
+                }
+                None => Some(proj.position),
+            };
+            if rewound.is_some_and(&in_zone) || current.is_some_and(&in_zone) {
+                let late = proj.pending.map_or(0, |pd| now.saturating_sub(pd.hit_tick));
+                projectiles.push((proj.id, late));
+            }
+        }
+        projectiles
+    }
+
+    /// Deflects `projectiles` and counters `melee` attacks (each with how late it was) for
+    /// player `id`, with the reward and a [`SimEvent::Parried`] each. True if there was any.
+    fn apply_parries(
+        &mut self,
+        t: &Tuning,
+        id: PlayerId,
+        projectiles: Vec<(NetId, u32)>,
+        melee: Vec<(NetId, u32)>,
+    ) -> bool {
         if projectiles.is_empty() && melee.is_empty() {
             return false;
         }
+        let now = self.tick;
         let healed = self.parry_reward(t, id);
         let mut first = true;
         for (pid, late) in projectiles {

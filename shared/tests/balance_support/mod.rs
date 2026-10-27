@@ -48,6 +48,23 @@ pub const MOULDS: [&str; 8] = [
 /// The ranges every table is measured at (m, feet to feet).
 pub const RANGES: [f32; 3] = [5.0, 15.0, 30.0];
 
+/// The weapons the tables and the bands cover: every class but Melee for now (the Trimmer and
+/// the Tamper join once their behaviour lands, arsenal's milestone 2; `docs/balance.md`).
+pub fn weapons() -> Vec<WeaponKind> {
+    WeaponKind::ALL
+        .into_iter()
+        .filter(|w| w.class() != WeaponClass::Melee)
+        .collect()
+}
+
+/// The classes of [`weapons`].
+pub fn classes() -> Vec<WeaponClass> {
+    WeaponClass::ALL
+        .into_iter()
+        .filter(|c| *c != WeaponClass::Melee)
+        .collect()
+}
+
 /// Which balance profile (and level kind) a measurement runs with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {

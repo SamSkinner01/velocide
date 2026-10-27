@@ -835,7 +835,7 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     let base = Tuning::default();
     let a = Assume::default();
     let kills = |damage: f32| damage >= 100.0;
-    for w in WeaponKind::ALL {
+    for w in balance_support::weapons() {
         let bow = w == WeaponKind::Longwick;
         for range in [3.0, 5.0, 10.0] {
             let body = per_trigger(&base, Side::Pvp, w, range, Aim::Body, 1.0);
@@ -849,7 +849,7 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
             assert!(!kills(head), "a 90 % draw to the head: {head}");
         }
     }
-    for w in WeaponKind::ALL {
+    for w in balance_support::weapons() {
         for &ability in w.abilities() {
             let bow = w == WeaponKind::Longwick;
             let allowed = bow || matches!(ability, Ability::Slug | Ability::Skewer);
@@ -897,7 +897,7 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
         );
     }
     // Every primary, every shot at the body, at its range.
-    for w in WeaponKind::ALL {
+    for w in balance_support::weapons() {
         let t = on_player(
             &base,
             a,

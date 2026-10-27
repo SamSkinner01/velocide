@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::weapons::WeaponState;
 use super::{HitPart, HitTarget, PlayerId, SimEvent, SimWorld};
-use crate::loadout::{Ability, WeaponKind};
+use crate::loadout::{Ability, Knack, WeaponKind};
 use crate::protocol::{NetId, kind};
 use crate::tuning::{CombatTuning, Tuning};
 
@@ -133,6 +133,22 @@ pub enum Attack {
     PinningArrow,
     /// The ember arrow's hit and flame burst.
     EmberArrow,
+
+    // ---- refit (docs/refit.md): melee primaries and abilities, knacks ----
+    /// Trimmer primary: one slash.
+    Trimmer,
+    /// Tamper primary: one swing.
+    Tamper,
+    /// The Lunge's strike on the first target it reaches.
+    Lunge,
+    /// The Whirl's spin.
+    Whirl,
+    /// The thrown blade / hammer-head.
+    Hurl,
+    /// The rising strike.
+    Upswing,
+    /// A sprung Snare (knack).
+    Snare,
 }
 
 impl Attack {
@@ -149,6 +165,8 @@ impl Attack {
             WeaponKind::Cinderbox => Attack::Cinderbox,
             WeaponKind::Longwick => Attack::Longwick,
             WeaponKind::Kiln => Attack::Kiln,
+            WeaponKind::Trimmer => Attack::Trimmer,
+            WeaponKind::Tamper => Attack::Tamper,
         }
     }
 
@@ -174,6 +192,19 @@ impl Attack {
             Ability::TripleNock => Attack::TripleNock,
             Ability::PinningArrow => Attack::PinningArrow,
             Ability::EmberArrow => Attack::EmberArrow,
+            Ability::Lunge => Attack::Lunge,
+            Ability::Whirl => Attack::Whirl,
+            Ability::Hurl => Attack::Hurl,
+            Ability::Upswing => Attack::Upswing,
+        }
+    }
+
+    /// The attack a knack deals damage as (`None`: it deals none).
+    pub fn knack(knack: Knack) -> Option<Attack> {
+        match knack {
+            Knack::Thorn => Some(Attack::Thorn),
+            Knack::Snare => Some(Attack::Snare),
+            Knack::KindleFlask | Knack::SootPot | Knack::TallowSkin | Knack::Surge => None,
         }
     }
 
@@ -193,7 +224,7 @@ impl Attack {
 
     /// The weapon this attack belongs to: the weapon of a primary fire, or the only weapon
     /// that can carry an ability (the bow's arrows). `None` for abilities several weapons can
-    /// carry (the kill's [`KillInfo::weapon`] knows which one fired), thorn, fist, slam,
+    /// carry (the kill's [`KillInfo::weapon`] knows which one fired), knacks, fist, slam,
     /// enemies and the world.
     pub fn weapon(self) -> Option<WeaponKind> {
         if let Some(w) = self.primary_of() {
@@ -245,6 +276,13 @@ impl Attack {
             Attack::TripleNock => "Triple Nock",
             Attack::PinningArrow => "Pinning Arrow",
             Attack::EmberArrow => "Ember Arrow",
+            Attack::Trimmer => "Trimmer",
+            Attack::Tamper => "Tamper",
+            Attack::Lunge => "Lunge",
+            Attack::Whirl => "Whirl",
+            Attack::Hurl => "Hurl",
+            Attack::Upswing => "Upswing",
+            Attack::Snare => "Snare",
         }
     }
 }
@@ -262,7 +300,7 @@ impl DamageFlags {
     pub const PROJECTILE: DamageFlags = DamageFlags(1 << 1);
     /// Explosion splash (bomb, breach, gravewell implosion, wisp pop).
     pub const EXPLOSIVE: DamageFlags = DamageFlags(1 << 2);
-    /// Punch / melee swipe.
+    /// Punch / melee swipe (the fist, melee weapons and their strikes).
     pub const MELEE: DamageFlags = DamageFlags(1 << 3);
     /// Dealt by a deflected (parried) projectile, or the counter-hit of a melee parry.
     pub const PARRIED: DamageFlags = DamageFlags(1 << 4);
@@ -603,6 +641,8 @@ impl SimWorld {
     fn damage_player(&mut self, t: &Tuning, id: PlayerId, info: DamageInfo) -> DamageEvent {
         let tick = self.tick;
         let friendly_fire = self.rules.friendly_fire;
+        // Tallow Skin (knack): less damage, no knockback from anything but your own blasts.
+        let tallow = self.has_tallow(id) && info.source != Owner::Player(id);
         let mut event = DamageEvent {
             target: HitTarget::Player(id),
             info,
@@ -643,6 +683,9 @@ impl SimWorld {
             amount *= c.player_head_multiplier;
             event.info.flags.insert(DamageFlags::HEADSHOT);
         }
+        if tallow && info.attack != Attack::World {
+            amount *= c.knacks.tallow_skin.damage_scale;
+        }
         if event.blocked.is_none() {
             if p.combat.god {
                 event.blocked = Some(Blocked::God);
@@ -657,7 +700,7 @@ impl SimWorld {
         let kb_applies = event.blocked.is_none()
             || (explosive && event.blocked != Some(Blocked::God))
             || event.blocked == Some(Blocked::God) && is_self;
-        if kb_applies && info.knockback.length_squared() > 0.0 {
+        if kb_applies && !tallow && info.knockback.length_squared() > 0.0 {
             p.movement.velocity += info.knockback;
         }
         if event.blocked.is_some() {

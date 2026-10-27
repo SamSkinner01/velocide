@@ -13,7 +13,7 @@
 mod balance_support;
 
 use balance_support::*;
-use shared::loadout::{WeaponClass, WeaponKind};
+use shared::loadout::WeaponClass;
 use shared::tuning::Tuning;
 
 /// Seconds, or a dash when it never happened.
@@ -82,7 +82,7 @@ fn primaries(base: &Tuning, assume: Assume) {
     cols.extend(ranges.iter().map(String::as_str));
     header(&cols);
     let c = &effective(base, Side::Pve, assume).combat;
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let mut cells = vec![
             w.name().to_string(),
             num(per_trigger(base, Side::Pve, w, 5.0, Aim::Body, 1.0)),
@@ -131,7 +131,7 @@ fn ttk(base: &Tuning, assume: Assume) {
             let mut cols = vec!["weapon"];
             cols.extend(names.iter().map(String::as_str));
             header(&cols);
-            for w in WeaponKind::ALL {
+            for w in weapons() {
                 let mut cells = vec![w.name().to_string()];
                 for (m, behind) in mould_rows() {
                     let health = mould_health(base, m, difficulty);
@@ -166,7 +166,7 @@ fn swarm(base: &Tuning, assume: Assume) {
          weapon's defaults, ability A / B used whenever ready.\n"
     );
     header(&["weapon", "primary", "+ ability A", "+ ability B"]);
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let b = w.default_build();
         let mut cells = vec![w.name().to_string()];
         for trigger in [Trigger::Primary, Trigger::Both(0), Trigger::Both(1)] {
@@ -198,7 +198,7 @@ fn pvp(base: &Tuning, assume: Assume) {
     let mut cols = vec!["weapon", "per trigger"];
     cols.extend(ranges.iter().map(String::as_str));
     header(&cols);
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let pull = |aim| kill(per_trigger(base, Side::Pvp, w, 5.0, aim, 1.0));
         let mut cells = vec![
             w.name().to_string(),
@@ -229,7 +229,7 @@ fn pvp(base: &Tuning, assume: Assume) {
          the scatterguns and the Kiln, 15 m for the rest).\n"
     );
     header(&["weapon", "range m", "primary", "+ ability A", "+ ability B"]);
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let b = w.default_build();
         let r = weapon_range(w);
         let mut cells = vec![w.name().to_string(), format!("{r:.0}")];
@@ -256,7 +256,7 @@ fn oneshots(base: &Tuning) {
     let cell = |f: &dyn Fn(f32, Aim) -> f32, r: f32| {
         format!("{} / {}", kill(f(r, Aim::Body)), kill(f(r, Aim::Weak(0))))
     };
-    for w in WeaponKind::ALL {
+    for w in weapons() {
         let f = |r: f32, aim: Aim| per_trigger(base, Side::Pvp, w, r, aim, 1.0);
         let bow = w.primary_style() == shared::sim::weapons::PrimaryStyle::Draw;
         let partial = if bow {
@@ -274,7 +274,7 @@ fn oneshots(base: &Tuning) {
             partial,
         ]);
     }
-    for class in WeaponClass::ALL {
+    for class in classes() {
         for &a in class.abilities() {
             for w in carriers(a) {
                 if w.class() != class {
@@ -312,7 +312,7 @@ fn abilities(base: &Tuning, assume: Assume) {
          alone (12 s, one Gnawer): what taking it adds. A build's two abilities share one \
          cooldown, so siblings compete for the same seconds.\n"
     );
-    for class in WeaponClass::ALL {
+    for class in classes() {
         println!("### {}\n", class.name());
         header(&[
             "ability",

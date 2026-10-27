@@ -3,7 +3,8 @@
 //! The weapons' base numbers live in `combat` and are the same everywhere. A
 //! [`BalanceProfile`] adjusts them for one kind of match: per-weapon (primary fire) and
 //! per-ability [`BalanceScale`] multipliers, then absolute `overrides` for single `combat`
-//! fields where a multiplier can't express it (`"thorn.charges": 0` turns the Thorn off).
+//! fields where a multiplier can't express it (`"quill.brand_multiplier": 1.25`). (No Thorns
+//! in PvP is not a number any more: the Thorn isn't `Knack::pvp_allowed`.)
 //! `pve` applies to campaign and grind (and warm-ups before them), `pvp` to deathmatch and gun
 //! game. [`Tuning::for_mode`] returns the effective tuning a match runs with; the server sends
 //! that one to clients, so prediction always uses exactly what the server simulates.
@@ -127,8 +128,9 @@ pub struct BalanceTuning {
 }
 
 impl Default for BalanceTuning {
-    /// PvE is the reference (nothing changed). PvP: tuned for time-to-kill between players, no
-    /// Thorns. The numbers and their reasoning: `docs/arsenal.md`.
+    /// PvE is the reference (nothing changed). PvP: tuned for time-to-kill between players
+    /// (no Thorns either: `Knack::pvp_allowed`). The numbers and their reasoning:
+    /// `docs/arsenal.md`.
     fn default() -> Self {
         let scale = |damage: f32| BalanceScale::damage(damage);
         let weapons = BTreeMap::from([
@@ -145,6 +147,8 @@ impl Default for BalanceTuning {
                 },
             ),
             (WeaponKind::Kiln, scale(0.9)),
+            // Its abilities hit for a multiple of the swing: 60 keeps them under a one-shot.
+            (WeaponKind::Tamper, scale(0.8)),
         ]);
         let abilities = BTreeMap::from([
             (Ability::BothBarrels, scale(0.25)),
@@ -167,10 +171,7 @@ impl Default for BalanceTuning {
             (Ability::TripleNock, scale(0.55)),
             (Ability::EmberArrow, scale(0.5)),
         ]);
-        let overrides = BTreeMap::from([
-            ("thorn.charges".to_string(), 0.0),
-            ("quill.brand_multiplier".to_string(), 1.25),
-        ]);
+        let overrides = BTreeMap::from([("quill.brand_multiplier".to_string(), 1.25)]);
         Self {
             pve: BalanceProfile::default(),
             pvp: BalanceProfile {
@@ -283,6 +284,20 @@ impl CombatTuning {
                 k.damage *= s.damage;
                 k.interval *= s.interval;
                 k.range *= s.radius;
+            }
+            WeaponKind::Trimmer => {
+                let m = &mut self.trimmer;
+                m.damage *= s.damage;
+                m.interval *= s.interval;
+                m.reach *= s.radius;
+                m.knockback *= s.knockback;
+            }
+            WeaponKind::Tamper => {
+                let m = &mut self.tamper;
+                m.damage *= s.damage;
+                m.interval *= s.interval;
+                m.reach *= s.radius;
+                m.knockback *= s.knockback;
             }
         }
     }
@@ -422,6 +437,34 @@ impl CombatTuning {
                 e.explosion_radius *= s.radius;
                 e.knockback *= s.knockback;
             }
+            Ability::Lunge => {
+                let l = &mut self.lunge;
+                l.damage_scale *= s.damage;
+                l.cooldown *= s.interval;
+                l.reach *= s.radius;
+                l.knockback *= s.knockback;
+                l.speed *= s.speed;
+            }
+            Ability::Whirl => {
+                let w = &mut self.whirl;
+                w.damage_scale *= s.damage;
+                w.cooldown *= s.interval;
+                w.radius *= s.radius;
+                w.knockback *= s.knockback;
+            }
+            Ability::Hurl => {
+                let h = &mut self.hurl;
+                h.damage_scale *= s.damage;
+                h.cooldown *= s.interval;
+                h.knockback *= s.knockback;
+                h.speed *= s.speed;
+            }
+            Ability::Upswing => {
+                let u = &mut self.upswing;
+                u.damage_scale *= s.damage;
+                u.cooldown *= s.interval;
+                u.launch *= s.knockback;
+            }
         }
     }
 
@@ -522,14 +565,15 @@ mod tests {
     }
 
     #[test]
-    fn pve_is_the_reference_and_pvp_has_no_thorns() {
+    fn pve_is_the_reference_and_pvp_is_neutral_once_applied() {
         let t = Tuning::default();
         let pve = t.for_mode(GameMode::Campaign);
         assert_eq!(pve.combat, t.combat);
         assert_eq!(t.for_mode(GameMode::Grind).combat, t.combat);
         let pvp = t.for_mode(GameMode::Deathmatch);
-        assert_eq!(pvp.combat.thorn.charges, 0);
-        assert_eq!(t.for_mode(GameMode::GunGame).combat.thorn.charges, 0);
+        // No Thorns in PvP is the knack rule (`Knack::pvp_allowed`), not a tuning number.
+        assert_eq!(pvp.combat.thorn.charges, t.combat.thorn.charges);
+        assert_eq!(pvp.combat.quill.brand_multiplier, 1.25);
         // Applied once: an effective tuning is neutral.
         assert_eq!(pvp.for_mode(GameMode::Deathmatch), pvp);
         assert_eq!(pvp.balance, BalanceTuning::neutral());

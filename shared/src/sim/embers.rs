@@ -2,7 +2,8 @@
 //!
 //! Every damage instance dealt to an enemy (or, in PvP, to another player) sheds a burst of
 //! embers at the hit point holding a heal pool of `embers.heal_fraction` of the damage dealt
-//! (`melee_heal_fraction` for punches and parries). Each tick the **closest** living player
+//! (`melee_heal_fraction` for punches and parries, `melee_weapon_heal_fraction` for the melee
+//! weapons' strikes). Each tick the **closest** living player
 //! inside the burst's radius who is below their effective max draws it in (whoever is closest
 //! gets it — players compete in PvP). An enemy death releases its stored heat as a big burst.
 //! Bursts close together in space and time merge (a shotgun blast makes one burst, not ten).
@@ -15,7 +16,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use super::combat::{DamageEvent, DamageFlags, Owner, secs_to_ticks};
+use super::combat::{Attack, DamageEvent, DamageFlags, Owner, secs_to_ticks};
 use super::{PlayerId, SimEvent, SimWorld};
 use crate::protocol::{EntityState, NetId, ember_flags, kind};
 use crate::tuning::Tuning;
@@ -42,6 +43,8 @@ pub enum HealSource {
     /// Drew in an ember burst (kindling).
     Embers(NetId),
     Parry,
+    /// Stood in a Kindle Flask's pool (`knacks.rs`).
+    KindleFlask(NetId),
 }
 
 impl EmberBurst {
@@ -125,10 +128,13 @@ impl SimWorld {
         if !matches!(event.info.source, Owner::Player(_)) || event.dealt <= 0.0 {
             return;
         }
-        let melee = event.info.flags.contains(DamageFlags::MELEE)
+        let melee = event.info.flags.contains(DamageFlags::MELEE);
+        let fist = (melee && event.info.attack == Attack::Fist)
             || (event.info.flags.contains(DamageFlags::PARRIED) && event.info.projectile.is_none());
-        let fraction = if melee {
+        let fraction = if fist {
             b.melee_heal_fraction
+        } else if melee {
+            b.melee_weapon_heal_fraction
         } else {
             b.heal_fraction
         };

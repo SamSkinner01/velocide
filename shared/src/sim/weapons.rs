@@ -4,13 +4,13 @@
 //!
 //! * [`step_weapons`] — a **pure, deterministic** function of `(WeaponState, PlayerInput,
 //!   alive, tuning)` that decides *what* fires this input (cooldowns, charges, the Longwick's
-//!   draw, bursts, punch, thorn charges) and returns [`FireIntent`]s. All timers are integer
+//!   draw, bursts, punch, knack charges) and returns [`FireIntent`]s. All timers are integer
 //!   ticks, so the owning client can run the same function on its predicted inputs (muzzle
 //!   flash, sound and viewmodel recoil without waiting a round trip) and compare its
 //!   prediction bit-exactly with the authoritative `OwnState::combat.weapons`.
 //! * [`SimWorld::resolve_intent`] (server) — turns an intent into hitscan traces (`hitscan.rs`),
-//!   area attacks (`area.rs`), projectiles (`projectiles.rs`), a punch/parry or a thorn throw
-//!   (`thorn.rs`).
+//!   area attacks (`area.rs`), projectiles (`projectiles.rs`), melee swings (`melee.rs`), a
+//!   punch/parry or a knack (`knacks.rs`; the Thorn: `thorn.rs`).
 //!
 //! The player carries a [`Loadout`] (`WeaponState::loadout`, set by the server: `loadouts.rs`):
 //! up to four [`WeaponBuild`]s on the slot keys. `PlayerInput::weapon` is the slot (an empty
@@ -19,7 +19,7 @@
 //! (Cinderbox) or hold-to-draw / release (Longwick); `ALT_FIRE` = the selected ability: held
 //! and automatic, hold-to-charge / release (Discharge, Skewer), a burst (Flurry), press-only
 //! (Limpet), or on the bow it arms the next release; `PUNCH` (press) = fist/parry; `THROW`
-//! (press) = thorn (none when `thorn.charges` is 0, the PvP profile).
+//! (press, the KNACK control) = the loadout's [`Knack`] while it has a charge.
 
 use std::borrow::Cow;
 
@@ -31,7 +31,7 @@ use super::hitscan::ShotSpec;
 use super::projectiles::ProjectileKind;
 use super::{HitboxHistory, PlayerId, SimEvent, SimWorld};
 use crate::input::{Buttons, PlayerInput};
-pub use crate::loadout::{Ability, Loadout, WeaponBuild, WeaponClass, WeaponKind};
+pub use crate::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponClass, WeaponKind};
 use crate::loadout::{BUILD_ABILITIES, LOADOUT_SLOTS};
 use crate::tuning::{BalanceScale, CombatTuning, Tuning};
 
@@ -90,6 +90,8 @@ impl WeaponKind {
             WeaponKind::Cinderbox => t.cinderbox.interval,
             WeaponKind::Longwick => t.longwick.interval,
             WeaponKind::Kiln => t.kiln.interval,
+            WeaponKind::Trimmer => t.trimmer.interval,
+            WeaponKind::Tamper => t.tamper.interval,
         }
     }
 
@@ -106,10 +108,13 @@ impl WeaponKind {
             WeaponKind::Cinderbox => t.cinderbox.ability_power,
             WeaponKind::Longwick => t.longwick.ability_power,
             WeaponKind::Kiln => t.kiln.ability_power,
+            WeaponKind::Trimmer => t.trimmer.ability_power,
+            WeaponKind::Tamper => t.tamper.ability_power,
         }
     }
 
-    /// Damage of one primary shot (a pellet, a zap, a rivet, a rocket, an un-drawn arrow).
+    /// Damage of one primary shot (a pellet, a zap, a rivet, a rocket, an un-drawn arrow, a
+    /// swing).
     pub fn primary_damage(self, t: &CombatTuning) -> f32 {
         match self {
             WeaponKind::Quill => t.quill.damage,
@@ -122,6 +127,8 @@ impl WeaponKind {
             WeaponKind::Cinderbox => t.cinderbox.damage,
             WeaponKind::Longwick => t.longwick.min_damage,
             WeaponKind::Kiln => t.kiln.damage,
+            WeaponKind::Trimmer => t.trimmer.damage,
+            WeaponKind::Tamper => t.tamper.damage,
         }
     }
 }
@@ -173,6 +180,10 @@ impl Ability {
             Ability::TripleNock => t.triple_nock.cooldown,
             Ability::PinningArrow => t.pinning_arrow.cooldown,
             Ability::EmberArrow => t.ember_arrow.cooldown,
+            Ability::Lunge => t.lunge.cooldown,
+            Ability::Whirl => t.whirl.cooldown,
+            Ability::Hurl => t.hurl.cooldown,
+            Ability::Upswing => t.upswing.cooldown,
         }
     }
 
@@ -205,14 +216,15 @@ pub struct Burst {
     pub ability: Option<Ability>,
 }
 
-/// Weapons, fist and thorn state of one player. Everything is in ticks/integers so client
+/// Weapons, fist and knack state of one player. Everything is in ticks/integers so client
 /// prediction can reproduce it exactly. `Default` = fresh with the default loadout (all
-/// ready, full thorns).
+/// ready, every knack charge).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeaponState {
-    /// The weapons carried, one build per slot key. Only the server changes it
-    /// (`SimWorld::request_loadout` / `force_loadout`, applied at (re)spawn). Packed into one
-    /// integer on the wire (it rides along every `OwnState`).
+    /// The weapons carried, one build per slot key, and the knack on Q. Only the server
+    /// changes it (`SimWorld::request_loadout` / `force_loadout`, applied at (re)spawn; the
+    /// knack as it applies in this world: `SimWorld::fit_loadout`). Packed into one integer on
+    /// the wire (it rides along every `OwnState`).
     #[serde(with = "packed_loadout")]
     pub loadout: Loadout,
     /// Selected slot (index into `loadout`; a slot holding a weapon).
@@ -237,35 +249,39 @@ pub struct WeaponState {
     pub punch_cooldown: u16,
     /// Ticks left in the parry window opened by the last punch.
     pub parry: u16,
-    /// Thorns spent and not yet recharged (charges = `thorn.charges - thorns_used`).
-    pub thorns_used: u8,
-    /// Ticks accumulated towards the next thorn charge.
-    pub thorn_recharge: u16,
+    /// Knack charges spent and not yet recharged (charges = the knack's `charges` −
+    /// `knack_used`, [`WeaponState::knack_charges`]).
+    pub knack_used: u8,
+    /// Ticks accumulated towards the next knack charge.
+    pub knack_recharge: u16,
 }
 
 /// A [`Loadout`] as one `u64`: 16 bits per slot (slot 0 lowest): weapon id + 1 (bits 0–4,
-/// 0 = empty), ability A (5–9), ability B (10–14). Lossless for every valid loadout; unknown
-/// ids decode as an empty slot / the default ability.
+/// 0 = empty), ability A (5–9), ability B (10–14), and one bit of the knack id (15; slot 0
+/// holds its lowest bit, empty slots carry theirs too). Lossless for every valid loadout;
+/// unknown ids decode as an empty slot / the default ability / the default knack.
 mod packed_loadout {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use crate::loadout::{Ability, Loadout, WeaponBuild, WeaponKind};
+    use crate::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 
     pub fn pack(loadout: &Loadout) -> u64 {
         let mut word = 0u64;
         for (i, slot) in loadout.slots.iter().enumerate() {
+            let mut bits = (loadout.knack.id() as u64 >> i & 1) << 15;
             if let Some(b) = slot {
-                let bits = (b.weapon.id() as u64 + 1) & 0x1F
+                bits |= (b.weapon.id() as u64 + 1) & 0x1F
                     | (b.abilities[0].id() as u64 & 0x1F) << 5
                     | (b.abilities[1].id() as u64 & 0x1F) << 10;
-                word |= bits << (16 * i);
             }
+            word |= bits << (16 * i);
         }
         word
     }
 
     pub fn unpack(word: u64) -> Loadout {
-        let mut loadout = Loadout { slots: [None; 4] };
+        let knack = (0..4).fold(0u8, |id, i| id | ((word >> (16 * i + 15) & 1) as u8) << i);
+        let mut loadout = Loadout::unarmed().with_knack(Knack::from_id(knack).unwrap_or_default());
         for (i, slot) in loadout.slots.iter_mut().enumerate() {
             let bits = word >> (16 * i);
             let weapon = ((bits & 0x1F) as u8)
@@ -307,24 +323,27 @@ pub enum FireIntent {
         charge: f32,
     },
     Punch,
-    ThrowThorn,
+    /// The loadout's knack (a charge was spent).
+    Knack(Knack),
 }
 
 impl FireIntent {
+    /// The attack it fires (`None` for knacks: what they do later may deal damage, the use
+    /// itself doesn't).
     pub fn attack(self) -> Option<Attack> {
         match self {
             FireIntent::Primary { weapon, .. } => Some(weapon.primary()),
             FireIntent::Ability { ability, .. } => Some(ability.attack()),
             FireIntent::Punch => Some(Attack::Fist),
-            FireIntent::ThrowThorn => None,
+            FireIntent::Knack(_) => None,
         }
     }
 
-    /// The weapon that fires it (`None` for the fist and the thorn).
+    /// The weapon that fires it (`None` for the fist and knacks).
     pub fn weapon(self) -> Option<WeaponKind> {
         match self {
             FireIntent::Primary { weapon, .. } | FireIntent::Ability { weapon, .. } => Some(weapon),
-            FireIntent::Punch | FireIntent::ThrowThorn => None,
+            FireIntent::Punch | FireIntent::Knack(_) => None,
         }
     }
 }
@@ -350,8 +369,14 @@ impl WeaponState {
     }
 
     /// The weapons replaced by `loadout` now (warm-up, dead, forced): every weapon's state
-    /// starts afresh; fist, parry window, thorns, selection and edge detection carry on.
+    /// starts afresh; fist, parry window, selection, edge detection and the knack's charges
+    /// (while it is the same knack; a new one starts full) carry on.
     pub fn with_loadout(&self, loadout: Loadout) -> Self {
+        let (knack_used, knack_recharge) = if loadout.knack == self.loadout.knack {
+            (self.knack_used, self.knack_recharge)
+        } else {
+            (0, 0)
+        };
         Self {
             loadout,
             slot: self.slot_in(&loadout),
@@ -359,8 +384,8 @@ impl WeaponState {
             prev_buttons: self.prev_buttons,
             punch_cooldown: self.punch_cooldown,
             parry: self.parry,
-            thorns_used: self.thorns_used,
-            thorn_recharge: self.thorn_recharge,
+            knack_used,
+            knack_recharge,
             ..Default::default()
         }
     }
@@ -383,7 +408,7 @@ impl WeaponState {
     }
 
     /// Carries no weapon: the primary and abilities fire nothing, only the fist (and the
-    /// thorn, per tuning).
+    /// knack).
     pub fn is_unarmed(&self) -> bool {
         self.loadout.is_unarmed()
     }
@@ -404,9 +429,22 @@ impl WeaponState {
         self.build().ability(self.mode)
     }
 
-    /// Thorn charges available.
-    pub fn thorns(&self, t: &CombatTuning) -> u32 {
-        t.thorn.charges.saturating_sub(self.thorns_used as u32)
+    /// The knack on Q.
+    pub fn knack(&self) -> Knack {
+        self.loadout.knack
+    }
+
+    /// Knack charges available.
+    pub fn knack_charges(&self, t: &CombatTuning) -> u32 {
+        self.knack()
+            .charges(t)
+            .saturating_sub(self.knack_used as u32)
+    }
+
+    /// Progress (0..1) towards the next knack charge (0 while every charge is there).
+    pub fn knack_recharge_fraction(&self, t: &CombatTuning, tick_rate: u32) -> f32 {
+        let full = secs_to_ticks(self.knack().recharge_time(t), tick_rate, 1);
+        (self.knack_recharge as f32 / full as f32).min(1.0)
     }
 
     /// Ticks to a full charge of the selected ability.
@@ -504,14 +542,15 @@ pub fn step_weapons(
     s.bloom = s.bloom.saturating_sub(1);
     s.punch_cooldown = s.punch_cooldown.saturating_sub(1);
     s.parry = s.parry.saturating_sub(1);
-    if s.thorns_used > 0 {
-        s.thorn_recharge += 1;
-        if s.thorn_recharge >= secs_to_ticks(t.thorn.recharge_time, tick_rate, 1) {
-            s.thorns_used -= 1;
-            s.thorn_recharge = 0;
+    let knack = s.knack();
+    if s.knack_used > 0 {
+        s.knack_recharge = s.knack_recharge.saturating_add(1);
+        if s.knack_recharge >= secs_to_ticks(knack.recharge_time(t), tick_rate, 1) {
+            s.knack_used -= 1;
+            s.knack_recharge = 0;
         }
     } else {
-        s.thorn_recharge = 0;
+        s.knack_recharge = 0;
     }
     if !alive {
         s.cancel();
@@ -551,13 +590,13 @@ pub fn step_weapons(
         s.parry = secs_to_ticks(t.parry_window, tick_rate, 1);
     }
 
-    // Thorn.
-    if held.pressed(prev, Buttons::THROW) && (s.thorns_used as u32) < t.thorn.charges {
-        out.push(FireIntent::ThrowThorn);
-        if s.thorns_used == 0 {
-            s.thorn_recharge = 0;
+    // Knack.
+    if held.pressed(prev, Buttons::THROW) && s.knack_charges(t) > 0 {
+        out.push(FireIntent::Knack(knack));
+        if s.knack_used == 0 {
+            s.knack_recharge = 0;
         }
-        s.thorns_used += 1;
+        s.knack_used = s.knack_used.saturating_add(1);
     }
     out
 }
@@ -818,7 +857,7 @@ pub(crate) fn spread_dir(dir: Vec3, cone_degrees: f32, rng: &mut SpreadRng) -> V
 }
 
 /// `aim` rotated `degrees` upwards about its right axis (lobs); never below the aim.
-fn lob_dir(aim: Vec3, degrees: f32) -> Vec3 {
+pub(crate) fn lob_dir(aim: Vec3, degrees: f32) -> Vec3 {
     let (right, _) = aim_basis(aim);
     let lob = Quat::from_axis_angle(right, degrees.to_radians()) * aim;
     if lob.y < aim.y { aim } else { lob }
@@ -858,20 +897,9 @@ impl SimWorld {
         input: &PlayerInput,
         intent: FireIntent,
     ) {
-        let Some(p) = self.players.get(&id) else {
-            return;
-        };
-        let eye = p.movement.eye_position(&t.movement);
-        let body_velocity = p.movement.velocity;
-        let aim = input.look_dir();
         match intent {
             FireIntent::Punch => self.punch(t, history, id, input),
-            FireIntent::ThrowThorn => {
-                // Thrown along the aim, inheriting part of the thrower's velocity.
-                let c = &t.combat;
-                let vel = aim * c.thorn.throw_speed + body_velocity * c.thorn.inherit_velocity;
-                self.spawn_thorn(t, id, eye + aim * 0.5, vel);
-            }
+            FireIntent::Knack(knack) => self.use_knack(t, id, input, knack),
             FireIntent::Primary { weapon, charge } => {
                 self.fire_primary(t, history, id, input, weapon, charge)
             }
@@ -984,6 +1012,9 @@ impl SimWorld {
                 self.loose_arrows(t, id, eye, aim, charge, ProjectileKind::Arrow, attack, 1.0)
             }
             WeaponKind::Kiln => self.kiln_spray(t, history, id, input),
+            WeaponKind::Trimmer | WeaponKind::Tamper => {
+                self.melee_swing(t, history, id, input, weapon)
+            }
         }
     }
 
@@ -1154,6 +1185,9 @@ impl SimWorld {
                 let dir = lob_dir(aim, m.angle_degrees);
                 self.spawn_projectile(t, ProjectileKind::MortarShell, owner, eye, dir * m.speed);
                 self.push_fired(id, attack, eye);
+            }
+            Ability::Lunge | Ability::Whirl | Ability::Hurl | Ability::Upswing => {
+                self.melee_ability(t, history, id, input, weapon, ability)
             }
             // Bow-only abilities never reach here (handled above).
             Ability::TripleNock | Ability::PinningArrow | Ability::EmberArrow => {}
@@ -1503,22 +1537,25 @@ mod tests {
             &t,
             60,
         );
-        assert_eq!(out, vec![FireIntent::Punch, FireIntent::ThrowThorn]);
+        assert_eq!(
+            out,
+            vec![FireIntent::Punch, FireIntent::Knack(Knack::Thorn)]
+        );
         assert_eq!(s.parry, 12);
-        assert_eq!(s.thorns(&t), 2);
+        assert_eq!(s.knack_charges(&t), 2);
         // Three charges: the fourth press throws nothing.
         for _ in 0..2 {
             step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
             step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &t, 60);
         }
-        assert_eq!(s.thorns(&t), 0);
+        assert_eq!(s.knack_charges(&t), 0);
         step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
         assert!(step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &t, 60).is_empty());
         // One per 3 s.
         for _ in 0..180 {
             step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
         }
-        assert_eq!(s.thorns(&t), 1);
+        assert_eq!(s.knack_charges(&t), 1);
         assert_eq!(s.parry, 0);
         // Dead players fire nothing.
         assert!(
@@ -1531,12 +1568,47 @@ mod tests {
             )
             .is_empty()
         );
-        // No thorn charges (the PvP profile): THROW does nothing.
-        let mut pvp = t.clone();
-        pvp.thorn.charges = 0;
+        // No thorn charges in the tuning: THROW does nothing.
+        let mut none = t.clone();
+        none.thorn.charges = 0;
         let mut s = WeaponState::default();
-        assert!(step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &pvp, 60).is_empty());
-        assert_eq!(s.thorns(&pvp), 0);
+        assert!(step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &none, 60).is_empty());
+        assert_eq!(s.knack_charges(&none), 0);
+    }
+
+    #[test]
+    fn every_knack_uses_its_own_charges_and_recharge() {
+        let t = CombatTuning::default();
+        for knack in Knack::ALL {
+            let mut s = WeaponState::new(Loadout::default().with_knack(knack));
+            let charges = knack.charges(&t);
+            assert!(charges > 0, "{knack:?}");
+            let mut used = 0;
+            for _ in 0..charges + 2 {
+                let out = step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &t, 60);
+                used += out
+                    .iter()
+                    .filter(|f| **f == FireIntent::Knack(knack))
+                    .count();
+                step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+            }
+            assert_eq!(used as u32, charges, "{knack:?}");
+            assert_eq!(s.knack_charges(&t), 0);
+            // One charge back after its recharge time.
+            let ticks = secs_to_ticks(knack.recharge_time(&t), 60, 1);
+            for _ in 0..ticks {
+                step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+            }
+            assert_eq!(s.knack_charges(&t), 1, "{knack:?}");
+        }
+        // A new knack starts full; the same one keeps its spent charges.
+        let mut s = WeaponState::default();
+        step_weapons(&mut s, &input(Buttons::THROW, 0, 0), true, &t, 60);
+        assert_eq!(s.knack_used, 1);
+        let same = s.with_loadout(Loadout::single(WeaponKind::Kiln.default_build()));
+        assert_eq!(same.knack_used, 1);
+        let other = s.with_loadout(Loadout::default().with_knack(Knack::Surge));
+        assert_eq!((other.knack_used, other.knack_recharge), (0, 0));
     }
 
     #[test]
@@ -1549,6 +1621,7 @@ mod tests {
                 None,
                 Some(WeaponKind::Lancet.default_build()),
             ],
+            ..Default::default()
         };
         let mut s = WeaponState::new(loadout);
         assert_eq!((s.slot, s.current()), (1, WeaponKind::Longwick));
@@ -1631,6 +1704,7 @@ mod tests {
                 None,
                 None,
             ],
+            ..Default::default()
         });
         let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
         assert_eq!(out.len(), 1);
@@ -1744,9 +1818,9 @@ mod tests {
         let mut loadouts = vec![
             Loadout::default(),
             Loadout::single(WeaponKind::Kiln.default_build()),
-            Loadout { slots: [None; 4] },
+            Loadout::unarmed(),
         ];
-        for w in WeaponKind::ALL {
+        for (i, w) in WeaponKind::ALL.into_iter().enumerate() {
             for &a in w.abilities() {
                 for &b in w.abilities() {
                     let build = WeaponBuild {
@@ -1755,13 +1829,29 @@ mod tests {
                     };
                     loadouts.push(Loadout {
                         slots: [None, Some(build), None, Some(w.default_build())],
+                        knack: Knack::ALL[i % Knack::COUNT],
                     });
                 }
+            }
+        }
+        // Every knack with every slot pattern (empty slots carry knack bits too).
+        for knack in Knack::ALL {
+            for mask in 0..16u8 {
+                let mut l = Loadout::unarmed().with_knack(knack);
+                for (i, slot) in l.slots.iter_mut().enumerate() {
+                    if mask >> i & 1 == 1 {
+                        *slot = Some(WeaponKind::ALL[i + 8].default_build());
+                    }
+                }
+                loadouts.push(l);
             }
         }
         for l in loadouts {
             assert_eq!(packed_loadout::unpack(packed_loadout::pack(&l)), l);
         }
+        // The packing of the old layout (no knack bits) is unchanged for the Thorn.
+        let old = packed_loadout::pack(&Loadout::default());
+        assert_eq!(old & 0x8000_8000_8000_8000, 0);
         let s = WeaponState::default();
         let bytes = crate::protocol::encode(&s);
         let back: WeaponState = crate::protocol::decode_server_message(&bytes).unwrap();
@@ -1769,6 +1859,11 @@ mod tests {
         // Garbage decodes to something usable.
         let junk = packed_loadout::unpack(u64::MAX);
         assert_eq!(junk.slots, [None; 4]);
+        assert_eq!(
+            junk.knack,
+            Knack::Thorn,
+            "knack id 15 is unknown: the default"
+        );
     }
 
     #[test]
@@ -1809,7 +1904,7 @@ mod tests {
     }
 
     #[test]
-    fn unarmed_fires_only_the_fist_and_the_thorn() {
+    fn unarmed_fires_only_the_fist_and_the_knack() {
         let t = CombatTuning::default();
         let mut s = WeaponState::new(Loadout::unarmed());
         assert!(s.is_unarmed() && s.held().is_none());
@@ -1822,11 +1917,11 @@ mod tests {
             fired.extend(step_weapons(&mut s, &input(b, i % 5, i % 3), true, &t, 60));
         }
         assert!(fired.contains(&FireIntent::Punch));
-        assert!(fired.contains(&FireIntent::ThrowThorn));
+        assert!(fired.contains(&FireIntent::Knack(Knack::Thorn)));
         assert!(
             fired
                 .iter()
-                .all(|f| matches!(f, FireIntent::Punch | FireIntent::ThrowThorn)),
+                .all(|f| matches!(f, FireIntent::Punch | FireIntent::Knack(_))),
             "{fired:?}"
         );
         assert_eq!((s.charge, s.draw, s.burst.left), (0, 0, 0));
