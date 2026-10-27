@@ -1,8 +1,9 @@
 //! What the expansion arsenal's projectiles do when they land (`docs/arsenal.md`): the Flak
-//! shell's airburst ring, Limpets sticking and detonating, the Flare's burning patch and the
-//! Longwick's special arrows (pinning, ember, branding). `projectiles.rs` calls the three hooks
-//! below on a target hit, a world hit and the end of a flight; everything else follows the
-//! generic projectile rules there.
+//! shell's airburst ring, Limpets sticking and detonating, the Flare's burning patch, the
+//! Longwick's special arrows (pinning, ember, branding) and the refit's thrown knacks (the
+//! Kindle Flask's pool, the Soot Pot's cloud, the Snare settling on the floor).
+//! `projectiles.rs` calls the three hooks below on a target hit, a world hit and the end of a
+//! flight; everything else (the Hurl too) follows the generic projectile rules there.
 
 use engine::physics::SweepHit;
 use glam::Vec3;
@@ -66,6 +67,16 @@ impl SimWorld {
                 self.ember_burst(t, p, Some(target));
                 Some(false)
             }
+            ProjectileKind::KindleFlask => {
+                // Breaks on whoever it hit: the pool at their feet.
+                let feet = self.target_origin(target).unwrap_or(p.position);
+                self.knack_lands(t, p, feet);
+                Some(false)
+            }
+            ProjectileKind::SootPot => {
+                self.knack_lands(t, p, p.position);
+                Some(false)
+            }
             _ => None,
         }
     }
@@ -107,6 +118,27 @@ impl SimWorld {
                 self.ember_burst(t, p, None);
                 Some(false)
             }
+            ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
+                let at = p.position + hit.normal * 0.05;
+                self.knack_lands(t, p, at);
+                Some(false)
+            }
+            ProjectileKind::Snare => {
+                if hit.normal.y > 0.5 {
+                    // On the floor: it lies there as a trap (`knacks.rs` arms and springs it).
+                    p.stuck = Some(Stuck {
+                        to: None,
+                        offset: Vec3::ZERO,
+                    });
+                    p.velocity = Vec3::ZERO;
+                } else {
+                    // Off a wall or a ceiling: it drops on.
+                    let n = hit.normal;
+                    p.velocity = (p.velocity - n * (2.0 * p.velocity.dot(n))) * 0.3;
+                }
+                p.relaunch(now);
+                Some(true)
+            }
             _ => None,
         }
     }
@@ -128,8 +160,29 @@ impl SimWorld {
                 self.ember_burst(t, p, None);
                 true
             }
+            ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
+                self.knack_lands(t, p, p.position);
+                true
+            }
             _ => false,
         }
+    }
+
+    /// A Kindle Flask / Soot Pot broke at `at`: the pool (on the ground below) or the cloud.
+    fn knack_lands(&mut self, t: &Tuning, p: &Projectile, at: Vec3) {
+        if let Owner::Player(owner) = p.owner {
+            match p.kind {
+                ProjectileKind::KindleFlask => self.spawn_kindle_pool(t, owner, at),
+                ProjectileKind::SootPot => self.spawn_soot_cloud(t, owner, at),
+                _ => {}
+            }
+        }
+        self.events.push(SimEvent::ProjectileImpact {
+            id: p.id,
+            kind: p.kind,
+            position: at,
+            normal: Vec3::Y,
+        });
     }
 
     /// The Flak ring: `flak.pellets` rays from `origin`, evenly around `axis`, each

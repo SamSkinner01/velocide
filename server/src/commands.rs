@@ -12,7 +12,7 @@
 //! | `/killall` | kills every enemy |
 //! | `/god` | toggles invulnerability |
 //! | `/notarget` | toggles: enemies ignore you |
-//! | `/give` | full health, no hard damage, full thorns, weapons ready |
+//! | `/give` | full health, no hard damage, every knack charge, weapons ready |
 //! | `/kill` | kills you (respawn rule applies) |
 //! | `/ff [on/off]` | PvP damage between players |
 //! | `/hurt <amount>` | damages you (test hard damage / healing) |
@@ -22,18 +22,18 @@
 //! | `/encounters` | encounter states (docs/enemies.md) |
 //! | `/tp <x> <y> <z>` | teleports you to that point (feet) |
 //! | `/goto <exit / start / checkpoint n / encounter n>` | teleports you to the level exit, the start, checkpoint n's spawn or encounter n's rally point |
-//! | `/loadout [weapon[:ability,ability] ...]` | sets your loadout now, slot by slot (`-` = empty slot; abilities default to the weapon's), e.g. `/loadout longwick:pinning,ember kiln quill`; no arguments: shows it (docs/arsenal.md) |
+//! | `/loadout [weapon[:ability,ability] ...] [knack:<name>]` | sets your loadout now, slot by slot (`-` = empty slot; abilities default to the weapon's), e.g. `/loadout longwick:pinning,ember kiln quill knack:snare`; only `knack:<name>`: keeps the weapons; no arguments: shows it (docs/arsenal.md) |
 //! | `/help` | this list |
 
 use glam::Vec3;
 use shared::input::look_dir;
-use shared::loadout::{Ability, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponKind};
+use shared::loadout::{Ability, Knack, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponKind};
 use shared::protocol::kind;
 use shared::sim::{Attack, DamageInfo, HitTarget, Owner, PlayerId, ProjectileKind, WeaponState};
 
 use crate::Server;
 
-const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...]";
+const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...] [knack:<name>]";
 
 /// Lower-case letters and digits only ("Triple Nock" → "triplenock").
 fn squash(s: &str) -> String {
@@ -60,14 +60,28 @@ fn find_named<T: Copy>(word: &str, all: &[T], name: impl Fn(T) -> &'static str) 
 }
 
 /// Parses `/loadout` arguments: up to four `weapon[:ability[,ability]]` (or `-` for an empty
-/// slot). Abilities left out are the weapon's defaults; the result is sanitised.
-fn parse_loadout(args: &[&str]) -> Result<Loadout, String> {
+/// slot) and `knack:<name>` anywhere. Abilities left out are the weapon's defaults; without
+/// weapons the slots (and without a knack the knack) are `current`'s. The result is sanitised.
+fn parse_loadout(args: &[&str], current: Loadout) -> Result<Loadout, String> {
+    let (knacks, args): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| {
+        a.split_once(':')
+            .is_some_and(|(k, _)| k.eq_ignore_ascii_case("knack"))
+    });
+    let mut knack = current.knack;
+    for arg in knacks {
+        let name = arg.split_once(':').map_or("", |(_, n)| n);
+        knack = find_named(name, &Knack::ALL, Knack::name).ok_or_else(|| {
+            let all: Vec<&str> = Knack::ALL.iter().map(|k| k.name()).collect();
+            format!("unknown knack '{name}' ({})", all.join(", "))
+        })?;
+    }
+    if args.is_empty() {
+        return Ok(current.with_knack(knack).sanitized());
+    }
     if args.len() > LOADOUT_SLOTS {
         return Err(format!("at most {LOADOUT_SLOTS} slots"));
     }
-    let mut loadout = Loadout {
-        slots: [None; LOADOUT_SLOTS],
-    };
+    let mut loadout = Loadout::unarmed().with_knack(knack);
     for (slot, arg) in args.iter().enumerate() {
         if *arg == "-" || arg.eq_ignore_ascii_case("none") {
             continue;
@@ -97,7 +111,7 @@ fn parse_loadout(args: &[&str]) -> Result<Loadout, String> {
     Ok(loadout.sanitized())
 }
 
-/// "1 LONGWICK (Triple Nock / Pinning Arrow)  2 KILN (...)".
+/// "1 LONGWICK (Triple Nock / Pinning Arrow)  2 KILN (...)  Q SNARE".
 fn describe_loadout(loadout: &Loadout) -> String {
     let builds: Vec<String> = loadout
         .slots
@@ -114,7 +128,11 @@ fn describe_loadout(loadout: &Loadout) -> String {
             )
         })
         .collect();
-    builds.join("  ")
+    format!(
+        "{}  Q {}",
+        builds.join("  "),
+        loadout.knack.name().to_uppercase()
+    )
 }
 
 impl Server {
@@ -197,7 +215,7 @@ impl Server {
                         prev_buttons: w.prev_buttons,
                         ..w.respawned(w.loadout)
                     };
-                    "full health, thorns and weapons".into()
+                    "full health, knack and weapons".into()
                 }
                 None => "no body".into(),
             },
@@ -356,18 +374,32 @@ impl Server {
                 if args.is_empty() {
                     return format!("loadout: {}", describe_loadout(&self.world.loadout(player)));
                 }
-                let loadout = match parse_loadout(&args) {
+                let current = self
+                    .world
+                    .loadout_requests
+                    .get(&player)
+                    .copied()
+                    .unwrap_or_else(|| self.world.loadout(player));
+                let loadout = match parse_loadout(&args, current) {
                     Ok(l) => l,
                     Err(e) => {
-                        return format!("{e}. usage: /loadout <weapon[:ability,ability]> ...");
+                        return format!(
+                            "{e}. usage: /loadout <weapon[:ability,ability]> ... [knack:<name>]"
+                        );
                     }
                 };
-                // The usual rules store it; a dev wants it in hand right now.
+                // The usual rules store it; a dev wants it in hand right now (with the knack
+                // this world allows: no Thorn in PvP).
                 self.world.request_loadout(player, loadout);
+                let fitted = self.world.fit_loadout(loadout);
                 if let Some(p) = self.world.players.get_mut(&player) {
-                    p.combat.weapons = p.combat.weapons.with_loadout(loadout);
+                    p.combat.weapons = p.combat.weapons.with_loadout(fitted);
                 }
-                format!("loadout: {}", describe_loadout(&loadout))
+                let mut reply = format!("loadout: {}", describe_loadout(&fitted));
+                if fitted.knack != loadout.knack {
+                    reply.push_str(&format!(" ({} is PvE only)", loadout.knack.name()));
+                }
+                reply
             }
             other => format!("unknown command '/{other}'. {HELP}"),
         }
@@ -387,9 +419,14 @@ impl Server {
 mod tests {
     use super::*;
 
+    /// `parse_loadout` from the default loadout.
+    fn parse(args: &[&str]) -> Result<Loadout, String> {
+        parse_loadout(args, Loadout::default())
+    }
+
     #[test]
     fn loadout_arguments_parse() {
-        let l = parse_loadout(&["longwick:pinning,ember", "-", "Kiln", "quill:splinter"]).unwrap();
+        let l = parse(&["longwick:pinning,ember", "-", "Kiln", "quill:splinter"]).unwrap();
         assert_eq!(
             l.slot(0).map(|b| b.abilities),
             Some([Ability::PinningArrow, Ability::EmberArrow])
@@ -402,16 +439,36 @@ mod tests {
             Some([Ability::Splinter, Ability::Brand])
         );
         assert!(l.is_valid());
+        assert_eq!(l.knack, Knack::Thorn, "the current knack");
         assert_eq!(
-            parse_loadout(&["triple nock"]).unwrap_err(),
+            parse(&["triple nock"]).unwrap_err(),
             "unknown weapon 'triple nock'"
         );
-        assert!(parse_loadout(&["quill:gust"]).is_err());
-        assert!(parse_loadout(&["-"]).is_err());
-        assert!(parse_loadout(&["quill"; 5]).is_err());
+        assert!(parse(&["quill:gust"]).is_err());
+        assert!(parse(&["-"]).is_err());
+        assert!(parse(&["quill"; 5]).is_err());
         // The same weapon twice: the second is dropped.
-        let l = parse_loadout(&["lancet", "lancet"]).unwrap();
+        let l = parse(&["lancet", "lancet"]).unwrap();
         assert_eq!(l.slot(1), None);
         assert!(describe_loadout(&l).starts_with("1 LANCET (Skewer / Flurry)"));
+        assert!(describe_loadout(&l).ends_with("Q THORN"));
+        // Melee builds, and the knack by name prefix anywhere (not a slot).
+        let l = parse(&["knack:kindle", "trimmer:whirl,upswing", "tamper"]).unwrap();
+        assert_eq!(l.knack, Knack::KindleFlask);
+        assert_eq!(
+            l.slot(0).map(|b| b.abilities),
+            Some([Ability::Whirl, Ability::Upswing])
+        );
+        assert_eq!(l.slot(1), Some(&WeaponKind::Tamper.default_build()));
+        assert!(parse(&["quill", "knack:soot", "-", "-", "kiln"]).is_ok());
+        assert!(
+            parse(&["knack:nothing"])
+                .unwrap_err()
+                .starts_with("unknown knack")
+        );
+        // Only a knack: the current weapons keep.
+        let current = Loadout::single(WeaponKind::Kiln.default_build());
+        let l = parse_loadout(&["KNACK:tallow"], current).unwrap();
+        assert_eq!(l, current.with_knack(Knack::TallowSkin));
     }
 }

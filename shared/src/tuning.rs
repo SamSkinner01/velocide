@@ -302,6 +302,14 @@ pub struct CombatTuning {
     /// Status effects: Burn (Kiln, Flare, Ember Arrow).
     pub burn: BurnTuning,
     pub enemy_projectiles: EnemyProjectileTuning,
+    // ---- refit (docs/refit.md): the melee weapons, their abilities, the knacks on Q ----
+    pub trimmer: TrimmerTuning,
+    pub tamper: TamperTuning,
+    pub lunge: LungeTuning,
+    pub whirl: WhirlTuning,
+    pub hurl: HurlTuning,
+    pub upswing: UpswingTuning,
+    pub knacks: KnackTuning,
 }
 
 impl Default for CombatTuning {
@@ -370,6 +378,13 @@ impl Default for CombatTuning {
             ember_arrow: EmberArrowTuning::default(),
             burn: BurnTuning::default(),
             enemy_projectiles: EnemyProjectileTuning::default(),
+            trimmer: TrimmerTuning::default(),
+            tamper: TamperTuning::default(),
+            lunge: LungeTuning::default(),
+            whirl: WhirlTuning::default(),
+            hurl: HurlTuning::default(),
+            upswing: UpswingTuning::default(),
+            knacks: KnackTuning::default(),
         }
     }
 }
@@ -380,8 +395,11 @@ impl Default for CombatTuning {
 pub struct EmberTuning {
     /// Heal pool as a fraction of the damage dealt.
     pub heal_fraction: f32,
-    /// Heal pool fraction for melee and parry damage.
+    /// Heal pool fraction for punches and parry damage.
     pub melee_heal_fraction: f32,
+    /// Heal pool fraction for the melee weapons' strikes (Trimmer, Tamper, Lunge, Whirl,
+    /// Upswing): between a gun's and the fist's, they hit often and several at once.
+    pub melee_weapon_heal_fraction: f32,
     pub radius: f32,
     pub lifetime: f32,
     /// Big burst when an enemy dies.
@@ -399,6 +417,7 @@ impl Default for EmberTuning {
         Self {
             heal_fraction: 0.4,
             melee_heal_fraction: 1.0,
+            melee_weapon_heal_fraction: 0.5,
             radius: 3.5,
             lifetime: 0.6,
             death_pool: 25.0,
@@ -1312,6 +1331,328 @@ impl Default for EnemyProjectileTuning {
     }
 }
 
+// ---- refit (docs/refit.md, docs/arsenal.md): melee weapons, their abilities, knacks ----
+
+/// Trimmer (Melee): hooked wick-shears. Every `interval` a slash in an arc in front of the eye
+/// hits up to `max_targets` (nearest first) and deflects the parryable hostile projectiles in
+/// it, like a punch parry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrimmerTuning {
+    pub damage: f32,
+    pub interval: f32,
+    /// Reach from the eye and the arc (full aperture) a swing covers.
+    pub reach: f32,
+    pub arc_degrees: f32,
+    pub max_targets: u32,
+    pub knockback: f32,
+    /// Damage of the abilities this weapon carries, relative to their home weapon's.
+    pub ability_power: f32,
+}
+
+impl Default for TrimmerTuning {
+    fn default() -> Self {
+        Self {
+            damage: 30.0,
+            interval: 0.32,
+            reach: 3.0,
+            arc_degrees: 70.0,
+            max_targets: 3,
+            knockback: 4.0,
+            ability_power: 1.0,
+        }
+    }
+}
+
+/// Tamper (Melee): a foundry ramming hammer. Every `interval` a heavy swing hits everything in
+/// its arc, with heavy knockback; no deflect.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TamperTuning {
+    pub damage: f32,
+    pub interval: f32,
+    pub reach: f32,
+    pub arc_degrees: f32,
+    pub knockback: f32,
+    pub ability_power: f32,
+}
+
+impl Default for TamperTuning {
+    fn default() -> Self {
+        Self {
+            damage: 75.0,
+            interval: 0.85,
+            reach: 3.4,
+            arc_degrees: 100.0,
+            knockback: 16.0,
+            ability_power: 1.0,
+        }
+    }
+}
+
+/// Lunge (Melee): an impulse along the aim; for `window` seconds the first target the body
+/// reaches takes `damage_scale` × the carrier's primary damage.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LungeTuning {
+    pub speed: f32,
+    /// Share of the aim's vertical part the impulse keeps (mostly horizontal).
+    pub vertical: f32,
+    pub window: f32,
+    /// A target this close to the body (beyond the hit shapes) counts as reached.
+    pub reach: f32,
+    pub damage_scale: f32,
+    pub knockback: f32,
+    pub cooldown: f32,
+}
+
+impl Default for LungeTuning {
+    fn default() -> Self {
+        Self {
+            speed: 16.0,
+            vertical: 0.35,
+            window: 0.35,
+            reach: 0.8,
+            damage_scale: 1.5,
+            knockback: 10.0,
+            cooldown: 3.0,
+        }
+    }
+}
+
+/// Whirl (Melee): a spin hitting everything within `radius` for `damage_scale` × the carrier's
+/// primary damage, knocking it outward.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WhirlTuning {
+    pub radius: f32,
+    pub damage_scale: f32,
+    pub knockback: f32,
+    /// Upward bias of the knockback (added before normalising).
+    pub up: f32,
+    pub cooldown: f32,
+}
+
+impl Default for WhirlTuning {
+    fn default() -> Self {
+        Self {
+            radius: 3.5,
+            damage_scale: 1.2,
+            knockback: 12.0,
+            up: 0.35,
+            cooldown: 4.0,
+        }
+    }
+}
+
+/// Hurl (Melee): throws a spinning blade / hammer-head dealing `damage_scale` × the carrier's
+/// primary damage on contact.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HurlTuning {
+    pub speed: f32,
+    pub gravity: f32,
+    pub projectile_radius: f32,
+    /// Seconds in flight before it drops out of the air.
+    pub flight_time: f32,
+    pub damage_scale: f32,
+    pub knockback: f32,
+    pub cooldown: f32,
+}
+
+impl Default for HurlTuning {
+    fn default() -> Self {
+        Self {
+            speed: 30.0,
+            gravity: 6.0,
+            projectile_radius: 0.25,
+            flight_time: 2.0,
+            damage_scale: 1.5,
+            knockback: 6.0,
+            cooldown: 2.5,
+        }
+    }
+}
+
+/// Upswing (Melee): a rising strike in the carrier's arc: `damage_scale` × its primary damage
+/// and an upward launch for what it hits, a small hop for the swinger.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpswingTuning {
+    pub damage_scale: f32,
+    /// Upward speed given to what it hits (enemies: × their knockback scale).
+    pub launch: f32,
+    /// The swinger's own upward hop.
+    pub hop: f32,
+    pub cooldown: f32,
+}
+
+impl Default for UpswingTuning {
+    fn default() -> Self {
+        Self {
+            damage_scale: 0.8,
+            launch: 14.0,
+            hop: 5.0,
+            cooldown: 3.0,
+        }
+    }
+}
+
+/// The knacks on Q (`sim::knacks`), one section each. The Thorn keeps `combat.thorn`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KnackTuning {
+    pub kindle_flask: KindleFlaskTuning,
+    pub snare: SnareTuning,
+    pub soot_pot: SootPotTuning,
+    pub tallow_skin: TallowSkinTuning,
+    pub surge: SurgeTuning,
+}
+
+/// Kindle Flask: a lobbed flask; where it lands a pool heals the Shrikes standing in it
+/// (teammates and you; in PvP only you) through the normal healing rules.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KindleFlaskTuning {
+    pub charges: u32,
+    pub recharge_time: f32,
+    pub speed: f32,
+    /// Launch angle above the aim.
+    pub angle_degrees: f32,
+    pub gravity: f32,
+    pub projectile_radius: f32,
+    pub flight_time: f32,
+    pub radius: f32,
+    pub duration: f32,
+    /// HP per second to everyone it heals.
+    pub heal_rate: f32,
+}
+
+impl Default for KindleFlaskTuning {
+    fn default() -> Self {
+        Self {
+            charges: 1,
+            recharge_time: 14.0,
+            speed: 16.0,
+            angle_degrees: 15.0,
+            gravity: 16.0,
+            projectile_radius: 0.15,
+            flight_time: 3.0,
+            radius: 3.5,
+            duration: 4.0,
+            heal_rate: 10.0,
+        }
+    }
+}
+
+/// Snare: a wax trap thrown to the floor. It arms after `arm_time`; the first hostile within
+/// `trigger_radius` is Pinned (the Pinning Arrow's status, `pinning_arrow` times) and takes
+/// `damage`. Up to `max_live` out, each lasts `lifetime`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnareTuning {
+    pub charges: u32,
+    pub recharge_time: f32,
+    pub speed: f32,
+    pub gravity: f32,
+    pub projectile_radius: f32,
+    pub arm_time: f32,
+    pub trigger_radius: f32,
+    pub damage: f32,
+    pub lifetime: f32,
+    pub max_live: u32,
+}
+
+impl Default for SnareTuning {
+    fn default() -> Self {
+        Self {
+            charges: 2,
+            recharge_time: 10.0,
+            speed: 12.0,
+            gravity: 20.0,
+            projectile_radius: 0.15,
+            arm_time: 0.6,
+            trigger_radius: 1.8,
+            damage: 15.0,
+            lifetime: 20.0,
+            max_live: 2,
+        }
+    }
+}
+
+/// Soot Pot: bursts into a soot cloud Moulds can't see into, out of or through.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SootPotTuning {
+    pub charges: u32,
+    pub recharge_time: f32,
+    pub speed: f32,
+    pub gravity: f32,
+    pub projectile_radius: f32,
+    /// Seconds in flight before it bursts where it is.
+    pub flight_time: f32,
+    pub radius: f32,
+    pub duration: f32,
+}
+
+impl Default for SootPotTuning {
+    fn default() -> Self {
+        Self {
+            charges: 1,
+            recharge_time: 15.0,
+            speed: 18.0,
+            gravity: 16.0,
+            projectile_radius: 0.15,
+            flight_time: 2.0,
+            radius: 5.0,
+            duration: 7.0,
+        }
+    }
+}
+
+/// Tallow Skin: for `duration` the player takes `damage_scale` × damage and no knockback.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TallowSkinTuning {
+    pub charges: u32,
+    pub recharge_time: f32,
+    pub duration: f32,
+    pub damage_scale: f32,
+}
+
+impl Default for TallowSkinTuning {
+    fn default() -> Self {
+        Self {
+            charges: 1,
+            recharge_time: 16.0,
+            duration: 3.0,
+            damage_scale: 0.5,
+        }
+    }
+}
+
+/// Surge: an instant burst of speed along the look (an impulse, mostly horizontal).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SurgeTuning {
+    pub charges: u32,
+    pub recharge_time: f32,
+    pub speed: f32,
+    /// Share of the look's vertical part the impulse keeps.
+    pub vertical: f32,
+}
+
+impl Default for SurgeTuning {
+    fn default() -> Self {
+        Self {
+            charges: 2,
+            recharge_time: 6.0,
+            speed: 18.0,
+            vertical: 0.3,
+        }
+    }
+}
+
 /// Networking feel.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1702,13 +2043,15 @@ impl Default for GrindTuning {
 }
 
 /// Gun game (`sim::gungame`): the fixed ladder of weapon builds players climb with kills (the
-/// Fist comes after the last one) and what a punch kill costs the victim. See
+/// melee finale comes after the last one) and what a punch kill costs the victim. See
 /// `docs/style_modes.md`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GunGameTuning {
     /// One build per tier, first to last. A kill with your tier's weapon moves you up.
     pub ladder: Vec<crate::loadout::WeaponBuild>,
+    /// The tier after the ladder: a kill with this weapon wins the match.
+    pub finale: crate::loadout::WeaponBuild,
     /// Tiers a punch kill knocks the victim down.
     pub punch_demotes: u32,
 }
@@ -1723,6 +2066,7 @@ impl Default for GunGameTuning {
         ];
         Self {
             ladder: ladder.iter().map(|w| w.default_build()).collect(),
+            finale: Trimmer.default_build(),
             punch_demotes: 1,
         }
     }
@@ -1851,13 +2195,21 @@ impl CombatTuning {
         self.ember_arrow.sanitize();
         self.burn.sanitize();
         self.enemy_projectiles.sanitize();
+        self.trimmer.sanitize();
+        self.tamper.sanitize();
+        self.lunge.sanitize();
+        self.whirl.sanitize();
+        self.hurl.sanitize();
+        self.upswing.sanitize();
+        self.knacks.sanitize();
     }
 }
 
 impl EmberTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_MULT; heal_fraction, melee_heal_fraction);
+        clamp!(self, d, 0.0, MAX_MULT; heal_fraction, melee_heal_fraction,
+            melee_weapon_heal_fraction);
         clamp!(self, d, 0.0, MAX_DIST; radius, death_radius, merge_distance);
         clamp!(self, d, 0.0, MAX_TIME; lifetime, death_lifetime, merge_window);
         clamp!(self, d, 0.0, MAX_DAMAGE; death_pool);
@@ -2171,6 +2523,140 @@ impl EnemyProjectileTuning {
     }
 }
 
+impl TrimmerTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage);
+        clamp!(self, d, 0.0, MAX_TIME; interval);
+        clamp!(self, d, 0.0, MAX_DIST; reach);
+        clamp!(self, d, 0.0, 360.0; arc_degrees);
+        clamp!(self, d, 0.0, MAX_SPEED; knockback);
+        clamp!(self, d, 0.0, MAX_MULT; ability_power);
+        clamp_count!(self; max_targets);
+    }
+}
+
+impl TamperTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage);
+        clamp!(self, d, 0.0, MAX_TIME; interval);
+        clamp!(self, d, 0.0, MAX_DIST; reach);
+        clamp!(self, d, 0.0, 360.0; arc_degrees);
+        clamp!(self, d, 0.0, MAX_SPEED; knockback);
+        clamp!(self, d, 0.0, MAX_MULT; ability_power);
+    }
+}
+
+impl LungeTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_SPEED; speed, knockback);
+        clamp!(self, d, 0.0, 1.0; vertical);
+        clamp!(self, d, 0.0, MAX_TIME; window, cooldown);
+        clamp!(self, d, 0.0, MAX_DIST; reach);
+        clamp!(self, d, 0.0, MAX_MULT; damage_scale);
+    }
+}
+
+impl WhirlTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_DIST; radius);
+        clamp!(self, d, 0.0, MAX_MULT; damage_scale, up);
+        clamp!(self, d, 0.0, MAX_SPEED; knockback);
+        clamp!(self, d, 0.0, MAX_TIME; cooldown);
+    }
+}
+
+impl HurlTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_SPEED; speed, knockback);
+        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
+        clamp!(self, d, 0.0, 10.0; projectile_radius);
+        clamp!(self, d, 0.0, MAX_TIME; flight_time, cooldown);
+        clamp!(self, d, 0.0, MAX_MULT; damage_scale);
+    }
+}
+
+impl UpswingTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_MULT; damage_scale);
+        clamp!(self, d, 0.0, MAX_SPEED; launch, hop);
+        clamp!(self, d, 0.0, MAX_TIME; cooldown);
+    }
+}
+
+impl KnackTuning {
+    pub fn sanitize(&mut self) {
+        self.kindle_flask.sanitize();
+        self.snare.sanitize();
+        self.soot_pot.sanitize();
+        self.tallow_skin.sanitize();
+        self.surge.sanitize();
+    }
+}
+
+impl KindleFlaskTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, flight_time, duration);
+        clamp!(self, d, 0.0, MAX_SPEED; speed);
+        clamp!(self, d, 0.0, 90.0; angle_degrees);
+        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
+        clamp!(self, d, 0.0, 10.0; projectile_radius);
+        clamp!(self, d, 0.0, MAX_DIST; radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; heal_rate);
+        clamp_count!(self; charges);
+    }
+}
+
+impl SnareTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, arm_time, lifetime);
+        clamp!(self, d, 0.0, MAX_SPEED; speed);
+        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
+        clamp!(self, d, 0.0, 10.0; projectile_radius);
+        clamp!(self, d, 0.0, MAX_DIST; trigger_radius);
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage);
+        clamp_count!(self; charges, max_live);
+    }
+}
+
+impl SootPotTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, flight_time, duration);
+        clamp!(self, d, 0.0, MAX_SPEED; speed);
+        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
+        clamp!(self, d, 0.0, 10.0; projectile_radius);
+        clamp!(self, d, 0.0, MAX_DIST; radius);
+        clamp_count!(self; charges);
+    }
+}
+
+impl TallowSkinTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, duration);
+        clamp!(self, d, 0.0, 1.0; damage_scale);
+        clamp_count!(self; charges);
+    }
+}
+
+impl SurgeTuning {
+    pub fn sanitize(&mut self) {
+        let d = Self::default();
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time);
+        clamp!(self, d, 0.0, MAX_SPEED; speed);
+        clamp!(self, d, 0.0, 1.0; vertical);
+        clamp_count!(self; charges);
+    }
+}
+
 impl NetTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
@@ -2266,6 +2752,7 @@ impl GunGameTuning {
         if self.ladder.is_empty() {
             self.ladder = Self::default().ladder;
         }
+        self.finale = self.finale.sanitized();
         self.punch_demotes = self.punch_demotes.min(MAX_LADDER as u32);
     }
 }
@@ -2442,6 +2929,13 @@ mod tests {
             &mut expected.combat.burn.max_stacks,
             &mut expected.combat.kiln.burn_stacks,
             &mut expected.combat.ember_arrow.burn_stacks,
+            &mut expected.combat.trimmer.max_targets,
+            &mut expected.combat.knacks.kindle_flask.charges,
+            &mut expected.combat.knacks.snare.charges,
+            &mut expected.combat.knacks.snare.max_live,
+            &mut expected.combat.knacks.soot_pot.charges,
+            &mut expected.combat.knacks.tallow_skin.charges,
+            &mut expected.combat.knacks.surge.charges,
         ] {
             *n = 3;
         }

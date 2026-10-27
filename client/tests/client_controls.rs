@@ -45,6 +45,7 @@ fn empty_loadout_slots_are_skipped() {
             Some(WeaponKind::Longwick.default_build()),
             Some(WeaponKind::Kiln.default_build()),
         ],
+        ..Default::default()
     };
     assert!(
         w.set_loadout(&loadout),
@@ -61,7 +62,7 @@ fn empty_loadout_slots_are_skipped() {
     assert_eq!(w.current, 3);
     assert_eq!(w.press_slot(9), WeaponChange::None);
     // A loadout with nothing in it changes nothing.
-    assert!(!w.set_loadout(&Loadout { slots: [None; 4] }));
+    assert!(!w.set_loadout(&Loadout::unarmed()));
     assert_eq!(w.current, 3);
 }
 

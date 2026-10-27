@@ -1041,6 +1041,35 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.audio.play(Sfx::ThornThrow, PlayParams::at(at));
         }
         Fx::ThornPlanted { position } => thorn_plant(ctx, q(*position)),
+        // Melee and knacks: placeholders (punch / thorn looks and sounds) until the
+        // arsenal-client work (docs/refit.md).
+        Fx::Swing { player, hits, .. } => {
+            if Some(*player) == ctx.local {
+                return;
+            }
+            let vis = ctx.remote.visual_mut(NetId::player(*player));
+            vis.punching = 0.01;
+            let at = vis.head;
+            let sfx = if *hits > 0 { Sfx::PunchHit } else { Sfx::Punch };
+            ctx.audio.play(sfx, PlayParams::at(at));
+        }
+        Fx::LungeStruck { position, .. } => {
+            ctx.audio.play(Sfx::PunchHit, PlayParams::at(q(*position)));
+        }
+        Fx::Knack { player, .. } => {
+            if Some(*player) == ctx.local {
+                return;
+            }
+            let vis = ctx.remote.visual_mut(NetId::player(*player));
+            vis.punching = 0.01;
+            let at = vis.head;
+            ctx.audio.play(Sfx::ThornThrow, PlayParams::at(at));
+        }
+        Fx::SnareSprung { position } => {
+            let p = q(*position);
+            ctx.effects.sparks(p, Vec3::Y, 6);
+            ctx.audio.play(Sfx::ThornShatter, PlayParams::at(p));
+        }
         Fx::ThornExpired { id } => {
             if let Some(p) = (ctx.thorn_position)(*id) {
                 ctx.effects

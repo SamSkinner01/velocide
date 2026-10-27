@@ -13,7 +13,7 @@ use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
 use shared::level::{Checkpoint, LevelDef, LevelKind, SpawnPoint, Volume};
-use shared::loadout::Loadout;
+use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::lobby::{Difficulty, GameMode, MatchSettings};
 use shared::protocol::{NetFrame, NetId, player_flags};
 use shared::sim::modes::{authored_enemies, grade_player};
@@ -1339,6 +1339,12 @@ fn tier(a: &Arena, p: PlayerId) -> u8 {
     a.world.gun_game_tier(p)
 }
 
+/// What a player who kept the default knack carries on a tier with `build`: the build alone,
+/// the Thorn applied as Surge (gun game is PvP).
+fn carried(build: WeaponBuild) -> Loadout {
+    Loadout::single(build).with_knack(Knack::Surge)
+}
+
 #[test]
 fn gun_game_promotes_with_the_tier_weapon_only() {
     let (mut a, ids) = gun_game(2);
@@ -1346,7 +1352,7 @@ fn gun_game_promotes_with_the_tier_weapon_only() {
     let ladder = a.tuning.gun_game.ladder.clone();
     // Everyone carries the first build and nothing else.
     for p in [p0, p1] {
-        assert_eq!(a.world.loadout(p), Loadout::single(ladder[0]));
+        assert_eq!(a.world.loadout(p), carried(ladder[0]));
         assert_eq!(tier(&a, p), 0);
     }
     // A kill with another weapon (say a bomb of an old tier) doesn't count.
@@ -1367,13 +1373,13 @@ fn gun_game_promotes_with_the_tier_weapon_only() {
     );
     assert_eq!(tier(&a, p0), 1);
     let w = &a.world.players[&p0].combat.weapons;
-    assert_eq!(w.loadout, Loadout::single(ladder[1]));
+    assert_eq!(w.loadout, carried(ladder[1]));
     assert_eq!(w.current(), ladder[1].weapon);
     // It sticks through a death and a respawn.
     let ev = kill_with(&mut a, p0, p1, Attack::Slam);
     assert!(gun_events(&ev).is_empty(), "slam kills don't count");
     back_up(&mut a, p0);
-    assert_eq!(a.world.loadout(p0), Loadout::single(ladder[1]));
+    assert_eq!(a.world.loadout(p0), carried(ladder[1]));
     // The scoreboard carries the tiers.
     let board = a.world.scoreboard();
     let row = board.rows.iter().find(|r| r.player == p0).unwrap();
@@ -1388,7 +1394,7 @@ fn punch_kills_knock_the_victim_down_a_tier() {
     a.world.mode.player(p1).stats.tier = 3;
     a.tick();
     let ladder = a.tuning.gun_game.ladder.clone();
-    assert_eq!(a.world.loadout(p1), Loadout::single(ladder[3]));
+    assert_eq!(a.world.loadout(p1), carried(ladder[3]));
     let ev = kill_with(&mut a, p1, p0, Attack::Fist);
     assert_eq!(
         gun_events(&ev),
@@ -1399,13 +1405,9 @@ fn punch_kills_knock_the_victim_down_a_tier() {
         }]
     );
     assert_eq!(tier(&a, p1), 2);
-    assert_eq!(
-        tier(&a, p0),
-        0,
-        "the puncher doesn't climb (the Fist isn't their tier)"
-    );
+    assert_eq!(tier(&a, p0), 0, "the puncher doesn't climb");
     back_up(&mut a, p1);
-    assert_eq!(a.world.loadout(p1), Loadout::single(ladder[2]));
+    assert_eq!(a.world.loadout(p1), carried(ladder[2]));
     // Nobody goes below the first tier.
     let ev = kill_with(&mut a, p0, p1, Attack::Fist);
     assert!(gun_events(&ev).is_empty());
@@ -1413,39 +1415,44 @@ fn punch_kills_knock_the_victim_down_a_tier() {
 }
 
 #[test]
-fn a_punch_kill_on_the_fist_tier_wins_the_gun_game() {
+fn a_kill_with_the_finale_weapon_wins_the_gun_game() {
     let (mut a, ids) = gun_game(3);
     let (p0, p1, p2) = (ids[0], ids[1], ids[2]);
     let ladder = a.tuning.gun_game.ladder.clone();
-    let fist = ladder.len() as u8;
-    // The last weapon's kill reaches the Fist.
-    a.world.mode.player(p0).stats.tier = fist - 1;
+    let finale = ladder.len() as u8;
+    // The last weapon's kill reaches the melee finale.
+    a.world.mode.player(p0).stats.tier = finale - 1;
     a.world.mode.player(p1).stats.tier = 4;
     a.tick();
     let ev = kill_with(
         &mut a,
         p2,
         p0,
-        Attack::primary(ladder[fist as usize - 1].weapon),
+        Attack::primary(ladder[finale as usize - 1].weapon),
     );
     assert!(gun_events(&ev).contains(&GunGameEvent::Promoted {
         player: p0,
-        tier: fist,
+        tier: finale,
         victim: p2,
     }));
-    // On the Fist tier weapon kills count for nothing ...
+    // On the finale, kills with anything else count for nothing (a projectile of the last
+    // weapon still flying), and a punch kill only knocks the victim down ...
     back_up(&mut a, p2);
-    let held = a.world.players[&p0].combat.weapons.current();
-    let ev = kill_with(&mut a, p2, p0, Attack::primary(held));
+    let ev = kill_with(&mut a, p2, p0, Attack::primary(ladder[0].weapon));
     assert!(gun_events(&ev).is_empty() && results(&ev).is_none());
-    assert_eq!(tier(&a, p0), fist);
-    // ... a punch kill wins.
+    back_up(&mut a, p2);
     let ev = kill_with(&mut a, p1, p0, Attack::Fist);
+    assert!(results(&ev).is_none(), "a punch doesn't win any more");
+    assert_eq!(tier(&a, p0), finale);
+    // ... a kill with the finale weapon, its abilities included, wins.
+    back_up(&mut a, p1);
+    assert_eq!(a.tuning.gun_game.finale.abilities[1], Ability::Hurl);
+    let ev = kill_with(&mut a, p1, p0, Attack::Hurl);
     let r = results(&ev).expect("the ladder is climbed");
     assert_eq!(r.reason, EndReason::Ladder);
     assert_eq!(r.winner, Some(p0));
     assert_eq!(r.players[0].player, p0);
-    assert_eq!(r.players[0].stats.tier, fist + 1, "past the Fist");
+    assert_eq!(r.players[0].stats.tier, finale + 1, "past the finale");
     assert_eq!(r.players[1].player, p1, "then by tier");
     assert_eq!(r.players[1].stats.tier, 3, "punched down from 4");
     let g = r.gun_game.expect("gun game results");
@@ -1454,43 +1461,67 @@ fn a_punch_kill_on_the_fist_tier_wins_the_gun_game() {
 }
 
 #[test]
-fn the_fist_tier_is_fists_only() {
+fn the_finale_tier_is_the_melee_weapon() {
     let (mut a, ids) = gun_game(2);
     let (p0, p1) = (ids[0], ids[1]);
-    let fist = a.tuning.gun_game.ladder.len() as u8;
-    a.world.mode.player(p0).stats.tier = fist;
+    let finale = a.tuning.gun_game.ladder.len() as u8;
+    let build = a.tuning.gun_game.finale;
+    assert_eq!(build, WeaponKind::Trimmer.default_build());
+    a.world.mode.player(p0).stats.tier = finale;
     a.tick();
-    // No weapon in hand: forced unarmed, replicated as such.
-    assert_eq!(a.world.loadout(p0), Loadout::unarmed());
-    assert!(a.world.players[&p0].combat.weapons.is_unarmed());
+    // The finale's build, a forced loadout like every tier, replicated as held.
+    assert_eq!(a.world.loadout(p0), carried(build));
+    let w = a.world.players[&p0].combat.weapons;
+    assert!(!w.is_unarmed());
+    assert_eq!(w.current(), WeaponKind::Trimmer);
     let mut frame = NetFrame::new();
     a.world.replicate(&a.tuning, &mut frame);
     let e = frame.get(NetId::player(p0)).unwrap();
-    assert!(!shared::protocol::player_armed(e.state));
-    // The trigger and the abilities do nothing; the fist still punches.
-    let ev = hold_buttons(&mut a, p0, Buttons::FIRE | Buttons::ALT_FIRE, 60);
-    assert!(!ev.iter().any(|e| matches!(e, SimEvent::Shot(_))), "{ev:?}");
-    assert!(a.world.projectiles.is_empty());
-    let ev = hold_buttons(&mut a, p0, Buttons::PUNCH, 1);
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, SimEvent::Punched { player, .. } if *player == p0))
+    assert!(shared::protocol::player_armed(e.state));
+    assert_eq!(
+        shared::protocol::player_weapon(e.state).0,
+        WeaponKind::Trimmer
     );
-    // Still fists only after a death.
+    // The trigger swings it.
+    let ev = hold_buttons(&mut a, p0, Buttons::FIRE, 30);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        SimEvent::Swing { player, attack: Attack::Trimmer, .. } if *player == p0
+    )));
+    // Still the finale after a death.
     kill_with(&mut a, p0, p1, Attack::Slam);
     back_up(&mut a, p0);
-    assert!(a.world.players[&p0].combat.weapons.is_unarmed());
-    // Punched down a tier: armed again with the last build.
+    assert_eq!(a.world.loadout(p0), carried(build));
+    // Punched down a tier: the last build of the ladder again.
     let ev = kill_with(&mut a, p0, p1, Attack::Fist);
     assert!(gun_events(&ev).contains(&GunGameEvent::Demoted {
         player: p0,
-        tier: fist - 1,
+        tier: finale - 1,
         by: p1,
     }));
     back_up(&mut a, p0);
     let last = *a.tuning.gun_game.ladder.last().unwrap();
-    assert_eq!(a.world.loadout(p0), Loadout::single(last));
-    assert!(!a.world.players[&p0].combat.weapons.is_unarmed());
+    assert_eq!(a.world.loadout(p0), carried(last));
+}
+
+#[test]
+fn gun_game_keeps_the_players_knack() {
+    let (mut a, ids) = gun_game(2);
+    let (p0, p1) = (ids[0], ids[1]);
+    let ladder = a.tuning.gun_game.ladder.clone();
+    // A PvP knack rides along every tier; the Thorn (PvE only) applies as Surge.
+    a.world
+        .request_loadout(p0, Loadout::default().with_knack(Knack::Snare));
+    a.tick();
+    let snare = Loadout::single(ladder[0]).with_knack(Knack::Snare);
+    assert_eq!(a.world.loadout(p0), snare);
+    assert_eq!(a.world.loadout(p1), carried(ladder[0]));
+    let ev = kill_with(&mut a, p1, p0, Attack::primary(ladder[0].weapon));
+    assert!(!gun_events(&ev).is_empty());
+    assert_eq!(
+        a.world.loadout(p0),
+        Loadout::single(ladder[1]).with_knack(Knack::Snare)
+    );
 }
 
 /// Holds `buttons` for `ticks`, then releases them for a tick; the events.
@@ -1530,7 +1561,7 @@ fn gun_game_late_joiners_start_on_the_lowest_tier() {
     a.ticks(2);
     assert_eq!(tier(&a, late), 2);
     let ladder = a.tuning.gun_game.ladder.clone();
-    assert_eq!(a.world.loadout(late), Loadout::single(ladder[2]));
+    assert_eq!(a.world.loadout(late), carried(ladder[2]));
 }
 
 #[test]

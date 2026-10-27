@@ -947,7 +947,8 @@ impl InGame {
                         common.audio.play_2d(Sfx::Punch);
                         punched = true;
                     }
-                    FireIntent::ThrowThorn => {
+                    // Every knack throws like the Thorn until arsenal-client gives each its own.
+                    FireIntent::Knack(_) => {
                         viewmodel.throw_thorn();
                         common.audio.play_2d(Sfx::ThornThrow);
                     }

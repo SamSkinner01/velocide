@@ -73,7 +73,7 @@ impl InGame {
         });
         HudWeapons {
             loadout: if s.is_unarmed() {
-                Loadout { slots: [None; 4] }
+                Loadout::unarmed()
             } else {
                 s.loadout
             },
