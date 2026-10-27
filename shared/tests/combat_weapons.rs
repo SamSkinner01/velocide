@@ -478,9 +478,11 @@ fn arc_zaps_and_chains_twice() {
     let body = dummy_body(&a, d[0]);
     a.aim(p, body);
     let ev = a.tap(p, Buttons::FIRE, 0);
-    assert_eq!(dmg(&ev, d[0]), 6.0);
-    assert_eq!(dmg(&ev, d[1]), 4.5);
-    assert_eq!(dmg(&ev, d[2]), 3.375);
+    let arc = &a.tuning.combat.arclash;
+    let (zap, falloff) = (arc.zap_damage, arc.chain_falloff);
+    assert_eq!(dmg(&ev, d[0]), zap);
+    assert_eq!(dmg(&ev, d[1]), zap * falloff);
+    assert_eq!(dmg(&ev, d[2]), zap * falloff * falloff);
     assert_eq!(dmg(&ev, d[3]), 0.0, "two jumps at most");
     assert!(
         hits_on(&ev, HitTarget::Entity(d[1]))[0]
@@ -527,10 +529,12 @@ fn arc_chains_prefer_branded_and_need_line_of_sight() {
     a.aim(p, body);
     let ev = a.tap(p, Buttons::FIRE, 0);
     assert_eq!(dmg(&ev, walled), 0.0, "no chain through walls");
+    let (zap, falloff) = (t.combat.arclash.zap_damage, t.combat.arclash.chain_falloff);
     // The branded one (farther) first, x1.35 ...
-    assert!((dmg(&ev, branded) - 4.5 * 1.35).abs() < 1e-3);
+    let brand = t.combat.quill.brand_multiplier;
+    assert!((dmg(&ev, branded) - zap * falloff * brand).abs() < 1e-3);
     // ... then the next jump from there.
-    assert_eq!(dmg(&ev, near), 3.375);
+    assert_eq!(dmg(&ev, near), zap * falloff * falloff);
 }
 
 #[test]
@@ -569,7 +573,7 @@ fn wisp_drifts_zaps_and_pops() {
         .collect();
     assert_eq!(pops.len(), 1);
     assert!(pops[0].z < -19.0, "popped on the wall: {}", pops[0]);
-    // ... zapping whatever was within 6 m every 0.2 s (8 each).
+    // ... zapping whatever was within 6 m every 0.2 s (11 each).
     let zaps = ev
         .iter()
         .filter(|e| matches!(e, SimEvent::WispZap { .. }))
@@ -582,8 +586,9 @@ fn wisp_drifts_zaps_and_pops() {
             .map(|d| d.dealt)
             .sum::<f32>()
     };
-    assert!(zapped(in_path) >= 16.0 && zapped(in_path) % 8.0 == 0.0);
-    assert!(zapped(beside) >= 8.0 && zapped(beside) % 8.0 == 0.0);
+    let zap = a.tuning.combat.arclash.wisp_zap_damage;
+    assert!(zapped(in_path) >= 2.0 * zap && zapped(in_path) % zap == 0.0);
+    assert!(zapped(beside) >= zap && zapped(beside) % zap == 0.0);
     assert!(!a.world.projectiles.contains_key(&wisp));
 }
 
@@ -698,8 +703,10 @@ fn bombs_explode_on_hostiles_and_on_their_fuse() {
             .flags
             .contains(DamageFlags::EXPLOSIVE | DamageFlags::DIRECT)
     );
+    // A direct hit: full damage but for the bomb's own radius of falloff.
+    let bomb = a.tuning.combat.tumbler.bomb_damage;
     assert!(
-        hit[0].dealt > 60.0 && hit[0].dealt <= 65.0,
+        hit[0].dealt > 0.92 * bomb && hit[0].dealt <= bomb,
         "{}",
         hit[0].dealt
     );

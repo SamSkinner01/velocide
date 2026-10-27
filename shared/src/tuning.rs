@@ -584,7 +584,7 @@ impl Default for BellowsTuning {
             both_pellet_damage: 8.0,
             both_cone_degrees: 5.0,
             both_recoil: 9.0,
-            both_cooldown: 1.4,
+            both_cooldown: 1.8,
             ability_power: 1.0,
         }
     }
@@ -636,7 +636,7 @@ impl Default for ArclashTuning {
         Self {
             zap_interval: 0.1,
             zap_range: 30.0,
-            zap_damage: 6.0,
+            zap_damage: 7.0,
             chain_range: 7.0,
             chain_jumps: 2,
             chain_falloff: 0.75,
@@ -645,11 +645,11 @@ impl Default for ArclashTuning {
             wisp_radius: 0.3,
             wisp_zap_interval: 0.2,
             wisp_zap_range: 6.0,
-            wisp_zap_damage: 8.0,
+            wisp_zap_damage: 11.0,
             wisp_pop_radius: 4.0,
-            wisp_pop_damage: 25.0,
+            wisp_pop_damage: 30.0,
             wisp_pop_knockback: 8.0,
-            wisp_cooldown: 2.8,
+            wisp_cooldown: 2.4,
             discharge_charge_time: 1.0,
             discharge_min_radius: 3.5,
             discharge_max_radius: 8.0,
@@ -721,7 +721,7 @@ impl Default for TumblerTuning {
             bomb_fuse: 1.6,
             bomb_projectile_radius: 0.2,
             bomb_radius: 4.5,
-            bomb_damage: 65.0,
+            bomb_damage: 72.0,
             bomb_knockback: 20.0,
             interval: 0.85,
             breach_reach: 3.0,
@@ -793,8 +793,8 @@ impl Default for ThresherTuning {
     fn default() -> Self {
         Self {
             pellets: 7,
-            pellet_damage: 7.0,
-            cone_degrees: 11.0,
+            pellet_damage: 8.0,
+            cone_degrees: 10.0,
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
@@ -929,9 +929,9 @@ impl Default for KilnTuning {
     fn default() -> Self {
         Self {
             range: 13.0,
-            cone_degrees: 16.0,
+            cone_degrees: 20.0,
             interval: 0.08,
-            damage: 3.0,
+            damage: 4.0,
             burn_stacks: 1,
             ability_power: 0.85,
         }
@@ -983,9 +983,9 @@ impl Default for FlurryTuning {
         Self {
             shots: 3,
             gap: 0.06,
-            damage_scale: 0.8,
+            damage_scale: 1.0,
             spread_degrees: 1.0,
-            cooldown: 1.6,
+            cooldown: 1.4,
         }
     }
 }
@@ -1125,9 +1125,9 @@ impl Default for LimpetTuning {
             max_live: 3,
             fuse: 20.0,
             explosion_radius: 3.5,
-            damage: 50.0,
+            damage: 40.0,
             knockback: 14.0,
-            cooldown: 0.4,
+            cooldown: 0.9,
             detonate_hold: 0.25,
         }
     }
@@ -1183,7 +1183,7 @@ impl Default for TripleNockTuning {
         Self {
             arrows: 3,
             fan_degrees: 7.0,
-            damage_scale: 1.0,
+            damage_scale: 0.6,
             min_draw: 0.3,
             cooldown: 1.4,
         }
@@ -1240,9 +1240,9 @@ pub struct EmberArrowTuning {
 impl Default for EmberArrowTuning {
     fn default() -> Self {
         Self {
-            damage_scale: 0.75,
+            damage_scale: 0.9,
             explosion_radius: 3.0,
-            damage: 30.0,
+            damage: 35.0,
             knockback: 8.0,
             burn_stacks: 2,
             cooldown: 3.0,
@@ -1267,7 +1267,7 @@ pub struct BurnTuning {
 impl Default for BurnTuning {
     fn default() -> Self {
         Self {
-            dps: 4.0,
+            dps: 5.0,
             max_stacks: 3,
             duration: 3.0,
             tick_interval: 0.25,

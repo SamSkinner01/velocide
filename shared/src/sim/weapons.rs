@@ -605,11 +605,22 @@ fn step_build(
         }
     }
 
+    // Both Barrels and Volley are the primary's shot fired another way: they wait for it to be
+    // ready and use it up, so the primary doesn't also fire that tick (both at once was a body
+    // one-shot in PvP).
+    let ability = build.ability(s.mode);
+    let takes_shot = takes_primary_shot(ability);
+    let ability_takes_shot = takes_shot
+        && w.class() != WeaponClass::Draw
+        && held.contains(Buttons::ALT_FIRE)
+        && s.alt_cooldown[si] == 0
+        && s.primary_cooldown[si] == 0;
+
     // Primary.
     let fire = held.contains(Buttons::FIRE);
     match w.primary_style() {
         PrimaryStyle::Auto => {
-            if fire && s.primary_cooldown[si] == 0 {
+            if fire && !ability_takes_shot && s.primary_cooldown[si] == 0 {
                 let mut charge = 0.0;
                 if w == WeaponKind::Lancet {
                     let (per_shot, max) = bloom_ticks(t, tick_rate);
@@ -669,7 +680,6 @@ fn step_build(
     }
 
     // Ability.
-    let ability = build.ability(s.mode);
     let alt_held = held.contains(Buttons::ALT_FIRE);
     let alt_cd = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
     if w.class() == WeaponClass::Draw {
@@ -744,20 +754,26 @@ fn step_build(
             }
         }
         AbilityStyle::Instant => {
-            if alt_held && s.alt_cooldown[si] == 0 {
+            if alt_held && s.alt_cooldown[si] == 0 && (!takes_shot || s.primary_cooldown[si] == 0) {
                 out.push(FireIntent::Ability {
                     weapon: w,
                     ability,
                     charge: 0.0,
                 });
                 s.alt_cooldown[si] = alt_cd;
-                if matches!(ability, Ability::BothBarrels | Ability::Volley) {
-                    // Everything at once: the primary has to wait its interval too.
-                    s.primary_cooldown[si] = s.primary_cooldown[si].max(interval);
+                if takes_shot {
+                    // It was the primary's shot: the primary waits its interval.
+                    s.primary_cooldown[si] = interval;
                 }
             }
         }
     }
+}
+
+/// Abilities that are the primary's shot fired another way (Both Barrels: both barrels at
+/// once; Volley: ten of its shots at once). They need the primary ready and use it up.
+fn takes_primary_shot(ability: Ability) -> bool {
+    matches!(ability, Ability::BothBarrels | Ability::Volley)
 }
 
 /// Deterministic pseudo-random numbers for spread (splitmix64 of a seed).
@@ -1415,6 +1431,61 @@ mod tests {
             secs_to_ticks(t.bellows.interval, 60, 1)
         );
         assert!(step_weapons(&mut s, &input(Buttons::FIRE, 1, 1), true, &t, 60).is_empty());
+        // Both buttons on one tick: the ability takes the shot, the primary doesn't also fire.
+        let both = Buttons::FIRE | Buttons::ALT_FIRE;
+        let out = step_weapons(
+            &mut WeaponState::default(),
+            &input(both, 1, 1),
+            true,
+            &t,
+            60,
+        );
+        assert!(
+            matches!(
+                out[..],
+                [FireIntent::Ability {
+                    ability: Ability::BothBarrels,
+                    ..
+                }]
+            ),
+            "{out:?}"
+        );
+        let mut s = WeaponState::new(Loadout::single(WeaponBuild {
+            weapon: WeaponKind::Riveter,
+            abilities: [Ability::Volley, Ability::Wisp],
+        }));
+        let out = step_weapons(&mut s, &input(both, 0, 0), true, &t, 60);
+        assert!(
+            matches!(
+                out[..],
+                [FireIntent::Ability {
+                    ability: Ability::Volley,
+                    ..
+                }]
+            ),
+            "{out:?}"
+        );
+        // It waits for the primary: a blast, then the ability only once the blast's interval
+        // is over (even with its own cooldown ready long before).
+        let mut s = WeaponState::default();
+        let out = step_weapons(&mut s, &input(Buttons::FIRE, 1, 1), true, &t, 60);
+        assert!(matches!(out[..], [FireIntent::Primary { .. }]));
+        let interval = secs_to_ticks(t.bellows.interval, 60, 1);
+        for _ in 1..interval {
+            let out = step_weapons(&mut s, &input(both, 1, 1), true, &t, 60);
+            assert!(out.is_empty(), "{out:?}");
+        }
+        let out = step_weapons(&mut s, &input(both, 1, 1), true, &t, 60);
+        assert!(
+            matches!(
+                out[..],
+                [FireIntent::Ability {
+                    ability: Ability::BothBarrels,
+                    ..
+                }]
+            ),
+            "{out:?}"
+        );
         // Gust doesn't.
         let mut s = WeaponState::default();
         step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 0), true, &t, 60);

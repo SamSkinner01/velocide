@@ -1,10 +1,15 @@
 //! The expansion arsenal in a live world (docs/arsenal.md): every new primary and ability, the
 //! Burn and Pinned status effects (enemies and PvP players), burning patches, abilities on a
-//! lesser weapon of their class, and the PvP profile's one-shot rules and times to kill.
+//! lesser weapon of their class, and the PvP profile's one-shot rules and times to kill (from
+//! the numbers, and measured in play with the balance harness).
 
+mod balance_support;
 mod combat_support;
 mod weapon_support;
 
+use balance_support::{
+    Aim, Assume, Side, Stop, Trigger, build_with, on_player, per_trigger, per_use, weapon_range,
+};
 use combat_support::*;
 use glam::Vec3;
 use shared::input::Buttons;
@@ -116,7 +121,8 @@ fn thresher_is_an_automatic_scattergun() {
     let ev = hold(&mut a, p, Buttons::FIRE, 54, 2);
     let hits = hits_on(&ev, d, Attack::Thresher);
     assert_eq!(hits.len(), 21);
-    assert!(hits.iter().all(|h| h.info.amount == 7.0));
+    let pellet = Tuning::default().combat.thresher.pellet_damage;
+    assert!(hits.iter().all(|h| h.info.amount == pellet));
 }
 
 #[test]
@@ -203,11 +209,16 @@ fn kiln_sets_targets_alight_and_the_burn_outlasts_the_spray() {
         0,
         "every client sees it"
     );
-    // It keeps burning for `burn.duration` after the spray stops: 3 stacks x 4 dps x 3 s.
+    // It keeps burning for `burn.duration` after the spray stops: 3 stacks x 5 dps x 3 s.
     let ev = a.ticks(200);
     let burns: Vec<DamageEvent> = hits_on(&ev, d, Attack::Kiln);
     let total: f32 = burns.iter().map(|h| h.dealt).sum();
-    assert!((total - 36.0).abs() <= 3.0, "{total}");
+    let b = Tuning::default().combat.burn;
+    let expected = b.max_stacks as f32 * b.dps * b.duration;
+    assert!(
+        (total - expected).abs() <= b.max_stacks as f32 * b.dps * b.tick_interval,
+        "{total}"
+    );
     // Burn ticks are only BURN: never hitscan or projectile damage (no LONGSHOT).
     assert!(burns.iter().all(|h| h.info.flags == DamageFlags::BURN));
     assert!(!a.world.is_burning(target));
@@ -280,7 +291,8 @@ fn flurry_fires_three_quick_shots() {
         let ev = a.tick();
         a.set_buttons(p, Buttons::NONE);
         for h in hits_on(&ev, d, Attack::Flurry) {
-            assert!((h.info.amount - 14.0 * 0.8).abs() < 1e-4);
+            let c = Tuning::default().combat;
+            assert!((h.info.amount - c.lancet.damage * c.flurry.damage_scale).abs() < 1e-4);
             ticks.push(i);
         }
     }
@@ -393,9 +405,11 @@ fn limpets_stick_and_a_hold_detonates_them_all() {
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -5.0), 0.0, BIG);
     let head = dummy_head(&a, d);
     a.aim(p, head);
+    let c = Tuning::default().combat.limpet;
+    let gap = secs_to_ticks(c.cooldown, 60, 1) as u32;
     for _ in 0..3 {
-        // A tap throws (on release); 0.4 s between throws.
-        hold(&mut a, p, Buttons::ALT_FIRE, 2, 30);
+        // A tap throws (on release); `limpet.cooldown` between throws.
+        hold(&mut a, p, Buttons::ALT_FIRE, 2, gap);
     }
     let limpets = a.world.limpets_of(p);
     assert_eq!(limpets.len(), 3);
@@ -408,12 +422,12 @@ fn limpets_stick_and_a_hold_detonates_them_all() {
     assert_eq!(explosions(&ev, Attack::Limpet).len(), 3);
     assert!(a.world.limpets_of(p).is_empty());
     // Three direct blasts (a charge sits its radius off the surface: ~2 % falloff each).
-    assert!(damage_to(&ev, HitTarget::Entity(d)) > 140.0);
+    assert!(damage_to(&ev, HitTarget::Entity(d)) > 3.0 * c.damage * 0.95);
 
     // On the floor; and a fourth throw with three out detonates instead.
     a.aim(p, Vec3::new(0.0, 0.0, -3.0));
     for _ in 0..3 {
-        hold(&mut a, p, Buttons::ALT_FIRE, 2, 30);
+        hold(&mut a, p, Buttons::ALT_FIRE, 2, gap);
     }
     let floor: Vec<_> = a.world.limpets_of(p);
     assert_eq!(floor.len(), 3);
@@ -806,4 +820,97 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
 
     // PvE is the reference: nothing changed.
     assert_eq!(base.for_mode(GameMode::Campaign).combat, base.combat);
+}
+
+/// The PvP rules measured in play (`balance_support`, docs/balance.md): every trigger pull and
+/// every ability use on every carrier, at 3, 5 and 10 m, aimed at the body and at the head.
+/// Body: never 100. Head: only a full-draw arrow (plain or special), the Slug and a full-charge
+/// Skewer — and a Bellows blast inside 5 m, the scattergun's point-blank reward (at 0.7 its
+/// pellets one-shot a head at 5 m too). At a 90 % draw no arrow kills, special ones included
+/// (Triple Nock's three heads and the Ember Arrow's burst + burn did). Both buttons at once
+/// never stack a blast and Both Barrels (or a shot and a Volley) on one tick. Every primary's
+/// all-body time to kill at its range stays inside 0.8–1.8 s.
+#[test]
+fn pvp_one_shots_and_times_to_kill_measured_in_play() {
+    let base = Tuning::default();
+    let a = Assume::default();
+    let kills = |damage: f32| damage >= 100.0;
+    for w in WeaponKind::ALL {
+        let bow = w == WeaponKind::Longwick;
+        for range in [3.0, 5.0, 10.0] {
+            let body = per_trigger(&base, Side::Pvp, w, range, Aim::Body, 1.0);
+            assert!(!kills(body), "{w:?} body at {range} m: {body}");
+            let head = per_trigger(&base, Side::Pvp, w, range, Aim::Weak(0), 1.0);
+            let allowed = bow || (w == WeaponKind::Bellows && range < 5.0);
+            assert!(allowed || !kills(head), "{w:?} head at {range} m: {head}");
+        }
+        if bow {
+            let head = per_trigger(&base, Side::Pvp, w, 5.0, Aim::Weak(0), 0.9);
+            assert!(!kills(head), "a 90 % draw to the head: {head}");
+        }
+    }
+    for w in WeaponKind::ALL {
+        for &ability in w.abilities() {
+            let bow = w == WeaponKind::Longwick;
+            let allowed = bow || matches!(ability, Ability::Slug | Ability::Skewer);
+            for range in [3.0, 5.0] {
+                let body = per_use(&base, Side::Pvp, w, ability, range, Aim::Body, 1.0);
+                assert!(
+                    !kills(body),
+                    "{ability:?} on the {w:?}, body at {range} m: {body}"
+                );
+                let head = per_use(&base, Side::Pvp, w, ability, range, Aim::Weak(0), 1.0);
+                assert!(
+                    allowed || !kills(head),
+                    "{ability:?} on the {w:?}, head at {range} m: {head}"
+                );
+            }
+            if bow {
+                let head = per_use(&base, Side::Pvp, w, ability, 5.0, Aim::Weak(0), 0.9);
+                assert!(
+                    !kills(head),
+                    "{ability:?} at a 90 % draw to the head: {head}"
+                );
+            }
+        }
+    }
+    // Both buttons on the first tick: the shot is either the primary's or the ability's.
+    for (w, ability) in [
+        (WeaponKind::Bellows, Ability::BothBarrels),
+        (WeaponKind::Thresher, Ability::BothBarrels),
+        (WeaponKind::Riveter, Ability::Volley),
+        (WeaponKind::Arclash, Ability::Volley),
+    ] {
+        let t = on_player(
+            &base,
+            a,
+            build_with(w, ability),
+            Trigger::Both(0),
+            false,
+            5.0,
+            Stop::secs(0.1),
+        );
+        assert!(
+            t.within(0.0) < 100.0,
+            "{w:?} + {ability:?}: {}",
+            t.within(0.0)
+        );
+    }
+    // Every primary, every shot at the body, at its range.
+    for w in WeaponKind::ALL {
+        let t = on_player(
+            &base,
+            a,
+            w.default_build(),
+            Trigger::Primary,
+            false,
+            weapon_range(w),
+            Stop::damage(100.0, 4.0),
+        );
+        let secs = t.time_to(100.0, None);
+        assert!(
+            secs.is_some_and(|s| (0.8 - 1e-3..=1.8 + 1e-3).contains(&s)),
+            "{w:?}: {secs:?} s"
+        );
+    }
 }

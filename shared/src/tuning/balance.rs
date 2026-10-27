@@ -132,9 +132,10 @@ impl Default for BalanceTuning {
     fn default() -> Self {
         let scale = |damage: f32| BalanceScale::damage(damage);
         let weapons = BTreeMap::from([
+            (WeaponKind::Tumbler, scale(0.9)),
             (WeaponKind::Lancet, scale(0.85)),
-            (WeaponKind::Bellows, scale(0.7)),
-            (WeaponKind::Thresher, scale(0.8)),
+            (WeaponKind::Bellows, scale(0.6)),
+            (WeaponKind::Thresher, scale(0.7)),
             (WeaponKind::Cinderbox, scale(0.75)),
             (
                 WeaponKind::Longwick,
@@ -143,19 +144,19 @@ impl Default for BalanceTuning {
                     ..scale(0.5)
                 },
             ),
-            (WeaponKind::Kiln, scale(1.2)),
+            (WeaponKind::Kiln, scale(0.9)),
         ]);
         let abilities = BTreeMap::from([
-            (Ability::BothBarrels, scale(0.4)),
-            (Ability::Wisp, scale(0.7)),
+            (Ability::BothBarrels, scale(0.25)),
+            (Ability::Wisp, scale(0.5)),
             (Ability::Discharge, scale(0.9)),
             (Ability::Breach, scale(0.85)),
             (Ability::Gravewell, scale(0.75)),
             (Ability::Skewer, scale(0.58)),
-            (Ability::Flurry, scale(0.75)),
+            (Ability::Flurry, scale(0.6)),
             (Ability::Flak, scale(0.8)),
-            (Ability::Volley, scale(0.7)),
-            (Ability::Limpet, scale(0.6)),
+            (Ability::Volley, scale(0.65)),
+            (Ability::Limpet, scale(0.75)),
             (
                 Ability::Mortar,
                 BalanceScale {
@@ -163,7 +164,8 @@ impl Default for BalanceTuning {
                     ..scale(0.75)
                 },
             ),
-            (Ability::TripleNock, scale(0.5)),
+            (Ability::TripleNock, scale(0.55)),
+            (Ability::EmberArrow, scale(0.5)),
         ]);
         let overrides = BTreeMap::from([
             ("thorn.charges".to_string(), 0.0),

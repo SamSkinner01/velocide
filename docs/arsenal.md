@@ -115,7 +115,7 @@ switching ability cancels the charge and the arming.
 
 | ability style | abilities | rule |
 |---|---|---|
-| instant | most | while `ALT_FIRE` is held, once per cooldown (Both Barrels and Volley also put the primary on its interval) |
+| instant | most | while `ALT_FIRE` is held, once per cooldown. Both Barrels and Volley are the primary's shot fired another way: they also wait for the primary to be ready, take its shot (the primary doesn't fire that tick) and put it on its interval |
 | charge | Discharge, Skewer | hold to charge once off cooldown, fires on release (`charge` 0..1) |
 | burst | Flurry | `flurry.shots` shots `flurry.gap` apart |
 | hold | Limpet | a tap (released before `limpet.detonate_hold`) fires with `charge` 0 = throw, off cooldown; holding to it fires once with `charge` 1 = detonate (any time) |
@@ -132,14 +132,14 @@ while `thorn.charges` is 0 (the PvP profile).
 |---|---|---|---|
 | 0 | Quill | Precision | unchanged (`docs/roster.md`): 24 dmg hitscan, 0.28 s, ricochets off Thorns |
 | 1 | Bellows | Scatter | unchanged: 12 × 8, 8°, 0.8 s |
-| 2 | Arclash | Rapid | unchanged: 6 dmg zaps every 0.1 s, chaining |
-| 3 | Tumbler | Explosive | unchanged: bouncing bombs, r 4.5 m, 65 dmg, 0.85 s |
+| 2 | Arclash | Rapid | as `docs/roster.md`: 7 dmg zaps every 0.1 s (was 6, `docs/balance.md`), chaining |
+| 3 | Tumbler | Explosive | as `docs/roster.md`: bouncing bombs, r 4.5 m, 72 dmg (was 65), 0.85 s |
 | 4 | Lancet | Precision | hitscan needle, 14 dmg, 0.15 s; each shot heats it (+0.25 s, cap 0.6 s, drains in real time) and the spread grows to 3° at full heat — the first shot is exact, sustained fire settles at 2.25° |
-| 5 | Thresher | Scatter | 7 × 7 dmg, 11°, 45 m, 0.42 s, automatic while held |
+| 5 | Thresher | Scatter | 7 × 8 dmg, 10°, 45 m, 0.42 s, automatic while held |
 | 6 | Riveter | Rapid | rivet projectile 90 m/s, gravity 6, 7 dmg, 1.2° spread, 0.09 s (5 ticks: 12/s at 60 Hz; 11/s is not a whole number of ticks) |
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
 | 8 | Longwick | Draw | hold to draw (0.75 s to full), release: arrow 45–120 m/s, 22–105 dmg by draw, gravity 14, 0.25 s before the next draw; a tap looses a weak, slow arrow |
-| 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 16° cone: 3 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
+| 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 20° cone: 4 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
 
 Only the Quill's shots ricochet off Thorns, whichever ability fires them (its identity): Brand,
 Splinter and Flurry ricochet on the Quill and not on the Lancet; Skewer pierces instead.
@@ -152,16 +152,18 @@ behave the same (their damage scaled, below). New ones, as built:
 | ability | as built |
 |---|---|
 | Skewer | hold to charge ≤ 0.8 s, release: a hitscan shot, 30–90 dmg by charge, through up to 3 targets (nearest first, before the level stops it), ×0.8 for each target passed (`PIERCED` after the first). No ricochet. 1.4 s |
-| Flurry | 3 shots 0.06 s apart (4 ticks), each 0.8 × the weapon's primary damage, 1° spread; 1.6 s |
+| Flurry | 3 shots 0.06 s apart (4 ticks), each 1.0 × the weapon's primary damage, 1° spread; 1.4 s |
 | Slug | one exact hitscan slug, 55 dmg, kb 6; 1.2 s |
 | Flak | a shell (45 m/s, straight) that bursts after 14 m of flight, or 0.5 m short of a target it touches, or off a wall (the ring then sprays along the reflected flight): 10 pellet rays evenly around the flight axis, each 25° off it, 14 m, 9 dmg each. On contact the ring closes on the target (a point-blank shotgun); in the open it fans out behind cover and around corners. Not parryable. `SimEvent::Burst` / `Fx::Burst` carry the rays. 1.8 s |
-| Volley | 10 of the weapon's own shots at once in a 6° cone: rivets (Riveter), chaining zaps (Arclash), ember rays that each set a Burn stack (Kiln); the primary waits its interval too. 2.2 s |
+| Volley | 10 of the weapon's own shots at once in a 6° cone: rivets (Riveter), chaining zaps (Arclash), ember rays that each set a Burn stack (Kiln); it takes the primary's shot (waits for it to be ready, then the primary waits its interval). 2.2 s |
 | Flare | a flare lobbed 10° above the aim (22 m/s, gravity 16); where it lands — on the floor, at the feet of what it hit, under where it hit a wall, or below where it burns out after 4 s — a 3 m burning patch for 4 s (no patch over a pit). 3.0 s |
-| Limpet | tap: throws a charge (24 m/s, gravity 16) that sticks to the level or to the enemy / player it hits and rides along; hold 0.25 s: every charge out detonates (r 3.5 m, 50 dmg, kb 14, a direct hit on what it sticks to). Up to 3 out: a throw with 3 out detonates them instead. A charge left alone goes off after 20 s. 0.4 s between throws |
+| Limpet | tap: throws a charge (24 m/s, gravity 16) that sticks to the level or to the enemy / player it hits and rides along; hold 0.25 s: every charge out detonates (r 3.5 m, 40 dmg, kb 14, a direct hit on what it sticks to). Up to 3 out: a throw with 3 out detonates them instead. A charge left alone goes off after 20 s. 0.9 s between throws |
 | Mortar | a shell lobbed 35° above the aim at 26 m/s, gravity 20: r 6 m, 85 dmg, kb 26; 3.0 s |
-| Triple Nock | 3 arrows in a 7° fan at the current draw (≥ 30 %), each a plain arrow's damage; 1.4 s |
+| Triple Nock | 3 arrows in a 7° fan at the current draw (≥ 30 %), each 0.6 × a plain arrow's damage; 1.4 s |
 | Pinning Arrow | an arrow at the draw that pins what it hits (Pinned, below); 2.5 s |
-| Ember Arrow | an arrow at the draw whose own hit is 0.75 × a plain arrow's, then it bursts — on a target, on the level or at the end of its flight: r 3 m, 30 dmg, kb 8, and 2 Burn stacks on everything in the burst; 3.0 s |
+| Ember Arrow | an arrow at the draw whose own hit is 0.9 × a plain arrow's, then it bursts — on a target, on the level or at the end of its flight: r 3 m, 35 dmg, kb 8, and 2 Burn stacks on everything in the burst; 3.0 s |
+| Both Barrels | as `docs/roster.md` (24 × 8 dmg, 5°, recoil 9), but 1.8 s (was 1.4) and, like Volley, it takes the primary's shot: it waits for the blast to be ready and fires instead of it (never a blast and Both Barrels on one tick) |
+| Wisp | as `docs/roster.md`, but zaps 11 dmg (was 8), pop 30 (was 25), 2.4 s (was 2.8) |
 | Brand (on the Longwick) | a branding arrow at the draw: what it hits is branded exactly like a Brand shot (`quill.brand_*`) |
 
 ### Abilities on other weapons
@@ -190,7 +192,7 @@ carrier.
 
 ## Status effects
 
-**Burn** (`status.rs`; `burn` tuning): `dps` 4 per stack, up to `max_stacks` 3, for
+**Burn** (`status.rs`; `burn` tuning): `dps` 5 per stack, up to `max_stacks` 3, for
 `duration` 3 s — every new stack refreshes it, the latest source owns it (kill credit, its
 attack: Kiln / Flare / Ember Arrow / Volley). Damage is dealt every `tick_interval` 0.25 s
 through the damage pipeline with **only** `DamageFlags::BURN` (never HITSCAN or PROJECTILE,
@@ -303,47 +305,55 @@ running world's mode (the lobby's warm-up) calls `Server::update_effective_tunin
 
 ### Balance profiles
 
-**PvE** changes nothing: today's campaign feel (and the numbers above) is the reference, and
-nothing in play gave a reason to move a co-op number yet. Difficulty and player-count scaling
-of the Moulds are the modes area's (`difficulty` section), not a weapon profile.
+**PvE** changes nothing: `combat` (the numbers above) is the PvE reference. The balance pass
+(`docs/balance.md`: the measurements, before / after, every change and its reason) moved base
+numbers, not a profile. Difficulty and player-count scaling of the Moulds are the modes area's
+(`difficulty` section), not a weapon profile.
 
 **PvP** is tuned for players killing players: 100 HP, headshots ×2 (`player_head_multiplier`)
 for everything that isn't explosive, a time to kill of **0.8–1.6 s** for a skilled player at
 the weapon's range, and **one-shots only from a full-draw bow headshot, a Slug headshot and a
-full-charge Skewer headshot**. The Thorn is off (`thorn.charges` 0: THROW does nothing; hiding
-the pips is the HUD's) and a brand multiplies by 1.25 instead of 1.35 (in a free-for-all a
-brand invites everyone, the extra was too much on top of a third party).
+full-charge Skewer headshot** — plus a Bellows blast to the head inside 5 m, the scattergun's
+point-blank reward (from 5 m on it no longer kills). The Thorn is off (`thorn.charges` 0:
+THROW does nothing; hiding the pips is the HUD's) and a brand multiplies by 1.25 instead of
+1.35 (in a free-for-all a brand invites everyone, the extra was too much on top of a third
+party). Times to kill and per-pull damage below are measured in play by the balance harness
+(`cargo run -p shared --release --example balance_report -- pvp oneshots`).
 
 | weapon / ability | PvP | after | time to kill (all on the body; heads faster) and why |
 |---|---|---|---|
-| Quill | 1.0 | 24 / 0.28 s | 5 hits: 1.12 s (3 heads: 0.56 s). The reference precision weapon |
+| Quill | 1.0 | 24 / 0.28 s | 5 hits: 1.13 s (3 heads: 0.57 s). The reference precision weapon |
 | Lancet | damage 0.85 | 11.9 / 0.15 s | 9 hits: 1.2 s; raw it out-damaged the Quill at range despite the bloom |
-| Bellows | damage 0.7 | 12 × 5.6 = 67 a blast | 2 blasts: 0.8 s; at 8 dmg a point-blank blast with a few head pellets one-shot |
-| Thresher | damage 0.8 | 7 × 5.6 = 39 a blast | 3 blasts: 0.84 s; 2 blasts with head pellets killed in 0.42 s |
-| Arclash | 1.0 | 6 / 0.1 s | 17 zaps: 1.6 s (chains help in fights of three) |
-| Riveter | 1.0 | 7 / 5 ticks | 15 rivets: 1.17 s; projectiles at 90 m/s already cost aim |
-| Kiln | damage 1.2 | 3.6 / 5 ticks + 12 dps burn | ~1.8 s inside 13 m, and the 3 s burn keeps going (36) — the counterplay is breaking contact, so the spray itself had to threaten |
-| Tumbler | 1.0 | 65 a direct bomb | 2 direct: 0.85 s; splash kills take three |
-| Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.3 s; three 32s (96) were a body one-shot in 0.16 s with any brand |
-| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.64 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (48) is not; body: 2 full draws, 1.49 s |
-| Both Barrels | damage 0.4 | 24 × 3.2 = 77 | 192 point blank was a one-shot; it stays the blast-jump |
-| Wisp | damage 0.7 | 5.6 a zap | it aims itself: 40 dps of free damage was too much |
+| Bellows | damage 0.6 | 12 × 4.8 = 58 a blast | 2 blasts: 0.8 s; at 0.7 (67) a blast at the head one-shot at 5 m (106), now 91 at 5 m and 115 only inside it |
+| Thresher | damage 0.7 | 7 × 5.6 = 39 a blast | 3 blasts: 0.83 s (PvE pellets went 7 → 8: the same 5.6 here) |
+| Arclash | 1.0 | 7 / 0.1 s | 15 zaps: 1.4 s (PvE zaps went 6 → 7 and PvP follows: at 1.6 s the tracking beam was the slowest hitscan) |
+| Riveter | 1.0 | 7 / 5 ticks | 15 rivets: 1.2 s at 5 m, 1.32 s at 15 m; projectiles at 90 m/s already cost aim |
+| Kiln | damage 0.9 | 3.6 / 5 ticks + 15 dps burn | 1.75 s inside 13 m, and the 3 s burn keeps going (45) — the counterplay is breaking contact (PvE spray went 3 → 4: the same 3.6 here) |
+| Tumbler | damage 0.9 | 65 a direct bomb | 2 direct: 0.98 s at 5 m; splash kills take three (PvE bombs went 65 → 72: the same 65 here) |
+| Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.47 s at 5 m, 1.7 s at 15 m; three 32s (96) were a body one-shot in 0.16 s with any brand |
+| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.64 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (96) is not; body: 2 full draws, 1.6 s |
+| Both Barrels | damage 0.25 | 24 × 2 = 48 (96 to the head) | at 0.4 (77) a 5° cone at the head was a one-shot (154), and fired on the same tick as a blast it was a body one-shot (144) — it now takes the blast's shot; it stays the blast-jump |
+| Wisp | damage 0.5 | 5.5 a zap | it aims itself: 40 dps of free damage was too much (PvE zaps went 8 → 11: about the same 5.6 as before here) |
 | Discharge | damage 0.9 | 22.5–72 | no one-shot even with a hit before it |
 | Breach | damage 0.85 | 59.5 | the panic button, not a kill button |
 | Gravewell | damage 0.75 | 60 | players are pulled at half strength; the implosion still punishes staying |
 | Skewer | damage 0.58 | 17–52 (on the Lancet) | full charge to the head (104) is the one-shot, 90 % (97) is not; it still pierces a line of players |
-| Flurry | damage 0.75 | Quill: 3 × 14.4 | three Quill heads in 0.13 s (115) were a one-shot |
+| Flurry | damage 0.6 | Quill: 3 × 14.4 | three Quill heads in 0.13 s (115) were a one-shot (PvE went 0.8 → 1.0 of the primary: the same 14.4 here) |
 | Flak | damage 0.8 | 10 × 7.2 | a contact burst landing every pellet stays under 100 |
-| Volley | damage 0.7 | Riveter: 10 × 4.9 | ten rivets at once (70, more with heads) was an instant kill up close |
-| Limpet | damage 0.6 | 30 a charge | three charges on one player (90) is a kill only with a hit before it |
+| Volley | damage 0.65 | Riveter / Arclash: 10 × 4.55 | ten rivets at once (70, more with heads) was an instant kill up close; at 0.7 the 7-dmg zaps put ten at the head for 98 |
+| Limpet | damage 0.75 | 30 a charge | three charges on one player (88) is a kill only with a hit before it (PvE went 50 → 40 a charge: the same 30 here; 0.9 s between throws in both) |
 | Mortar | damage 0.75, radius 0.85 | 64, r 5.1 m | a huge blast is area denial in PvE but a free kill on a corner in PvP |
-| Triple Nock | damage 0.5 | 3 × 26 | three full arrows (315 PvE, 158 at the bow's PvP damage) |
-| everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Splinter, Slug (55: its headshot is the allowed one-shot), Flare (burn), Pinning / Ember / Brand arrows (they ride the bow's 0.5) |
+| Triple Nock | damage 0.55 | 3 × 17 (a third of an arrow each) | at 0.5 three heads at a 90 % draw (144) one-shot: now 95, and a full draw's three heads (104) is the bow's one-shot; the fan is a forgiving shot, not more damage |
+| Ember Arrow | damage 0.5 | 0.45 × the arrow + a 17.5 burst + 2 Burn stacks | at 1.0 a 90 % draw to the head with its burst and burn (124) one-shot; now 88 (92 at a full draw) |
+| everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Splinter, Slug (55: its headshot is the allowed one-shot), Flare (burn), Pinning / Brand arrows (they ride the bow's 0.5) |
 
 `shared/tests/combat_arsenal.rs::pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band`
 recomputes these from the effective tuning: no body one-shot from any trigger pull or ability
 use, exactly the allowed headshot one-shots, and every weapon's all-body time to kill inside
-0.8–1.8 s.
+0.8–1.8 s. `pvp_one_shots_and_times_to_kill_measured_in_play` measures the same in the
+simulation (every pull and every ability use on every carrier at 3, 5 and 10 m, body and head,
+the bow at a full and a 90 % draw, both buttons on one tick, every primary's time to kill at
+its range).
 
 ## As-built notes
 

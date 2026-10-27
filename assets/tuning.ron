@@ -190,14 +190,14 @@
             both_pellet_damage: 8.0,
             both_cone_degrees: 5.0,
             both_recoil: 9.0,
-            both_cooldown: 1.4,
+            both_cooldown: 1.8,    // it takes the primary's shot; at 1.4 it doubled the build's DPS (docs/balance.md)
             ability_power: 1.0,
         ),
         // 3: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
         arclash: (
             zap_interval: 0.1,
             zap_range: 30.0,
-            zap_damage: 6.0,
+            zap_damage: 7.0,       // 70 DPS: at 6 the lowest hitscan primary by far (docs/balance.md)
             chain_range: 7.0,
             chain_jumps: 2,
             chain_falloff: 0.75,   // per jump
@@ -206,11 +206,11 @@
             wisp_radius: 0.3,
             wisp_zap_interval: 0.2,
             wisp_zap_range: 6.0,
-            wisp_zap_damage: 8.0,
+            wisp_zap_damage: 11.0, // the weakest damage ability at 8 / 25 / 2.8 s (docs/balance.md)
             wisp_pop_radius: 4.0,  // world contact or expiry
-            wisp_pop_damage: 25.0,
+            wisp_pop_damage: 30.0,
             wisp_pop_knockback: 8.0,
-            wisp_cooldown: 2.8,
+            wisp_cooldown: 2.4,
             discharge_charge_time: 1.0,
             discharge_min_radius: 3.5,
             discharge_max_radius: 8.0,
@@ -230,7 +230,7 @@
             bomb_fuse: 1.6,        // ... after this long
             bomb_projectile_radius: 0.2,
             bomb_radius: 4.5,
-            bomb_damage: 65.0,
+            bomb_damage: 72.0,     // the heavier explosive: more per bomb than a rocket salvo's share (docs/balance.md)
             bomb_knockback: 20.0,
             interval: 0.85,
             breach_reach: 3.0,
@@ -267,8 +267,8 @@
         // Drum-fed auto-scattergun (Scatter), automatic while held.
         thresher: (
             pellets: 7,
-            pellet_damage: 7.0,
-            cone_degrees: 11.0,
+            pellet_damage: 8.0,    // 7 / 11 deg: below the Bellows at every range (docs/balance.md)
+            cone_degrees: 10.0,
             pellet_range: 45.0,
             interval: 0.42,
             pellet_knockback: 1.5,
@@ -315,9 +315,9 @@
         // Ember sprayer (Rapid): a short cone that sets targets alight.
         kiln: (
             range: 13.0,
-            cone_degrees: 16.0,
+            cone_degrees: 20.0,    // was 16 deg ...
             interval: 0.08,        // 5 ticks at 60 Hz
-            damage: 3.0,
+            damage: 4.0,           // ... and 3: the weakest primary at everything (docs/balance.md)
             burn_stacks: 1,        // per spray
             ability_power: 0.85,
         ),
@@ -333,9 +333,9 @@
         flurry: (
             shots: 3,
             gap: 0.06,
-            damage_scale: 0.8,     // of the weapon's primary damage
-            spread_degrees: 1.0,
-            cooldown: 1.6,
+            damage_scale: 1.0,     // of the weapon's primary damage; at 0.8 / 1.6 s the Lancet's
+            spread_degrees: 1.0,   // own Flurry was its weakest pick (docs/balance.md)
+            cooldown: 1.4,
         ),
         slug: (
             damage: 55.0,
@@ -376,9 +376,9 @@
             max_live: 3,
             fuse: 20.0,
             explosion_radius: 3.5,
-            damage: 50.0,
+            damage: 40.0,          // 50 every 0.4 s was 85 DPS, three times its siblings
             knockback: 14.0,
-            cooldown: 0.4,         // between throws
+            cooldown: 0.9,         // between throws (docs/balance.md)
             detonate_hold: 0.25,   // hold this long: every charge out detonates
         ),
         mortar: (
@@ -395,7 +395,7 @@
         triple_nock: (
             arrows: 3,
             fan_degrees: 7.0,
-            damage_scale: 1.0,     // of a plain arrow at the same draw
+            damage_scale: 0.6,     // of a plain arrow at the same draw; three full ones doubled the bow
             min_draw: 0.3,
             cooldown: 1.4,
         ),
@@ -409,16 +409,16 @@
             cooldown: 2.5,
         ),
         ember_arrow: (
-            damage_scale: 0.75,    // the arrow's own hit, of a plain arrow at the same draw
-            explosion_radius: 3.0,
-            damage: 30.0,
+            damage_scale: 0.9,     // the arrow's own hit, of a plain arrow at the same draw; at
+            explosion_radius: 3.0, // 0.75 / 30 it added 6 DPS to the bow (docs/balance.md)
+            damage: 35.0,
             knockback: 8.0,
             burn_stacks: 2,
             cooldown: 3.0,
         ),
         // Burn status (Kiln, Flare patches, Ember Arrow).
         burn: (
-            dps: 4.0,              // per stack
+            dps: 5.0,              // per stack: 15/s at the cap (Kiln, Flare, Ember Arrow; docs/balance.md)
             max_stacks: 3,
             duration: 3.0,         // refreshed by every new stack
             tick_interval: 0.25,   // damage steps
@@ -572,9 +572,11 @@
     // speed)`, 1.0 if left out -- then sets absolute `overrides` by field path inside
     // `combat`. `pve`: campaign, grind. `pvp`: deathmatch, gun game. The server sends clients
     // the effective tuning of the match.
-    // Reasoning per number: docs/arsenal.md ("Balance profiles"). PvP aims at 0.8-1.6 s to
-    // kill for a skilled player at the weapon's range; one-shots only from full-draw bow
-    // headshots and Slug / full-charge Skewer headshots.
+    // Reasoning per number: docs/arsenal.md ("Balance profiles"), measured by
+    // `cargo run -p shared --release --example balance_report` (docs/balance.md). PvP aims at
+    // 0.8-1.6 s to kill for a skilled player at the weapon's range; one-shots only from
+    // full-draw bow headshots and Slug / full-charge Skewer headshots (and a Bellows blast to
+    // the head inside 5 m).
     balance: (
         pve: (
             weapons: {},
@@ -583,26 +585,28 @@
         ),
         pvp: (
             weapons: {
+                Tumbler: (damage: 0.9),       // 65 a bomb, as before the PvE raise
                 Lancet: (damage: 0.85),
-                Bellows: (damage: 0.7),
-                Thresher: (damage: 0.8),
+                Bellows: (damage: 0.6),       // 4.8 a pellet: no head one-shot from 5 m on
+                Thresher: (damage: 0.7),      // 5.6 a pellet, as before the PvE raise
                 Cinderbox: (damage: 0.75),
                 Longwick: (damage: 0.5, interval: 0.85),
-                Kiln: (damage: 1.2),
+                Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise
             },
             abilities: {
-                BothBarrels: (damage: 0.4),
-                Wisp: (damage: 0.7),
+                BothBarrels: (damage: 0.25),  // 48 body / 96 head: 0.4 one-shot a head
+                Wisp: (damage: 0.5),          // 5.5 a zap, as before the PvE raise
                 Discharge: (damage: 0.9),
                 Breach: (damage: 0.85),
                 Gravewell: (damage: 0.75),
                 Skewer: (damage: 0.58),
-                Flurry: (damage: 0.75),
+                Flurry: (damage: 0.6),        // Quill: 3 x 14.4, as before the PvE raise
                 Flak: (damage: 0.8),
-                Volley: (damage: 0.7),
-                Limpet: (damage: 0.6),
+                Volley: (damage: 0.65),       // ten 7s to the head were 98 (Riveter, Arclash)
+                Limpet: (damage: 0.75),       // 30 a charge, as before the PvE cut
                 Mortar: (damage: 0.75, radius: 0.85),
-                TripleNock: (damage: 0.5),
+                TripleNock: (damage: 0.55),   // a third of an arrow each: three heads at 90 % don't kill
+                EmberArrow: (damage: 0.5),    // a 90 % draw to the head one-shot with the burst + burn
             },
             overrides: {
                 "thorn.charges": 0.0,           // no Thorns in PvP: THROW does nothing
