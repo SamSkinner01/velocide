@@ -16,8 +16,8 @@ use crate::tuning::Tuning;
 
 /// A target inside a cone: `h` along the aim within `range` (ray), or its nearest (padded)
 /// surface within `range` with its centre inside `half_cone` radians of the aim. Returns the
-/// distance, the part and the point to apply the hit at.
-fn in_cone(
+/// distance, the part and the point to apply the hit at. (Also the melee arc, `melee.rs`.)
+pub(crate) fn in_cone(
     h: &Hitbox,
     pads: super::HitPads,
     eye: Vec3,

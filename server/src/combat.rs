@@ -216,7 +216,7 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             SimEvent::Healed {
                 player,
                 amount,
-                source: HealSource::Embers(_),
+                source: HealSource::Embers(_) | HealSource::KindleFlask(_),
                 position,
             } => fx.push(
                 tick,
@@ -422,6 +422,45 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             SimEvent::EncounterCleared { index } => routed
                 .broadcast
                 .push(GameEvent::EncounterCleared { index: *index }),
+            // Melee and knacks (docs/arsenal.md, "Replication and wire ids").
+            SimEvent::Swing {
+                player,
+                attack,
+                hits,
+            } => fx.push(
+                tick,
+                Fx::Swing {
+                    player: *player,
+                    attack: *attack,
+                    hits: *hits,
+                },
+                Some(*player),
+            ),
+            SimEvent::LungeStruck {
+                player, position, ..
+            } => fx.push(
+                tick,
+                Fx::LungeStruck {
+                    player: *player,
+                    position: (*position).into(),
+                },
+                None,
+            ),
+            SimEvent::KnackUsed { player, knack } => fx.push(
+                tick,
+                Fx::Knack {
+                    player: *player,
+                    knack: *knack,
+                },
+                Some(*player),
+            ),
+            SimEvent::SnareSprung { position, .. } => fx.push(
+                tick,
+                Fx::SnareSprung {
+                    position: (*position).into(),
+                },
+                None,
+            ),
             // Visible through entities / other events, or server-internal.
             SimEvent::Jumped { .. }
             | SimEvent::Landed { .. }

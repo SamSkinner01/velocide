@@ -72,6 +72,9 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => ModelId::Cinderbox,
             WeaponKind::Longwick => ModelId::Longwick,
             WeaponKind::Kiln => ModelId::Kiln,
+            // Placeholders until the melee models exist (arsenal-client, docs/refit.md).
+            WeaponKind::Trimmer => ModelId::Lancet,
+            WeaponKind::Tamper => ModelId::Tumbler,
         }
     }
 
@@ -87,6 +90,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => cinderbox::MUZZLE,
             WeaponKind::Longwick => longwick::MUZZLE,
             WeaponKind::Kiln => kiln::MUZZLE,
+            WeaponKind::Trimmer => lancet::MUZZLE,
+            WeaponKind::Tamper => tumbler::MUZZLE,
         }
     }
 
@@ -110,6 +115,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => Vec4::new(1.0, 0.4, 0.12, 1.0),
             WeaponKind::Longwick => Vec4::new(1.0, 0.8, 0.42, 1.0),
             WeaponKind::Kiln => Vec4::new(1.0, 0.5, 0.1, 1.0),
+            WeaponKind::Trimmer => Vec4::new(0.9, 0.92, 1.0, 1.0),
+            WeaponKind::Tamper => Vec4::new(1.0, 0.66, 0.4, 1.0),
         }
     }
 }
@@ -145,6 +152,11 @@ pub fn ability_color(a: Ability) -> Vec4 {
         Ability::TripleNock => Vec3::new(0.7, 1.0, 0.35),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
         Ability::EmberArrow => Vec3::new(1.0, 0.55, 0.16),
+        // Melee (placeholders until arsenal-client picks them).
+        Ability::Lunge => Vec3::new(1.0, 0.3, 0.3),
+        Ability::Whirl => Vec3::new(0.5, 0.9, 1.0),
+        Ability::Hurl => Vec3::new(1.0, 0.85, 0.4),
+        Ability::Upswing => Vec3::new(0.6, 1.0, 0.5),
     };
     c.extend(1.0)
 }
@@ -162,6 +174,8 @@ fn view_offset(w: WeaponKind) -> Vec3 {
         WeaponKind::Cinderbox => Vec3::new(0.14, -0.15, -0.32),
         WeaponKind::Longwick => longwick::VIEW_OFFSET,
         WeaponKind::Kiln => Vec3::new(0.135, -0.135, -0.31),
+        WeaponKind::Trimmer => Vec3::new(0.115, -0.108, -0.3),
+        WeaponKind::Tamper => Vec3::new(0.14, -0.148, -0.32),
     }
 }
 
@@ -188,6 +202,8 @@ fn kick_amount(w: WeaponKind) -> (f32, f32) {
         // The string snaps forward and the bow rocks towards the target.
         WeaponKind::Longwick => (-0.035, -0.06),
         WeaponKind::Kiln => (0.01, 0.025),
+        WeaponKind::Trimmer => (0.03, 0.11),
+        WeaponKind::Tamper => (0.09, 0.32),
     }
 }
 
@@ -384,13 +400,14 @@ pub fn weapon_pose(h: &HeldWeapon) -> Pose {
             }
             pose
         }
-        WeaponKind::Tumbler => {
+        // The melee weapons wear the Lancet / Tumbler models until theirs exist.
+        WeaponKind::Tumbler | WeaponKind::Tamper => {
             let mut pose = Pose::rest(tumbler::JOINTS.len());
             pose.rotate(tumbler::DRUM, Quat::from_rotation_z(-h.spin));
             glow = 0.8 + 0.3 * wave(time, 1.1) + kick * 1.4;
             pose
         }
-        WeaponKind::Lancet => lancet::pose(h, &mut glow),
+        WeaponKind::Lancet | WeaponKind::Trimmer => lancet::pose(h, &mut glow),
         WeaponKind::Thresher => thresher::pose(h, &mut glow),
         WeaponKind::Riveter => riveter::pose(h, &mut glow),
         WeaponKind::Cinderbox => cinderbox::pose(h, &mut glow),

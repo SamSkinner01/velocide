@@ -5,6 +5,9 @@
 //! two alt-fire [`Ability`]s chosen from the pool of the weapon's [`WeaponClass`]. Pressing a
 //! slot's key again cycles between its two abilities (`PlayerInput::weapon_mode`).
 //!
+//! The Q slot holds one [`Knack`] (a utility the player picks: the Thorn by default), part of
+//! the loadout too.
+//!
 //! This module is plain data: ids, names, the class / ability compatibility table, defaults
 //! and validation. What each weapon and ability *does* lives in `sim::weapons` and friends.
 //! The ids are part of the network protocol (replicated player state, lobby messages); never
@@ -30,15 +33,18 @@ pub enum WeaponClass {
     Explosive,
     /// Bows: hold to draw, release to loose.
     Draw,
+    /// Blades and hammers: swings in an arc in front of the eye.
+    Melee,
 }
 
 impl WeaponClass {
-    pub const ALL: [WeaponClass; 5] = [
+    pub const ALL: [WeaponClass; 6] = [
         WeaponClass::Precision,
         WeaponClass::Scatter,
         WeaponClass::Rapid,
         WeaponClass::Explosive,
         WeaponClass::Draw,
+        WeaponClass::Melee,
     ];
 
     pub fn name(self) -> &'static str {
@@ -48,6 +54,7 @@ impl WeaponClass {
             WeaponClass::Rapid => "RAPID",
             WeaponClass::Explosive => "EXPLOSIVE",
             WeaponClass::Draw => "DRAW",
+            WeaponClass::Melee => "MELEE",
         }
     }
 
@@ -60,6 +67,7 @@ impl WeaponClass {
             WeaponClass::Rapid => &[Wisp, Discharge, Volley, Flare],
             WeaponClass::Explosive => &[Breach, Gravewell, Limpet, Mortar],
             WeaponClass::Draw => &[Brand, TripleNock, PinningArrow, EmberArrow],
+            WeaponClass::Melee => &[Lunge, Whirl, Hurl, Upswing],
         }
     }
 }
@@ -91,10 +99,15 @@ pub enum WeaponKind {
     Longwick = 8,
     /// Ember sprayer: a short cone of burning embers that sets targets alight.
     Kiln = 9,
+    // ---- refit (docs/refit.md): melee ----
+    /// Hooked wick-shears: fast alternating slashes that also deflect projectiles.
+    Trimmer = 10,
+    /// Foundry ramming hammer: a slow, heavy swing through everything in its arc.
+    Tamper = 11,
 }
 
 impl WeaponKind {
-    pub const ALL: [WeaponKind; 10] = [
+    pub const ALL: [WeaponKind; 12] = [
         WeaponKind::Quill,
         WeaponKind::Bellows,
         WeaponKind::Arclash,
@@ -105,6 +118,8 @@ impl WeaponKind {
         WeaponKind::Cinderbox,
         WeaponKind::Longwick,
         WeaponKind::Kiln,
+        WeaponKind::Trimmer,
+        WeaponKind::Tamper,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -129,6 +144,8 @@ impl WeaponKind {
             WeaponKind::Cinderbox => "Cinderbox",
             WeaponKind::Longwick => "Longwick",
             WeaponKind::Kiln => "Kiln",
+            WeaponKind::Trimmer => "Trimmer",
+            WeaponKind::Tamper => "Tamper",
         }
     }
 
@@ -145,6 +162,8 @@ impl WeaponKind {
             WeaponKind::Cinderbox => "salvo box launcher",
             WeaponKind::Longwick => "recurve bow",
             WeaponKind::Kiln => "ember sprayer",
+            WeaponKind::Trimmer => "hooked wick-shears",
+            WeaponKind::Tamper => "foundry ramming hammer",
         }
     }
 
@@ -155,6 +174,7 @@ impl WeaponKind {
             WeaponKind::Arclash | WeaponKind::Riveter | WeaponKind::Kiln => WeaponClass::Rapid,
             WeaponKind::Tumbler | WeaponKind::Cinderbox => WeaponClass::Explosive,
             WeaponKind::Longwick => WeaponClass::Draw,
+            WeaponKind::Trimmer | WeaponKind::Tamper => WeaponClass::Melee,
         }
     }
 
@@ -177,6 +197,8 @@ impl WeaponKind {
             WeaponKind::Cinderbox => [Limpet, Mortar],
             WeaponKind::Longwick => [TripleNock, PinningArrow],
             WeaponKind::Kiln => [Flare, Discharge],
+            WeaponKind::Trimmer => [Lunge, Hurl],
+            WeaponKind::Tamper => [Whirl, Upswing],
         };
         WeaponBuild {
             weapon: self,
@@ -232,10 +254,19 @@ pub enum Ability {
     PinningArrow = 17,
     /// An arrow that bursts into flame on impact.
     EmberArrow = 18,
+    // ---- refit (docs/refit.md): melee ----
+    /// A dash along the aim; the first target the body reaches takes a heavy hit.
+    Lunge = 19,
+    /// A spin that hits everything around and knocks it outward.
+    Whirl = 20,
+    /// Throws a spinning blade / hammer-head.
+    Hurl = 21,
+    /// A rising strike that launches what it hits into the air.
+    Upswing = 22,
 }
 
 impl Ability {
-    pub const ALL: [Ability; 19] = [
+    pub const ALL: [Ability; 23] = [
         Ability::Brand,
         Ability::Splinter,
         Ability::Gust,
@@ -255,6 +286,10 @@ impl Ability {
         Ability::TripleNock,
         Ability::PinningArrow,
         Ability::EmberArrow,
+        Ability::Lunge,
+        Ability::Whirl,
+        Ability::Hurl,
+        Ability::Upswing,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -288,6 +323,10 @@ impl Ability {
             Ability::TripleNock => "Triple Nock",
             Ability::PinningArrow => "Pinning Arrow",
             Ability::EmberArrow => "Ember Arrow",
+            Ability::Lunge => "Lunge",
+            Ability::Whirl => "Whirl",
+            Ability::Hurl => "Hurl",
+            Ability::Upswing => "Upswing",
         }
     }
 
@@ -313,12 +352,99 @@ impl Ability {
             Ability::TripleNock => "three arrows in a fan",
             Ability::PinningArrow => "pins the target in place",
             Ability::EmberArrow => "bursts into flame on impact",
+            Ability::Lunge => "dash forward: the first target takes a heavy hit",
+            Ability::Whirl => "spin: hits everything around you, knocks it away",
+            Ability::Hurl => "throws a spinning blade or hammer-head",
+            Ability::Upswing => "rising strike that launches targets upward",
         }
     }
 
     /// Whether a weapon can take this ability.
     pub fn fits(self, weapon: WeaponKind) -> bool {
         weapon.abilities().contains(&self)
+    }
+}
+
+/// The utility on the Q slot (`Buttons::THROW`, the KNACK control), one per loadout. The
+/// discriminant is the wire id (4 bits; append only). What each does: `sim::knacks`.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[repr(u8)]
+pub enum Knack {
+    /// The relay spike: Quill shots ricochet off it (PvE only).
+    #[default]
+    Thorn = 0,
+    /// A lobbed flask: a pool that heals the Shrikes standing in it.
+    KindleFlask = 1,
+    /// A wax trap: the first hostile to come close is pinned.
+    Snare = 2,
+    /// A cloud of soot the Moulds can't see through.
+    SootPot = 3,
+    /// A few seconds of half damage and no knockback.
+    TallowSkin = 4,
+    /// A burst of speed along your look.
+    Surge = 5,
+}
+
+impl Knack {
+    pub const ALL: [Knack; 6] = [
+        Knack::Thorn,
+        Knack::KindleFlask,
+        Knack::Snare,
+        Knack::SootPot,
+        Knack::TallowSkin,
+        Knack::Surge,
+    ];
+    pub const COUNT: usize = Self::ALL.len();
+    /// What a knack that isn't [`Knack::pvp_allowed`] becomes in PvP.
+    pub const PVP_FALLBACK: Knack = Knack::Surge;
+
+    pub fn from_id(id: u8) -> Option<Knack> {
+        Self::ALL.get(id as usize).copied()
+    }
+
+    pub fn id(self) -> u8 {
+        self as u8
+    }
+
+    /// Display name ("Kindle Flask").
+    pub fn name(self) -> &'static str {
+        match self {
+            Knack::Thorn => "Thorn",
+            Knack::KindleFlask => "Kindle Flask",
+            Knack::Snare => "Snare",
+            Knack::SootPot => "Soot Pot",
+            Knack::TallowSkin => "Tallow Skin",
+            Knack::Surge => "Surge",
+        }
+    }
+
+    /// One-line description (menus).
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Knack::Thorn => "relay spike: Quill shots ricochet off it",
+            Knack::KindleFlask => "lobbed flask: a pool that heals you and your team",
+            Knack::Snare => "wax trap: pins the first hostile that steps close",
+            Knack::SootPot => "soot cloud: Moulds can't see into or through it",
+            Knack::TallowSkin => "half damage and no knockback for a few seconds",
+            Knack::Surge => "a burst of speed along your look",
+        }
+    }
+
+    /// Usable in PvP matches. A knack that isn't is replaced by [`Knack::PVP_FALLBACK`] when
+    /// the loadout applies in a PvP world (the player's request keeps their pick).
+    pub fn pvp_allowed(self) -> bool {
+        !matches!(self, Knack::Thorn)
+    }
+
+    /// This knack as it applies in a PvP (`pvp`) or PvE world.
+    pub fn for_world(self, pvp: bool) -> Knack {
+        if pvp && !self.pvp_allowed() {
+            Self::PVP_FALLBACK
+        } else {
+            self
+        }
     }
 }
 
@@ -376,15 +502,18 @@ impl WeaponBuild {
     }
 }
 
-/// The weapons a player carries, one build per slot key. Empty slots are skipped by weapon
-/// switching. A valid loadout has at least one weapon and no weapon twice.
+/// The weapons a player carries, one build per slot key, and the knack on Q. Empty slots are
+/// skipped by weapon switching. A valid loadout has at least one weapon and no weapon twice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Loadout {
     pub slots: [Option<WeaponBuild>; LOADOUT_SLOTS],
+    /// The Q slot (presets saved before knacks existed load with the Thorn).
+    #[serde(default)]
+    pub knack: Knack,
 }
 
 impl Default for Loadout {
-    /// Quill, Bellows, Arclash, Tumbler with their default builds.
+    /// Quill, Bellows, Arclash, Tumbler with their default builds, and the Thorn.
     fn default() -> Self {
         Self {
             slots: [
@@ -393,24 +522,33 @@ impl Default for Loadout {
                 Some(WeaponKind::Arclash.default_build()),
                 Some(WeaponKind::Tumbler.default_build()),
             ],
+            knack: Knack::default(),
         }
     }
 }
 
 impl Loadout {
-    /// One weapon in slot 1, nothing else (gun game).
+    /// One weapon in slot 1, nothing else, the default knack (gun game: see
+    /// [`Loadout::with_knack`]).
     pub fn single(build: WeaponBuild) -> Self {
         Self {
             slots: [Some(build), None, None, None],
+            knack: Knack::default(),
         }
     }
 
-    /// No weapon at all: fists only (gun game's Fist tier). Only a game mode can hand this
-    /// out (`SimWorld::force_loadout`); requests sanitise it into the default loadout.
+    /// No weapon at all: fists only. Only a game mode can hand this out
+    /// (`SimWorld::force_loadout`); requests sanitise it into the default weapons.
     pub fn unarmed() -> Self {
         Self {
             slots: [None; LOADOUT_SLOTS],
+            knack: Knack::default(),
         }
+    }
+
+    /// The same weapons with `knack` on Q.
+    pub fn with_knack(self, knack: Knack) -> Self {
+        Self { knack, ..self }
     }
 
     /// Carries no weapon ([`Loadout::unarmed`]).
@@ -453,10 +591,10 @@ impl Loadout {
     }
 
     /// This loadout made valid: invalid builds fixed, repeated weapons dropped, and the default
-    /// loadout if nothing is left.
+    /// weapons if nothing is left (the knack is kept: every knack is valid).
     pub fn sanitized(self) -> Loadout {
         let mut seen = [false; WeaponKind::COUNT];
-        let mut out = Loadout { slots: [None; 4] };
+        let mut out = Loadout::unarmed().with_knack(self.knack);
         for (i, slot) in self.slots.iter().enumerate() {
             if let Some(b) = slot
                 && !std::mem::replace(&mut seen[b.weapon as usize], true)
@@ -465,7 +603,7 @@ impl Loadout {
             }
         }
         if out.first_slot().is_none() {
-            return Loadout::default();
+            return Loadout::default().with_knack(self.knack);
         }
         out
     }
@@ -485,11 +623,24 @@ mod tests {
             assert_eq!(a.id() as usize, i);
             assert_eq!(Ability::from_id(a.id()), Some(*a));
         }
+        for (i, k) in Knack::ALL.iter().enumerate() {
+            assert_eq!(k.id() as usize, i);
+            assert_eq!(Knack::from_id(k.id()), Some(*k));
+        }
         assert_eq!(WeaponKind::from_id(WeaponKind::COUNT as u8), None);
         assert_eq!(Ability::from_id(Ability::COUNT as u8), None);
-        // Wire ids of the second-generation set are fixed.
+        assert_eq!(Knack::from_id(Knack::COUNT as u8), None);
+        // Wire ids of the second-generation set and the refit (docs/refit.md) are fixed.
         assert_eq!(WeaponKind::Tumbler.id(), 3);
         assert_eq!(Ability::Gravewell.id(), 7);
+        assert_eq!(
+            (WeaponKind::Trimmer.id(), WeaponKind::Tamper.id()),
+            (10, 11)
+        );
+        assert_eq!((Ability::Lunge.id(), Ability::Upswing.id()), (19, 22));
+        assert_eq!((Knack::Thorn.id(), Knack::Surge.id()), (0, 5));
+        // Weapon ids stay below the unarmed marker, knack ids fit 4 bits.
+        const { assert!(WeaponKind::COUNT < 15 && Knack::COUNT <= 16) };
     }
 
     #[test]
@@ -514,6 +665,24 @@ mod tests {
         assert!(l.is_valid());
         assert_eq!(l.slot(0).map(|b| b.weapon), Some(WeaponKind::Quill));
         assert_eq!(l.slot_of(WeaponKind::Tumbler), Some(3));
+    }
+
+    #[test]
+    fn knacks_default_to_the_thorn_and_fall_back_to_surge_in_pvp() {
+        assert_eq!(Loadout::default().knack, Knack::Thorn);
+        assert!(!Knack::Thorn.pvp_allowed());
+        assert_eq!(Knack::Thorn.for_world(true), Knack::Surge);
+        assert_eq!(Knack::Thorn.for_world(false), Knack::Thorn);
+        for k in Knack::ALL.into_iter().filter(|k| k.pvp_allowed()) {
+            assert_eq!(k.for_world(true), k);
+        }
+        assert!(Knack::PVP_FALLBACK.pvp_allowed());
+        // Presets saved before knacks existed still load (with the Thorn).
+        let old =
+            "(slots: (Some((weapon: Kiln, abilities: (Flare, Discharge))), None, None, None))";
+        let l: Loadout = ron::from_str(old).unwrap();
+        assert_eq!(l.knack, Knack::Thorn);
+        assert_eq!(l.slot(0).map(|b| b.weapon), Some(WeaponKind::Kiln));
     }
 
     #[test]
@@ -542,16 +711,24 @@ mod tests {
                 None,
                 Some(bad),
             ],
+            knack: Knack::SootPot,
         };
         assert!(!l.is_valid());
         let s = l.sanitized();
         assert!(s.is_valid());
+        assert_eq!(s.knack, Knack::SootPot);
         assert_eq!(s.slots[1], None);
         assert_eq!(s.slot(3).map(|b| b.weapon), Some(WeaponKind::Longwick));
-        let empty = Loadout { slots: [None; 4] };
+        let empty = Loadout {
+            slots: [None; 4],
+            knack: Knack::Snare,
+        };
         assert!(!empty.is_valid());
-        assert_eq!(empty.sanitized(), Loadout::default());
-        assert_eq!(empty, Loadout::unarmed());
+        assert_eq!(
+            empty.sanitized(),
+            Loadout::default().with_knack(Knack::Snare)
+        );
+        assert_eq!(empty.with_knack(Knack::Thorn), Loadout::unarmed());
         assert!(Loadout::unarmed().is_unarmed() && !Loadout::default().is_unarmed());
         let single = Loadout::single(WeaponKind::Cinderbox.default_build());
         assert!(single.is_valid());

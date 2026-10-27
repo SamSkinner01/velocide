@@ -492,7 +492,7 @@ impl ModeHud {
         let me = |id: PlayerId| Some(id) == local;
         match *e {
             GunGameEvent::Promoted { player, tier, .. } => {
-                let fist = tier_of(&self.gun_game, tier) == Tier::Fist;
+                let fist = matches!(tier_of(&self.gun_game, tier), Tier::Finale(_));
                 if me(player) {
                     if fist {
                         hud.banner("THE FIST", t.crimson_bright, now);
@@ -560,7 +560,7 @@ impl ModeHud {
             "TIER",
             &TextStyle::new(t.bone_dim).outline(outline),
         );
-        let fist = tier_of(g, tier) == Tier::Fist;
+        let fist = matches!(tier_of(g, tier), Tier::Finale(_));
         let count = g.ladder.len() + 1;
         let r = list.text(
             vec2(18.0, 21.0),
@@ -574,15 +574,15 @@ impl ModeHud {
         );
         let (weapon, col) = match tier_of(g, tier) {
             Tier::Weapon(b) => (b.weapon.name().to_uppercase(), t.bone),
-            Tier::Fist => (
-                "FIST".to_string(),
+            Tier::Finale(b) => (
+                b.weapon.name().to_uppercase(),
                 if (info.time * 3.0).fract() < 0.5 {
                     t.crimson_bright
                 } else {
                     t.rank_color(7)
                 },
             ),
-            Tier::Won => ("FIST".to_string(), t.rank_color(7)),
+            Tier::Won => ("WON".to_string(), t.rank_color(7)),
         };
         list.text(
             vec2(r.max.x + 8.0, 21.0),
@@ -590,9 +590,9 @@ impl ModeHud {
             &TextStyle::new(col).scale(2.0).outline(outline),
         );
         let next = match tier_of(g, tier.saturating_add(1)) {
-            _ if fist => "PUNCH A KILL TO WIN".to_string(),
+            _ if fist => "A KILL TO WIN".to_string(),
             Tier::Weapon(b) => format!("NEXT: {}", b.weapon.name().to_uppercase()),
-            Tier::Fist => "NEXT: THE FIST".to_string(),
+            Tier::Finale(b) => format!("NEXT: {}", b.weapon.name().to_uppercase()),
             Tier::Won => String::new(),
         };
         list.text(
@@ -1267,8 +1267,12 @@ pub(crate) fn tier_label(g: &GunGameTuning, tier: u8, long: bool) -> String {
                 format!("{} {name}", tier as usize + 1)
             }
         }
-        Tier::Fist if long => "THE FIST".to_string(),
-        Tier::Fist => "FIST".to_string(),
+        Tier::Finale(WeaponBuild { weapon, .. }) if long => {
+            format!("FINAL TIER: {}", weapon.name().to_uppercase())
+        }
+        Tier::Finale(WeaponBuild { weapon, .. }) => {
+            format!("FINAL {}", weapon.name().to_uppercase())
+        }
         Tier::Won => "WON".to_string(),
     }
 }

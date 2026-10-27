@@ -65,10 +65,19 @@ pub enum ProjectileKind {
     EmberArrow,
     /// Longwick branding arrow (Brand on the bow).
     BrandArrow,
+    // ---- refit (docs/arsenal.md): melee and knacks ----
+    /// Hurl (melee ability): a spinning blade / hammer-head, direct damage.
+    Hurl,
+    /// Kindle Flask (knack): lobbed, leaves a healing pool where it lands.
+    KindleFlask,
+    /// Snare (knack): thrown to the floor, lies there as a trap (`sim::knacks`).
+    Snare,
+    /// Soot Pot (knack): thrown, bursts into a soot cloud.
+    SootPot,
 }
 
 impl ProjectileKind {
-    pub const ALL: [ProjectileKind; 15] = [
+    pub const ALL: [ProjectileKind; 19] = [
         ProjectileKind::Bomb,
         ProjectileKind::Gravewell,
         ProjectileKind::Wisp,
@@ -84,6 +93,10 @@ impl ProjectileKind {
         ProjectileKind::PinArrow,
         ProjectileKind::EmberArrow,
         ProjectileKind::BrandArrow,
+        ProjectileKind::Hurl,
+        ProjectileKind::KindleFlask,
+        ProjectileKind::Snare,
+        ProjectileKind::SootPot,
     ];
 
     pub fn net_kind(self) -> u16 {
@@ -103,6 +116,10 @@ impl ProjectileKind {
             ProjectileKind::PinArrow => kind::PIN_ARROW,
             ProjectileKind::EmberArrow => kind::EMBER_ARROW,
             ProjectileKind::BrandArrow => kind::BRAND_ARROW,
+            ProjectileKind::Hurl => kind::HURL,
+            ProjectileKind::KindleFlask => kind::KINDLE_FLASK,
+            ProjectileKind::Snare => kind::SNARE,
+            ProjectileKind::SootPot => kind::SOOT_POT,
         }
     }
 
@@ -134,6 +151,10 @@ impl ProjectileKind {
             ProjectileKind::Limpet => t.limpet.gravity,
             ProjectileKind::MortarShell => t.mortar.gravity,
             ProjectileKind::Flare => t.flare.gravity,
+            ProjectileKind::Hurl => t.hurl.gravity,
+            ProjectileKind::KindleFlask => t.knacks.kindle_flask.gravity,
+            ProjectileKind::Snare => t.knacks.snare.gravity,
+            ProjectileKind::SootPot => t.knacks.soot_pot.gravity,
             _ => 0.0,
         }
     }
@@ -152,6 +173,10 @@ impl ProjectileKind {
             ProjectileKind::FlakShell => t.flak.shell_radius,
             ProjectileKind::Limpet => t.limpet.projectile_radius,
             ProjectileKind::MortarShell => t.mortar.projectile_radius,
+            ProjectileKind::Hurl => t.hurl.projectile_radius,
+            ProjectileKind::KindleFlask => t.knacks.kindle_flask.projectile_radius,
+            ProjectileKind::Snare => t.knacks.snare.projectile_radius,
+            ProjectileKind::SootPot => t.knacks.soot_pot.projectile_radius,
             _ => t.flare.projectile_radius,
         }
     }
@@ -171,6 +196,11 @@ impl ProjectileKind {
             ProjectileKind::FlakShell => t.flak.burst_distance / t.flak.shell_speed.max(1e-3),
             ProjectileKind::Limpet => t.limpet.fuse,
             ProjectileKind::MortarShell => t.mortar.flight_time,
+            ProjectileKind::Hurl => t.hurl.flight_time,
+            ProjectileKind::KindleFlask => t.knacks.kindle_flask.flight_time,
+            // Thrown and lying on the floor: the trap's whole life.
+            ProjectileKind::Snare => t.knacks.snare.lifetime,
+            ProjectileKind::SootPot => t.knacks.soot_pot.flight_time,
             _ => t.flare.flight_time,
         }
     }
@@ -186,9 +216,13 @@ impl ProjectileKind {
         false
     }
 
-    /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets).
+    /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets, a
+    /// thrown Snare falls to the floor past them).
     pub fn hits_targets(self) -> bool {
-        !matches!(self, ProjectileKind::Gravewell | ProjectileKind::Wisp)
+        !matches!(
+            self,
+            ProjectileKind::Gravewell | ProjectileKind::Wisp | ProjectileKind::Snare
+        )
     }
 
     pub fn default_attack(self) -> Attack {
@@ -209,6 +243,10 @@ impl ProjectileKind {
             ProjectileKind::PinArrow => Attack::PinningArrow,
             ProjectileKind::EmberArrow => Attack::EmberArrow,
             ProjectileKind::BrandArrow => Attack::Brand,
+            ProjectileKind::Hurl => Attack::Hurl,
+            ProjectileKind::Snare => Attack::Snare,
+            // They deal no damage.
+            ProjectileKind::KindleFlask | ProjectileKind::SootPot => Attack::World,
         }
     }
 

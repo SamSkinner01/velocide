@@ -16,7 +16,8 @@
 //!    windows are re-checked against the moved projectiles.
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
 //! 4. **thorns**, **brands**, **status effects** (Burn, Pinned, burning patches),
-//!    **ember bursts**, **vitals** (hard damage recovery, respawns).
+//!    **knacks** (pools, clouds, snares, Tallow Skin), **melee** (lunges), **ember bursts**,
+//!    **vitals** (hard damage recovery, respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
 //! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
 //!    events, checkpoints, revives, the exit, deathmatch limits, the scoreboard.
@@ -41,7 +42,9 @@ pub mod gungame; // the weapon ladder: docs/style_modes.md
 pub mod highlight; // play of the game (PvP highlights): docs/potg.md
 mod hitbox;
 pub mod hitscan;
+pub mod knacks; // the knacks on Q (Thorn, Kindle Flask, Snare, ...): docs/arsenal.md
 pub mod loadouts; // requested / forced loadouts and when they apply: docs/arsenal.md
+pub mod melee; // the Trimmer, the Tamper and their abilities: docs/arsenal.md
 // Game modes (death rule, checkpoints, downed/revive, deathmatch, results) and the style
 // meter: docs/style_modes.md.
 pub mod modes;
@@ -84,7 +87,8 @@ pub use projectiles::{Projectile, ProjectileKind};
 pub use style::{PlayerStyle, StyleBonus, StyleEvent, StyleKey, StyleSystem, StyleView};
 pub use thorn::{Thorn, ThornState};
 pub use weapons::{
-    Ability, FireIntent, Loadout, WeaponBuild, WeaponClass, WeaponKind, WeaponState, step_weapons,
+    Ability, FireIntent, Knack, Loadout, WeaponBuild, WeaponClass, WeaponKind, WeaponState,
+    step_weapons,
 };
 
 use crate::input::PlayerInput;
@@ -252,9 +256,9 @@ impl SimPlayer {
         e.state = w.replicated_state(&t.combat, tick_rate);
         e.health = c.health(&t.combat).ceil().clamp(0.0, 65535.0) as u16;
         let hard = c.hard.ceil().clamp(0.0, 255.0) as u32;
-        let thorns = w.thorns(&t.combat).min(15);
+        let charges = w.knack_charges(&t.combat).min(15);
         // Keep the wall-cling yaw from `entity_state` in the high 16 bits.
-        e.aux = (e.aux & 0xFFFF_0000) | hard | (thorns << 8);
+        e.aux = (e.aux & 0xFFFF_0000) | hard | (charges << 8);
         e
     }
 
@@ -514,6 +518,32 @@ pub enum SimEvent {
     EncounterCleared {
         index: u32,
     },
+    // ---- refit: melee and knacks (docs/arsenal.md) ----
+    /// A melee swing: a Trimmer / Tamper primary, a Whirl, an Upswing or the start of a Lunge
+    /// (`attack`); `hits` = targets it struck.
+    Swing {
+        player: PlayerId,
+        attack: Attack,
+        hits: u8,
+    },
+    /// A Lunge reached `target` (hit at `position`).
+    LungeStruck {
+        player: PlayerId,
+        target: HitTarget,
+        position: Vec3,
+    },
+    /// A knack other than the Thorn (`ThornThrown`) was used.
+    KnackUsed {
+        player: PlayerId,
+        knack: Knack,
+    },
+    /// Snare `id` of `owner` sprang on `target` at `position` (it is gone).
+    SnareSprung {
+        id: NetId,
+        owner: PlayerId,
+        target: HitTarget,
+        position: Vec3,
+    },
 }
 
 /// A player's shot (for remote tracers, muzzle flashes and sounds).
@@ -574,6 +604,10 @@ pub struct SimWorld {
     pub statuses: BTreeMap<HitTarget, status::Status>,
     /// Burning patches on the ground (Flare, `status.rs`).
     pub fire_patches: BTreeMap<NetId, status::FirePatch>,
+    /// Kindle pools, soot clouds, Tallow Skin (`knacks.rs`).
+    pub knacks: knacks::KnackWorld,
+    /// Lunges in progress (`melee.rs`).
+    pub melee: melee::MeleeWorld,
     /// The loadout each player asked for (`loadouts.rs`). The server carries it over to every
     /// new world, so it outlives matches.
     pub loadout_requests: BTreeMap<PlayerId, Loadout>,
@@ -642,6 +676,8 @@ impl SimWorld {
             enemy_hazards: BTreeMap::new(),
             statuses: BTreeMap::new(),
             fire_patches: BTreeMap::new(),
+            knacks: knacks::KnackWorld::default(),
+            melee: melee::MeleeWorld::default(),
             loadout_requests: BTreeMap::new(),
             forced_loadouts: BTreeMap::new(),
             warmup: false,
@@ -682,7 +718,8 @@ impl SimWorld {
             + self.thorns.len()
             + self.embers.len()
             + self.enemy_hazards.len()
-            + self.fire_patches.len();
+            + self.fire_patches.len()
+            + self.knacks.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -707,6 +744,7 @@ impl SimWorld {
             || self.embers.contains_key(&id)
             || self.enemy_hazards.contains_key(&id)
             || self.fire_patches.contains_key(&id)
+            || self.knacks.holds(id)
     }
 
     /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
@@ -752,6 +790,8 @@ impl SimWorld {
         self.statuses.remove(&HitTarget::Player(id));
         self.fire_patches
             .retain(|_, p| p.owner != Owner::Player(id));
+        self.knacks.forget(id);
+        self.melee.forget(id);
         self.cancel_pending_for_victim(id);
         for e in self.enemies.values_mut() {
             if e.target == Some(id) {
@@ -782,6 +822,8 @@ impl SimWorld {
         self.mode = ModeState::new(ModeRules::from_settings(&settings));
         self.style.clear();
         self.match_settings = settings;
+        // PvP or not decides which knacks apply (`loadouts.rs`).
+        self.refit_knacks();
     }
 
     pub fn restart_level(&mut self) -> Vec<SimEvent> {
@@ -795,6 +837,8 @@ impl SimWorld {
         self.enemy_hazards.clear();
         self.statuses.clear();
         self.fire_patches.clear();
+        self.knacks.clear();
+        self.melee.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
         self.reset_encounters();
@@ -952,6 +996,8 @@ impl SimWorld {
         self.step_thorns(tuning);
         self.step_brands();
         self.step_statuses(tuning);
+        self.step_knacks(tuning);
+        self.step_melee(tuning);
         self.step_embers(tuning);
         self.tick_vitals(tuning);
 
@@ -1063,6 +1109,9 @@ impl SimWorld {
             if self.is_pinned(target) {
                 e.flags |= player_flags::PINNED;
             }
+            if self.has_tallow(p.id) {
+                e.flags |= player_flags::TALLOW;
+            }
             frame.insert(&e);
         }
         for door in &self.level.doors {
@@ -1108,6 +1157,12 @@ impl SimWorld {
         }
         for p in self.fire_patches.values() {
             frame.insert(&p.entity_state());
+        }
+        for p in self.knacks.pools.values() {
+            frame.insert(&p.entity_state());
+        }
+        for c in self.knacks.clouds.values() {
+            frame.insert(&c.entity_state());
         }
         // Encounter state (HUD: wave, enemies left).
         self.replicate_encounters(frame);

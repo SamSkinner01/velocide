@@ -197,11 +197,17 @@ fn flying_thorn_is_hit_where_a_lagging_shooter_saw_it() {
     a.ticks(5);
     let lag = 12.0;
     a.view_lag.insert(p, lag);
-    let before = a.world.players[&p].combat.weapons.thorns(&a.tuning.combat);
+    let before = a.world.players[&p]
+        .combat
+        .weapons
+        .knack_charges(&a.tuning.combat);
     a.held.get_mut(&p).unwrap().pitch = 0.5;
     a.tap(p, Buttons::THROW, 0);
     assert_eq!(
-        a.world.players[&p].combat.weapons.thorns(&a.tuning.combat),
+        a.world.players[&p]
+            .combat
+            .weapons
+            .knack_charges(&a.tuning.combat),
         before - 1
     );
     let thorn = *a.world.thorns.keys().next().expect("thrown");

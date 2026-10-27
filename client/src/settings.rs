@@ -106,6 +106,7 @@ pub fn default_presets() -> Vec<LoadoutPreset> {
         name: name.into(),
         loadout: Loadout {
             slots: weapons.map(|w| Some(w.default_build())),
+            knack: Default::default(),
         },
     };
     vec![
@@ -142,12 +143,13 @@ impl LoadoutSettings {
 }
 
 /// Loadouts in the settings file as readable text, one entry per slot key:
-/// `"Longwick: Ember Arrow, Brand"`, or `"-"` for an empty slot. Names are matched ignoring
-/// case and spaces; anything unknown is dropped and the loadout repaired by `sanitize`, so a
+/// `"Longwick: Ember Arrow, Brand"`, or `"-"` for an empty slot, then the knack:
+/// `"Knack: Snare"` (files without it get the Thorn). Names are matched ignoring case and
+/// spaces; anything unknown is dropped and the loadout repaired by `sanitize`, so a
 /// hand-edited typo never breaks the file (or resets the other settings).
 pub mod loadout_text {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use shared::loadout::{Ability, LOADOUT_SLOTS, Loadout, WeaponBuild, WeaponKind};
+    use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 
     fn key(s: &str) -> String {
         s.chars()
@@ -187,18 +189,36 @@ pub mod loadout_text {
         Some(build)
     }
 
+    /// The knack's entry (`"Knack: Kindle Flask"`).
+    pub fn format_knack(knack: Knack) -> String {
+        format!("Knack: {}", knack.name())
+    }
+
+    /// The knack of a `"Knack: ..."` entry (`None`: not one, or an unknown knack).
+    fn parse_knack(text: &str) -> Option<Knack> {
+        let (label, name) = text.split_once(':')?;
+        if key(label) != "knack" {
+            return None;
+        }
+        Knack::ALL.into_iter().find(|k| key(k.name()) == key(name))
+    }
+
     pub fn parse(entries: &[String]) -> Loadout {
-        let mut out = Loadout {
-            slots: [None; LOADOUT_SLOTS],
-        };
-        for (slot, text) in out.slots.iter_mut().zip(entries) {
+        let is_knack = |e: &String| e.split_once(':').is_some_and(|(l, _)| key(l) == "knack");
+        let mut out = Loadout::unarmed();
+        let slots = entries.iter().filter(|e| !is_knack(e));
+        for (slot, text) in out.slots.iter_mut().zip(slots) {
             *slot = parse_slot(text);
+        }
+        if let Some(knack) = entries.iter().filter_map(|e| parse_knack(e)).next_back() {
+            out.knack = knack;
         }
         out.sanitized()
     }
 
     pub fn serialize<S: Serializer>(loadout: &Loadout, s: S) -> Result<S::Ok, S::Error> {
-        let entries: Vec<String> = loadout.slots.iter().map(|b| format(b.as_ref())).collect();
+        let mut entries: Vec<String> = loadout.slots.iter().map(|b| format(b.as_ref())).collect();
+        entries.push(format_knack(loadout.knack));
         entries.serialize(s)
     }
 

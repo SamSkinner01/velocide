@@ -188,6 +188,62 @@ the Lancet, Discharge on the Kiln hit a little softer), while an ability on its 
 on a weightier one is exactly what its numbers say — so the PvP limits below hold on every
 carrier.
 
+## Melee (refit)
+
+`docs/refit.md` is the contract. `WeaponClass::Melee`: the **Trimmer** (id 10, hooked
+wick-shears) and the **Tamper** (id 11, a foundry ramming hammer); `PrimaryStyle::Auto` (hold to
+keep swinging). Code: `shared::sim::melee`.
+
+| weapon | primary (PvE) |
+|---|---|
+| Trimmer | every 0.32 s a 3.0 m / 70° arc in front of the eye: 30 dmg to up to 3 targets (nearest first), kb 4; the swing deflects the parryable hostile projectiles in its arc like a punch parry (same reward) |
+| Tamper | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16; no deflect |
+
+A swing tests the arc against the hit shapes the swinger saw (lag compensation, like
+hitscan), with hit assist and line of sight from the eye (`area::in_cone`: along the aim, or
+the nearest surface within reach with the centre inside the arc). Melee **ignores weak
+points**: the arc already forgives where a ray wouldn't, and a hammer that headshots for ×2
+would one-shot. All melee damage carries `DamageFlags::MELEE`; its embers heal at
+`embers.melee_weapon_heal_fraction` (0.5: between a gun's 0.4 and the fist's 1.0 — the melee
+weapons hit often and several targets at once, the fist's rate made them near-immortal).
+
+| id | ability | as built (damage = `damage_scale` × the carrier's primary damage) |
+|---|---|---|
+| 19 | Lunge | an impulse along the aim (16 m/s, 35 % of its vertical part kept); for 0.35 s the first hostile within 0.8 m of the body (current shapes, hit assist, line of sight) takes 1.5×, kb 10 (`Fx::LungeStruck`). 3.0 s |
+| 20 | Whirl | everything within 3.5 m of the body (lag-compensated, line of sight) takes 1.2×, knocked outward (kb 12, up bias 0.35). 4.0 s |
+| 21 | Hurl | a spinning blade / hammer-head (30 m/s, gravity 6, r 0.25 m, 2 s), 1.5× on contact, kb 6. 2.5 s |
+| 22 | Upswing | the carrier's arc: 0.8× and an upward launch of 14 m/s (enemies × their knockback scale); the swinger hops (vertical speed at least 5 m/s). 3.0 s |
+
+Defaults: Trimmer `[Lunge, Hurl]`, Tamper `[Whirl, Upswing]` (the home weapons for
+`ability_power`, both 1.0). The impulses (Lunge, Upswing's hop) are server-side like Both
+Barrels' recoil: the owner's client reconciles.
+
+## Knacks (refit)
+
+The Q slot (`Buttons::THROW`, the KNACK control) holds the loadout's `Knack`
+(`Loadout::knack`, `#[serde(default)]`: old presets load with the Thorn). `step_weapons`
+spends a charge (`WeaponState::knack_used`, one back every `recharge_time`, predicted) and
+fires `FireIntent::Knack(knack)`; `SimWorld::use_knack` (`shared::sim::knacks`) does the rest.
+
+| id | knack | as built | charges / recharge |
+|---|---|---|---|
+| 0 | Thorn | the relay spike (`thorn.rs`, `combat.thorn`). **PvE only** | 3 / 3 s |
+| 1 | Kindle Flask | lobbed 15° above the aim (16 m/s); where it breaks a 3.5 m pool for 4 s heals the Shrikes inside 10 HP/s | 1 / 14 s |
+| 2 | Snare | thrown (12 m/s) to the floor, lies there `STUCK`; arms after 0.6 s; the first hostile within 1.8 m is Pinned and takes 15. Up to 2 out, 20 s each | 2 / 10 s |
+| 3 | Soot Pot | thrown (18 m/s); bursts on contact (or after 2 s) into a 5 m cloud for 7 s | 1 / 15 s |
+| 4 | Tallow Skin | for 3 s: damage × 0.5 and no knockback (your own blasts still push: blast jumps work); `TALLOW` player flag | 1 / 16 s |
+| 5 | Surge | an impulse of 18 m/s along the look (30 % of its vertical part kept) | 2 / 6 s |
+
+**PvP**: a knack that isn't `Knack::pvp_allowed` (the Thorn) is replaced by
+`Knack::PVP_FALLBACK` (Surge) whenever a loadout applies in a PvP world (a PvP match or the
+warm-up before one: `SimWorld::pvp_world`, `fit_loadout`); the stored request keeps the pick.
+The old `"thorn.charges": 0` PvP override is gone. Gun game keeps the requested knack in its
+forced loadouts. `/loadout ... knack:<name>` sets it (alone: keeps the weapons).
+
+Milestone 1 status (`docs/refit.md`): the API, melee, the Thorn, Tallow Skin, Surge and the
+flask / snare / pot flights and landings work; the pool's healing, the snare's trigger and the
+soot cloud's effect on Moulds come with milestone 2.
+
 ## Status effects
 
 **Burn** (`status.rs`; `burn` tuning): `dps` 4 per stack, up to `max_stacks` 3, for
@@ -268,14 +324,44 @@ Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
 | 71 | `PIN_ARROW` | arrow gravity |
 | 75 | `EMBER_ARROW` | arrow gravity, bursts (an `Explosion` with `attack` `EmberArrow`) |
 | 76 | `BRAND_ARROW` | arrow gravity |
-| 77–79 | reserved | |
+| 77 | `HURL` | the Hurl's blade / hammer-head, gravity `hurl.gravity`; `state` = the carrier's `WeaponKind` id (10 Trimmer: a blade, 11 Tamper: a hammer-head); direct damage |
+| 78 | `KINDLE_FLASK` | gravity `knacks.kindle_flask.gravity`; breaks into a `KINDLE_POOL` (and a `ProjectileImpact`) |
+| 79 | `SNARE` | gravity `knacks.snare.gravity`, passes through bodies; `STUCK` once it lies on the floor (`position` current), `ARMED` (projectile flag bit 4) once armed; sprung or worn out: removed |
+| 96 | `SOOT_POT` | gravity `knacks.soot_pot.gravity`; bursts into a `SOOT_CLOUD` (and a `ProjectileImpact`) |
+| 97–103 | reserved for the arsenal | (82–95 are the enemies area's) |
 | 136 | `BURNING_PATCH` | `position` = centre on the floor, `owner` = owner code, `state` = radius (dm), `aux` = burn-out tick |
-| 137–139 | reserved | |
+| 137 | `KINDLE_POOL` | `position` = centre on the floor, `owner` = thrower, `state` = radius (dm), `aux` = tick it dries up |
+| 138 | `SOOT_CLOUD` | `position` = centre, `owner` = thrower, `state` = radius (dm), `aux` = tick it clears; draw it dense enough to hide players |
+| 139 | reserved | |
 
 `Fx::Burst { shooter, attack, origin, ends }` (everyone, repeated like other important
 effects): a projectile burst into rays — the Flak ring. Owner-only: `OwnState::combat.weapons`
 carries the whole `WeaponState`, loadout included (47 B of own combat state per snapshot with
 the default loadout), and `OwnState::movement` the slow (8 B).
+
+### Melee and knacks on the wire (refit, `PROTOCOL_VERSION` 9)
+
+* **Loadout**: the packed `u64` keeps its four 16-bit slots; the **knack id** rides in bit 15
+  of each slot (4 bits, slot 0 holds the lowest; empty slots carry theirs too), so a loadout is
+  still one integer in `OwnState` (no growth). `WeaponState::{knack_used, knack_recharge}`
+  replace `thorns_used` / `thorn_recharge` (same sizes).
+* **Player entity**: `aux` bits 8–11 = the knack's charges (were the thorns'); flag bit 16
+  `TALLOW` = Tallow Skin is on (a waxy sheen). `state` packs the melee weapons (ids 10, 11)
+  and abilities (19–22) like any other.
+* **Swings** are events, not entity bits (a swing is an instant, an entity bit would need a
+  counter to show two swings in a row): `SimEvent::Swing { player, attack, hits }` →
+  `Fx::Swing` for every primary swing, Whirl, Upswing and the start of a Lunge — not sent to
+  the swinger (it predicts its own from `step_weapons`). The Trimmer alternates sides: the
+  client alternates per swing it shows. `SimEvent::LungeStruck` → `Fx::LungeStruck { player,
+  position }` to everyone (the swinger can't predict where a Lunge connects). The Hurl is a
+  projectile (`kind::HURL`) plus the usual `Fx::Shot` muzzle event. A Trimmer deflect is a
+  `GameEvent::Parried` like a punch parry.
+* **Knacks**: `SimEvent::KnackUsed { player, knack }` → `Fx::Knack` for every knack but the
+  Thorn (that one keeps `Fx::ThornThrown`), not sent to the user. `SimEvent::SnareSprung` →
+  `Fx::SnareSprung { position }` to everyone. Kindle pool heals are `SimEvent::Healed` with
+  `HealSource::KindleFlask(pool)` → `Fx::Heal` (from the pool to the lantern).
+* The replay records the local player's own swings and knacks as the same `Fx` the others
+  receive (`client/src/ingame/replay.rs`).
 
 ## Tuning and balance per mode
 
