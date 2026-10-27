@@ -122,7 +122,12 @@ pub fn projectile_model(k: u16) -> Option<ModelId> {
 }
 
 /// Velocity of a trajectory-replicated entity at `time_ticks`.
-fn replicated_velocity(e: &EntityState, time_ticks: f64, rate: u32, t: &CombatTuning) -> Vec3 {
+pub(crate) fn replicated_velocity(
+    e: &EntityState,
+    time_ticks: f64,
+    rate: u32,
+    t: &CombatTuning,
+) -> Vec3 {
     let g = if e.flags & projectile_flags::PARRIED != 0 {
         0.0
     } else {
@@ -198,6 +203,9 @@ pub struct EntityFrame<'a> {
     /// Muzzle minus eye of the local weapon: own projectiles leave the drawn barrel and blend
     /// onto their true (eye-based) path over their first ~0.15 s.
     pub own_offset: Vec3,
+    /// Stand-ins for own projectiles the server hasn't reported yet, and the handovers of the
+    /// ones it just did (`stand_in.rs`).
+    pub stand_ins: Option<&'a super::stand_in::StandIns>,
     /// Camera position (nothing is drawn inside the camera).
     pub camera: Vec3,
     /// The level (aim lasers stop at walls).
@@ -221,6 +229,12 @@ impl EntityFrame<'_> {
                     .iter()
                     .filter(|e| kind::is_projectile(e.kind))
                     .map(|e| {
+                        // Just handed over from a stand-in: drawn where the stand-in was,
+                        // easing onto its own path.
+                        if let Some((ahead, offset)) = self.stand_ins.and_then(|s| s.handover(e.id))
+                        {
+                            return (e, self.own_time + ahead, offset);
+                        }
                         let age =
                             ((self.own_time - e.aux as f64) / self.tick_rate.max(1) as f64) as f32;
                         let fresh = e.flags & projectile_flags::PARRIED == 0;
@@ -231,6 +245,11 @@ impl EntityFrame<'_> {
                         };
                         (e, self.own_time, self.own_offset * k)
                     }),
+            )
+            .chain(
+                self.stand_ins
+                    .into_iter()
+                    .flat_map(|s| s.drawn(self.own_time)),
             )
     }
 }
@@ -257,6 +276,16 @@ impl EntityView {
         self.embers.clear();
         self.thorns.clear();
         self.slag.clear();
+    }
+
+    /// Stand-ins handed over to the server's projectiles: their per-projectile state (trail,
+    /// age) carries over to the real id.
+    pub fn adopt(&mut self, claims: &[(NetId, NetId)]) {
+        for (from, to) in claims {
+            if let Some(v) = self.projectiles.remove(from) {
+                self.projectiles.insert(*to, v);
+            }
+        }
     }
 
     /// Last drawn position of a thorn.

@@ -1,6 +1,7 @@
 //! First-person camera: sits at the predicted, smoothed eye position and layers the camera
 //! feel on top: speed FOV kick, view roll (slides / wall running), landing dip, stair
-//! smoothing, slide eye height, the low view while downed and screen shake.
+//! smoothing, slide eye height, the low view while downed and screen shake, plus the weapon
+//! feel (`docs/feel.md`): a short view punch per shot and the bow's zoom at full draw.
 //!
 //! Everything here is presentation: it reads the predicted [`MoveState`] and the server's
 //! [`MovementTuning`] (via `shared::movement::{view_roll, fov_kick, landing_dip}`) and never
@@ -27,6 +28,12 @@ const MIN_DIP: f32 = 0.01;
 pub const DOWNED_EYE_HEIGHT: f32 = 0.6;
 /// How fast the view sinks when going down (1/s): slower than crouching, it reads as a fall.
 const DOWNED_EYE_RATE: f32 = 5.0;
+/// View punch spring (rad/s): a shot's punch peaks after ~1/ω ≈ 25 ms and settles in ~0.15 s.
+const PUNCH_OMEGA: f32 = 40.0;
+/// Largest view punch (radians, ~1.7°), however many shots stack.
+const MAX_PUNCH: f32 = 0.03;
+/// Zoom smoothing (1/s).
+const ZOOM_RATE: f32 = 10.0;
 
 fn approach(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
     current + (target - current) * (1.0 - (-rate * dt).exp())
@@ -41,6 +48,14 @@ pub struct CameraRig {
     step_offset: f32,
     dip: f32,
     dip_velocity: f32,
+    /// View punch (pitch up, radians) and its spring velocity: presentation only, the aim
+    /// stays where the player put it.
+    punch: f32,
+    punch_velocity: f32,
+    /// How much the field of view is narrowed (0 = none; the bow's full draw zooms in a
+    /// little: 0.1 = tan(fov/2) × 0.9) and its target.
+    zoom_in: f32,
+    zoom_in_target: f32,
 }
 
 /// What the camera needs from the current frame.
@@ -89,6 +104,28 @@ impl CameraRig {
         }
     }
 
+    /// A shot's view punch: `amount` 0..1 (the shot's kick). The view jumps up a fraction of a
+    /// degree and springs back; the aim (and so the shot) is unaffected.
+    pub fn punch(&mut self, amount: f32) {
+        if amount.is_finite() && amount > 0.0 {
+            self.punch_velocity += amount.min(1.0) * 0.012 * PUNCH_OMEGA * std::f32::consts::E;
+        }
+    }
+
+    /// Field-of-view scale to ease towards (1 = no zoom; 0.9 = 10 % narrower).
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom_in_target = if zoom.is_finite() {
+            1.0 - zoom.clamp(0.5, 1.0)
+        } else {
+            0.0
+        };
+    }
+
+    /// Current view punch (radians, >= 0).
+    pub fn view_punch(&self) -> f32 {
+        self.punch
+    }
+
     /// Current landing dip (metres, <= 0); the viewmodel follows it.
     pub fn dip(&self) -> f32 {
         self.dip
@@ -129,18 +166,38 @@ impl CameraRig {
             self.dip += self.dip_velocity * h;
         }
         self.dip = self.dip.clamp(-0.6, 0.2);
+        // View punch: the same critically damped spring, stiffer.
+        for _ in 0..steps {
+            let accel =
+                -PUNCH_OMEGA * PUNCH_OMEGA * self.punch - 2.0 * PUNCH_OMEGA * self.punch_velocity;
+            self.punch_velocity += accel * h;
+            self.punch += self.punch_velocity * h;
+        }
+        self.punch = self.punch.clamp(-MAX_PUNCH, MAX_PUNCH);
+        if !self.punch.is_finite() || !self.punch_velocity.is_finite() {
+            (self.punch, self.punch_velocity) = (0.0, 0.0);
+        }
+        self.zoom_in = approach(self.zoom_in, self.zoom_in_target, ZOOM_RATE, dt);
 
         let rotation = Camera::rotation_from_angles(
             f.yaw + f.shake.angles.x,
-            (f.pitch + f.shake.angles.y).clamp(-1.56, 1.56),
+            (f.pitch + f.shake.angles.y + self.punch).clamp(-1.56, 1.56),
             self.roll + f.shake.angles.z,
         );
         let position =
             f.feet + Vec3::Y * (eye + self.step_offset + self.dip) + rotation * f.shake.offset;
+        // Zoom narrows the view: tan(fov/2) scales by `zoom`.
+        let fov = f.settings.vertical_fov(self.fov_kick);
+        let fov_y_degrees = if self.zoom_in > 0.001 {
+            let k = 1.0 - self.zoom_in;
+            2.0 * ((fov * 0.5).to_radians().tan() * k).atan().to_degrees()
+        } else {
+            fov
+        };
         Camera {
             position,
             rotation,
-            fov_y_degrees: f.settings.vertical_fov(self.fov_kick),
+            fov_y_degrees,
             near: 0.05,
             far: 600.0,
         }
@@ -200,6 +257,56 @@ mod tests {
             rig.update(&frame(&state, &tuning, &settings));
         }
         assert!(rig.dip().abs() < 0.005);
+    }
+
+    #[test]
+    fn shots_punch_the_view_and_it_springs_back() {
+        let tuning = MovementTuning::default();
+        let settings = Settings::default();
+        let state = MoveState::default();
+        let mut rig = CameraRig::new();
+        let rest = rig.update(&frame(&state, &tuning, &settings)).rotation;
+        rig.punch(1.0);
+        let mut peak = 0.0f32;
+        for _ in 0..8 {
+            rig.update(&frame(&state, &tuning, &settings));
+            peak = peak.max(rig.view_punch());
+        }
+        assert!(peak > 0.005 && peak <= MAX_PUNCH, "{peak}");
+        for _ in 0..144 {
+            rig.update(&frame(&state, &tuning, &settings));
+        }
+        let back = rig.update(&frame(&state, &tuning, &settings)).rotation;
+        assert!(rig.view_punch().abs() < 1e-3 && back.angle_between(rest) < 1e-3);
+        // A burst of shots never punches past the cap.
+        for _ in 0..50 {
+            rig.punch(1.0);
+            rig.update(&frame(&state, &tuning, &settings));
+            assert!(rig.view_punch() <= MAX_PUNCH);
+        }
+    }
+
+    #[test]
+    fn zoom_narrows_the_view_smoothly() {
+        let tuning = MovementTuning::default();
+        let settings = Settings::default();
+        let state = MoveState::default();
+        let mut rig = CameraRig::new();
+        let wide = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
+        rig.set_zoom(0.9);
+        let first = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
+        assert!(first < wide && first > wide * 0.95, "{first} vs {wide}");
+        let mut fov = first;
+        for _ in 0..300 {
+            fov = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
+        }
+        let expected = 2.0 * ((wide * 0.5).to_radians().tan() * 0.9).atan().to_degrees();
+        assert!((fov - expected).abs() < 0.05, "{fov} vs {expected}");
+        rig.set_zoom(f32::NAN);
+        for _ in 0..300 {
+            fov = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
+        }
+        assert!((fov - wide).abs() < 0.05);
     }
 
     #[test]

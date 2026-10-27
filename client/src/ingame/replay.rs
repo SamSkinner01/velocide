@@ -822,7 +822,7 @@ impl InGame {
         } else {
             // The card over the frozen end of the match.
             if self.is_playing() {
-                self.combat_update(common, vdt);
+                self.combat_update(common, vdt, dt);
             }
             let alpha = self.timestep.alpha();
             let scene = self.update_camera(common, alpha, dt, vdt);
@@ -1105,6 +1105,7 @@ impl InGame {
             own_time: pb.tick,
             local_owner: Some(vp_owner),
             own_offset,
+            stand_ins: None,
             camera: cam.position,
             world,
         };

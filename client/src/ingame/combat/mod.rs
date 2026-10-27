@@ -9,6 +9,8 @@
 //!   cooldowns, the Discharge gauge, BRANDED.
 //! * [`arsenal`]: the expansion arsenal's projectiles, blasts, hazards and status effects, and
 //!   which build the local player holds.
+//! * [`stand_in`]: own projectiles drawn from the muzzle on the frame the shot is predicted,
+//!   handed over to the server's when they arrive (`docs/feel.md`).
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -19,6 +21,7 @@ pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
 pub mod hud;
+pub mod stand_in;
 pub mod weapon_feel;
 
 use engine::audio::{PlayParams, Sfx};
@@ -32,7 +35,7 @@ use shared::sim::{Attack, Blocked, DamageFlags, FireIntent, HitTarget, KillInfo,
 
 use crate::models::{Ability, WeaponKind, WeaponLook as _, ability_color};
 
-use super::{InGame, effects};
+use super::InGame;
 use crate::app::Common;
 use crate::frame::FrameBuffers;
 use crate::net::{NetClient, Session};
@@ -117,7 +120,7 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         beam_color: c,
         beam_life: life,
         shake,
-        flash: 0.25 + 0.3 * kick,
+        flash: 0.35 + 0.45 * kick,
         jagged: false,
     };
     let quill = WeaponKind::Quill;
@@ -126,42 +129,42 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::Quill => s(
             Sfx::QuillFire,
             0.5,
-            0.03,
-            glow(quill.primary_color(), 1.7, 0.9),
-            0.1,
+            0.055,
+            glow(quill.primary_color(), 1.8, 0.95),
+            0.2,
             0.04,
         ),
         Attack::Brand => s(
             Sfx::BrandFire,
             0.6,
-            0.045,
+            0.075,
             glow(quill.glow_color(0), 2.0, 0.95),
-            0.28,
+            0.42,
             0.07,
         ),
         Attack::Splinter => s(
             Sfx::SplinterFire,
             0.75,
-            0.05,
+            0.08,
             glow(quill.glow_color(1), 1.9, 0.95),
-            0.18,
+            0.3,
             0.12,
         ),
         Attack::Blast => s(
             Sfx::BellowsBlast,
             1.0,
-            0.022,
-            glow(bellows.primary_color(), 1.6, 0.75),
-            0.07,
+            0.036,
+            glow(bellows.primary_color(), 1.7, 0.8),
+            0.13,
             0.22,
         ),
         Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
         Attack::BothBarrels => s(
             Sfx::BothBarrels,
             1.0,
-            0.026,
-            glow(bellows.glow_color(1), 1.8, 0.8),
-            0.09,
+            0.04,
+            glow(bellows.glow_color(1), 1.8, 0.85),
+            0.16,
             0.42,
         ),
         Attack::Arc => AttackStyle {
@@ -170,9 +173,9 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             ..s(
                 Sfx::ArcZap,
                 0.12,
-                0.03,
+                0.042,
                 crate::ingame::combat::fx::ARC_COLOR,
-                0.08,
+                0.11,
                 0.015,
             )
         },
@@ -186,17 +189,17 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::Lancet => s(
             Sfx::LancetFire,
             0.35,
-            0.022,
-            glow(WeaponKind::Lancet.primary_color(), 1.8, 0.85),
-            0.07,
+            0.04,
+            glow(WeaponKind::Lancet.primary_color(), 1.8, 0.9),
+            0.13,
             0.03,
         ),
         Attack::Thresher => s(
             Sfx::ThresherFire,
             0.9,
-            0.02,
-            glow(WeaponKind::Thresher.primary_color(), 1.6, 0.75),
-            0.07,
+            0.034,
+            glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
+            0.12,
             0.18,
         ),
         Attack::Riveter => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.02),
@@ -209,34 +212,34 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::Skewer => s(
             Sfx::SkewerFire,
             0.9,
-            0.05,
+            0.09,
             glow(ability_color(Ability::Skewer), 2.0, 0.95),
-            0.3,
+            0.45,
             0.15,
         ),
         Attack::Flurry => s(
             Sfx::FlurryFire,
             0.4,
-            0.024,
+            0.045,
             glow(ability_color(Ability::Flurry), 1.8, 0.9),
-            0.08,
+            0.15,
             0.04,
         ),
         Attack::Slug => s(
             Sfx::SlugFire,
             1.0,
-            0.06,
+            0.1,
             glow(ability_color(Ability::Slug), 1.9, 0.95),
-            0.2,
+            0.36,
             0.35,
         ),
         Attack::Flak => s(Sfx::FlakFire, 0.8, 0.0, Vec4::ONE, 0.0, 0.15),
         Attack::Volley => s(
             Sfx::VolleyFire,
             1.0,
-            0.022,
-            glow(ability_color(Ability::Volley), 1.7, 0.8),
-            0.08,
+            0.038,
+            glow(ability_color(Ability::Volley), 1.7, 0.85),
+            0.14,
             0.3,
         ),
         Attack::Flare => s(Sfx::FlareLaunch, 0.5, 0.0, Vec4::ONE, 0.0, 0.06),
@@ -268,9 +271,14 @@ pub struct CombatClient {
     pub hud: CombatHud,
     /// The expansion arsenal's visuals (`arsenal.rs`).
     pub arsenal: arsenal::ArsenalView,
+    /// Own projectiles before the server's arrive (`stand_in.rs`).
+    pub stand_ins: stand_in::StandIns,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
+    /// Press-frame shots: the next tick's, played on the frame the button changed
+    /// (`WeaponPredictor::lookahead`).
+    early: Vec<PredictedShot>,
     /// Recent combat intensity for the music (decays).
     heat: f32,
     /// Smoothed music intensity (the style rank can raise it: `mode_hud::mode_music_intensity`).
@@ -296,8 +304,10 @@ impl CombatClient {
             entities: EntityView::new(),
             hud: CombatHud::new(),
             arsenal: arsenal::ArsenalView::new(),
+            stand_ins: stand_in::StandIns::new(),
             rng: Rng::default(),
             shots: Vec::new(),
+            early: Vec::new(),
             heat: 0.0,
             music: 0.2,
             killed_by: None,
@@ -315,6 +325,8 @@ impl CombatClient {
         self.entities.clear();
         self.hud.clear();
         self.arsenal.clear();
+        self.stand_ins.clear();
+        self.early.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.heat = 0.0;
@@ -324,6 +336,20 @@ impl CombatClient {
     pub fn after_tick(&mut self, net: &NetClient) {
         if let Some(shot) = self.predictor.after_tick(net) {
             self.shots.push(shot);
+        }
+    }
+
+    /// No tick ran this frame: if `next` (the input the next tick will send, built now) fires
+    /// something, play it now (press-frame feedback, `WeaponPredictor::lookahead`). Only when
+    /// a fire / punch / throw button changed since the last tick.
+    pub fn lookahead(&mut self, net: &NetClient, next: &shared::input::PlayerInput) {
+        let alive = !net.own_combat().is_some_and(|c| c.combat.dead);
+        let t = &net.tuning().combat;
+        if let Some(mut shot) = self.predictor.lookahead(next, alive, t, net.tick_rate()) {
+            shot.eye = net
+                .local_state()
+                .map(|s| s.eye_position(&net.tuning().movement));
+            self.early.push(shot);
         }
     }
 
@@ -685,7 +711,9 @@ impl InGame {
         }
     }
 
-    /// Plays the local player's predicted shots of this frame's ticks.
+    /// Plays the local player's predicted shots of this frame: the press-frame shot (if the
+    /// button changed between ticks) and those of this frame's ticks not played ahead. Runs
+    /// after the camera update, so flashes and tracers leave this frame's muzzle.
     pub(super) fn combat_after_ticks(&mut self, common: &mut Common) {
         let InGame {
             session,
@@ -693,9 +721,11 @@ impl InGame {
             effects,
             viewmodel,
             feedback,
+            camera,
             last_camera,
             ..
         } = self;
+        let early = std::mem::take(&mut combat.early);
         let shots = std::mem::take(&mut combat.shots);
         let Some(net) = session.as_ref().map(Session::client) else {
             return;
@@ -705,12 +735,17 @@ impl InGame {
         let cam = *last_camera;
         let vm = viewmodel.last_draw();
         let body = net.local_state().map(|s| s.position + Vec3::Y * 0.9);
-        for shot in shots {
+        // Flashes ride along with the shooter (a 60 ms flash at 20 m/s would trail 1.2 m).
+        let carry = net.local_state().map_or(Vec3::ZERO, |s| s.velocity);
+        let (own, own_now, owner) = own_projectiles(net);
+        let live_limpets = own.iter().filter(|e| e.kind == kind::LIMPET).count() as u32;
+        for shot in early.iter().chain(shots.iter()).filter(|s| !s.played) {
             let input = &shot.input;
             let aim = look_dir(input.yaw, input.pitch);
             let muzzle = vm.map_or(cam.position + aim * 0.6, |d| {
                 cam.position + cam.rotation * d.muzzle
             });
+            let eye = shot.eye.unwrap_or(cam.position);
             for intent in &shot.intents {
                 match intent {
                     FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
@@ -719,7 +754,15 @@ impl InGame {
                         };
                         let style = attack_style(attack);
                         common.audio.play_2d(style.sfx);
+                        // The weight under the shot (feel): a punch scaled by its kick.
+                        if style.kick >= 0.3 {
+                            common.audio.play(
+                                Sfx::ShotPunch,
+                                PlayParams::default().with_volume(0.4 + 0.6 * style.kick),
+                            );
+                        }
                         viewmodel.fire(style.kick);
+                        camera.punch(style.kick * style.kick);
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
@@ -733,6 +776,20 @@ impl InGame {
                             aim,
                             t,
                         );
+                        // Own projectiles leave the muzzle now, not a round trip later.
+                        if let Some(owner) = owner {
+                            for l in stand_in::launches(
+                                intent,
+                                aim,
+                                eye,
+                                t,
+                                world,
+                                live_limpets,
+                                &mut combat.rng,
+                            ) {
+                                combat.stand_ins.spawn(l, muzzle, owner, own_now, t);
+                            }
+                        }
                         let charge = match intent {
                             FireIntent::Ability { charge, .. } => *charge,
                             _ => 1.0,
@@ -773,28 +830,17 @@ impl InGame {
                                 continue;
                             }
                             Attack::Arc => {
-                                effects.glow(muzzle, fx::ARC_COLOR, 0.25, 0.05);
+                                effects.glow(muzzle, fx::ARC_COLOR, 0.3, 0.06);
                             }
-                            _ => {
-                                let angle = combat.rng.angle();
-                                effects.spawn(effects::Particle {
-                                    position: muzzle + aim * 0.06,
-                                    max_life: 0.06,
-                                    size: glam::Vec2::splat(style.flash),
-                                    end_scale: 1.3,
-                                    color: Vec4::new(1.0, 0.85, 0.55, 1.0),
-                                    texture: effects::FxTex::MuzzleFlash,
-                                    additive: true,
-                                    rotation: angle,
-                                    ..Default::default()
-                                });
-                                combat.beams.light(
-                                    muzzle + aim * 0.3,
-                                    Vec3::new(1.8, 1.2, 0.7),
-                                    5.0,
-                                    0.05,
-                                );
-                            }
+                            _ => fx::muzzle_flash(
+                                effects,
+                                &mut combat.beams,
+                                &mut combat.rng,
+                                muzzle,
+                                aim,
+                                carry,
+                                style.flash,
+                            ),
                         }
                         let dirs = hitscan_dirs(intent, input, t, &mut combat.rng);
                         let range = hitscan_range(attack, t);
@@ -828,24 +874,7 @@ impl InGame {
                                     &mut combat.rng,
                                 );
                             } else {
-                                // Thin near the gun (it is right in front of the camera),
-                                // full width further out.
-                                let along = (end - muzzle).normalize_or_zero();
-                                let mid = muzzle + along * (end - muzzle).length().min(3.0);
-                                combat.beams.beam(
-                                    muzzle,
-                                    mid,
-                                    style.beam_width.min(0.03),
-                                    style.beam_color,
-                                    style.beam_life,
-                                );
-                                combat.beams.beam(
-                                    mid,
-                                    end,
-                                    style.beam_width,
-                                    style.beam_color,
-                                    style.beam_life,
-                                );
+                                fx::tracer(&mut combat.beams, muzzle, end, &style, true);
                             }
                             if hit_entity {
                                 fx::body_impact(effects, end, -dir, 0.4);
@@ -869,7 +898,7 @@ impl InGame {
 
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
     /// visuals (Discharge charge, brands), viewmodel charge, music intensity.
-    pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32) {
+    pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32, real_dt: f32) {
         let InGame {
             session,
             combat,
@@ -941,6 +970,23 @@ impl InGame {
         let own_offset = viewmodel
             .last_draw()
             .map_or(Vec3::ZERO, |d| last_camera.rotation * d.muzzle);
+        // Own projectiles' stand-ins: fly, stop, hand over to the server's (real time: the
+        // projectiles they stand in for don't stop for hitstop).
+        let bodies: Vec<(Vec3, Vec3, f32)> = entities.iter().filter_map(entity_capsule).collect();
+        let rtt = net.stats().rtt_ms / 1000.0;
+        combat.stand_ins.update(
+            &stand_in::StandInFrame {
+                own: &own,
+                now: own_time,
+                tick_rate: rate,
+                tuning: t,
+                world: net.world().map(|w| &w.collision.world),
+                bodies: &bodies,
+                timeout: (rtt * 1.5 + 0.25).clamp(0.3, 1.2),
+            },
+            real_dt,
+        );
+        combat.entities.adopt(combat.stand_ins.claims());
         let frame = EntityFrame {
             entities,
             render_tick,
@@ -950,6 +996,7 @@ impl InGame {
             own_time,
             local_owner,
             own_offset,
+            stand_ins: Some(&combat.stand_ins),
             camera,
             world: net.world().map(|w| &w.collision.world),
         };
@@ -1068,6 +1115,7 @@ impl InGame {
             own_time,
             local_owner,
             own_offset,
+            stand_ins: Some(&self.combat.stand_ins),
             camera,
             world: net.world().map(|w| &w.collision.world),
         };

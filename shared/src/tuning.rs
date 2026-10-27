@@ -901,13 +901,13 @@ pub struct LongwickTuning {
 impl Default for LongwickTuning {
     fn default() -> Self {
         Self {
-            draw_time: 0.75,
+            draw_time: 0.62,
             interval: 0.25,
-            min_speed: 45.0,
-            max_speed: 120.0,
+            min_speed: 55.0,
+            max_speed: 135.0,
             min_damage: 22.0,
             max_damage: 105.0,
-            arrow_gravity: 14.0,
+            arrow_gravity: 10.0,
             arrow_radius: 0.05,
             arrow_lifetime: 4.0,
             ability_power: 1.0,

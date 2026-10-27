@@ -589,8 +589,14 @@ fn viewmodels_are_finite_and_framed() {
         let gun = weapons::viewmodel_transform(&ViewmodelAnim { weapon, ..base });
         let grip = gun.transform_point3(Vec3::ZERO);
         let muzzle = gun.transform_point3(weapon.muzzle());
+        // (The bow is held on the lower left: `the_bow_never_covers_the_centre`.)
+        let side = if weapon == WeaponKind::Longwick {
+            -grip.x
+        } else {
+            grip.x
+        };
         assert!(
-            grip.x > 0.05 && grip.y < -0.05 && grip.z < -0.1,
+            side > 0.05 && grip.y < -0.05 && grip.z < -0.1,
             "{weapon:?}: grip {grip}"
         );
         assert!(muzzle.z < grip.z, "{weapon:?}: muzzle behind grip");
@@ -607,6 +613,63 @@ fn viewmodels_are_finite_and_framed() {
         });
         assert!(lowered.transform_point3(weapon.muzzle()).y < muzzle.y - 0.1);
     }
+}
+
+#[test]
+fn the_bow_never_covers_the_centre() {
+    // Every point of the riser, the flexed limbs, the strings and the nocked arrow, at every
+    // draw (and through the release), projected into the 62 degree viewmodel frustum, stays
+    // out of a box around the crosshair (about 70 px either way at 720p); at full draw the
+    // arrow points at the crosshair from below.
+    let tan = (31f32).to_radians().tan();
+    let half = 0.12;
+    for step in 0..=10 {
+        for kick in [0.0, 0.5, 1.0] {
+            let draw = step as f32 / 10.0;
+            let anim = ViewmodelAnim {
+                weapon: WeaponKind::Longwick,
+                switch: 1.0,
+                draw,
+                fire_kick: kick,
+                time: 12.5,
+                ..Default::default()
+            };
+            let gun = weapons::viewmodel_transform(&anim);
+            for p in weapons::longwick::outline_points(draw, kick, anim.time) {
+                let v = gun.transform_point3(p);
+                assert!(v.z < -0.05, "behind the camera: {v} (draw {draw})");
+                let s = Vec2::new(v.x, v.y) / -v.z;
+                assert!(
+                    s.x.abs() > half || s.y.abs() > half,
+                    "draw {draw} kick {kick}: {p} covers the crosshair at {s}"
+                );
+                assert!(
+                    s.y < tan * 0.8,
+                    "draw {draw}: {p} near the top of the screen"
+                );
+            }
+        }
+    }
+    let full = ViewmodelAnim {
+        weapon: WeaponKind::Longwick,
+        switch: 1.0,
+        draw: 1.0,
+        time: 12.5,
+        ..Default::default()
+    };
+    let gun = weapons::viewmodel_transform(&full);
+    let nock = gun.transform_point3(weapons::longwick::nock_position(1.0, 0.0, 12.5));
+    let bow_head = weapons::longwick::MUZZLE + Vec3::Z * weapons::longwick::DRAW_LENGTH;
+    let head = gun.transform_point3(bow_head);
+    let (n, h) = (nock.truncate() / -nock.z, head.truncate() / -head.z);
+    assert!(
+        h.y < 0.0 && h.y > n.y,
+        "the arrow rises towards the crosshair: {n} -> {h}"
+    );
+    // Extended, the arrow's line passes within a few pixels of the crosshair.
+    let along = (h - n).normalize();
+    let miss = (Vec2::ZERO - n).perp_dot(along).abs();
+    assert!(miss < 0.06, "the arrow points {miss} off the crosshair");
 }
 
 #[test]
