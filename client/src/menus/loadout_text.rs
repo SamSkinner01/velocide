@@ -161,8 +161,8 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              end of its flight, and sets everything near it alight."
         }
         Ability::Lunge => {
-            "A dash along your aim: for a moment the first hostile your body reaches takes a \
-             heavy blow. Close the gap and strike at once."
+            "A low leap along your aim: for a moment the first hostile your body reaches \
+             takes a heavy blow. Close the gap and strike at once."
         }
         Ability::Whirl => {
             "A spin that hits everything around you, front and back, and knocks it outward. \

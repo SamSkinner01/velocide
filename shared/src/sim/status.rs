@@ -301,7 +301,8 @@ impl SimWorld {
     }
 
     /// Living players and enemies whose feet are inside a patch (and at most 2 m above it).
-    fn targets_in_patch(&self, center: Vec3, radius: f32) -> Vec<HitTarget> {
+    /// (Kindle pools and snares use the same rule, `knacks.rs`.)
+    pub(crate) fn targets_in_patch(&self, center: Vec3, radius: f32) -> Vec<HitTarget> {
         let inside = |feet: Vec3| {
             let d = feet - center;
             Vec3::new(d.x, 0.0, d.z).length() <= radius && (-0.5..=2.0).contains(&d.y)

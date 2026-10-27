@@ -1144,7 +1144,12 @@ impl SimWorld {
             frame.insert(&state);
         }
         for p in self.projectiles.values() {
-            frame.insert(&p.entity_state());
+            let mut e = p.entity_state();
+            // An armed snare (knacks.rs).
+            if self.knacks.armed.contains(&p.id) {
+                e.flags |= crate::protocol::projectile_flags::ARMED;
+            }
+            frame.insert(&e);
         }
         for th in self.thorns.values() {
             frame.insert(&th.entity_state());

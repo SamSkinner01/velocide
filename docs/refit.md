@@ -125,6 +125,13 @@ holds one **knack** the player picks in the loadout screen. `shared::loadout::Kn
   body one-shot).
 - Client settings: a loadout's text gains a `"Knack: <name>"` entry after the slots (files
   without it load with the Thorn).
+- Lunge: besides the impulse along the aim it gives at least `lunge.lift` (4.5 m/s) upward —
+  ground friction stopped a standing lunge within 1.5 m; off the ground it glides ~5 m.
+- The melee arc measures to the nearest point of a target's shapes (`melee::in_arc`), not its
+  centre: a low Mould at your feet is in the arc while you look ahead.
+- A Trimmer deflect happens at the swing only (no parry window: held, it would be a shield).
+- Kindle pools heal in 0.25 s steps (2.5 HP each); a third Snare retires the oldest; soot hides
+  players from aware arena spawns too (they don't hunt a hidden player).
 
 ### Milestones
 

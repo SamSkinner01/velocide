@@ -1393,6 +1393,9 @@ pub struct LungeTuning {
     pub speed: f32,
     /// Share of the aim's vertical part the impulse keeps (mostly horizontal).
     pub vertical: f32,
+    /// Upward speed it gives at least: off the ground the lunge glides (ground friction would
+    /// stop a standing lunge within ~1.5 m).
+    pub lift: f32,
     pub window: f32,
     /// A target this close to the body (beyond the hit shapes) counts as reached.
     pub reach: f32,
@@ -1406,6 +1409,7 @@ impl Default for LungeTuning {
         Self {
             speed: 16.0,
             vertical: 0.35,
+            lift: 4.5,
             window: 0.35,
             reach: 0.8,
             damage_scale: 1.5,
@@ -2545,7 +2549,7 @@ impl TamperTuning {
 impl LungeTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_SPEED; speed, knockback);
+        clamp!(self, d, 0.0, MAX_SPEED; speed, knockback, lift);
         clamp!(self, d, 0.0, 1.0; vertical);
         clamp!(self, d, 0.0, MAX_TIME; window, cooldown);
         clamp!(self, d, 0.0, MAX_DIST; reach);
