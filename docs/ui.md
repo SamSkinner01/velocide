@@ -380,25 +380,56 @@ lobby's player list and on the results rows.
 
 ## Loadout screen and the weapon HUD (arsenal)
 
-**LOADOUT** (`client::menus::loadout::LoadoutMenu`, `docs/expansion.md`): the main menu's
-LOADOUT page, a LOADOUT button next to CUSTOMISE in the lobby's match panel (a sub-screen of
-the panel, also in the warm-up's overlay; applies at once in the lobby / warm-up) and LOADOUT in
-the pause menu ("CHANGES APPLY AT YOUR NEXT RESPAWN"; in the warm-up "WARM-UP: CHANGES APPLY AT
-ONCE"). One panel
-(`loadout::panel_rect`, 560 × 334):
+**LOADOUT** (`client::menus::loadout::LoadoutMenu`, `docs/arsenal.md`, `docs/refit.md`): the
+main menu's LOADOUT page, a LOADOUT button next to CUSTOMISE in the lobby's match panel (a
+sub-screen of the panel, also in the warm-up's overlay; applies at once in the lobby / warm-up)
+and LOADOUT in the pause menu ("CHANGES APPLY AT YOUR NEXT RESPAWN"; in the warm-up "WARM-UP:
+CHANGES APPLY AT ONCE"). One full-screen page (`loadout::Layout`: the canvas less an 8-unit
+margin, at most 720 wide, a LOADOUT title bar like a panel's):
 
-- left: **SLOTS** 1–4 (key, weapon, its two abilities; selecting one edits it on the right) and
-  **PRESETS** (PRESET choice, LOAD / SAVE / NEW / DELETE, NAME field) with the note that gun game
-  hands out its own weapons;
-- right: **SLOT n**: WEAPON choice (the ten, or EMPTY), class and blurb, DAMAGE and RATE from the
-  tuning (`damage_text`, `rate_text`) in its PvE / PvP balance (`Tuning::for_mode`), ABILITY A /
-  B choices from the weapon's class pool, each with its blurb and cooldown;
+- left: **SLOTS**: four cards (key badge, weapon, its two abilities; the selected one lit),
+  then the **knack** card (Q: today the Thorn, its charges, PvE only); **PRESETS** (PRESET
+  choice, LOAD / SAVE, NEW / DELETE, NAME field) and the note that gun game hands out its own
+  weapons;
+- right, the **showcase**: the selected weapon **turning on a card** (a window in the page:
+  drawn into the viewmodel pass on the ready board's slate, lit by two lamps the screen adds,
+  sized from the model's bounds, `ModelLibrary::bounds`; drag it, PageUp / PageDown or the
+  shoulders turn it, it spins by itself 2.5 s later; its glow parts take the colour of the
+  ability box under the cursor / focus), then the weapon's name, class, **role**, a PVE / PVP
+  table (DAMAGE, RATE, DPS on one target with everything landing) and CHANGE WEAPON;
+- under it, **ABILITIES** (the heading names the ALT FIRE binding and the slot key that
+  switches A / B) and **two boxes, A and B**: badge, the ability's colour, name, how it fires
+  (ALT FIRE, hold / release, tap / hold, armed for the bow's next arrow), what it does and how
+  to use it, and a PVE / PVP table (COOLDOWN and two key numbers, for that carrier);
 - foot: the hint (or the pause menu's note), DEFAULT LOADOUT, BACK.
 
+**CHANGE WEAPON** opens the **weapon picker** in place of the boxes: a column per class
+(`WeaponClass::ALL`), a tile per weapon (the slot's weapon lit, a badge on weapons another slot
+holds) and EMPTY SLOT (disabled for the last weapon). The tile under the cursor / focus turns on
+the card with its role and numbers, and the abilities it comes with or "ON SLOT 3: EQUIPPING
+SWAPS THE TWO". An **ability box** opens the **ability picker**: the class's pool as four boxes
+in a 2 × 2 grid over the right side, each explained like the A / B boxes, tagged EQUIPPED /
+SWAPS / PICK. Picking applies the rules below and closes the picker; Escape / B or CANCEL
+closes it without a change. While a picker is open the left column and DEFAULT LOADOUT are
+disabled.
+
+The words live in `menus::loadout_text` (written from `docs/arsenal.md` and checked against the
+sim; no numbers in them); every number comes from the effective tunings of the local
+`assets/tuning.ron` (`Tuning::for_mode`: campaign = PVE, deathmatch = PVP), abilities through
+`weapons::ability_tuning` for their carrier, intervals in whole ticks. A PVP number that
+differs from PVE is lit. Its tests wrap every text at the 16:10 widths (nothing is cut from
+16:10 up; 4:3 cuts with `..`) and check that every number fits its column.
+
+Keys and pad: Up / Down walk every control (walking onto a slot card selects it); Left / Right
+jump between a slot card, CHANGE WEAPON and the boxes, and across the pickers' columns; Enter / A
+activates (on a slot card: its weapon picker); Escape / B closes a picker, then leaves. The
+mouse clicks everything and drags the weapon. Callers hand the screen a `loadout::Preview` (the
+model library, the frame's viewmodel list, which the screen clears, its lights, the camera and
+the viewmodel FOV); the pause menu's page hides the HUD under it.
+
 Rules while editing (`loadout::set_weapon`, `set_ability`): a weapon another slot holds swaps the
-two slots, the last weapon can't be emptied, picking a build's other ability swaps the two. Every
-control is a focusable widget, so arrows / d-pad, Enter / A and the mouse all work; Escape / B is
-BACK. The loadout and presets live in the settings file's `loadout` section as text per slot
+two slots, the last weapon can't be emptied, picking a build's other ability swaps the two. The
+loadout and presets live in the settings file's `loadout` section as text per slot
 (`"Longwick: Ember Arrow, Brand"`, `"-"`; `settings::loadout_text`): an unknown weapon empties
 its slot, an unknown ability falls back to the weapon's default, the loadout is sanitised, and
 nothing else in the file is affected. `NetClient::set_loadout` sends it (`SetLoadout`) once per

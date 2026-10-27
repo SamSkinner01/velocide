@@ -298,8 +298,9 @@ player shows ~11–17 ms).
   the wave sound.
 - **CUSTOMISE** (from the overlay): the customise sub-screen with the preview in front of the
   world (`docs/models.md` "Cosmetics"). **LOADOUT** (from the overlay, or the pause menu): the
-  arsenal's loadout screen (`menus::loadout`, docs/ui.md); the client sends the loadout each
-  change and the warm-up world (`SimWorld::warmup`) applies it at once. While a sub-screen is
+  arsenal's loadout screen (`menus::loadout`, docs/ui.md), its weapon turning in front of the
+  world the same way; the client sends the loadout each change and the warm-up world
+  (`SimWorld::warmup`) applies it at once. While a sub-screen is
   open the overlay and Ready keys are off.
 
 ### Lobby screen layout
@@ -394,9 +395,10 @@ cargo test -p client --test lobby_screen   # real lobby + game screens on a head
 cargo test -p server --test warmup_net     # warm-up phases, rules, cosmetics over UDP
 cargo test -p shared --lib warmup          # practice stations, respawns, PvP by next mode
 cargo run -p client --release --example lobby_shots -- out/   # PNGs: the warm-up overlay (host
-        # / guest), the hub with the HUD card and the ready board, customise and loadout over the
-        # world, the firing range's Effigies, a practice pack, the countdown banner, match, scoreboard with pings, host pause menu,
-        # results, back in the warm-up, the lobby screen without a world + its leave dialog
+        # / guest), the hub with the HUD card and the ready board, customise and loadout (+ its
+        # weapon picker) over the world, the firing range's Effigies, a practice pack, the
+        # countdown banner, match, scoreboard with pings, host pause menu, results, back in the
+        # warm-up, the lobby screen without a world + its loadout and leave dialog
 scripts/local_test.sh --release            # dedicated server (--autostart) + 2 clients (--ready)
 scripts/local_test.sh --lobby              # ... staying in the lobby (P1 hosts, starts by hand)
 ```

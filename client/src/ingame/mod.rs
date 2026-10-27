@@ -926,9 +926,10 @@ impl InGame {
         let list = &mut out.ui;
         let canvas = Rect::from_min_size(Vec2::ZERO, list.canvas_size);
 
-        // The warm-up's lobby overlay covers the HUD.
+        // The warm-up's lobby overlay covers the HUD (and so does the pause menu's LOADOUT).
         let lobby_up = self.warmup.open && self.in_warmup();
-        if in_game && !results && !lobby_up {
+        let covered = lobby_up || self.pause.is_loadout_open();
+        if in_game && !results && !covered {
             // Name tags.
             if let Some(net) = self.net() {
                 let world = net.world().map(|w| &w.collision.world);
@@ -974,7 +975,7 @@ impl InGame {
             self.draw_mode_hud(common, list, now, io.dt);
             self.warmup_hud(common, list);
         }
-        if in_game && !lobby_up {
+        if in_game && !covered {
             self.chat.draw_log(list, &common.theme, canvas, now);
         }
         if scoreboard {
@@ -1020,7 +1021,13 @@ impl InGame {
             return;
         }
         let theme = &common.theme;
-        let mut ui = Ui::new(&mut out.ui, &mut common.ui_state, io.ui_input, theme);
+        let FrameBuffers {
+            ui: list,
+            viewmodel,
+            lights,
+            ..
+        } = out;
+        let mut ui = Ui::new(list, &mut common.ui_state, io.ui_input, theme);
         let mut sound = None;
         if connecting {
             if self.connecting_ui(&mut ui) {
@@ -1044,6 +1051,13 @@ impl InGame {
                             .is_some_and(|l| l.lobby_enabled && l.phase.level_running())
                 });
             self.pause.instant_loadout = self.in_warmup();
+            let preview = crate::menus::loadout::Preview {
+                lib: common.models.as_ref(),
+                viewmodel,
+                lights,
+                camera: self.last_camera,
+                fov: common.settings.viewmodel_fov,
+            };
             let r = self.pause.ui(
                 &mut ui,
                 &mut common.settings,
@@ -1051,6 +1065,7 @@ impl InGame {
                 single,
                 lobby_host,
                 &subtitle,
+                preview,
             );
             sound = r.sound;
             if r.settings.changed {

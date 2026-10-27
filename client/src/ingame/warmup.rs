@@ -735,18 +735,27 @@ impl InGame {
         }
         if self.warmup.panel.is_loadout_open() {
             // Sent by the screen's update; the warm-up applies it at once (docs/arsenal.md).
-            let mut ui = Ui::new(
-                &mut out.ui,
-                &mut common.ui_state,
-                io.ui_input,
-                &common.theme,
-            );
+            let FrameBuffers {
+                ui: list,
+                viewmodel,
+                lights,
+                ..
+            } = out;
+            let mut ui = Ui::new(list, &mut common.ui_state, io.ui_input, &common.theme);
+            let preview = crate::menus::loadout::Preview {
+                lib: common.models.as_ref(),
+                viewmodel,
+                lights,
+                camera: self.last_camera,
+                fov: viewmodel_fov,
+            };
             let r = self
                 .warmup
                 .panel
-                .loadout_ui(&mut ui, &mut common.settings.loadout);
+                .loadout_ui(&mut ui, &mut common.settings, preview);
             drop(ui);
             common.settings_changed |= r.changed;
+            sound = r.sound;
             if r.back {
                 common.settings_save = true;
                 sound = Some(Sfx::UiBack);
