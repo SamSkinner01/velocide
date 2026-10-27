@@ -1875,7 +1875,7 @@ fn a_leaping_gnawer_knocked_mid_air_falls_in_the_water() {
 }
 
 #[test]
-fn gnawers_ride_a_jump_pad_up_to_a_ledge() {
+fn a_gaoler_rides_a_jump_pad_up_to_a_ledge() {
     // A 6 m ledge 10..16 m north, no way up but the pad at the origin.
     let mut level = flat_level(
         LevelKind::Campaign,
