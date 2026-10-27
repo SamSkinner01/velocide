@@ -279,6 +279,9 @@ pub struct CombatClient {
     /// Press-frame shots: the next tick's, played on the frame the button changed
     /// (`WeaponPredictor::lookahead`).
     early: Vec<PredictedShot>,
+    /// When the local player last parried on their own screen (`InGame::combat_predict_parry`):
+    /// the server's `Parried` then only confirms it.
+    parry_predicted_at: Option<f64>,
     /// Recent combat intensity for the music (decays).
     heat: f32,
     /// Smoothed music intensity (the style rank can raise it: `mode_hud::mode_music_intensity`).
@@ -308,6 +311,7 @@ impl CombatClient {
             rng: Rng::default(),
             shots: Vec::new(),
             early: Vec::new(),
+            parry_predicted_at: None,
             heat: 0.0,
             music: 0.2,
             killed_by: None,
@@ -329,6 +333,7 @@ impl CombatClient {
         self.early.clear();
         self.predictor.reset();
         self.killed_by = None;
+        self.parry_predicted_at = None;
         self.heat = 0.0;
     }
 
@@ -466,6 +471,36 @@ pub fn kill_line_text(killer: &str, attack: &str, victim: &str, k: &KillInfo) ->
         s.push_str(" AIR");
     }
     s
+}
+
+/// How much the bow narrows the view at full draw (tan(fov/2) × 0.9).
+const BOW_ZOOM: f32 = 0.1;
+
+/// How long after a parry seen on the punch's frame the server's `Parried` counts as its
+/// confirmation (a round trip and the parry delay, generously).
+const PARRY_CONFIRM_WINDOW: f64 = 0.9;
+
+/// Everything a parry does for the parrier (`docs/feel.md`): a long hitstop, a white flash, a
+/// hard shake, the parry clang over a deep impact, and a white shock ring bursting from the
+/// fist.
+fn parry_feedback(
+    feedback: &mut super::feedback::Feedback,
+    audio: &mut engine::audio::Audio,
+    effects: &mut super::effects::Effects,
+    beams: &mut fx::Beams,
+    fist: Vec3,
+    view: Vec3,
+) {
+    feedback.hitstop(0.16);
+    feedback.flash(crate::palette::palette().flash_parry, 0.65);
+    feedback.shake(0.28);
+    audio.play_2d(Sfx::Parry);
+    audio.play_2d(Sfx::ParryImpact);
+    let pal = crate::palette::palette();
+    let white = pal.effect(Vec4::new(2.4, 2.4, 2.2, 0.95), pal.deflected, 2.2);
+    beams.ring(fist, view, 0.05, 0.9, 0.035, white, 0.22);
+    beams.light(fist, Vec3::new(3.0, 3.0, 2.8), 7.0, 0.2);
+    effects.glow(fist, white, 1.2, 0.18);
 }
 
 /// The local player's projectiles from the newest snapshot, the (present) time to draw them
@@ -610,10 +645,18 @@ impl InGame {
                 match kind {
                     MarkerKind::Kill => {
                         common.audio.play_2d(Sfx::KillConfirm);
-                        self.feedback.hitstop(0.045);
-                        self.feedback.shake(0.08);
+                        if h.flags.contains(DamageFlags::HEADSHOT)
+                            || h.flags.contains(DamageFlags::WEAK_POINT)
+                        {
+                            common.audio.play_2d(Sfx::WeakPointTick);
+                        }
+                        self.feedback.hitstop(0.06);
+                        self.feedback.shake(0.1);
                     }
-                    MarkerKind::Head => common.audio.play_2d(Sfx::Headshot),
+                    MarkerKind::Head => {
+                        common.audio.play_2d(Sfx::Headshot);
+                        common.audio.play_2d(Sfx::WeakPointTick);
+                    }
                     _ => common.audio.play(
                         Sfx::Hitmarker,
                         PlayParams::default().with_pitch(if kind == MarkerKind::Armour {
@@ -670,16 +713,31 @@ impl InGame {
             }
             GameEvent::Parried(p) => {
                 if Some(p.player) == local {
-                    self.feedback.hitstop(0.12);
-                    self.feedback.parry_flash();
-                    self.feedback.shake(0.15);
-                    common.audio.play_2d(Sfx::Parry);
+                    // Already shown on the punch's frame if we saw it coming (the server only
+                    // confirms); otherwise now.
+                    let predicted = self
+                        .combat
+                        .parry_predicted_at
+                        .take()
+                        .is_some_and(|at| now - at < PARRY_CONFIRM_WINDOW);
+                    if !predicted {
+                        let fist = self.parry_fist();
+                        let view = self.last_camera.rotation * Vec3::NEG_Z;
+                        parry_feedback(
+                            &mut self.feedback,
+                            &mut common.audio,
+                            &mut self.effects,
+                            &mut self.combat.beams,
+                            fist,
+                            view,
+                        );
+                        self.hud.banner("PARRY", theme.bone, now);
+                    }
                     if p.healed > 0.5 {
                         common
                             .audio
                             .play(Sfx::Heal, PlayParams::default().with_volume(0.6));
                     }
-                    self.hud.banner("PARRY", theme.bone, now);
                     self.combat.heat = (self.combat.heat + 0.3).min(1.0);
                 } else {
                     common.audio.play_at(Sfx::Parry, p.position);
@@ -739,6 +797,7 @@ impl InGame {
         let carry = net.local_state().map_or(Vec3::ZERO, |s| s.velocity);
         let (own, own_now, owner) = own_projectiles(net);
         let live_limpets = own.iter().filter(|e| e.kind == kind::LIMPET).count() as u32;
+        let mut punched = false;
         for shot in early.iter().chain(shots.iter()).filter(|s| !s.played) {
             let input = &shot.input;
             let aim = look_dir(input.yaw, input.pitch);
@@ -886,6 +945,7 @@ impl InGame {
                     FireIntent::Punch => {
                         viewmodel.punch();
                         common.audio.play_2d(Sfx::Punch);
+                        punched = true;
                     }
                     FireIntent::ThrowThorn => {
                         viewmodel.throw_thorn();
@@ -894,6 +954,98 @@ impl InGame {
                 }
             }
         }
+        // A punch this frame, or its parry window still open (the predicted state).
+        self.combat_predict_parry(common, punched);
+    }
+
+    /// The parry as the local player sees it (`docs/feel.md`): during the punch's parry window,
+    /// a parryable projectile drawn within the parry reach in front of the camera (or touching
+    /// close), or a Mould flashing its parry window within melee parry reach, is parried *now*
+    /// — the server tests the same rule at the same (rewound) view time, so its `Parried` only
+    /// confirms it a round trip later.
+    pub(super) fn combat_predict_parry(&mut self, common: &mut Common, punched: bool) {
+        let now = self.time;
+        if self
+            .combat
+            .parry_predicted_at
+            .is_some_and(|at| now - at < PARRY_CONFIRM_WINDOW)
+        {
+            return;
+        }
+        let Some(net) = self.session.as_ref().map(Session::client) else {
+            return;
+        };
+        if !punched && self.combat.predictor.state().parry == 0 {
+            return;
+        }
+        let t = &net.tuning().combat;
+        let eye = self.last_camera.position;
+        let view = self.last_camera.rotation * Vec3::NEG_Z;
+        let local = net.local_player_id().map(|p| p.0 as u16);
+        let render_tick = net.render_tick();
+        let half_cone = (t.parry_cone_degrees * 0.5).to_radians().cos();
+        let hit = net.remote_entities().iter().find_map(|e| {
+            if kind::is_projectile(e.kind) {
+                let pk = shared::sim::ProjectileKind::from_net_kind(e.kind)?;
+                let flags = e.flags;
+                if !pk.parryable()
+                    || Some(e.owner) == local
+                    || flags
+                        & (shared::protocol::projectile_flags::STUCK
+                            | shared::protocol::projectile_flags::PARRIED)
+                        != 0
+                {
+                    return None;
+                }
+                let p = shared::sim::projectiles::replicated_position(
+                    e,
+                    render_tick,
+                    net.tick_rate(),
+                    t,
+                );
+                let to = p - eye;
+                let d = to.length();
+                let front = to.normalize_or_zero().dot(view);
+                ((d <= t.parry_range && front >= half_cone)
+                    || (d <= t.parry_close_range && front > 0.0))
+                    .then_some(p)
+            } else if kind::is_enemy(e.kind)
+                && e.flags & shared::protocol::enemy_flags::PARRYABLE != 0
+            {
+                let (r, h) = enemy_size(e.kind);
+                let center = e.position + Vec3::Y * (h * 0.5);
+                (center.distance(eye) <= t.melee_parry_range + r + h * 0.5).then_some(center)
+            } else {
+                None
+            }
+        });
+        let Some(at) = hit else {
+            return;
+        };
+        self.combat.parry_predicted_at = Some(now);
+        let fist = self.parry_fist();
+        parry_feedback(
+            &mut self.feedback,
+            &mut common.audio,
+            &mut self.effects,
+            &mut self.combat.beams,
+            fist,
+            view,
+        );
+        let pal = crate::palette::palette();
+        let glow = pal.effect(Vec4::new(1.0, 1.0, 0.95, 1.0), pal.deflected, 1.0);
+        self.effects.glow(at, glow, 1.3, 0.15);
+        self.effects.sparks(at, -view, 18);
+        self.hud.banner("PARRY", common.theme.bone, now);
+    }
+
+    /// Where the punching fist is drawn (world space), else just in front of the camera.
+    fn parry_fist(&self) -> Vec3 {
+        let cam = &self.last_camera;
+        self.viewmodel.last_draw().and_then(|d| d.fist).map_or(
+            cam.position + cam.rotation * Vec3::new(-0.05, -0.05, -0.45),
+            |f| cam.position + cam.rotation * f,
+        )
     }
 
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
@@ -906,6 +1058,7 @@ impl InGame {
             viewmodel,
             feedback,
             remote,
+            camera: rig,
             last_camera,
             potg,
             ..
@@ -998,6 +1151,7 @@ impl InGame {
             own_offset,
             stand_ins: Some(&combat.stand_ins),
             camera,
+            view: last_camera.rotation * Vec3::NEG_Z,
             world: net.world().map(|w| &w.collision.world),
         };
         combat.entities.update(
@@ -1074,14 +1228,20 @@ impl InGame {
             combat.arsenal.play_pending(&mut ctx);
         }
 
-        // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds.
-        combat.arsenal.local_feel(
+        // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds;
+        // the bow zooms in a little as it is drawn and flashes at full draw (docs/feel.md).
+        let (draw, full_now) = combat.arsenal.local_feel(
             combat.predictor.state(),
             t,
             rate,
             viewmodel,
             &mut common.audio,
         );
+        let eased = draw * draw * (3.0 - 2.0 * draw);
+        rig.set_zoom(1.0 - BOW_ZOOM * eased);
+        if full_now {
+            feedback.flash(glam::Vec3::new(1.0, 0.86, 0.5), 0.14);
+        }
 
         // Music: nearby alert enemies + recent combat.
         let near = combat.entities.alert_enemies_near(entities, listener, 40.0) as f32;
@@ -1117,6 +1277,7 @@ impl InGame {
             own_offset,
             stand_ins: Some(&self.combat.stand_ins),
             camera,
+            view: self.last_camera.rotation * Vec3::NEG_Z,
             world: net.world().map(|w| &w.collision.world),
         };
         self.combat.entities.draw(
@@ -1171,6 +1332,7 @@ impl InGame {
             branded,
             burning: own_flags & player_flags::BURNING != 0,
             pinned: own_flags & player_flags::PINNED != 0,
+            parry_window: weapons.parry as f32 / (t.parry_window * rate as f32).max(1.0),
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);

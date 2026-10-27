@@ -186,13 +186,13 @@ fn view_scale(w: WeaponKind) -> f32 {
 /// Recoil at full kick: (pull back in metres before scaling, muzzle climb in radians).
 fn kick_amount(w: WeaponKind) -> (f32, f32) {
     match w {
-        WeaponKind::Quill => (0.04, 0.2),
+        WeaponKind::Quill => (0.055, 0.26),
         WeaponKind::Bellows => (0.085, 0.45),
         WeaponKind::Arclash => (0.016, 0.05),
         WeaponKind::Tumbler => (0.09, 0.32),
-        WeaponKind::Lancet => (0.03, 0.11),
+        WeaponKind::Lancet => (0.038, 0.14),
         WeaponKind::Thresher => (0.07, 0.3),
-        WeaponKind::Riveter => (0.022, 0.05),
+        WeaponKind::Riveter => (0.03, 0.07),
         WeaponKind::Cinderbox => (0.05, 0.16),
         // The string snaps forward and the bow rocks towards the target.
         WeaponKind::Longwick => (-0.035, -0.06),

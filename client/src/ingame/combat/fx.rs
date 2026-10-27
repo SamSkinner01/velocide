@@ -755,8 +755,8 @@ pub fn muzzle_flash(
     effects.spawn(Particle {
         position: muzzle + aim * 0.06,
         velocity: carry,
-        max_life: 0.07,
-        size: Vec2::splat(size * 1.3),
+        max_life: 0.06,
+        size: Vec2::splat(size * 0.85),
         end_scale: 1.4,
         color: Vec4::new(1.0, 0.85, 0.55, 1.0),
         texture: FxTex::MuzzleFlash,
@@ -765,10 +765,10 @@ pub fn muzzle_flash(
         ..Default::default()
     });
     effects.spawn(Particle {
-        position: muzzle + aim * (0.06 + size * 0.55),
+        position: muzzle + aim * (0.06 + size * 0.4),
         velocity: carry + aim * 3.0,
         max_life: 0.05,
-        size: Vec2::splat(size * 0.9),
+        size: Vec2::splat(size * 0.55),
         end_scale: 1.6,
         color: Vec4::new(1.0, 0.7, 0.35, 0.9),
         texture: FxTex::MuzzleFlash,
@@ -780,7 +780,7 @@ pub fn muzzle_flash(
         position: muzzle + aim * 0.04,
         velocity: carry,
         max_life: 0.05,
-        size: Vec2::splat(size * 0.6),
+        size: Vec2::splat(size * 0.45),
         end_scale: 0.6,
         color: Vec4::new(1.8, 1.7, 1.4, 1.0),
         texture: FxTex::Glow,

@@ -67,6 +67,9 @@ pub struct CombatHudInfo<'a> {
     pub burning: bool,
     /// You are pinned (slowed): steel-blue bars at the screen edges and PINNED.
     pub pinned: bool,
+    /// The punch's parry window still open, 1 → 0 (a closing ring round the crosshair in the
+    /// parry colour, `docs/feel.md`).
+    pub parry_window: f32,
     pub time: f64,
 }
 
@@ -76,10 +79,14 @@ pub struct CombatHud {
     numbers: Vec<Number>,
     indicators: Vec<Indicator>,
     died_at: Option<f64>,
+    /// When the bow reached full draw (the full-draw ring bursts from then).
+    full_draw_at: Option<f64>,
 }
 
-const MARKER_TIME: f64 = 0.25;
-const KILL_MARKER_TIME: f64 = 0.45;
+const MARKER_TIME: f64 = 0.3;
+const KILL_MARKER_TIME: f64 = 0.55;
+/// Hit markers pop in bigger and settle over this long.
+const MARKER_POP: f64 = 0.07;
 const NUMBER_TIME: f64 = 0.8;
 const INDICATOR_TIME: f64 = 1.3;
 
@@ -193,21 +200,26 @@ impl CombatHud {
             };
             let age = ((now - m.time) / life) as f32;
             let alpha = 1.0 - age * age;
+            // Pop: drawn further out for a moment, then snapping in (docs/feel.md).
+            let pop = 1.0 - ((now - m.time) / MARKER_POP).clamp(0.0, 1.0) as f32;
             let (color, r0, len, thick) = match m.kind {
-                MarkerKind::Body => (t.bone, 5.0, 5.0, 1.0),
-                MarkerKind::Head => (t.crimson_bright, 5.0, 7.0, 2.0),
+                MarkerKind::Body => (t.bone, 5.0, 6.0, 2.0),
+                MarkerKind::Head => (t.crimson_bright, 5.0, 9.0, 2.0),
                 MarkerKind::Armour => (t.ash, 5.0, 4.0, 1.0),
-                MarkerKind::Kill => (t.crimson_bright, 6.0 + 3.0 * age, 9.0, 2.0),
+                MarkerKind::Kill => (t.crimson_bright, 6.0 + 4.0 * age, 12.0, 3.0),
             };
             marker(
                 list,
                 center,
-                r0,
+                r0 + 3.0 * pop,
                 len,
                 thick,
                 fade(color, alpha),
                 fade(t.ink, 0.8 * alpha),
             );
+            if m.kind == MarkerKind::Kill {
+                ring(list, center, 10.0 + 22.0 * age, fade(color, 0.8 * alpha));
+            }
         }
 
         // Damage numbers.
@@ -298,6 +310,39 @@ impl CombatHud {
                     vec2(bar.max.x + 4.0, bar.min.y - 2.0),
                     &format!("{radius:.0}M"),
                     &TextStyle::new(fade(color, 0.9)).outline(outline),
+                );
+            }
+        }
+
+        // The punch's parry window: a ring closing on the crosshair while it lasts.
+        if info.parry_window > 0.0 && !info.dead {
+            let pal = crate::palette::palette();
+            let k = info.parry_window.clamp(0.0, 1.0);
+            ring(
+                list,
+                center,
+                7.0 + 12.0 * k,
+                fade(pal.parry_window, 0.35 + 0.6 * k),
+            );
+        }
+
+        // The bow reaching full draw: a gold ring bursts out from the crosshair.
+        let full = w.draw > 0 && w.draw_fraction(info.tuning, info.tick_rate) >= 1.0;
+        match (full, self.full_draw_at) {
+            (true, None) => self.full_draw_at = Some(now),
+            (false, Some(_)) => self.full_draw_at = None,
+            _ => {}
+        }
+        if let Some(at) = self.full_draw_at {
+            let k = ((now - at) / 0.35) as f32;
+            if k < 1.0 {
+                let gold = Vec4::new(1.0, 0.85, 0.45, 1.0);
+                ring(list, center, 8.0 + 30.0 * k, fade(gold, 1.0 - k));
+                ring(
+                    list,
+                    center,
+                    6.0 + 18.0 * k,
+                    fade(Vec4::ONE, 0.8 * (1.0 - k)),
                 );
             }
         }
@@ -470,6 +515,22 @@ fn marker(
                 );
             }
         }
+    }
+}
+
+/// A thin circle of `radius` around `center` (pixel dots, so it stays crisp).
+fn ring(list: &mut UiDrawList, center: Vec2, radius: f32, color: Vec4) {
+    if radius <= 0.0 || color.w <= 0.01 {
+        return;
+    }
+    let n = ((radius * std::f32::consts::TAU / 2.0) as usize).clamp(12, 160);
+    for i in 0..n {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        let p = center + vec2(a.cos(), a.sin()) * radius;
+        list.fill(
+            Rect::from_center_size(p.floor() + vec2(0.5, 0.5), vec2(1.5, 1.5)),
+            color,
+        );
     }
 }
 

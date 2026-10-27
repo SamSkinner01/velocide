@@ -1107,6 +1107,7 @@ impl InGame {
             own_offset,
             stand_ins: None,
             camera: cam.position,
+            view: cam.rotation * Vec3::NEG_Z,
             world,
         };
         pb.entities
