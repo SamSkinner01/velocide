@@ -251,6 +251,43 @@ pub enum Sfx {
     FullDrawGlint,
     /// A hit on a weak point / head confirmed by the server: a hard metallic tick.
     WeakPointTick,
+    // arsenal-client: melee and knacks (docs/refit.md)
+    /// A Trimmer slash: the shears snip and the blade whistles past (one per swing).
+    TrimmerSlash,
+    /// The Trimmer's hook biting into a target: a crisp slice and a scrape of steel.
+    TrimmerHit,
+    /// The Tamper's overhead swing: a deep rush of air, the haft creaking.
+    TamperSwing,
+    /// The Tamper landing: a packed thud, sand crunching, the iron head ringing.
+    TamperHit,
+    /// Lunge: a hard rush forward, a blade drawn along steel.
+    Lunge,
+    /// Whirl: air whooshing round twice over a spinning drone.
+    Whirl,
+    /// Hurl: a fling and the piece whirring away end over end.
+    HurlThrow,
+    /// A hurled blade / head biting into something: a chop and a ringing judder.
+    HurlHit,
+    /// Upswing: a rising whoosh into a heavy upward heave.
+    Upswing,
+    /// A knack thrown (flask, snare, soot pot): a short lob, a soft clink.
+    KnackThrow,
+    /// The Kindle flask breaking: glass, the kindling catching, a bright rising chime.
+    FlaskShatter,
+    /// The kindling pool burning (1.5 s, re-trigger while it lasts).
+    KindlePool,
+    /// A Snare slapped down: a wax thud, the jaws ratcheting open.
+    SnareSet,
+    /// A Snare armed: its wick lamp catching.
+    SnareArmed,
+    /// A Snare sprung: the jaws biting shut, a chain jerking taut.
+    SnareSpring,
+    /// A Soot pot breaking: a clay pop and soot billowing out.
+    SootBurst,
+    /// Tallow Skin: a sizzling coat of hot tallow settling.
+    TallowSkin,
+    /// Surge: the wick flaring and a hard rush of air.
+    Surge,
 }
 
 /// Mixing and playback metadata of one sound.
@@ -458,6 +495,25 @@ impl Sfx {
         Sfx::ParryImpact,
         Sfx::FullDrawGlint,
         Sfx::WeakPointTick,
+        // arsenal-client: melee and knacks
+        Sfx::TrimmerSlash,
+        Sfx::TrimmerHit,
+        Sfx::TamperSwing,
+        Sfx::TamperHit,
+        Sfx::Lunge,
+        Sfx::Whirl,
+        Sfx::HurlThrow,
+        Sfx::HurlHit,
+        Sfx::Upswing,
+        Sfx::KnackThrow,
+        Sfx::FlaskShatter,
+        Sfx::KindlePool,
+        Sfx::SnareSet,
+        Sfx::SnareArmed,
+        Sfx::SnareSpring,
+        Sfx::SootBurst,
+        Sfx::TallowSkin,
+        Sfx::Surge,
     ];
 
     /// Number of sounds; `sfx as usize` is a valid index below this.
@@ -652,6 +708,26 @@ impl Sfx {
             ParryImpact => info(-11.0, 2, 0.0, 0.08),
             FullDrawGlint => info(-13.0, 2, 0.0, 0.1),
             WeakPointTick => info(-16.0, 3, 0.03, 0.035),
+
+            // arsenal-client: melee and knacks
+            TrimmerSlash => variants(info(-16.0, 4, 0.06, 0.02), 2),
+            TrimmerHit => variants(info(-14.0, 4, 0.06, 0.03), 2),
+            TamperSwing => info(-14.0, 3, 0.04, 0.05),
+            TamperHit => info(-11.0, 3, 0.04, 0.05),
+            Lunge => info(-14.0, 3, 0.04, 0.05),
+            Whirl => info(-13.0, 3, 0.03, 0.1),
+            HurlThrow => info(-15.0, 3, 0.05, 0.03),
+            HurlHit => variants(info(-14.0, 4, 0.06, 0.03), 2),
+            Upswing => info(-13.0, 3, 0.04, 0.05),
+            KnackThrow => info(-18.0, 3, 0.06, 0.05),
+            FlaskShatter => info(-14.0, 3, 0.03, 0.1),
+            KindlePool => info(-20.0, 4, 0.05, 0.2),
+            SnareSet => info(-17.0, 3, 0.05, 0.05),
+            SnareArmed => info(-20.0, 4, 0.03, 0.05),
+            SnareSpring => info(-12.0, 3, 0.04, 0.05),
+            SootBurst => info(-14.0, 3, 0.04, 0.1),
+            TallowSkin => info(-15.0, 2, 0.03, 0.2),
+            Surge => info(-15.0, 3, 0.05, 0.05),
         }
     }
 }
@@ -3563,6 +3639,279 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let snap = click(r, 0.003);
             let thud = thump(0.08, 300.0, 140.0, 0.01, 0.025);
             layer(&[(&tick, 1.0, 0.0), (&snap, 0.7, 0.0), (&thud, 0.5, 0.0)])
+        }
+        // ----- arsenal-client: melee and knacks (docs/refit.md, docs/audio.md "Melee") -------
+        // The Trimmer is shear steel (a snip, a thin ringing whistle), the Tamper a foundry
+        // tool (heavy air, packed sand and iron); the knacks are glass, wax, clay and soot.
+        TrimmerSlash => {
+            // The shears snip as the wrist turns, then the blade whistles through the air with
+            // a thin steel ring riding on it.
+            let snip = metal(
+                0.05,
+                r.range(3600.0, 4200.0),
+                &[(1.0, 1.0, 0.01), (1.48, 0.6, 0.008), (2.31, 0.4, 0.006)],
+            );
+            let tick = click(r, 0.001);
+            let air = whoosh(r, 0.17, 1400.0, 5200.0, 2.4);
+            let ring = metal(
+                0.2,
+                r.range(2400.0, 2700.0),
+                &[(1.0, 0.6, 0.07), (2.7, 0.3, 0.04)],
+            );
+            let mut b = layer(&[
+                (&tick, 0.5, 0.0),
+                (&snip, 0.7, 0.0),
+                (&air, 1.0, 0.012),
+                (&ring, 0.25, 0.03),
+            ]);
+            highpass(&mut b, 300.0);
+            b
+        }
+        TrimmerHit => {
+            // The hook biting into wax: a crisp slice, a split, a short scrape of steel.
+            let slice = noise(r, 0.09, Pass::Band, 6000.0, 2200.0, 1.4, 0.0003, 0.03);
+            let split = thump(0.12, 380.0, 150.0, 0.006, 0.03);
+            let snap = noise(r, 0.06, Pass::Band, 1900.0, 1100.0, 1.2, 0.0005, 0.015);
+            let scrape = metal(
+                0.18,
+                r.range(1700.0, 2000.0),
+                &[(1.0, 0.8, 0.05), (2.2, 0.5, 0.03), (3.6, 0.3, 0.02)],
+            );
+            let mut b = layer(&[
+                (&slice, 1.0, 0.0),
+                (&split, 0.9, 0.0),
+                (&snap, 0.6, 0.004),
+                (&scrape, 0.35, 0.01),
+            ]);
+            drive(&mut b, 1.5);
+            crush(&mut b, 11, 1.0);
+            b
+        }
+        TamperSwing => {
+            // A heavy head moved fast: a deep rush of air and the haft creaking under it.
+            let air = whoosh(r, 0.38, 180.0, 900.0, 1.3);
+            let low = noise(r, 0.4, Pass::Low, 260.0, 160.0, 0.8, 0.06, 0.16);
+            let mut creak = tone(0.18, Wave::Saw, 150.0, 120.0, 0.18, 0.02, 0.07);
+            lowpass(&mut creak, 900.0);
+            stutter(&mut creak, 40.0, 0.0);
+            layer(&[(&air, 1.0, 0.0), (&low, 0.6, 0.02), (&creak, 0.3, 0.0)])
+        }
+        TamperHit => {
+            // The rammer's foot driving home: a deep packed thud, sand crunching, the iron head
+            // ringing once, grit scattering.
+            let boom = thump(0.7, 95.0, 34.0, 0.03, 0.18);
+            let crunch = noise(r, 0.45, Pass::Low, 3000.0, 220.0, 0.9, 0.0005, 0.09);
+            let clang = metal(
+                0.6,
+                r.range(230.0, 260.0),
+                &[
+                    (1.0, 1.0, 0.25),
+                    (2.62, 0.6, 0.16),
+                    (4.3, 0.35, 0.09),
+                    (6.7, 0.2, 0.05),
+                ],
+            );
+            let grit = crackle(r, 0.45, 380.0, 0.14);
+            let mut b = layer(&[
+                (&boom, 1.3, 0.0),
+                (&crunch, 0.9, 0.0),
+                (&clang, 0.35, 0.002),
+                (&grit, 0.35, 0.02),
+            ]);
+            drive(&mut b, 2.6);
+            crush(&mut b, 10, 2.0);
+            reverb(&mut b, 0.45, 0.5, 0.18, 0.35);
+            b
+        }
+        Lunge => {
+            // Launching off the back foot: a hard rush forward and the blade drawn along steel.
+            let rush = whoosh(r, 0.32, 500.0, 2600.0, 1.6);
+            let push = thump(0.15, 140.0, 70.0, 0.01, 0.05);
+            let draw = metal(
+                0.3,
+                2100.0,
+                &[(1.0, 0.7, 0.12), (1.97, 0.4, 0.08), (3.1, 0.25, 0.05)],
+            );
+            let mut scrape = noise(r, 0.25, Pass::Band, 4500.0, 7000.0, 2.0, 0.02, 0.08);
+            highpass(&mut scrape, 2500.0);
+            layer(&[
+                (&push, 0.8, 0.0),
+                (&rush, 1.0, 0.0),
+                (&draw, 0.25, 0.03),
+                (&scrape, 0.4, 0.03),
+            ])
+        }
+        Whirl => {
+            // A full turn: the air whooshing round twice, a low drone of the spin under it.
+            let dur = 0.6;
+            let mut n = Rng::new(r.next_u64());
+            let mut svf = Svf::default();
+            let spin = render(dur, |t, _| {
+                // Two passes of the blade: the band sweeps up and the level pulses twice.
+                let pass = (t / dur * std::f32::consts::TAU).sin().abs();
+                let env = bell(t, dur).powf(0.5) * (0.35 + 0.65 * pass);
+                svf.process(n.bipolar(), sweep(t, 400.0, 2200.0, dur), 1.8, SR)
+                    .band
+                    * env
+            });
+            let mut drone = tone(dur, Wave::Saw, 110.0, 160.0, dur, 0.05, 0.25);
+            lowpass(&mut drone, 500.0);
+            let ring = metal(0.4, 1800.0, &[(1.0, 0.5, 0.15), (2.4, 0.3, 0.08)]);
+            layer(&[(&spin, 1.0, 0.0), (&drone, 0.35, 0.0), (&ring, 0.2, 0.25)])
+        }
+        HurlThrow => {
+            // Flung: a fwoosh, then the blade / head whirring away end over end.
+            let fling = whoosh(r, 0.18, 700.0, 2500.0, 1.5);
+            let dur = 0.45;
+            let mut n = Rng::new(r.next_u64());
+            let mut svf = Svf::default();
+            let whirr = render(dur, |t, _| {
+                let flutter = 0.5 + 0.5 * (t * 14.0 * std::f32::consts::TAU).sin();
+                let env = perc(t, 0.02, 0.18) * flutter;
+                svf.process(n.bipolar(), sweep(t, 1600.0, 900.0, dur), 2.5, SR)
+                    .band
+                    * env
+            });
+            layer(&[(&fling, 1.0, 0.0), (&whirr, 0.8, 0.06)])
+        }
+        HurlHit => {
+            // The spinning piece biting into something: a heavy chop and a ringing judder.
+            let chop = thump(0.2, 260.0, 90.0, 0.008, 0.05);
+            let bite = noise(r, 0.08, Pass::Band, 3500.0, 1500.0, 1.2, 0.0003, 0.025);
+            let mut judder = metal(
+                0.45,
+                r.range(620.0, 700.0),
+                &[(1.0, 1.0, 0.15), (2.76, 0.5, 0.1), (4.4, 0.3, 0.06)],
+            );
+            stutter(&mut judder, 24.0, 0.0);
+            let mut b = layer(&[(&chop, 1.0, 0.0), (&bite, 0.7, 0.0), (&judder, 0.4, 0.01)]);
+            drive(&mut b, 1.6);
+            b
+        }
+        Upswing => {
+            // From the floor up: a rising whoosh that ends in a heavy upward heave.
+            let rise = whoosh(r, 0.3, 300.0, 3000.0, 1.6);
+            let heave = thump(0.25, 70.0, 140.0, 0.08, 0.08);
+            let launch = noise(r, 0.3, Pass::Low, 600.0, 1800.0, 0.8, 0.02, 0.1);
+            layer(&[(&rise, 1.0, 0.0), (&heave, 0.9, 0.12), (&launch, 0.6, 0.14)])
+        }
+        KnackThrow => {
+            // A knack leaving the hand: a short underhand lob and a soft clink.
+            let lob = whoosh(r, 0.2, 500.0, 1500.0, 1.4);
+            let clink = metal(0.1, 2600.0, &[(1.0, 0.7, 0.03), (2.4, 0.4, 0.02)]);
+            layer(&[(&lob, 1.0, 0.0), (&clink, 0.3, 0.0)])
+        }
+        FlaskShatter => {
+            // The flask breaking: glass bursting, then the kindling catching with a warm
+            // whoomph and a bright rising chime (healing is here).
+            let glass = glass_spray(r, 14, 0.12, 2500.0, 6500.0);
+            let crack = noise(r, 0.06, Pass::High, 4000.0, 3000.0, 0.8, 0.0003, 0.015);
+            let whoomph = noise(r, 0.5, Pass::Low, 260.0, 1300.0, 0.9, 0.03, 0.16);
+            let chime = notes(
+                &[(76.0, 0.0, 0.18), (79.0, 0.08, 0.18), (84.0, 0.16, 0.3)],
+                Wave::Triangle,
+                0.004,
+                0.25,
+                5000.0,
+                0.0,
+            );
+            let mut b = layer(&[
+                (&crack, 0.8, 0.0),
+                (&glass, 0.7, 0.0),
+                (&whoomph, 0.9, 0.04),
+                (&chime, 0.35, 0.08),
+            ]);
+            echo(&mut b, 0.11, 0.3, 0.25, 4000.0, 0.3);
+            b
+        }
+        KindlePool => {
+            // The pool burning: a soft breathing crackle of embers (re-trigger while it lasts).
+            let dur = 1.5;
+            let embers = envelope(crackle(r, dur, 180.0, 6.0), 0.2, 0.9);
+            let mut breath = noise(r, dur, Pass::Band, 700.0, 900.0, 0.8, 0.3, 0.9);
+            for (i, b) in breath.iter_mut().enumerate() {
+                let t = i as f32 / SR;
+                *b *= 0.6 + 0.4 * (t * 1.3 * std::f32::consts::TAU).sin();
+            }
+            let mut b = layer(&[(&embers, 0.7, 0.0), (&breath, 0.6, 0.0)]);
+            fade_out(&mut b, 0.3);
+            b
+        }
+        SnareSet => {
+            // The trap slapped onto the floor: a wax thud, the jaws ratcheting open.
+            let thud = thump(0.18, 180.0, 80.0, 0.01, 0.05);
+            let wax = noise(r, 0.12, Pass::Low, 1500.0, 500.0, 0.9, 0.001, 0.04);
+            let ratchet = metal(0.04, 2300.0, &[(1.0, 1.0, 0.008), (2.6, 0.5, 0.005)]);
+            layer(&[
+                (&thud, 1.0, 0.0),
+                (&wax, 0.6, 0.0),
+                (&ratchet, 0.5, 0.08),
+                (&ratchet, 0.5, 0.12),
+                (&ratchet, 0.6, 0.16),
+            ])
+        }
+        SnareArmed => {
+            // The wick lamp catching: two small bright ticks and a puff.
+            let tick = metal(0.06, 3100.0, &[(1.0, 1.0, 0.012), (2.2, 0.4, 0.008)]);
+            let puff = noise(r, 0.15, Pass::Band, 900.0, 1500.0, 1.0, 0.01, 0.05);
+            layer(&[(&tick, 0.8, 0.0), (&tick, 0.6, 0.07), (&puff, 0.5, 0.05)])
+        }
+        SnareSpring => {
+            // Sprung: the jaws snapping shut (a hard steel bite), a chain jerking taut.
+            let snap = click(r, 0.0015);
+            let bite = metal(
+                0.3,
+                r.range(950.0, 1100.0),
+                &[(1.0, 1.0, 0.09), (2.31, 0.7, 0.06), (3.9, 0.4, 0.04)],
+            );
+            let thud = thump(0.2, 200.0, 70.0, 0.01, 0.06);
+            let chain = envelope(crackle(r, 0.35, 700.0, 0.12), 0.002, 0.1);
+            let mut b = layer(&[
+                (&snap, 0.9, 0.0),
+                (&bite, 0.8, 0.0),
+                (&thud, 0.8, 0.0),
+                (&chain, 0.6, 0.03),
+            ]);
+            drive(&mut b, 1.8);
+            b
+        }
+        SootBurst => {
+            // The pot breaking: a dull clay pop, then soot billowing out (a long soft rush that
+            // stays low and muffled).
+            let pop = thump(0.15, 240.0, 90.0, 0.006, 0.04);
+            let clay = noise(r, 0.08, Pass::Band, 1400.0, 700.0, 1.1, 0.0005, 0.02);
+            let shards = crackle(r, 0.2, 260.0, 0.06);
+            let billow = noise(r, 1.4, Pass::Low, 900.0, 220.0, 0.7, 0.06, 0.5);
+            let rush = whoosh(r, 0.9, 300.0, 700.0, 0.9);
+            let mut b = layer(&[
+                (&pop, 1.0, 0.0),
+                (&clay, 0.7, 0.0),
+                (&shards, 0.5, 0.005),
+                (&billow, 0.9, 0.03),
+                (&rush, 0.6, 0.05),
+            ]);
+            lowpass(&mut b, 3500.0);
+            b
+        }
+        TallowSkin => {
+            // Coated in hot tallow: a soft sizzling slide and a muffled, waxy settle.
+            let sizzle = noise(r, 0.5, Pass::High, 3500.0, 1800.0, 0.8, 0.02, 0.2);
+            let slide = noise(r, 0.4, Pass::Band, 1200.0, 400.0, 1.4, 0.04, 0.15);
+            let settle = thump(0.3, 110.0, 70.0, 0.04, 0.1);
+            let shimmer = fm(0.5, 520.0, 440.0, 1.5, 2.0, 0.3, 0.02, 0.2);
+            layer(&[
+                (&sizzle, 0.6, 0.0),
+                (&slide, 0.8, 0.0),
+                (&settle, 0.7, 0.08),
+                (&shimmer, 0.2, 0.05),
+            ])
+        }
+        Surge => {
+            // A burst of speed: the wick flaring (a fwoom) and a hard rush of air.
+            let fwoom = noise(r, 0.3, Pass::Low, 300.0, 1800.0, 1.0, 0.005, 0.09);
+            let rush = whoosh(r, 0.3, 900.0, 4000.0, 1.3);
+            let kick = thump(0.12, 160.0, 60.0, 0.008, 0.04);
+            layer(&[(&kick, 0.8, 0.0), (&fwoom, 1.0, 0.0), (&rush, 0.8, 0.02)])
         }
     }
 }

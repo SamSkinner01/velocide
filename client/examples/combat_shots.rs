@@ -600,6 +600,281 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 200, still);
 }
 
+/// Walks up to the nearest Mould until it is within `reach` (for melee), aiming at it.
+fn close_in(h: &mut Harness, game: &mut InGame, reach: f32) {
+    for _ in 0..240 {
+        let close = match (nearest_enemy(game, false), eye(game)) {
+            (Some(t), Some(me)) => {
+                aim_at(game, t);
+                Vec3::new(t.x - me.x, 0.0, t.z - me.z).length() < reach
+            }
+            _ => true,
+        };
+        if close {
+            break;
+        }
+        game.controls.override_move = Some((1.0, 0.0, Buttons::NONE));
+        h.frame(game);
+    }
+    hold(game, Buttons::NONE);
+}
+
+/// The melee weapons and knacks for real (`/loadout trimmer tamper knack:...`): the
+/// viewmodel mid-swing with its trail, a hit, the abilities, each knack used, the Q slot
+/// (`melee_weapon_*.png`, `knack_use_*.png`).
+fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let press = |h: &mut Harness, game: &mut InGame, b: Buttons, after: usize, name: &str| {
+        if let Some(t) = nearest_enemy(game, false) {
+            aim_at(game, t);
+        }
+        hold(game, b);
+        h.frame(game);
+        for _ in 0..after {
+            hold(game, Buttons::NONE);
+            h.frame(game);
+        }
+        h.shot(name);
+    };
+    game.send_chat("/killall");
+    game.send_chat("/loadout trimmer:lunge,hurl tamper:whirl,upswing knack:kindle");
+    spawn(game, 3);
+    h.frames(game, 70, still);
+    close_in(h, game, 2.6);
+
+    // The Trimmer: right blade, then left; the HUD's Q slot shows the flask.
+    select(game, 0, 0);
+    h.frames(game, 20, still);
+    h.shot("melee_weapon_trimmer_rest");
+    press(h, game, Buttons::FIRE, 3, "melee_weapon_trimmer_slash");
+    h.frames(game, 18, still);
+    press(h, game, Buttons::FIRE, 3, "melee_weapon_trimmer_slash_left");
+    h.frames(game, 12, still);
+    h.shot("melee_weapon_trimmer_hit");
+    h.frames(game, 30, still);
+    // Lunge, then Hurl.
+    press(h, game, Buttons::ALT_FIRE, 6, "melee_weapon_trimmer_lunge");
+    h.frames(game, 40, still);
+    select(game, 0, 1);
+    h.frames(game, 20, still);
+    press(h, game, Buttons::ALT_FIRE, 8, "melee_weapon_trimmer_hurl");
+    h.frames(game, 40, still);
+
+    // The Tamper: the slam, a Whirl, an Upswing.
+    game.send_chat("/give");
+    spawn(game, 2);
+    h.frames(game, 40, still);
+    close_in(h, game, 2.8);
+    select(game, 1, 0);
+    h.frames(game, 20, still);
+    h.shot("melee_weapon_tamper_rest");
+    press(h, game, Buttons::FIRE, 5, "melee_weapon_tamper_slam");
+    h.frames(game, 50, still);
+    press(h, game, Buttons::ALT_FIRE, 8, "melee_weapon_tamper_whirl");
+    h.frames(game, 40, still);
+    select(game, 1, 1);
+    h.frames(game, 20, still);
+    press(
+        h,
+        game,
+        Buttons::ALT_FIRE,
+        10,
+        "melee_weapon_tamper_upswing",
+    );
+    h.frames(game, 40, still);
+
+    // The knacks, used for real.
+    for (knack, name, after, settle) in [
+        ("kindle", "knack_use_flask", 4, 70),
+        ("snare", "knack_use_snare", 4, 60),
+        ("soot", "knack_use_soot", 40, 60),
+        ("tallow", "knack_use_tallow", 20, 200),
+        ("surge", "knack_use_surge", 4, 40),
+    ] {
+        game.send_chat(&format!("/loadout knack:{knack}"));
+        game.send_chat("/give");
+        h.frames(game, 20, still);
+        if let Some(t) = nearest_enemy(game, false) {
+            aim_at(game, t - Vec3::Y * 0.8);
+        }
+        hold(game, Buttons::THROW);
+        h.frame(game);
+        h.frames(game, after, still);
+        h.shot(name);
+        h.frames(game, settle, still);
+        if knack == "kindle" {
+            h.shot("knack_use_kindle_pool");
+        }
+        if knack == "snare" {
+            h.shot("knack_use_snare_armed");
+        }
+    }
+    game.send_chat("/loadout quill bellows arclash tumbler knack:thorn");
+    game.send_chat("/killall");
+    h.frames(game, 30, still);
+}
+
+/// Melee and knacks (docs/refit.md), staged client-side with `InGame::preview_melee` /
+/// `preview_knack` (`melee_*.png`, `knack_*.png`): slash trails, hits, the abilities' streak /
+/// ring / hurled pieces / launch, the flask and its pool, the snare arming and springing, the
+/// soot cloud hiding the Moulds, Tallow Skin's sheen and the Surge's lines.
+fn refit_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::knacks::{KnackPreview as K, Thrown};
+    use client::ingame::combat::melee::{MeleePreview as M, MeleeWeapon, SwingKind};
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 70, still);
+    if let Some(t) = nearest_enemy(game, false) {
+        aim_at(game, t - Vec3::Y * 0.4);
+    }
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let (yaw, pitch) = (game.controls.yaw, game.controls.pitch);
+    let fwd = shared::input::look_dir(yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = eye - Vec3::Y * 1.6;
+    let swing = |g: &mut InGame, weapon, kind, left| {
+        g.preview_melee(M::Swing {
+            weapon,
+            kind,
+            left,
+            eye,
+            yaw,
+            pitch,
+        })
+    };
+
+    // Slash trails: the Trimmer's right then left blade, the Tamper's slam.
+    swing(game, MeleeWeapon::Trimmer, SwingKind::Slash, false);
+    h.frames(game, 4, still);
+    h.shot("melee_trimmer_slash");
+    h.frames(game, 16, still);
+    swing(game, MeleeWeapon::Trimmer, SwingKind::Slash, true);
+    h.frames(game, 6, still);
+    h.shot("melee_trimmer_slash_left");
+    h.frames(game, 20, still);
+    swing(game, MeleeWeapon::Tamper, SwingKind::Slash, false);
+    h.frames(game, 9, still);
+    h.shot("melee_tamper_slam");
+    game.preview_melee(M::Hit {
+        weapon: MeleeWeapon::Tamper,
+        at: floor + fwd * 2.4 + Vec3::Y * 0.1,
+        dir: -Vec3::Y,
+    });
+    h.frames(game, 3, still);
+    h.shot("melee_tamper_hit");
+    h.frames(game, 30, still);
+
+    // Hits on the Moulds.
+    if let Some(t) = nearest_enemy(game, false) {
+        game.preview_melee(M::Hit {
+            weapon: MeleeWeapon::Trimmer,
+            at: t,
+            dir: fwd,
+        });
+    }
+    h.frames(game, 3, still);
+    h.shot("melee_trimmer_hit");
+    h.frames(game, 30, still);
+
+    // The abilities: a Lunge streak across the view, the Whirl round a spot ahead, hurled
+    // pieces, the Upswing under a Mould.
+    game.preview_melee(M::Lunge {
+        from: floor + fwd * 5.0 + right * 4.0,
+        velocity: -right * 16.0,
+        seconds: 0.4,
+    });
+    h.frames(game, 18, still);
+    h.shot("melee_lunge");
+    h.frames(game, 20, still);
+    game.preview_melee(M::Whirl {
+        feet: floor + fwd * 5.0,
+        radius: 3.5,
+    });
+    swing(game, MeleeWeapon::Trimmer, SwingKind::Whirl, false);
+    h.frames(game, 12, still);
+    h.shot("melee_whirl");
+    h.frames(game, 30, still);
+    for (weapon, side) in [(MeleeWeapon::Trimmer, -0.5), (MeleeWeapon::Tamper, 0.5)] {
+        game.preview_melee(M::Hurl {
+            weapon,
+            from: eye + fwd * 0.8 + right * side - Vec3::Y * 0.2,
+            velocity: fwd * 30.0 + Vec3::Y * 1.5,
+        });
+    }
+    h.frames(game, 5, still);
+    h.shot("melee_hurl");
+    h.frames(game, 40, still);
+    if let Some(t) = nearest_enemy(game, false) {
+        game.preview_melee(M::Upswing {
+            feet: t - Vec3::Y * 0.95,
+        });
+        swing(game, MeleeWeapon::Tamper, SwingKind::Upswing, false);
+    }
+    h.frames(game, 10, still);
+    h.shot("melee_upswing");
+    h.frames(game, 40, still);
+
+    // Knacks: a flask lobbed ahead and its pool.
+    let lob = |side: f32| eye + fwd * 0.7 + right * side - Vec3::Y * 0.2;
+    game.preview_knack(K::Throw {
+        thing: Thrown::Flask,
+        from: lob(0.2),
+        velocity: fwd * 9.0 + Vec3::Y * 4.0,
+        gravity: 16.0,
+    });
+    h.frames(game, 8, still);
+    h.shot("knack_flask");
+    h.frames(game, 50, still);
+    h.shot("knack_kindle_pool");
+    h.frames(game, 200, still);
+
+    // A snare thrown down, arming, armed, then sprung.
+    game.preview_knack(K::Snare {
+        position: floor + fwd * 3.5,
+        arm: 0.6,
+        spring: Some(2.0),
+    });
+    h.frames(game, 10, still);
+    h.shot("knack_snare_arming");
+    h.frames(game, 50, still);
+    h.shot("knack_snare_armed");
+    h.frames(game, 64, still);
+    h.shot("knack_snare_sprung");
+    h.frames(game, 30, still);
+
+    // A soot pot bursting between us and the Moulds: they disappear in it.
+    h.shot("knack_soot_before");
+    let target = nearest_enemy(game, false).unwrap_or(eye + fwd * 10.0);
+    let mid = eye + (target - eye) * 0.45;
+    game.preview_knack(K::Cloud {
+        position: Vec3::new(mid.x, floor.y, mid.z),
+        radius: 5.0,
+        seconds: 7.0,
+    });
+    h.frames(game, 70, still);
+    h.shot("knack_soot_cloud");
+    h.frames(game, 330, still);
+    h.shot("knack_soot_gone");
+
+    // Tallow Skin on you, then a Surge.
+    game.preview_knack(K::TallowSelf { seconds: 3.0 });
+    h.frames(game, 40, still);
+    h.shot("knack_tallow_skin");
+    h.frames(game, 160, still);
+    game.preview_knack(K::SurgeSelf { seconds: 0.35 });
+    game.preview_melee(M::Lunge {
+        from: floor + fwd * 6.0 - right * 3.0,
+        velocity: right * 18.0,
+        seconds: 0.35,
+    });
+    h.frames(game, 6, still);
+    h.shot("knack_surge");
+    h.frames(game, 30, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -640,6 +915,15 @@ fn main() -> anyhow::Result<()> {
     game.send_chat("/notarget");
     spawn(&mut game, 4);
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
+
+    // Melee and knacks; `COMBAT_SHOTS=refit` stops after them (quick look).
+    refit_previews(&mut h, &mut game);
+    melee_weapon_shots(&mut h, &mut game);
+    if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "refit") {
+        println!("{} screenshots in {}", h.shots.len(), h.out.display());
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return Ok(());
+    }
 
     // Quill: muzzle flash, tracer, hit marker, damage number.
     select(&mut game, 0, 0);

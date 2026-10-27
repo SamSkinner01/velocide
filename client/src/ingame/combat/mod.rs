@@ -11,6 +11,8 @@
 //!   which build the local player holds.
 //! * [`stand_in`]: own projectiles drawn from the muzzle on the frame the shot is predicted,
 //!   handed over to the server's when they arrive (`docs/feel.md`).
+//! * [`melee`] and [`knacks`] (docs/refit.md): slash trails, melee hits and abilities; the Q
+//!   slot's knacks (HUD slot, flask and pool, snare, soot cloud, Tallow Skin, Surge).
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -21,6 +23,8 @@ pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
 pub mod hud;
+pub mod knacks;
+pub mod melee;
 pub mod stand_in;
 pub mod weapon_feel;
 
@@ -248,8 +252,36 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::TripleNock => s(Sfx::TripleNock, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::PinningArrow => s(Sfx::PinningRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::EmberArrow => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
+        // Melee (melee.rs draws the swings): no flash, no tracer.
+        Attack::Trimmer
+        | Attack::Tamper
+        | Attack::Lunge
+        | Attack::Whirl
+        | Attack::Hurl
+        | Attack::Upswing => {
+            let (weapon, kind) = match attack_melee(a) {
+                Some(m) => m,
+                None => (melee::MeleeWeapon::Trimmer, melee::SwingKind::Slash),
+            };
+            AttackStyle {
+                flash: 0.0,
+                ..s(
+                    melee::swing_sfx(weapon, kind),
+                    0.0,
+                    0.0,
+                    Vec4::ONE,
+                    0.0,
+                    0.05,
+                )
+            }
+        }
         _ => s(Sfx::QuillFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.0),
     }
+}
+
+/// The melee weapon and move of a melee attack.
+fn attack_melee(a: Attack) -> Option<(melee::MeleeWeapon, melee::SwingKind)> {
+    melee::weapon_of_attack(a, None).zip(melee::swing_kind(a))
 }
 
 /// Range of a hitscan attack's rays (client tracers).
@@ -273,6 +305,9 @@ pub struct CombatClient {
     pub arsenal: arsenal::ArsenalView,
     /// Own projectiles before the server's arrive (`stand_in.rs`).
     pub stand_ins: stand_in::StandIns,
+    /// Melee trails, streaks and hurled pieces; the knacks' things (`melee.rs`, `knacks.rs`).
+    pub melee: melee::MeleeView,
+    pub knacks: knacks::KnackView,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -308,6 +343,8 @@ impl CombatClient {
             hud: CombatHud::new(),
             arsenal: arsenal::ArsenalView::new(),
             stand_ins: stand_in::StandIns::new(),
+            melee: melee::MeleeView::new(),
+            knacks: knacks::KnackView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             early: Vec::new(),
@@ -331,6 +368,8 @@ impl CombatClient {
         self.arsenal.clear();
         self.stand_ins.clear();
         self.early.clear();
+        self.melee.clear();
+        self.knacks.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.parry_predicted_at = None;
@@ -667,6 +706,27 @@ impl InGame {
                         }),
                     ),
                 }
+                // A melee blow lands: the slice / the slam where it struck (melee.rs); the
+                // Tamper's lands with a jolt.
+                let held = Some(self.combat.predictor.state().current());
+                if let Some(weapon) = melee::hit_weapon(h.attack, held) {
+                    let dir = (h.point - me).normalize_or(Vec3::NEG_Z);
+                    melee::melee_hit(
+                        &mut self.effects,
+                        &mut self.combat.beams,
+                        &mut self.combat.rng,
+                        &mut common.audio,
+                        weapon,
+                        h.point,
+                        dir,
+                    );
+                    if weapon == melee::MeleeWeapon::Tamper {
+                        self.feedback.hitstop(0.06);
+                        self.feedback.shake(0.18);
+                    } else {
+                        self.feedback.hitstop(0.025);
+                    }
+                }
                 self.combat.heat = (self.combat.heat + 0.15).min(1.0);
             }
             GameEvent::Killed(k) => {
@@ -801,6 +861,8 @@ impl InGame {
         let (own, own_now, owner) = own_projectiles(net);
         let live_limpets = own.iter().filter(|e| e.kind == kind::LIMPET).count() as u32;
         let mut punched = false;
+        let mut slashed = false;
+        let feet = net.local_state().map(|s| s.position);
         for shot in early.iter().chain(shots.iter()).filter(|s| !s.played) {
             let input = &shot.input;
             let aim = look_dir(input.yaw, input.pitch);
@@ -814,6 +876,31 @@ impl InGame {
                         let Some(attack) = intent.attack() else {
                             continue;
                         };
+                        // Melee (melee.rs): the swing, its sound and trail.
+                        slashed |= matches!(
+                            intent,
+                            FireIntent::Primary {
+                                weapon: shared::loadout::WeaponKind::Trimmer,
+                                ..
+                            }
+                        );
+                        if combat.melee.local_intent(
+                            intent,
+                            viewmodel,
+                            &mut common.audio,
+                            feedback,
+                            &mut combat.beams,
+                            effects,
+                            &mut combat.rng,
+                            cam.position,
+                            feet,
+                            input.yaw,
+                            input.pitch,
+                            t,
+                        ) {
+                            combat.heat = (combat.heat + 0.05).min(1.0);
+                            continue;
+                        }
                         let style = attack_style(attack);
                         common.audio.play_2d(style.sfx);
                         // The weight under the shot (feel): a punch scaled by its kick.
@@ -950,16 +1037,21 @@ impl InGame {
                         common.audio.play_2d(Sfx::Punch);
                         punched = true;
                     }
-                    // Every knack throws like the Thorn until arsenal-client gives each its own.
-                    FireIntent::Knack(_) => {
-                        viewmodel.throw_thorn();
-                        common.audio.play_2d(Sfx::ThornThrow);
+                    // The knacks (knacks.rs): a throw, or Tallow Skin / Surge on you.
+                    FireIntent::Knack(knack) => {
+                        combat
+                            .knacks
+                            .local_knack(*knack, viewmodel, &mut common.audio, t)
                     }
                 }
             }
         }
         // A punch this frame, or its parry window still open (the predicted state).
         self.combat_predict_parry(common, punched);
+        // A Trimmer slash deflects what its arc meets, on the swing's frame (melee.rs).
+        if slashed {
+            self.combat_predict_deflect(common);
+        }
     }
 
     /// The parry as the local player sees it (`docs/feel.md`): during the punch's parry window,
@@ -1165,6 +1257,28 @@ impl InGame {
             &mut combat.rng,
             &mut combat.beams,
         );
+        // Hurled pieces, thrown knacks, pools, clouds, snares (melee.rs, knacks.rs).
+        {
+            let mut ctx = melee::UpdateCtx {
+                effects,
+                beams: &mut combat.beams,
+                audio: &mut common.audio,
+                rng: &mut combat.rng,
+                world: net.world().map(|w| &w.collision.world),
+                dt: vdt,
+            };
+            let held = melee::held(combat.predictor.state());
+            combat.melee.update_replicated(&frame, held, &mut ctx);
+            let mut ctx = knacks::UpdateCtx {
+                effects,
+                beams: &mut combat.beams,
+                audio: &mut common.audio,
+                rng: &mut combat.rng,
+                world: net.world().map(|w| &w.collision.world),
+                dt: vdt,
+            };
+            combat.knacks.update_replicated(&frame, &mut ctx);
+        }
 
         // Fx due at the render tick.
         let due = combat.queue.due(render_tick, local);
@@ -1187,6 +1301,12 @@ impl InGame {
             };
             for ev in &due {
                 fx::play(&mut ctx, ev);
+            }
+            // A sprung snare's jaws stay shut there a moment (knacks.rs).
+            for ev in &due {
+                if let shared::protocol::Fx::SnareSprung { position } = ev.fx {
+                    combat.knacks.snare_sprung(position.to_vec3());
+                }
             }
         }
         combat.beams.update(vdt);
@@ -1230,6 +1350,39 @@ impl InGame {
             };
             combat.arsenal.play_pending(&mut ctx);
         }
+
+        // Melee trails and streaks, the knacks' things (melee.rs, knacks.rs).
+        let local_body = net.local_state().map(|s| s.position);
+        let local_code = local.map(|p| p.0 as u16);
+        let bodies = |owner: u16| -> Option<Vec3> {
+            if Some(owner) == local_code {
+                return local_body;
+            }
+            entities
+                .iter()
+                .find(|e| {
+                    e.kind == kind::PLAYER && e.id.as_player().map(|p| p.0 as u16) == Some(owner)
+                })
+                .map(|e| e.position)
+        };
+        let mut ctx = melee::UpdateCtx {
+            effects,
+            beams: &mut combat.beams,
+            audio: &mut common.audio,
+            rng: &mut combat.rng,
+            world,
+            dt: vdt,
+        };
+        combat.melee.update(&mut ctx, &bodies);
+        let mut ctx = knacks::UpdateCtx {
+            effects,
+            beams: &mut combat.beams,
+            audio: &mut common.audio,
+            rng: &mut combat.rng,
+            world,
+            dt: vdt,
+        };
+        combat.knacks.update(&mut ctx);
 
         // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds;
         // the bow zooms in a little as it is drawn and flashes at full draw (docs/feel.md).
@@ -1293,6 +1446,18 @@ impl InGame {
         self.combat
             .arsenal
             .draw(common.models.as_ref(), &mut out.draws, &mut out.lights);
+        let lib = common.models.as_ref();
+        self.combat.melee.draw(lib, &mut out.draws, &mut out.lights);
+        let held = melee::held(self.combat.predictor.state());
+        self.combat
+            .melee
+            .draw_replicated(lib, &frame, held, &mut out.draws, &mut out.lights);
+        self.combat
+            .knacks
+            .draw_replicated(lib, &frame, &mut out.draws, &mut out.lights);
+        self.combat
+            .knacks
+            .draw(lib, &mut out.draws, &mut out.lights);
     }
 
     /// Combat HUD layer (after `Hud::draw`).
@@ -1320,6 +1485,32 @@ impl InGame {
             })
             .map_or(0, |e| e.flags);
         let branded = own_flags & player_flags::BRANDED != 0;
+        // Tallow Skin on you: the predicted start, held while the server's flag says so.
+        let tallow = self
+            .combat
+            .knacks
+            .tallow_strength(own_flags & player_flags::TALLOW != 0);
+        // The Q slot: the loadout's knack (none when it holds no charges: a PvP Thorn).
+        let knack = {
+            let k = weapons.knack();
+            let max = k.charges(t);
+            let ready = weapons.knack_charges(t);
+            (max > 0).then(|| knacks::KnackSlot {
+                knack: k,
+                charges: ready,
+                max_charges: max,
+                recharge: if ready < max {
+                    weapons.knack_recharge_fraction(t, rate)
+                } else {
+                    0.0
+                },
+                active: if k == knacks::Knack::TallowSkin {
+                    tallow
+                } else {
+                    0.0
+                },
+            })
+        };
         let info = CombatHudInfo {
             camera: &self.last_camera,
             yaw: self.controls.yaw,
@@ -1336,9 +1527,16 @@ impl InGame {
             burning: own_flags & player_flags::BURNING != 0,
             pinned: own_flags & player_flags::PINNED != 0,
             parry_window: weapons.parry as f32 / (t.parry_window * rate as f32).max(1.0),
+            knack,
             spectating: self.spectate.is_active(),
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);
+        // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
+        let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
+        if !dead {
+            let rush = self.combat.melee.rush();
+            self.combat.knacks.hud(list, c, tallow, rush, now);
+        }
     }
 }

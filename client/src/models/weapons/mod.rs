@@ -19,9 +19,13 @@ pub mod fist;
 pub mod kiln;
 pub mod lancet;
 pub mod longwick;
+/// Melee (docs/refit.md): how the Trimmer and the Tamper are held and swung.
+pub mod melee;
 pub mod quill;
 pub mod riveter;
+pub mod tamper;
 pub mod thresher;
+pub mod trimmer;
 pub mod tumbler;
 
 use engine::gfx::DrawItem;
@@ -55,7 +59,8 @@ pub trait WeaponLook: Copy {
     fn glow_color(self, alt_mode: u8) -> Vec4;
     /// Colour of the primary fire (tracers, beams, muzzle flashes): Quill pale gold, Bellows
     /// amber, Arclash blue-white, Tumbler fuse orange, Lancet steel-cyan, Thresher hot amber,
-    /// Riveter red-hot, Cinderbox cinder orange, Longwick wick gold, Kiln ember.
+    /// Riveter red-hot, Cinderbox cinder orange, Longwick wick gold, Kiln ember; the Trimmer's
+    /// honed steel (warm white) and the Tamper's hot iron (slash trails, hit sparks).
     fn primary_color(self) -> Vec4;
 }
 
@@ -72,9 +77,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => ModelId::Cinderbox,
             WeaponKind::Longwick => ModelId::Longwick,
             WeaponKind::Kiln => ModelId::Kiln,
-            // Placeholders until the melee models exist (arsenal-client, docs/refit.md).
-            WeaponKind::Trimmer => ModelId::Lancet,
-            WeaponKind::Tamper => ModelId::Tumbler,
+            WeaponKind::Trimmer => ModelId::Trimmer,
+            WeaponKind::Tamper => ModelId::Tamper,
         }
     }
 
@@ -90,8 +94,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => cinderbox::MUZZLE,
             WeaponKind::Longwick => longwick::MUZZLE,
             WeaponKind::Kiln => kiln::MUZZLE,
-            WeaponKind::Trimmer => lancet::MUZZLE,
-            WeaponKind::Tamper => tumbler::MUZZLE,
+            WeaponKind::Trimmer => trimmer::MUZZLE,
+            WeaponKind::Tamper => tamper::MUZZLE,
         }
     }
 
@@ -115,8 +119,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Cinderbox => Vec4::new(1.0, 0.4, 0.12, 1.0),
             WeaponKind::Longwick => Vec4::new(1.0, 0.8, 0.42, 1.0),
             WeaponKind::Kiln => Vec4::new(1.0, 0.5, 0.1, 1.0),
-            WeaponKind::Trimmer => Vec4::new(0.9, 0.92, 1.0, 1.0),
-            WeaponKind::Tamper => Vec4::new(1.0, 0.66, 0.4, 1.0),
+            WeaponKind::Trimmer => Vec4::new(1.0, 0.93, 0.8, 1.0),
+            WeaponKind::Tamper => Vec4::new(1.0, 0.55, 0.2, 1.0),
         }
     }
 }
@@ -131,6 +135,7 @@ impl WeaponLook for WeaponKind {
 /// | Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
 /// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
 /// | Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
+/// | Melee | Lunge cyan, Whirl amber, Hurl violet, Upswing lime |
 pub fn ability_color(a: Ability) -> Vec4 {
     let c = match a {
         Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
@@ -152,11 +157,10 @@ pub fn ability_color(a: Ability) -> Vec4 {
         Ability::TripleNock => Vec3::new(0.7, 1.0, 0.35),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
         Ability::EmberArrow => Vec3::new(1.0, 0.55, 0.16),
-        // Melee (placeholders until arsenal-client picks them).
-        Ability::Lunge => Vec3::new(1.0, 0.3, 0.3),
-        Ability::Whirl => Vec3::new(0.5, 0.9, 1.0),
-        Ability::Hurl => Vec3::new(1.0, 0.85, 0.4),
-        Ability::Upswing => Vec3::new(0.6, 1.0, 0.5),
+        Ability::Lunge => Vec3::new(0.4, 0.95, 1.0),
+        Ability::Whirl => Vec3::new(1.0, 0.72, 0.22),
+        Ability::Hurl => Vec3::new(0.78, 0.5, 1.0),
+        Ability::Upswing => Vec3::new(0.72, 1.0, 0.35),
     };
     c.extend(1.0)
 }
@@ -174,8 +178,8 @@ fn view_offset(w: WeaponKind) -> Vec3 {
         WeaponKind::Cinderbox => Vec3::new(0.14, -0.15, -0.32),
         WeaponKind::Longwick => longwick::VIEW_OFFSET,
         WeaponKind::Kiln => Vec3::new(0.135, -0.135, -0.31),
-        WeaponKind::Trimmer => Vec3::new(0.115, -0.108, -0.3),
-        WeaponKind::Tamper => Vec3::new(0.14, -0.148, -0.32),
+        // Melee: the swing tracks place the hands (`melee::view_right`); not used.
+        WeaponKind::Trimmer | WeaponKind::Tamper => Vec3::new(0.14, -0.14, -0.32),
     }
 }
 
@@ -211,8 +215,8 @@ fn kick_amount(w: WeaponKind) -> (f32, f32) {
         // The string snaps forward and the bow rocks towards the target.
         WeaponKind::Longwick => (-0.035, -0.06),
         WeaponKind::Kiln => (0.01, 0.025),
-        WeaponKind::Trimmer => (0.03, 0.11),
-        WeaponKind::Tamper => (0.09, 0.32),
+        // Melee: the swing is the kick.
+        WeaponKind::Trimmer | WeaponKind::Tamper => (0.0, 0.0),
     }
 }
 
@@ -258,15 +262,20 @@ pub struct ViewmodelAnim {
     /// No weapon at all (gun game's Fist tier): both fists up instead of a gun.
     pub unarmed: bool,
     pub time: f64,
+    /// A melee swing in progress (the Trimmer / Tamper and their abilities, [`melee::Swing`]).
+    pub swing: melee::Swing,
+    /// What the left hand throws (`throw`): a knack's model; `None` = a Thorn.
+    pub throw_item: Option<ModelId>,
 }
 
 impl ViewmodelAnim {
-    /// The weapon-pose inputs of this frame.
+    /// The weapon-pose inputs of this frame (a melee weapon's glow flares with its swing).
     pub fn held(&self) -> HeldWeapon {
+        let flare = melee::of(self.weapon).map_or(0.0, |m| self.swing.flare(m));
         HeldWeapon {
             weapon: self.weapon,
             ability: self.ability,
-            kick: self.fire_kick,
+            kick: self.fire_kick.max(flare),
             charge: self.alt_charge,
             draw: self.draw,
             salvo: self.salvo,
@@ -409,14 +418,15 @@ pub fn weapon_pose(h: &HeldWeapon) -> Pose {
             }
             pose
         }
-        // The melee weapons wear the Lancet / Tumbler models until theirs exist.
-        WeaponKind::Tumbler | WeaponKind::Tamper => {
+        WeaponKind::Tumbler => {
             let mut pose = Pose::rest(tumbler::JOINTS.len());
             pose.rotate(tumbler::DRUM, Quat::from_rotation_z(-h.spin));
             glow = 0.8 + 0.3 * wave(time, 1.1) + kick * 1.4;
             pose
         }
-        WeaponKind::Lancet | WeaponKind::Trimmer => lancet::pose(h, &mut glow),
+        WeaponKind::Lancet => lancet::pose(h, &mut glow),
+        WeaponKind::Trimmer => trimmer::pose(kick, time, &mut glow),
+        WeaponKind::Tamper => tamper::pose(kick, time, &mut glow),
         WeaponKind::Thresher => thresher::pose(h, &mut glow),
         WeaponKind::Riveter => riveter::pose(h, &mut glow),
         WeaponKind::Cinderbox => cinderbox::pose(h, &mut glow),
@@ -458,9 +468,24 @@ pub(crate) fn unit(x: f32) -> f32 {
 /// draws them smaller and closer so they keep a sensible share of the screen.
 pub const VIEWMODEL_SCALE: f32 = 0.52;
 
-/// Grip transform of the held weapon in view space.
+/// Bob, sway and the switch's lowering of a melee weapon (view-space offset added to its
+/// swing track).
+fn melee_extra(anim: &ViewmodelAnim) -> Vec3 {
+    let lowered = (1.0 - smoothstep(anim.switch)).powi(2);
+    let bob = anim.bob_amount.clamp(0.0, 1.0);
+    let (s, c) = anim.bob_phase.sin_cos();
+    let sway = anim.sway.clamp(Vec2::splat(-3.0), Vec2::splat(3.0));
+    Vec3::new(s * 0.008, -(c * c) * 0.009 + 0.0045, 0.0) * bob
+        + Vec3::new(-sway.x * 0.006, -sway.y * 0.006, 0.0)
+        + Vec3::new(0.0, -0.24 * lowered, 0.04 * lowered)
+}
+
+/// Grip transform of the held weapon in view space (a melee weapon: its right hand's).
 pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
     let w = anim.weapon;
+    if let Some(m) = melee::of(w) {
+        return melee::view_right(m, &anim.swing, melee_extra(anim));
+    }
     let kick = anim
         .fire_kick
         .clamp(0.0, 1.0)
@@ -594,6 +619,48 @@ fn draw_fists(
     }
 }
 
+/// The punching / throwing left fist at `fist` and what it throws (a Thorn, or a knack's
+/// flask / snare / pot: [`ViewmodelAnim::throw_item`]); returns the knuckles or the held
+/// item's point (view space).
+fn draw_left_hand(
+    lib: &ModelLibrary,
+    anim: &ViewmodelAnim,
+    fist: Mat4,
+    tint: &Tint,
+    out: &mut Vec<DrawItem>,
+) -> Vec3 {
+    let mut pose = Pose::rest(fist::JOINTS.len());
+    let punch = punch_extension(anim.punch);
+    // The knuckle embers flare with the wick's light at full extension (parry window).
+    let flare = 0.6 + punch * 2.0;
+    pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
+    lib.get(ModelId::Fist).draw(&pose, fist, tint, out);
+    let mut point = fist.transform_point3(Vec3::new(0.0, 0.0, -0.02));
+    if anim.throw > 0.0 && anim.throw < 0.55 {
+        let wobble = Quat::from_rotation_y(0.12 * wave(anim.time, 3.0))
+            * Quat::from_rotation_x(-0.2 + 0.05 * wave(anim.time, 4.3));
+        let item = anim.throw_item.unwrap_or(ModelId::Thorn);
+        // A thorn point-forward between the knuckles; a flask / pot cupped on top of the
+        // fist; a snare's disc held edge-on, ready to be skimmed down.
+        let (scale, at, turn) = match item {
+            ModelId::Snare => (0.3, Vec3::new(0.0, 0.07, -0.01), Quat::from_rotation_x(1.3)),
+            ModelId::Thorn => (0.42, Vec3::new(0.0, 0.055, 0.02), Quat::IDENTITY),
+            _ => (0.55, Vec3::new(0.0, 0.1, 0.0), Quat::from_rotation_z(0.3)),
+        };
+        let held =
+            fist * Mat4::from_scale_rotation_translation(Vec3::splat(scale), wobble * turn, at);
+        let mut item_pose = lib.get(item).rest_pose();
+        item_pose.glow = Vec4::new(1.4, 1.4, 1.4, 1.0);
+        lib.get(item).draw(&item_pose, held, tint, out);
+        point = if item == ModelId::Thorn {
+            held.transform_point3(Vec3::new(0.0, 0.0, -super::projectiles::THORN_TIP))
+        } else {
+            held.transform_point3(Vec3::ZERO)
+        };
+    }
+    point
+}
+
 /// Draws the viewmodel; see [`ModelLibrary::draw_viewmodel`].
 pub(crate) fn draw_viewmodel(
     lib: &ModelLibrary,
@@ -606,6 +673,31 @@ pub(crate) fn draw_viewmodel(
     if anim.unarmed {
         return draw_fists(lib, anim, gun, tint, out);
     }
+    if let Some(m) = melee::of(w) {
+        // Melee: the swing tracks; the left hand punches / throws over them as usual.
+        let pose = weapon_pose(&anim.held());
+        let fist = fist_transform(anim);
+        let left = match fist {
+            Some(f) if anim.punch > 0.0 => melee::LeftHand::Punch(f),
+            Some(_) => melee::LeftHand::Busy,
+            None => melee::LeftHand::Weapon,
+        };
+        let (muzzle, muzzle_dir) = melee::draw_view(
+            lib,
+            m,
+            &anim.swing,
+            &pose,
+            melee_extra(anim),
+            left,
+            tint,
+            out,
+        );
+        return ViewmodelDrawInfo {
+            muzzle,
+            muzzle_dir,
+            fist: fist.map(|f| draw_left_hand(lib, anim, f, tint, out)),
+        };
+    }
     let held = anim.held();
     let pose = weapon_pose(&held);
     lib.get(w.model()).draw(&pose, gun, tint, out);
@@ -615,27 +707,7 @@ pub(crate) fn draw_viewmodel(
 
     let mut fist_point = None;
     if let Some(fist) = fist_transform(anim) {
-        let mut pose = Pose::rest(fist::JOINTS.len());
-        let punch = punch_extension(anim.punch);
-        // The knuckle embers flare with the wick's light at full extension (parry window).
-        let flare = 0.6 + punch * 2.0;
-        pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
-        lib.get(ModelId::Fist).draw(&pose, fist, tint, out);
-        fist_point = Some(fist.transform_point3(Vec3::new(0.0, 0.0, -0.02)));
-        if anim.throw > 0.0 && anim.throw < 0.55 {
-            // A thorn held point-forward between the knuckles until it is flicked away.
-            let wobble = Quat::from_rotation_y(0.12 * wave(anim.time, 3.0))
-                * Quat::from_rotation_x(-0.2 + 0.05 * wave(anim.time, 4.3));
-            let thorn = fist
-                * Mat4::from_scale_rotation_translation(
-                    Vec3::splat(0.42),
-                    wobble,
-                    Vec3::new(0.0, 0.055, 0.02),
-                );
-            lib.get(ModelId::Thorn).draw_static(thorn, tint, out);
-            fist_point =
-                Some(thorn.transform_point3(Vec3::new(0.0, 0.0, -super::projectiles::THORN_TIP)));
-        }
+        fist_point = Some(draw_left_hand(lib, anim, fist, tint, out));
     } else if w == WeaponKind::Longwick && anim.draw > 0.01 {
         // The left hand pinches the nock and draws the string back.
         let hand = longwick::draw_hand(gun, anim.draw, anim.time);

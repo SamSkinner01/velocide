@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use glam::{Quat, Vec3};
-use shared::loadout::{Ability, WeaponClass, WeaponKind};
+use shared::loadout::{Ability, Knack, WeaponClass, WeaponKind};
 use shared::protocol::{EntityState, NetId, kind, projectile_flags};
 use shared::sim::FireIntent;
 use shared::sim::projectiles::{ProjectileKind, replicated_position};
@@ -196,6 +196,23 @@ pub fn launches(
                     eye,
                     lob_dir(aim, c.mortar.angle_degrees) * c.mortar.speed,
                 ),
+                // The melee Hurl's blade / head (drawn by melee.rs).
+                Ability::Hurl => one(kind::HURL, safe(eye + aim * 0.5), aim * c.hurl.speed),
+                _ => Vec::new(),
+            }
+        }
+        // The knacks' throws (drawn by knacks.rs).
+        FireIntent::Knack(knack) => {
+            let k = &c.knacks;
+            let start = safe(eye + aim * 0.5);
+            match knack {
+                Knack::KindleFlask => one(
+                    kind::KINDLE_FLASK,
+                    start,
+                    lob_dir(aim, k.kindle_flask.angle_degrees) * k.kindle_flask.speed,
+                ),
+                Knack::Snare => one(kind::SNARE, start, aim * k.snare.speed),
+                Knack::SootPot => one(kind::SOOT_POT, start, aim * k.soot_pot.speed),
                 _ => Vec::new(),
             }
         }
@@ -219,7 +236,8 @@ fn on_world(k: u16) -> OnWorld {
             | ProjectileKind::Arrow
             | ProjectileKind::PinArrow
             | ProjectileKind::BrandArrow
-            | ProjectileKind::Limpet,
+            | ProjectileKind::Limpet
+            | ProjectileKind::Snare,
         ) => OnWorld::Stick,
         _ => OnWorld::Vanish,
     }

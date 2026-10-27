@@ -18,6 +18,8 @@ pub mod enemies;
 /// Warm-up hub props: the ready board and the practice console (docs/lobby.md).
 pub mod hub;
 pub mod kit;
+/// The knacks' thrown things and traps: the Kindle flask, the Snare, the Soot pot.
+pub mod knacks;
 mod library;
 pub mod projectiles;
 pub mod props;
@@ -75,6 +77,11 @@ pub enum ModelId {
     Cinderbox,
     Longwick,
     Kiln,
+    // Melee (docs/refit.md).
+    /// Hooked wick-shears carried as two blades.
+    Trimmer,
+    /// Foundry ramming hammer.
+    Tamper,
     /// First-person right forearm + gloved hand that grips every weapon.
     ArmRight,
     /// First-person left forearm + fist (punch / parry, Thorn throw).
@@ -122,10 +129,14 @@ pub enum ModelId {
     // Warm-up hub props (level props by file name).
     ReadyBoard,
     Console,
+    // The knacks (docs/refit.md): thrown things and traps.
+    KindleFlask,
+    Snare,
+    SootPot,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 47] = [
+    pub const ALL: [ModelId; 52] = [
         ModelId::Shrike,
         ModelId::ShrikeKit,
         ModelId::Gnawer,
@@ -147,6 +158,8 @@ impl ModelId {
         ModelId::Cinderbox,
         ModelId::Longwick,
         ModelId::Kiln,
+        ModelId::Trimmer,
+        ModelId::Tamper,
         ModelId::ArmRight,
         ModelId::Fist,
         ModelId::Bomb,
@@ -173,6 +186,9 @@ impl ModelId {
         ModelId::Door,
         ModelId::ReadyBoard,
         ModelId::Console,
+        ModelId::KindleFlask,
+        ModelId::Snare,
+        ModelId::SootPot,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -204,6 +220,8 @@ impl ModelId {
             ModelId::Cinderbox => "weapon_cinderbox.gltf",
             ModelId::Longwick => "weapon_longwick.gltf",
             ModelId::Kiln => "weapon_kiln.gltf",
+            ModelId::Trimmer => "weapon_trimmer.gltf",
+            ModelId::Tamper => "weapon_tamper.gltf",
             ModelId::ArmRight => "vm_arm.gltf",
             ModelId::Fist => "vm_fist.gltf",
             ModelId::Bomb => "proj_bomb.gltf",
@@ -230,6 +248,9 @@ impl ModelId {
             ModelId::Door => "prop_door.gltf",
             ModelId::ReadyBoard => "prop_ready_board.gltf",
             ModelId::Console => "prop_console.gltf",
+            ModelId::KindleFlask => "prop_kindle_flask.gltf",
+            ModelId::Snare => "prop_snare.gltf",
+            ModelId::SootPot => "prop_soot_pot.gltf",
         }
     }
 
@@ -259,6 +280,9 @@ impl ModelId {
             ModelId::Cinderbox => &weapons::cinderbox::JOINTS,
             ModelId::Longwick => &weapons::longwick::JOINTS,
             ModelId::Kiln => &weapons::kiln::JOINTS,
+            ModelId::Trimmer => &weapons::trimmer::JOINTS,
+            ModelId::Tamper => &weapons::tamper::JOINTS,
+            ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::joints(self),
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
             id if id.is_player_projectile() => projectiles::joints(self),
@@ -293,6 +317,9 @@ impl ModelId {
             ModelId::Cinderbox => weapons::cinderbox::build(),
             ModelId::Longwick => weapons::longwick::build(),
             ModelId::Kiln => weapons::kiln::build(),
+            ModelId::Trimmer => weapons::trimmer::build(),
+            ModelId::Tamper => weapons::tamper::build(),
+            ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::build(self),
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
             id if id.is_player_projectile() => projectiles::build(self),

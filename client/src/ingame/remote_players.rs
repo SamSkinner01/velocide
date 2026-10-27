@@ -23,7 +23,9 @@ use shared::protocol::{
 };
 use shared::sim::PlayerId;
 
+use super::combat::knacks::tallow_tint;
 use crate::models::shrike::REMOTE_SCALE;
+use crate::models::weapons::melee::{self, Swing};
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
 use engine::gfx::DrawItem;
 
@@ -51,6 +53,8 @@ pub struct PlayerVisual {
     pub firing: f32,
     /// Punch progress 0..1 (combat starts it at a small value; advances here).
     pub punching: f32,
+    /// A melee swing (combat starts it with `melee::Swing::start`; advances here).
+    pub swing: Swing,
     pub downed: bool,
     pub dead: bool,
     /// World-space head of the last drawn pose (name tags).
@@ -94,6 +98,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
         cycle: v.cycle,
         cosmetics: look,
         unarmed: !player_armed(e.state),
+        swing: v.swing,
     }
 }
 
@@ -152,6 +157,10 @@ impl RemotePlayers {
                     v.punching = 0.0;
                 }
             }
+            match melee::of_id(player_weapon(e.state).0.id()) {
+                Some(m) => v.swing.advance(m, dt),
+                None => v.swing = Swing::default(),
+            }
             v.seen = true;
             let Some(lib) = lib else {
                 v.head = name_tag_anchor(e) - Vec3::Y * 0.42;
@@ -160,6 +169,11 @@ impl RemotePlayers {
             let id = e.id.as_player();
             let color = id.map_or(PLAYER_COLORS[0], player_color);
             let anim = player_anim(e, v, self.time, id.map(look).unwrap_or_default());
+            let mut tint = Tint::team(color);
+            // Tallow Skin: a pale, waxy, glistening coat (knacks.rs).
+            if e.flags & player_flags::TALLOW != 0 {
+                tint.body = tallow_tint(1.0, self.time);
+            }
             // Other Shrikes are drawn a little larger than life so they read at a distance
             // (visual only: hit shapes and movement are unchanged).
             let mut unseen = Vec::new();
@@ -168,8 +182,7 @@ impl RemotePlayers {
             } else {
                 &mut *out
             };
-            let info =
-                lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &Tint::team(color), into);
+            let info = lib.draw_player_scaled(&anim, e.position, REMOTE_SCALE, &tint, into);
             v.head = info.head;
             v.muzzle = info.muzzle;
             v.muzzle_dir = info.muzzle_dir;

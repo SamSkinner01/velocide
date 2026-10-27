@@ -369,7 +369,7 @@ impl LoadoutMenu {
         let picking = self.picker != Picker::None;
         let knack_key = s
             .bindings
-            .hint(Action::ThrowThorn)
+            .hint(Action::Knack)
             .filter(|k| k.len() <= 3)
             .unwrap_or_else(|| "Q".into());
         ui.enabled_scope(!picking, |ui| {

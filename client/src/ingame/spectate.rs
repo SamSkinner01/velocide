@@ -155,6 +155,8 @@ pub struct Spectate {
     /// Their `firing` / `punching` animation last frame (a rise is a new shot / punch).
     last_firing: f32,
     last_punching: f32,
+    /// Their melee swing's progress last frame (`Fx::Swing` restarts it: a new swing).
+    last_swing: f32,
     /// The device the controls hint names: the gamepad (`true`) or the keyboard and mouse,
     /// the last one used to spectate, else a gamepad if one is connected.
     pad_hints: Option<bool>,
@@ -308,6 +310,15 @@ impl Spectate {
             if v.punching > 0.0 && (self.last_punching == 0.0 || v.punching < self.last_punching) {
                 self.viewmodel.punch();
             }
+            // Their melee swings (`Fx::Swing` starts the visual's swing: combat/melee.rs).
+            if v.swing.active() && (self.last_swing == 0.0 || v.swing.progress < self.last_swing) {
+                self.viewmodel.swing(v.swing.kind, v.swing.left);
+            }
+            self.last_swing = if v.swing.active() {
+                v.swing.progress
+            } else {
+                0.0
+            };
             self.last_firing = v.firing;
             self.last_punching = v.punching;
         }

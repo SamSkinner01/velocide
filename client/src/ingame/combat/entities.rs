@@ -220,7 +220,7 @@ const MUZZLE_BLEND: f32 = 0.15;
 impl EntityFrame<'_> {
     /// Every projectile to show: the entity, the time to evaluate its trajectory at and a
     /// visual offset (own projectiles start at the muzzle).
-    fn projectiles(&self) -> impl Iterator<Item = (&EntityState, f64, Vec3)> {
+    pub(crate) fn projectiles(&self) -> impl Iterator<Item = (&EntityState, f64, Vec3)> {
         let own = self.local_owner;
         self.entities
             .iter()
@@ -1113,6 +1113,12 @@ pub fn projectile_look(k: u16, parried: bool) -> ProjectileLook {
         kind::LIMPET => look(0.95, 1.0, 0.3, 0.8, 0.03),
         kind::MORTAR_SHELL => look(0.82, 0.6, 1.0, 1.3, 0.05),
         kind::FLARE => look(1.0, 0.28, 0.2, 1.7, 0.05),
+        // Melee and knacks (melee.rs, knacks.rs draw the pieces): the Hurl in its violet, the
+        // flask in kindling gold-green, the snare's amber lamp, the pot's spitting fuse.
+        kind::HURL => look(0.78, 0.5, 1.0, 1.1, 0.06),
+        kind::KINDLE_FLASK => look(0.85, 1.0, 0.55, 0.9, 0.04),
+        kind::SNARE => look(1.0, 0.72, 0.3, 0.55, 0.03),
+        kind::SOOT_POT => look(1.0, 0.6, 0.25, 0.7, 0.04),
         _ => look(1.0, 0.85, 0.5, 0.8, 0.04),
     }
 }

@@ -256,7 +256,9 @@ impl ModeHud {
                     GameMode::Deathmatch | GameMode::GunGame => Sfx::MatchEnd,
                 });
                 audio.set_music(MusicTrack::Results);
-                self.results = Some(ResultsScreen::new((**results).clone(), local, now));
+                let mut screen = ResultsScreen::new((**results).clone(), local, now);
+                screen.finale = Some(self.gun_game.finale.weapon);
+                self.results = Some(screen);
                 fx.results_opened = true;
             }
         }
@@ -476,8 +478,9 @@ impl ModeHud {
         draw_time_left(list, t, info, board, c);
     }
 
-    /// Gun game banners, sounds and feed lines: your promotions (the next weapon; the Fist),
-    /// being punched down, others reaching the Fist or punching someone down.
+    /// Gun game banners, sounds and feed lines: your promotions (the next weapon; the melee
+    /// finale: "FINAL TIER: TRIMMER"), being punched down, others reaching the finale or
+    /// punching someone down.
     #[allow(clippy::too_many_arguments)]
     fn on_gun_game_event(
         &mut self,
@@ -492,20 +495,22 @@ impl ModeHud {
         let me = |id: PlayerId| Some(id) == local;
         match *e {
             GunGameEvent::Promoted { player, tier, .. } => {
-                let fist = matches!(tier_of(&self.gun_game, tier), Tier::Finale(_));
+                let finale = tier_of(&self.gun_game, tier);
+                let last = matches!(finale, Tier::Finale(_));
                 if me(player) {
-                    if fist {
-                        hud.banner("THE FIST", t.crimson_bright, now);
-                    } else {
-                        hud.banner(tier_label(&self.gun_game, tier, true), t.bone, now);
-                    }
+                    let label = tier_label(&self.gun_game, tier, true);
+                    hud.banner(label, if last { t.crimson_bright } else { t.bone }, now);
                     audio.play(
                         Sfx::RankUp,
-                        PlayParams::default().with_pitch(if fist { 0.8 } else { 1.0 }),
+                        PlayParams::default().with_pitch(if last { 0.8 } else { 1.0 }),
                     );
-                } else if fist {
+                } else if let Tier::Finale(b) = finale {
                     hud.event(
-                        format!("{} HAS THE FIST", name_of(players, player)),
+                        format!(
+                            "{} IS ON THE FINAL TIER ({})",
+                            name_of(players, player),
+                            b.weapon.name().to_uppercase()
+                        ),
                         player_color(player),
                         now,
                     );
@@ -1025,7 +1030,9 @@ impl InGame {
     /// `ModeEvent::Ended` normally does this). Drawn while the lobby phase is `Results`.
     pub fn show_results(&mut self, results: shared::sim::MatchResults) {
         let local = self.net().and_then(NetClient::local_player_id);
-        self.modes.results = Some(ResultsScreen::new(results, local, self.time));
+        let mut screen = ResultsScreen::new(results, local, self.time);
+        screen.finale = Some(self.modes.gun_game.finale.weapon);
+        self.modes.results = Some(screen);
     }
 
     /// Per-frame mode upkeep before the world is drawn: checkpoint props, downed poses.
@@ -1256,7 +1263,8 @@ fn gun_game_order(rows: &[ScoreEntry]) -> Vec<ScoreEntry> {
     rows
 }
 
-/// "TIER 4 - THRESHER" (`long`) / "4 THRESHER", "FIST", "WON".
+/// "TIER 4 - THRESHER" (`long`) / "4 THRESHER"; the melee finale "FINAL TIER: TRIMMER" /
+/// "FINAL TRIMMER"; "WON".
 pub(crate) fn tier_label(g: &GunGameTuning, tier: u8, long: bool) -> String {
     match tier_of(g, tier) {
         Tier::Weapon(WeaponBuild { weapon, .. }) => {

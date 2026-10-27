@@ -31,7 +31,7 @@ the debug overlay.
 | `ingame::effects` | `Effects`: billboard particles with simple physics, decal ring buffer, presets |
 | `ingame::viewmodel` | `Viewmodel`: first-person weapon + arms (`ModelLibrary::draw_viewmodel`) with bob, sway, switch, kick, punch / thorn throw, Tumbler / Thresher drum turn, Discharge / Skewer charge, the Longwick's draw, the Cinderbox salvo, the Kiln's spray, plus landing dip / slide tilt / dash pull-back |
 | `ingame::world_render` | `WorldRender`: level via `LevelRender`, environment, model props (jump pads, checkpoints, exit gate), ghost-outline helpers |
-| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots, the press-frame lookahead), `stand_in` (own projectiles from the muzzle until the server's arrive, `docs/feel.md`), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, thorns / cooldowns / charge and draw gauge / BRANDED / BURNING / PINNED), `arsenal` (the expansion arsenal: the held build, local weapon feel, projectiles, blasts, the flak burst, burning patches, Burn / Pinned visuals, `InGame::preview_arsenal` for tools) |
+| `ingame::combat` | combat presentation (`docs/combat.md` "client presentation contract"): `CombatClient`; `weapon_feel` (client-side `step_weapons` prediction → instant shots, the press-frame lookahead), `stand_in` (own projectiles from the muzzle until the server's arrive, `docs/feel.md`), `fx` (tracer beams, temporary lights, `Fx` playback at the render tick), `entities` (enemies, projectiles, healing bursts, thorns, brand sigils), `hud` (hit markers, damage numbers, direction, vignette, death screen, the knack (Q) slot / cooldowns / charge and draw gauge / BRANDED / BURNING / PINNED), `arsenal` (the expansion arsenal: the held build, local weapon feel, projectiles, blasts, the flak burst, burning patches, Burn / Pinned visuals, `InGame::preview_arsenal` for tools), `melee` (slash trails, melee hits, the Lunge / Whirl / Hurl / Upswing effects, hurled pieces, remote swings; `InGame::preview_melee`), `knacks` (the Q slot, the flask and its pool, snares, the soot cloud, Tallow Skin's sheen, Surge; `InGame::preview_knack`) — `docs/arsenal.md` "Client: melee and knacks" |
 | `ingame::remote_players` | `RemotePlayers`: other players as animated Shrikes (`ModelLibrary::draw_player`), per-player `PlayerVisual`, `player_color` |
 | `ingame::hud` | `Hud` + `HudInfo`: health, stamina, weapon, crosshair, speed, timer, ping/FPS, feed, banner, name tags, `+N`/`-N` health popups (shape cues) |
 | `ingame::cues` | accessibility shape cues: player marker shapes (`player_swatch`, `draw_marker`), the parry icon over enemies in their parry window (`parry_icons`) |
@@ -161,7 +161,8 @@ entity (`player_flags::{ON_GROUND, SLIDING, DASHING, SLAMMING, WALL_CLING}`, hel
 name tags hang above the drawn head. Combat drives the
 third-person shot recoil / punch / downed / dead through `self.remote.visual_mut(id)`
 (`firing = 1.0`, `punching = 0.01`, ...); `visual(id).muzzle` gives the world-space muzzle for
-tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `throw_thorn()`,
+tracers. The local player's weapon: `self.viewmodel.fire(kick)`, `punch()`, `throw_thorn()` /
+`throw_item(model)` (a knack), `swing(kind, left)` (a melee move),
 `set_charge(c)` (Discharge), `turn_drum()` (Tumbler); `viewmodel.last_draw()` has the view-space muzzle
 / fist (transform by the camera for world tracers).
 
@@ -256,7 +257,7 @@ way.
 | `effects.muzzle_flash(pos, dir)`, `sparks(pos, normal, n)`, `wax_spray(pos, dir, amount)` (molten wax; landed drops set as wax splats), `lumps(pos, n)` (wax / slag lumps + embers), `smoke(pos, n)`, `dust(pos, n, spread)`, `shockwave(pos, radius)`, `glow(pos, color, size, life)` | presets |
 | `effects.spawn(Particle { .. })` | anything custom (gravity, drag, size/alpha over life, spin, additive, collision: bounce / splat decal / die) |
 | `effects.decal(pos, normal, size, DecalKind)` | ring buffer of 256 (oldest replaced) |
-| `viewmodel.fire(kick)`, `punch()`, `throw_thorn()`, `set_charge(c)`, `turn_drum()` | first-person weapon animation |
+| `viewmodel.fire(kick)`, `punch()`, `throw_thorn()` / `throw_item(model)`, `swing(kind, left)`, `set_charge(c)`, `turn_drum()` | first-person weapon animation |
 
 All of it respects the player's `screen_shake` / `screen_flashes` / `hitstop` toggles.
 Particles are capped at 2048 (oldest replaced); colliding particles cost one ray per frame.
@@ -304,7 +305,7 @@ Music intensity: set it every frame from game state in `InGame::frame` (step 7).
 | dash | L Shift | LB |
 | fire / alt fire | Mouse 1 / Mouse 2 | RT / LT |
 | punch / parry | F | RB |
-| throw thorn | Q | Y |
+| knack (the Q slot: Thorn, Kindle Flask, Snare, Soot Pot, Tallow Skin, Surge) | Q | Y |
 | use / revive | E | X |
 | weapons 1–4 | 1 2 3 4 (same key again = cycle alt mode) | — |
 | next / prev weapon | wheel down / up | d-pad right / left |

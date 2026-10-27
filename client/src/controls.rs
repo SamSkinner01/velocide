@@ -38,9 +38,11 @@ pub enum Action {
     AltFire,
     /// Punch / parry.
     Punch,
-    /// Throw a thorn (older settings files call it `ThrowPrism`).
-    #[serde(alias = "ThrowPrism")]
-    ThrowThorn,
+    /// Use the knack on Q (docs/refit.md): throw a Thorn, the flask, the snare or the pot;
+    /// Tallow Skin; Surge. Settings files written before the knacks call it `ThrowThorn`
+    /// (older ones `ThrowPrism`).
+    #[serde(alias = "ThrowThorn", alias = "ThrowPrism")]
+    Knack,
     Use,
     Weapon1,
     Weapon2,
@@ -74,7 +76,7 @@ impl Action {
         Action::Fire,
         Action::AltFire,
         Action::Punch,
-        Action::ThrowThorn,
+        Action::Knack,
         Action::Use,
         Action::Weapon1,
         Action::Weapon2,
@@ -105,7 +107,7 @@ impl Action {
             Action::Fire => "FIRE",
             Action::AltFire => "ALT FIRE",
             Action::Punch => "PUNCH / PARRY",
-            Action::ThrowThorn => "THROW THORN",
+            Action::Knack => "KNACK",
             Action::Use => "USE / REVIVE",
             Action::Weapon1 => "WEAPON SLOT 1",
             Action::Weapon2 => "WEAPON SLOT 2",
@@ -150,7 +152,7 @@ impl Action {
                 B::GamepadAxis(GamepadAxis::LeftTrigger, AxisDirection::Positive),
             ],
             Action::Punch => vec![key(Key::KeyF), pad(GamepadButton::RightBumper)],
-            Action::ThrowThorn => vec![key(Key::KeyQ), pad(GamepadButton::North)],
+            Action::Knack => vec![key(Key::KeyQ), pad(GamepadButton::North)],
             Action::Use => vec![key(Key::KeyE), pad(GamepadButton::West)],
             Action::Weapon1 => vec![key(Key::Digit1)],
             Action::Weapon2 => vec![key(Key::Digit2)],
@@ -410,7 +412,7 @@ const BUTTON_ACTIONS: [(Action, Buttons); 8] = [
     (Action::Fire, Buttons::FIRE),
     (Action::AltFire, Buttons::ALT_FIRE),
     (Action::Punch, Buttons::PUNCH),
-    (Action::ThrowThorn, Buttons::THROW),
+    (Action::Knack, Buttons::THROW),
     (Action::Use, Buttons::USE),
 ];
 

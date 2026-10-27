@@ -259,6 +259,29 @@ its index, so generation is deterministic.
     `MortarBlast` the arsenal's biggest boom (2.5 s, as loud as `Explosion`).
   - **Status.** `BurnSizzle` (0.6 s) is a fizzing sizzle, a guttering flame and pops; re-trigger
     it while something burns.
+- **Melee and knacks** (the refit, `docs/refit.md`; a block marked `arsenal-client: melee and
+  knacks` at the end of `Sfx`). The Trimmer is shear steel, the Tamper a foundry tool, the
+  knacks glass, wax, clay and soot.
+  - **Trimmer.** `TrimmerSlash` (0.23 s, 2 variants, one per slash: three a second) is the
+    shears' snip (a 3.6–4.2 kHz inharmonic tick), a whoosh sweeping 1.4 → 5.2 kHz and a thin
+    2.5 kHz ring riding on it, high-passed. `TrimmerHit` (2 variants) a crisp band-passed slice,
+    a split and a short steel scrape, driven and crushed.
+  - **Tamper.** `TamperSwing` a deep rush of air (180 → 900 Hz) with the haft creaking (a
+    stuttered saw). `TamperHit` (1 s) the rammer's foot driving home: a 95 → 34 Hz packed
+    thud, sand crunching, the iron head ringing once (~245 Hz partials), grit, driven, crushed
+    and a short room.
+  - **Abilities.** `Lunge` a hard rush and a blade drawn along steel; `Whirl` (0.65 s) air
+    whooshing round twice over a spinning saw drone; `HurlThrow` a fling and the piece
+    whirring away (a band-passed noise fluttering at 14 Hz); `HurlHit` (2 variants) a chop and
+    a ringing, stuttering judder; `Upswing` a rising whoosh into a heavy upward heave.
+  - **Knacks.** `KnackThrow` a short lob and a clink (flask, snare, pot); `FlaskShatter` glass
+    bursting, the kindling catching (a whoomph) and a bright rising triangle chime with an
+    echo; `KindlePool` (1.5 s, soft at both ends: re-trigger while a pool burns) a breathing
+    ember crackle; `SnareSet` a wax thud and the jaws ratcheting open; `SnareArmed` two small
+    bright ticks as its lamp catches; `SnareSpring` the jaws biting shut (a hard ~1 kHz steel
+    bite) and a chain jerking taut; `SootBurst` (1.4 s) a dull clay pop, shards and soot
+    billowing out, low-passed; `TallowSkin` a soft sizzling slide and a waxy settle under an
+    FM shimmer; `Surge` the wick flaring (a fwoom) and a hard rush of air.
 - **Parry.** The loudest and brightest sound in the game (spectral centroid 6.2 kHz): a
   transient crack, a long inharmonic clang (C6 with partials at ×1.5, 2.76, 5.4, 8.9 and 13.3),
   a beating 3.52 kHz shimmer, a fast whoosh, then saturation and a reverb tail. Nothing else
@@ -413,6 +436,12 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 | Arsenal: Riveter (11/s), Kiln roar, full draw, Flare burn, limpet throw | −17 … −18 |
 | Arsenal: bow draw, Skewer charge, rivet impact, burn sizzle | −19 |
 | Arsenal: limpet blink | −22 |
+| Melee: Tamper hit | −11 |
+| Melee: Snare spring, Whirl, Upswing | −12 … −13 |
+| Melee: Trimmer hit, Tamper swing, Lunge, hurl hit, flask shatter, soot burst | −14 |
+| Melee: hurl throw, Tallow Skin, Surge, Trimmer slash (3/s) | −15 … −16 |
+| Melee: snare set, knack throw | −17 … −18 |
+| Melee: snare armed, kindle pool | −20 |
 
 Each track is mastered so the full mix's loudest 400 ms sits at **−21 LU** (Campaign and
 Arena), −23 (Menu) or −22 (Results), with peaks at −5 dBFS or lower. In practice:
