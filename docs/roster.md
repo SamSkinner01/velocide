@@ -5,6 +5,10 @@ Riveter / Cinderbox + Prism; Husk / Spitter / Gnat / Bastion), whose line-up map
 closely onto other games' signature designs. Everything here is meant to be **original**: the
 names, the silhouettes, the mechanics combos, the sounds.
 
+> **The refit** (`docs/refit.md`) moved many of the numbers below: `docs/balance.md` has
+> the current values and why they changed, `docs/arsenal.md` the reference tables. The Thorn
+> is now one of six Q-slot knacks.
+
 > **The expansion** (`docs/expansion.md`) turns these four weapons into the first entries of a
 > ten-weapon arsenal with loadouts, builds (two abilities per weapon from its class's pool) and
 > PvE / PvP balance profiles; the returning Lancet, Thresher, Riveter and Cinderbox come back

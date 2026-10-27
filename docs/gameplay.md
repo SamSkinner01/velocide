@@ -4,6 +4,10 @@ Concrete rules and starting numbers for combat, enemies, style and game modes. E
 here belongs in `assets/tuning.ron` (`CombatTuning` and friends) or in the enemy RON files so it
 can be hot-reloaded; the values below are the defaults. All gameplay is resolved on the server.
 
+> The numbers here are the original starting values. The current weapon and ability numbers
+> are in `docs/arsenal.md` and `docs/balance.md` (with the reasons they moved), Mould sizes and
+> hit shapes in `docs/enemies.md`; `assets/tuning.ron` is always the truth.
+
 ## Player
 - **Health** 100: the Shrike's *wick*, the flame in its chest lantern (HUD label `WICK`;
   `docs/premise.md`). **Hard damage** (*smother*): 35 % of every hit also smothers the wick,

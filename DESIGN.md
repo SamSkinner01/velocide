@@ -55,14 +55,22 @@ is exactly one code path for SP, co-op and PvP.
   - *Explosive*: **Tumbler** (bouncing bombs), **Cinderbox** (three-rocket salvo) — Breach,
     Gravewell, Limpet, Mortar.
   - *Draw*: **Longwick** (recurve bow) — Brand, Triple Nock, Pinning Arrow, Ember Arrow.
+  - *Melee*: **Trimmer** (hooked wick-shears; fast slashes that deflect projectiles), **Tamper**
+    (foundry ramming hammer; slow heavy arcs) — Lunge, Whirl, Hurl, Upswing. Arc hits are
+    lag-compensated like hitscan; no weak points.
   - Lancet, Thresher, Riveter and Cinderbox are the first-generation names with new
     silhouettes, new primaries and no fixed alt set (their old signature combos are gone).
-  - **Fist**: punch / parry. **Thorn** (solo and co-op only): a thrown relay spike that plants
-    itself in surfaces; Quill shots that pass it ricochet to the next thorn, a branded target or
-    the nearest enemy, ×1.5 damage per bounce.
+  - **Fist**: punch / parry.
+  - **Knacks** (the Q slot, one per loadout, `shared::loadout::Knack`): **Thorn** (PvE only: a
+    thrown relay spike that plants itself in surfaces; Quill shots that pass it ricochet to the
+    next thorn, a branded target or the nearest enemy, ×1.5 damage per bounce), **Kindle Flask**
+    (healing pool), **Snare** (floor trap that pins), **Soot Pot** (a cloud Moulds can't see
+    through), **Tallow Skin** (damage reduction, no knockback), **Surge** (speed impulse). In a
+    PvP world a knack that isn't `pvp_allowed` (the Thorn) becomes Surge.
   - **Balance per mode:** `Tuning::for_mode` applies the `balance.pve` / `balance.pvp` profile
     (per-weapon and per-ability multipliers + overrides); the server runs and sends that
-    effective tuning, so prediction matches. PvP sets Thorn charges to 0.
+    effective tuning, so prediction matches. Method, measurements and every change's reason:
+    `docs/balance.md` (`cargo run -p shared --release --example balance_report`).
 - **Enemies** (the Moulds, `docs/enemies.md`): *Gnawer* (fodder melee, pounces), *Censer*
   (ranged lobber, parryable ember bombs), *Harrier* (flying dive-bomber, swattable mid-dive),
   *Gaoler* (heavy shielded, parryable bash, jumpable sweep, lantern weak point), *Heron*
@@ -71,7 +79,10 @@ is exactly one code path for SP, co-op and PvP.
   *Smelter* (heavy that pours slag lines on the floor), *Effigy* (warm-up training dummy).
   Any Mould can spawn as an *elite*.
 - **Hit assist:** player-owned attacks test against hit shapes inflated by `combat.hit_assist`
-  (enemies +0.2 m body / +0.1 m weak points; PvP players +0.12 / +0.06); enemy attacks don't.
+  (enemies +0.35 m body / +0.15 m weak points; PvP players +0.12 / +0.06), and player
+  projectiles test targets with `combat.projectile_hit_pad` (0.2 m) on top of their radius;
+  enemy attacks don't. Mould hit shapes are built separately from the movement capsule and
+  cover more than the drawn model (`EnemyDef::hitbox`, `docs/enemies.md`).
 - **Style ranks** (low → high): DULL, CRUDE, FERAL, VICIOUS, MERCILESS, GRISLY, SEARING,
   VELOCIDE.
 - **Levels:** campaigns *Crucible of Veins*, *Spire of Wicks* and *The Drowned Chandlery*;
@@ -165,9 +176,10 @@ errors and bad normals otherwise).
   `NetFrame` of quantised `NetEntity`s (delta-compressed per client against its last ack).
 - Combat: one damage pipeline `SimWorld::apply_damage`; weapons are pure tick-based
   (`step_weapons`) so clients can predict firing; enemies are data-driven (`assets/enemies/*.ron`).
-  Player entity packing: `state` = weapon | mode<<4 | Discharge charge<<8; `aux` = hard |
-  thorns<<8 | wall-yaw<<16; flags in `protocol::player_flags` (bit 15 `BRANDED`). Details:
-  `docs/combat.md`.
+  Player entity packing: `state` = held weapon (bits 0–3) | ability (4–8) | charge / draw
+  (9–15), through `protocol::pack_player_weapon`; `aux` = hard | knack charges<<8 |
+  wall-yaw<<16; flags in `protocol::player_flags` (bit 15 `BRANDED`, 16 `TALLOW`). Details:
+  `docs/combat.md`, `docs/arsenal.md`.
 - Server: `Server::new(ServerConfig)`, `ServerHandle::spawn(config)` (own thread, used for SP and
   listen servers), `velocide-server` binary. Lag compensation in `server::lagcomp`.
 - Client: `client::net::Session::{single_player, host, join}` → `NetClient` (`update(dt)` per
@@ -210,6 +222,12 @@ jump pads, kill volumes, glTF props. `build_collision()` → `LevelCollision`.
   balance per mode, replication.
 - `docs/potg.md` — highlight scoring, recording and the play-of-the-game replay.
 - `docs/expansion.md` — the contract the expansion areas were built against.
+- `docs/refit.md` — the contract of the refit (melee, knacks, feel, the loadout screen, readable
+  Moulds, spectating, balance), with each area's as-built notes.
+- `docs/feel.md` — projectile visibility, press-frame firing and stand-in projectiles, parry
+  feedback, the Longwick's handling, the latency audit.
+- `docs/balance.md` — the balance harness, the outliers it found, every number changed and why,
+  the bands the tests hold.
 
 ## Running it
 - Single-player: `cargo run -p client --release -- --sp crucible_of_veins`
@@ -260,6 +278,17 @@ game and kill distance in the feed (`docs/potg.md`); the warm-up lobby in the Ve
 character cosmetics (`docs/lobby.md`); the Bellwether, Snuffer, Smelter, Effigy and elites
 (`docs/enemies.md`); the levels The Drowned Chandlery, Tallow Works, Wickmarket and Furnace Ring
 plus grind spawns on every arena (`docs/levels.md`). `PROTOCOL_VERSION` 8.
+
+### Refit: melee, knacks, feel, the loadout screen, readable Moulds, spectating, balance
+Built by six parallel areas against `docs/refit.md`: the melee class (Trimmer, Tamper, four
+abilities) and gun game's melee finale replacing the Fist tier, the Q slot as a chosen knack
+(six), all drawn and heard (`docs/arsenal.md`); bigger, glowing projectiles, press-frame firing
+with local stand-in projectiles, instant parry feedback and a reworked Longwick
+(`docs/feel.md`); Moulds drawn up to ×1.3 with hit shapes past the model and more hit assist,
+and spectating a teammate while down in PvE (`docs/enemies.md`, `docs/style_modes.md`); a
+redesigned LOADOUT screen with a turning 3D weapon and explained abilities (`docs/ui.md`); a
+balance harness that measures the real sim and a rebalance of every weapon, ability and knack,
+with tests that hold the bands (`docs/balance.md`). `PROTOCOL_VERSION` 9.
 
 ### Deliberate deviations from the spec
 - **Netcode transport.** Connection authentication uses `renet_netcode`'s types

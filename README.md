@@ -9,7 +9,7 @@ You can play single-player or online co-op (2–4 players) through the campaign 
 of Veins**, **Spire of Wicks** and **The Drowned Chandlery**, survive endless waves together in
 **Grind**, or fight each other (up to 8 players) in **Deathmatch** and **Gun Game** on the arenas
 **Cistern Nine**, **Knell Yard**, **Ingot Run**, **Tallow Works**, **Wickmarket** and **Furnace
-Ring**. Pick your own loadout of weapons and abilities and your Shrike's look. Everything is
+Ring**. Pick your own loadout of guns, melee weapons, abilities and a knack, and your Shrike's look. Everything is
 original and procedural: the art, models, sound effects and music are all generated in code.
 
 ## Build and run
@@ -105,7 +105,7 @@ have to be built on a Mac.
 | Dash (3 charges) | Left Shift | LB |
 | Fire / Alt fire | LMB / RMB | RT / LT |
 | Punch / **Parry** | F | RB |
-| Throw Thorn (ricochet relay; not in PvP) | Q | Y / North |
+| Knack (your Q ability: Thorn, Kindle Flask, Snare, Soot Pot, Tallow Skin, Surge) | Q | Y / North |
 | Use / revive a teammate | E | X / West |
 | Weapon slots (your loadout) | 1–4 (press again to switch between the build's two abilities) | D-pad |
 | Next / previous weapon | mouse wheel | D-pad right / left |
@@ -128,21 +128,31 @@ have to be built on a Mac.
 - **Heal by fighting up close.** Every hit you land knocks embers out of a Mould; the closest
   Shrike draws them into its wick (*kindling*). Part of each hit you take *smothers* your wick,
   temporarily capping your max health.
-- **Parry.** Punch an incoming projectile just before it hits you. It flies back at double
-  damage and refills your wick. Punch a **Gaoler** while its shield rim strobes white-hot to
+- **Parry.** Punch an incoming projectile just before it hits you (parryable ones wear a ring
+  that tightens and strobes once they're in reach). It flies back at double damage and refills
+  your wick. A Trimmer slash deflects them too. Punch a **Gaoler** while its shield rim strobes white-hot to
   stun it, or swat a diving **Harrier** out of the air.
-- **Ricochet** (solo and co-op; PvP has no Thorns). Throw a Thorn: it plants itself in a wall
-  or floor. Shoot it with the Quill and the shot jumps to the nearest enemy (branded ones
-  first); chaining thorns multiplies the damage.
+- **Knacks** (Q). Pick one in the loadout:
+  - *Thorn* (solo and co-op only; in PvP you carry Surge instead): a relay spike that plants
+    itself in a wall or floor. Shoot it with the Quill and the shot jumps to the nearest enemy
+    (branded ones first); chaining thorns multiplies the damage.
+  - *Kindle Flask*: a healing pool for you and your teammates.
+  - *Snare*: a wax trap that pins and hurts the first enemy to step on it.
+  - *Soot Pot*: a cloud Moulds can't see through.
+  - *Tallow Skin*: take much less damage and no knockback for a few seconds.
+  - *Surge*: a burst of speed along your look.
 - **Style.** Mix weapons, kill in the air, parry and ricochet to climb the ranks from DULL up to
   VELOCIDE. Repeating the same weapon goes *stale* and earns less.
 
 ### Loadouts and builds
 
-Choose your weapons in **Loadout** (main menu, lobby, pause menu): up to four on the slot keys
-1–4. Each weapon's base stats and primary fire are fixed; you pick its **two abilities** (the
-alt fire) from the pool of its class. Presets save whole loadouts. In a match a change applies at
-your next respawn (at once in the warm-up). Gun game hands out its own weapons.
+Choose your weapons in **Loadout** (main menu, lobby, pause menu, warm-up): up to four on the
+slot keys 1–4, plus your **knack** on Q. Each weapon's base stats and primary fire are fixed;
+you pick its **two abilities** (the alt fire) from the pool of its class. The screen shows the
+selected weapon turning in 3D with its PvE and PvP numbers, and both abilities in boxes that
+explain what they do and how to use them. Presets save whole loadouts. In a match a change
+applies at your next respawn (at once in the warm-up). Gun game hands out its own weapons and
+keeps your knack.
 
 | class | weapons | ability pool |
 |---|---|---|
@@ -151,6 +161,7 @@ your next respawn (at once in the warm-up). Gun game hands out its own weapons.
 | Rapid | **Arclash** (chaining arc caster), **Riveter** (hot-rivet driver), **Kiln** (ember sprayer, sets targets alight) | Wisp, Discharge, Volley, Flare |
 | Explosive | **Tumbler** (bouncing bombs), **Cinderbox** (three-rocket salvo) | Breach, Gravewell, Limpet, Mortar |
 | Draw | **Longwick** (recurve bow: hold to draw, release to loose) | Brand, Triple Nock, Pinning Arrow, Ember Arrow |
+| Melee | **Trimmer** (hooked wick-shears: fast slashes that also deflect projectiles), **Tamper** (foundry ramming hammer: slow, heavy, wide) | Lunge, Whirl, Hurl, Upswing |
 
 The abilities: *Brand* (the target takes extra damage from everyone), *Splinter* (shrapnel that
 reflects off walls), *Skewer* (hold to charge a piercing shot), *Flurry* (three-shot burst),
@@ -160,11 +171,16 @@ lightning), *Discharge* (charged shock nova), *Volley* (ten shots at once), *Fla
 on the ground), *Breach* (point-blank blast-jump), *Gravewell* (pulls enemies in, implodes),
 *Limpet* (sticky charges: tap to throw, hold to detonate), *Mortar* (heavy lobbed shell), *Triple
 Nock* (three arrows), *Pinning Arrow* (pins enemies, slows players), *Ember Arrow* (bursts into
-flame). **Burn** stacks damage over time; **Pinned** roots a Mould for a moment.
+flame), *Lunge* (a low leap that strikes the first thing you reach), *Whirl* (a spin that hits
+everything around you), *Hurl* (throws a spinning blade or hammer head), *Upswing* (launches
+what it hits into the air). **Burn** stacks damage over time; **Pinned** roots a Mould for a
+moment.
 
-PvP and PvE are balanced separately for every weapon and ability (`docs/arsenal.md`): in PvP a
-skilled player kills in about 0.8–1.6 s, and only headshots with a fully drawn bow, a Slug or a
-fully charged Skewer kill in one hit.
+PvP and PvE are balanced separately for every weapon and ability (`docs/arsenal.md`,
+`docs/balance.md`): in PvP a skilled player kills in about 0.8–1.8 s, and only headshots with a
+fully drawn bow, a Slug, a fully charged Skewer or a point-blank Bellows blast kill in one hit.
+`cargo run -p shared --release --example balance_report` prints every weapon's damage, DPS and
+time to kill against each Mould and a PvP player, measured in the real simulation.
 
 ### The Moulds
 
@@ -179,7 +195,8 @@ fully charged Skewer kill in one hit.
 | **Snuffer** | leaps onto you and smothers your wick until you get it off | punch it off (or dash, or pin it) |
 | **Smelter** | slow heavy that pours molten slag lines along the floor | step off the glowing line before it ignites; hit the crucible hatch |
 
-Any Mould can come as an **elite** (more health, faster attacks, a searing glow). The Vestry's
+Moulds are drawn big and their hit shapes reach past the model, so your shots land when they
+look like they should. Any Mould can come as an **elite** (more health, faster attacks, a searing glow). The Vestry's
 **Effigies** are training dummies: they show your hits and never die.
 
 ### Modes
@@ -188,12 +205,14 @@ Any Mould can come as an **elite** (more health, faster attacks, a searing glow)
 - **Grind** (1–4 players, any arena): endless waves that grow and bring tougher Moulds; every
   5th wave is heavy, every 10th has a boss elite. Fallen players return at the next wave; the
   run ends when everyone is down at once. Your best wave per arena and difficulty is saved.
+- **Spectating** (co-op): while you're down or out, watch a teammate through their eyes (Jump:
+  chase camera; Fire / Alt fire: next / previous teammate).
 - **Difficulty** (campaign and grind): Easy, Normal, Hard, Brutal, Inferno. On top of it the
   Moulds scale with the number of players (more of them, tougher and more aggressive).
 - **Deathmatch** (2–8 players): frags with a frag and time limit.
 - **Gun Game** (2–8 players): every kill with your current weapon moves you up a ladder of all
-  ten weapons; the last tier is fists only, and a punch kill wins. Getting punched knocks you
-  down a tier.
+  ten guns; the final tier is the **Trimmer**, and a kill with it wins. Getting punched knocks
+  you down a tier.
 - **Play of the game** (PvP modes): when the match ends, everyone watches the best highlight
   replayed from that player's eyes before the results. The kill feed shows each kill's distance.
 
@@ -226,7 +245,7 @@ over parryable enemies, +/− health popups).
   server plus two clients with one command.
 - **Dev chat commands** (in a match; in hosted games only the host can use them):
   `/spawn gnawer 5`, `/spawn gaoler 1 elite`, `/enemies`, `/god`, `/give`, `/killall`,
-  `/loadout longwick:pinning,ember kiln quill`, `/needle` or `/ember` (parry practice),
+  `/loadout longwick:pinning,ember kiln trimmer knack:snare`, `/needle` or `/ember` (parry practice),
   `/encounter 1`, `/goto exit`, `/goto checkpoint 3`, `/tp x y z`, `/help`.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which
   must stay at zero warnings.

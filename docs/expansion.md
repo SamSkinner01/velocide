@@ -6,6 +6,9 @@ Numbers are starting values (tuned in play); names, ids, slots, messages and beh
 here are the contract. If an implementation has to deviate, update this file in the same commit
 and say why.
 
+> Historical contract. Its starting numbers were later moved by the refit (`docs/refit.md`,
+> `docs/balance.md`); `docs/arsenal.md` is the reference.
+
 What the player asked for, and where it lands:
 
 | request | area |
