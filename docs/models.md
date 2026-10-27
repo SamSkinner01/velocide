@@ -125,9 +125,10 @@ changes, so the standard look keeps each model's own glow colours.
 | `punching` | punch progress 0..1 (left arm thrust; fast out in the first 25 %) |
 | `downed`, `dead` | kneeling with a guttering wick / flat on its back, wick snuffed (flame hidden, eye slits dark, a dull smoulder) |
 | `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
-| `weapon` | the held weapon's wire id (`shared::loadout::WeaponKind`: 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler, 4 Lancet, 5 Thresher, 6 Riveter, 7 Cinderbox, 8 Longwick, 9 Kiln; `weapons::two_handed`: the Quill and Lancet are one-handed) |
+| `weapon` | the held weapon's wire id (`shared::loadout::WeaponKind`: 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler, 4 Lancet, 5 Thresher, 6 Riveter, 7 Cinderbox, 8 Longwick, 9 Kiln, 10 Trimmer, 11 Tamper; `weapons::two_handed`: the Quill and Lancet are one-handed) |
 | `ability`, `draw`, `charge` | the selected ability id (the held weapon glows in its colour; one the weapon can't take shows its default build's first), the Longwick's draw and an alt charge 0..1 (from the replicated `player_weapon` and `DRAWING` / `CHARGING`) |
-| `unarmed` | holding nothing (gun game's Fist tier): no weapon drawn, no two-handed grip |
+| `unarmed` | holding nothing: no weapon drawn, no two-handed grip |
+| `swing` | a melee move in progress (`weapons::melee::Swing { kind, progress, left }`; keep it per player and `advance` it with the held melee weapon): both arms follow it (`melee::arms`), the Trimmer's left half in the left hand, the edges / band flaring through the blow |
 | `cycle` | locomotion phase — keep per player: `cycle = PlayerAnim::advance_cycle(cycle, velocity, dt)` (phase keeps legs continuous when speed changes; leg rate capped at 2.6 cycles/s) |
 | `cosmetics` | the look (`shared::cosmetics::Cosmetics`): mask, crest, cloak, emblem, coat / mask colours, flame (below) |
 
@@ -141,10 +142,12 @@ changes, so the standard look keeps each model's own glow colours.
 | `draw` | 0..1 Longwick draw: the nock and the arrow come back by up to `longwick::DRAW_LENGTH` (0.3 m), the limbs flex, the wick string and the arrow's flame heat up and strobe white at full draw, the left fist pinches the nock (`longwick::draw_hand`), the bow trembles past 85 % |
 | `salvo` | seconds since a Cinderbox salvo started (`None` = no salvo): the tubes fire top, left, right 0.08 s apart (`cinderbox::SALVO_GAP`), each mouth flares (`tube_flash`), the box kicks once per rocket (`salvo_kick`), the back face's three "loaded" lamps go dark as their tubes fire and relight at `RELOAD` (0.9 s) |
 | `spray` | 0..1 Kiln spray (smoothed while it fires): the firebox coals roar, the chimney's damper rattles, the gun shakes |
-| `unarmed` | no weapon at all (gun game's Fist tier; the client sets it when the carried loadout is empty): the right hand (the arm's closed glove) raised and the left fist up in a guard, punching as usual |
+| `unarmed` | no weapon at all (the client sets it when the carried loadout is empty): the right hand (the arm's closed glove) raised and the left fist up in a guard, punching as usual |
+| `swing` | a melee move (`melee::Swing`): the Trimmer / Tamper follow its keyframed track (below) |
+| `throw_item` | what the left hand throws (`None` = a Thorn; a knack's flask / snare / pot model) |
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
-| `throw` | Thorn throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles, flicks it at ~0.5 |
+| `throw` | throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles (or the knack's flask / pot cupped on the fist, the snare's disc edge-on), flicks it at ~0.5 |
 | `bob_phase`, `bob_amount` | walk bob (advance phase by ~speed × 1.2 rad/s; amount = ground speed / run speed) |
 | `sway` | smoothed look velocity (rad/s); the weapon lags |
 | `spin` | Tumbler / Thresher drum angle — keep a `DrumTurn` per local player: `drum.kick()` on every Tumbler or Thresher shot, `drum.update(dt)` every frame, `spin = drum.angle()` (one chamber = `DrumTurn::STEP`, eased in with ~10 % overshoot; the Thresher's six shell windows have the same spacing) |
@@ -170,6 +173,33 @@ players until the replicated state carries their ability and draw).
 | Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
 | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
 | Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
+| Melee | Lunge cyan, Whirl amber, Hurl violet, Upswing lime |
+
+### Melee (`weapons::melee`, docs/refit.md)
+
+The Trimmer and the Tamper are held and swung, not aimed: `melee::of(WeaponKind)` /
+`of_id(id)` → `MeleeWeapon`. A swing is `Swing { kind: SwingKind::{Slash, Lunge, Whirl, Hurl,
+Upswing}, progress 0..1 (0 = idle), left }` (`advance(weapon, dt)`, `flare(weapon)` for the
+glow; `duration` / `impact` per move). Every move reaches its blow early (the hit is on the
+click's tick: the Trimmer's slash at 0.09 s of 0.3 s, the Tamper's slam at 0.1 s of 0.78 s)
+and spends the rest recovering.
+
+- **First person**: `viewmodel_transform` / `draw_viewmodel` use a keyframed view-space track
+  of the right hand per move (`melee::view_right`; the Trimmer's left blade `view_left`
+  mirrors it, its slashes alternate hands); bob, sway and the switch's lowering are added on
+  top. The forearms are re-aimed back at the shoulders (`aim_arm`) whatever the wrist does, so
+  the arm never sweeps across the view. The left hand: the Trimmer's left blade in the left
+  fist; the Tamper's haft (it slides down to the right hand for the slam and the whirl);
+  punching, the left blade rides in the fist (`LeftHand::Punch`); throwing a knack, it is
+  put away (`LeftHand::Busy`). A Hurl hides the thrown blade / the head's glow until the hand
+  comes back up (`hurl_hidden`). `ViewmodelDrawInfo::muzzle` is the strike point (the hook,
+  the foot); `strike_path` samples it through a move.
+- **Third person**: `melee::arms(weapon, swing, reach, pitch)` gives both arms' rotations
+  (`shrike::pose_full` applies them; a punch still takes the left arm); at rest the weapon
+  points along the look like a gun. `ModelLibrary::draw_shrike` puts the Trimmer's left half in
+  the left hand (`left_blade_local`).
+- **Hurled**: `melee::draw_hurled` draws just the blade (Trimmer) or the head (Tamper), spun
+  end over end about its middle.
 
 ### `EnemyAnim`
 
@@ -233,10 +263,13 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | Cinderbox (squat sooty box flaring to a brass face, three short clay tubes in a triangle, cinder vents, carry handle) | `weapon_cinderbox.gltf` | body, cinders *Core* (behind the vent slats), glow *Glow* (mouth rings), flare_0..2 *Glow* (shown while that tube fires), lamp_0..2 *Glow* ("loaded" lamps on the back face) |
 | Longwick (recurve bow of wax-hardened wood, ~1.1 m: dark riser with brass limb pockets, amber limbs sweeping back and flicking forward at the tips, a glowing wick string, a taper arrow nocked) | `weapon_longwick.gltf` | riser, limb_upper / limb_lower (flex about their pockets), string_upper / string_lower *Core* (each a full transform from its flexed tip to the nock), arrow (slides back with the nock), flame[arrow] *Core*, glow *Glow* (riser inlays, pocket rings) |
 | Kiln (ceramic ember sprayer: long terracotta spout on top with glazed bands, firebox belly underneath with grated, glowing doors, a chimney with a hinged damper, brass feed cap) | `weapon_kiln.gltf` | body, damper (rattles), coals *Core* (door grates, chimney mouth), glow *Glow* (spout throat, cap lamp) |
+| Trimmer (hooked wick-shears carried as two blades, ~0.6 m each: straight blued blades bent at the end into an angled jaw, a bright bevel, a brass pivot boss, leather-wrapped handles, brass finger loops closed round the knuckles; the right half carries the snuffer box on its spine with a wick stub smouldering in it; bind pose = the closed pair side by side) | `weapon_trimmer.gltf` | blade_r (grip at the origin), edge_r[blade_r] *Glow* (the honed edge), wick[blade_r] *Core*, blade_l (mirrored, grip at `trimmer::LEFT_GRIP`), edge_l[blade_l] *Glow* |
+| Tamper (foundry ramming hammer, ~0.95 m: an ash haft up the grip's axis with a leather grip and brass pommel; a black-iron head with the rammer's broad round foot ringed in brass on its face, a wedge peen behind, langets down the haft, slag glowing in vents on its flanks) | `weapon_tamper.gltf` | haft, head[haft] (pivot `tamper::HEAD_CENTER`), band[head] *Glow* (round its waist), vent[head] *Core* |
 | right arm (1st person) | `vm_arm.gltf` | forearm (cloth wraps), hand (glove), trim *Team* (cord round the bracer), bracer (brass) |
 | left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
 | arsenal projectiles | `proj_arrow/arrow_pinning/arrow_ember/rivet/cinder_rocket/flak_shell/limpet/mortar_shell/flare.gltf` | `body` + `glow`, all flying along -Z: taper arrow (wax shaft, red cock vane, iron head, the taper's flame behind it, ~0.72 m), pinning arrow (dark shaft, barbed steel head, chain, steel-blue rings), ember arrow (iron cage round a bulb of coals), rivet (red-hot, domed head at the back), cinder rocket (clay casing, brass nose, fins, cinder exhaust), flak shell (brass case, rose timer band, ring of pellet tips), limpet (iron dome on four claws facing -Z, a lamp to blink), mortar shell (fat iron teardrop, tail fins, lilac bands, fuse nose), flare (brass-capped tube, sputtering flame head) |
+| knacks (`models::knacks`) | `prop_kindle_flask/snare/soot_pot.gltf` | flask: `body` (brass cage, wax stopper, sling) + `glass` (translucent belly) + `embers` *Glow* (kindling inside); snare (~0.9 m wax trap on the floor): `base` (poured wax disc, brass ring, hinges) + `jaw_r` / `jaw_l` (toothed brass half hoops, open flat; `knacks::snare_pose(armed, sprung, time)` snaps them up past upright) + `lamp` *Glow* (the wick lamp: dull arming, pulsing armed, flashing sprung); soot pot: `body` (black clay, cord net, rag) + `fuse` *Glow* |
 | enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 | hub props (`models::hub`) | `prop_ready_board.gltf`, `prop_console.gltf` | placed by the Vestry as level props: the ready board (frame, slate, brass header plate + candle sconces; 6 × 3.4 m, the client writes on the slate: `hub::board`), the practice console (stone lectern with a slanted desk, a summoning bell and a lever, panel *Glow*; a sign board: `hub::console`) |
@@ -300,7 +333,12 @@ melting, dead), `look_masks` / `look_crests` / `look_cloaks` (from behind, stand
 running) / `look_emblems` / `look_random` (cosmetics), `vmx_00..17` (the arsenal in first person: Lancet rest / fire / Skewer charged,
 Thresher drum turning, Riveter hose pulse at the tank and at the tool, Cinderbox salvo 1st / 3rd
 tube, Longwick rest / half / full draw / release, Kiln rest / spraying / Discharge),
-`weapons_x` / `weapons_x34` and `projectiles_x` (the arsenal at real scale), `vm_00..22` (each
+`weapons_x` / `weapons_x34` and `projectiles_x` (the arsenal at real scale), `melee_vm_00..16`
+(the Trimmer and Tamper in first person: rest, the slashes' wind / mid / impact, the left
+blade, the slam's wind / fall / impact / recovery, Lunge, Whirl, Hurl, Upswing),
+`melee_weapons` / `melee_weapons_34` (real scale), `melee_hurled`, `melee_3p_trimmer` /
+`melee_3p_tamper` (third person through the swings), `knack_props` (flask, pot, snare
+arming / armed / sprung), `vm_00..22` (each
 weapon rest / kick / alt mode, Quill crest folding, Bellows
 pump, Arclash Discharge 40 % / full, Tumbler drum turning, switch, punch, thorn throw, bob +
 sway), `weapons` / `weapons_34` (the guns at real scale), `projectiles`, `thorns` (planted at
@@ -317,7 +355,10 @@ angles, lying, in flight), `props`.
 - The Censer's and the Gaoler's chains are rigid rods (no rope simulation): the pose solves
   their whirl directions, the links don't sag.
 - Viewmodel arms are generic: one right arm grips every weapon (fingers don't wrap each grip
-  exactly), and the left fist doubles as the thorn-throwing hand.
+  exactly), and the left fist doubles as the throwing hand and the Trimmer's / Tamper's left
+  hand (aimed at the shoulder, its fist closed round the handle).
+- Melee keyframes are hand-tuned per move (`melee::track` / `arm_track`); the third-person
+  Tamper's left hand only roughly follows the haft.
 - In first person the Bellows' pump and the Arclash's prong arcs are mostly seen from behind
   (the pleats bulge out to the left, the capacitor and its charge eye face the camera); the
   third-person view shows them fully.

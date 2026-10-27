@@ -381,6 +381,79 @@ the default loadout), and `OwnState::movement` the slow (8 B).
 * The replay records the local player's own swings and knacks as the same `Fx` the others
   receive (`client/src/ingame/replay.rs`).
 
+## Client: melee and knacks (refit, area arsenal-client)
+
+What you see and hear of the melee weapons and the knacks. Models in
+`client/src/models/weapons/{trimmer,tamper,melee}.rs` and `client/src/models/knacks.rs`
+(`docs/models.md`), presentation in `client/src/ingame/combat/{melee,knacks}.rs`, sounds in
+the `arsenal-client` melee / knack block of `engine/src/audio/sfx.rs` (`docs/audio.md`).
+
+**The weapons.** The **Trimmer** is a pair of hooked wick-shears whose pivot pin knocks out:
+two straight blued blades bent at the end into an angled jaw (the hook that catches a wick),
+brass finger loops closed round the knuckles, the right half carrying the snuffer box with a
+wick stub smouldering in it. One blade per hand; the bind pose (the loadout preview) is the
+closed pair. The **Tamper** is a foundry ramming hammer: an ash haft and a black-iron head with
+the rammer's broad round foot on its face and a wedge peen behind, still hot (slag glows in its
+flank vents). Edges / the head's band glow in the selected ability's colour like every gun
+(Lunge cyan, Whirl amber, Hurl violet, Upswing lime); the primary colour (trails, sparks) is
+the Trimmer's honed steel and the Tamper's hot iron.
+
+**Swings** (`models::weapons::melee`: `Swing { kind, progress, left }`, `SwingKind::{Slash,
+Lunge, Whirl, Hurl, Upswing}`). The blow lands on the tick the trigger is pulled, so every
+move strikes early and spends the rest recovering: the Trimmer's slash reaches its blow in
+0.09 s of a 0.3 s animation, alternating hands (right to left, then the left blade left to
+right); the Tamper is raised over the right shoulder and slammed down the middle in 0.1 s of
+0.78 s, bounces and is hauled back up (the left hand slides down the haft for the slam). In
+first person each move is a keyframed track of the right hand (the left blade mirrors it) with
+the forearms re-aimed at the shoulders so the arm never sweeps across the view; the left fist
+still punches (the Trimmer's left blade rides in the punching fist) and throws. In third
+person both arms follow the move (`melee::arms`), the Trimmer's left half in the left hand.
+
+| move | first person / third person | trail and effect | sound |
+|---|---|---|---|
+| Trimmer slash | the blade whips across, edge leading; right then left | a crescent swept across the front at the blade's pace | `TrimmerSlash` (a snip, a whistle, a ring) |
+| Tamper slam | raised behind the head, slammed down the middle | a crescent from over the right shoulder to the floor (its plane leans so it reads, not edge on) | `TamperSwing` |
+| Lunge | point first, held through the dash | your own: speed lines at the screen's edges; others': a streak at knee / chest / head height; `Fx::LungeStruck`: a cyan burst, the hit sound | `Lunge` |
+| Whirl | the blades / head swept flat round | a full ring round the body and rings rushing out to 3.5 m, sparks and dust | `Whirl` |
+| Hurl | wound back past the ear, flung; the hand comes back up empty | the spinning blade / hammer-head (the `HURL` projectile: `state` = the carrier, drawn 1.25×, a violet aura, light and streak), an impact where it vanishes | `HurlThrow`, `HurlHit` |
+| Upswing | from low in front up past the face | a crescent rising; a burst of dust and sparks under what it launches | `Upswing` |
+
+Hits: a `HitConfirm` of a melee attack (not the Hurl, whose piece makes its own impact) plays
+the blow where it struck: the Trimmer slices (sparks, molten wax, a bright nick, `TrimmerHit`,
+a tiny hitstop), the Tamper lands (lumps, dust, a shock ring, a light, `TamperHit`, 0.06 s
+hitstop and a jolt). Remote players: `Fx::Swing` starts their Shrike's swing (the client
+alternates the Trimmer's hands per swing it shows), the sound and the trail drawn whole in front
+of their eyes (sparks at its end when it hit); a Hurl's `Fx::Shot` is their throw. Spectating
+a teammate mirrors their swings on the viewmodel; the play of the game replays the viewpoint's
+own swings and knacks in first person (`melee::first_person_swing`,
+`knacks::first_person_knack`).
+
+**Knacks.** The HUD's **Q slot** (`knacks::draw_slot`, bottom right above the weapon block,
+replacing the thorn pips): a 12×12 pixel icon per knack in a frame with the key, the name, a pip
+per charge with the next one filling as it recharges; out of charges the icon dims and refills
+from the bottom; a running Tallow Skin drains a bar over the frame. No slot when the knack has
+no charges.
+
+| knack | in the hand | in the world | you | sounds |
+|---|---|---|---|---|
+| Thorn | the thorn between the knuckles (as before) | as before | | `ThornThrow` … |
+| Kindle Flask | the flask cupped on the fist | the `KINDLE_FLASK` tumbling with kindling sparks; breaking: glass, a burst in the heal colour; the `KINDLE_POOL`: embers rising and a glowing haze in the palette's heal colour, a turning dashed rim, a warm light. Its heals (`Fx::Heal` from the pool) are a quiet trickle of kindling from the floor into the lantern, not the full kindling chime every quarter second | a faint warm flash per heal | `KnackThrow`, `FlaskShatter`, `KindlePool` (crackle while it burns) |
+| Snare | the disc held edge-on | the `SNARE` flying, then lying on the floor (`STUCK`): the wax trap with its jaws open, its wick lamp dull while it arms and pulsing once `ARMED` (in the palette's hazard colour), a dashed trigger ring for its owner; `Fx::SnareSprung`: a flash, chains whipping up, the jaws snapped shut there for a moment | | `SnareSet`, `SnareArmed`, `SnareSpring` |
+| Soot Pot | the pot cupped on the fist | the `SOOT_POT` with its fuse spitting; bursting: shards, a dark puff, a scorch; the `SOOT_CLOUD`: big, dark, near-opaque billows kept topped up over the whole sphere (~60 alive at 5 m, darker at the core), thinning over its last fifth — dense enough to hide players inside and behind it | | `SootBurst` |
+| Tallow Skin | | other Shrikes under `TALLOW` are paler and glossier with a slow glisten and drips of glinting wax | a waxy sheen at the screen's edges, tallow drips running down from the top, a glint travelling round | `TallowSkin` |
+| Surge | | others: a streak along their look | speed lines streaming in from the screen's sides | `Surge` |
+
+`InGame::preview_melee(MeleePreview)` / `preview_knack(KnackPreview)` stage any of it
+client-side for tools; `combat_shots` shoots the previews (`melee_*`, `knack_*`) and the real
+thing after `/loadout trimmer tamper knack:...` (`melee_weapon_*`, `knack_use_*`).
+`COMBAT_SHOTS=refit` stops after them.
+
+**Gun game's finale** (`ingame::mode_hud`, `menus::results`): reaching it is the banner
+"FINAL TIER: TRIMMER" (the finale's weapon), others reaching it a feed line ("X IS ON THE FINAL
+TIER (TRIMMER)"), the tier block shows the weapon and "A KILL TO WIN", the results name the tier
+"FINAL TRIMMER". **Controls**: the Q / gamepad North action is **KNACK** (`Action::Knack`;
+settings files that call it `ThrowThorn` or `ThrowPrism` still load).
+
 ## Tuning and balance per mode
 
 `assets/tuning.ron` `combat` holds every weapon's and ability's base numbers: the old four
