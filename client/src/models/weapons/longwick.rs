@@ -64,14 +64,26 @@ pub const JOINTS: [JointDef; 8] = [
 /// The nocked arrow's head at rest.
 pub const MUZZLE: Vec3 = Vec3::new(0.0, ARROW_Y, NOCK[2] - ARROW_LEN);
 
-/// First-person placement: the bow is held low and canted nearly flat, the upper limb
-/// reaching across to the left of the view and the lower one off the bottom right, the arrow
-/// pointing up the middle; it comes up a little as it is drawn ([`DRAW_SHIFT`]).
-pub const VIEW_OFFSET: Vec3 = Vec3::new(0.085, -0.118, -0.5);
-pub const DRAW_SHIFT: Vec3 = Vec3::new(-0.012, 0.02, 0.015);
+/// First-person placement (`docs/feel.md`): the bow is held small and low on the left, canted
+/// so the upper limb leans away from the crosshair and the lower one runs off the bottom of the
+/// screen; the arrow points at the crosshair from below-left. As it is drawn the bow comes up
+/// and in ([`DRAW_SHIFT`]) until, at full draw, the arrowhead sits just under the crosshair.
+/// Nothing of it ever covers the centre of the screen (`models::tests`).
+pub const VIEW_OFFSET: Vec3 = Vec3::new(-0.14, -0.14, -0.42);
+pub const DRAW_SHIFT: Vec3 = Vec3::new(0.115, 0.06, 0.0);
+/// Drawn smaller than the other weapons (× the common viewmodel scale).
+pub const VIEW_SCALE: f32 = 0.8;
 
-pub fn view_rotation() -> Quat {
-    Quat::from_rotation_z(0.92) * Quat::from_rotation_y(0.3)
+/// The bow's view rotation at draw `draw` (0..1, eased): canted about the arrow's own axis (the
+/// upper limb leans left, away from the centre; more at full draw), then turned so the arrow
+/// points at the crosshair from where the bow is held (straight ahead at full draw, when the
+/// bow has come up under the crosshair).
+pub fn view_rotation(draw: f32) -> Quat {
+    let d = unit(draw);
+    let lerp = |a: f32, b: f32| a + (b - a) * d;
+    Quat::from_rotation_y(lerp(-0.1, -0.02))
+        * Quat::from_rotation_x(lerp(0.1, 0.03))
+        * Quat::from_rotation_z(lerp(0.62, 0.78))
 }
 
 /// Wax-hardened limbs (amber) and the riser's dark wood.
@@ -417,16 +429,50 @@ pub(super) fn pose(h: &HeldWeapon, glow: &mut f32, color: &mut Vec3) -> Pose {
     pose
 }
 
+/// Model-space points along the bow as drawn at `draw` / `kick` (the riser, both flexed limbs,
+/// both strings to the nock, the nocked arrow while it is shown): the first-person framing
+/// test projects them to check the bow never covers the crosshair.
+pub fn outline_points(draw: f32, kick: f32, time: f64) -> Vec<Vec3> {
+    let h = HeldWeapon {
+        draw,
+        kick,
+        time,
+        ..HeldWeapon::default()
+    };
+    let (mut glow, mut color) = (0.0, Vec3::ZERO);
+    let pose = pose(&h, &mut glow, &mut color);
+    let flex = |part: usize, q: [f32; 3], root: [f32; 3]| {
+        let rot = Quat::from_mat4(&pose.locals[part]);
+        Vec3::from(root) + rot * (Vec3::from(q) - Vec3::from(root))
+    };
+    let nock = nock_position(draw, kick, time);
+    let mut points = vec![Vec3::new(0.0, -0.175, 0.0), Vec3::new(0.0, 0.175, 0.0)];
+    for (part, sign, root) in [(LIMB_U, 1.0f32, ROOT_U), (LIMB_L, -1.0, ROOT_L)] {
+        let path: Vec<Vec3> = LIMB_PATH
+            .iter()
+            .map(|q| flex(part, [q[0], q[1] * sign, q[2]], root))
+            .collect();
+        let tip = path[path.len() - 2];
+        points.extend(path);
+        points.extend((1..8).map(|i| tip.lerp(nock, i as f32 / 8.0)));
+    }
+    if !pose.is_hidden(ARROW) {
+        let head = nock - Vec3::Z * ARROW_LEN;
+        points.extend((0..=8).map(|i| nock.lerp(head, i as f32 / 8.0)));
+    }
+    points
+}
+
 /// View-space transform of the drawing hand (the left fist model) for the bow drawn at `gun`
 /// (its view-space grip transform): knuckles pinching the nock, the forearm running down and
 /// out to the bottom right of the view (never straight back into the camera).
 pub fn draw_hand(gun: Mat4, draw: f32, time: f64) -> Mat4 {
     let nock = gun.transform_point3(nock_position(draw, 0.0, time));
-    let forearm = Vec3::new(0.78, -0.45, 0.44).normalize();
+    let forearm = Vec3::new(0.55, -0.7, 0.45).normalize();
     let rot = Quat::from_rotation_arc(Vec3::Z, forearm) * Quat::from_rotation_z(0.9);
     Mat4::from_scale_rotation_translation(
-        Vec3::splat(super::VIEWMODEL_SCALE * 0.8),
+        Vec3::splat(super::VIEWMODEL_SCALE * VIEW_SCALE * 0.7),
         rot,
-        nock + Vec3::new(0.008, -0.01, 0.01),
+        nock + Vec3::new(0.006, -0.008, 0.008),
     )
 }

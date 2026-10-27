@@ -240,6 +240,17 @@ pub enum Sfx {
     SmelterStep,
     /// A hit on the training dummy: a wax thunk and the post creaking.
     EffigyHit,
+
+    // ----- feel (refit, area **feel**: docs/feel.md) -------------------------------------------
+    /// Layered under every own shot (volume = the shot's kick): a tight low-end punch and a
+    /// click, so light weapons still land with weight.
+    ShotPunch,
+    /// Layered under `Parry`: a deep impact boom and a rising shimmer.
+    ParryImpact,
+    /// The bow at full draw: a bright two-note glint, clearly audible over the creak.
+    FullDrawGlint,
+    /// A hit on a weak point / head confirmed by the server: a hard metallic tick.
+    WeakPointTick,
     // arsenal-client: melee and knacks (docs/refit.md)
     /// A Trimmer slash: the shears snip and the blade whistles past (one per swing).
     TrimmerSlash,
@@ -479,6 +490,11 @@ impl Sfx {
         Sfx::SmelterSwing,
         Sfx::SmelterStep,
         Sfx::EffigyHit,
+        // feel
+        Sfx::ShotPunch,
+        Sfx::ParryImpact,
+        Sfx::FullDrawGlint,
+        Sfx::WeakPointTick,
         // arsenal-client: melee and knacks
         Sfx::TrimmerSlash,
         Sfx::TrimmerHit,
@@ -687,6 +703,11 @@ impl Sfx {
             SmelterSwing => info(-12.0, 3, 0.04, 0.1),
             SmelterStep => variants(info(-18.0, 4, 0.06, 0.1), 2),
             EffigyHit => variants(info(-18.0, 4, 0.1, 0.04), 2),
+            // feel
+            ShotPunch => variants(info(-15.0, 4, 0.05, 0.02), 3),
+            ParryImpact => info(-11.0, 2, 0.0, 0.08),
+            FullDrawGlint => info(-13.0, 2, 0.0, 0.1),
+            WeakPointTick => info(-16.0, 3, 0.03, 0.035),
 
             // arsenal-client: melee and knacks
             TrimmerSlash => variants(info(-16.0, 4, 0.06, 0.02), 2),
@@ -3572,6 +3593,52 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             lowpass(&mut creak, 1000.0);
             stutter(&mut creak, 30.0, 0.0);
             layer(&[(&thunk, 1.0, 0.0), (&crack, 0.6, 0.0), (&creak, 0.35, 0.06)])
+        }
+
+        // ----- feel ---------------------------------------------------------------------------
+        ShotPunch => {
+            // A short kick-drum thump with a snap on top: the weight under a shot.
+            let kick = thump(0.12, r.range(150.0, 175.0), 52.0, 0.012, 0.045);
+            let snap = click(r, 0.004);
+            let body = noise(r, 0.06, Pass::Low, 900.0, 300.0, 0.9, 0.0005, 0.02);
+            let mut b = layer(&[(&kick, 1.0, 0.0), (&snap, 0.5, 0.0), (&body, 0.4, 0.0)]);
+            drive(&mut b, 2.2);
+            b
+        }
+        ParryImpact => {
+            // A heavy boom with a sub drop, and a shimmer rising out of it.
+            let boom = thump(0.45, 120.0, 38.0, 0.03, 0.16);
+            let crack = noise(r, 0.08, Pass::Band, 2400.0, 900.0, 1.2, 0.0003, 0.02);
+            let shimmer = tone(0.5, Wave::Sine, 1400.0, 4200.0, 0.35, 0.02, 0.18);
+            let mut b = layer(&[
+                (&boom, 1.0, 0.0),
+                (&crack, 0.6, 0.0),
+                (&shimmer, 0.18, 0.02),
+            ]);
+            drive(&mut b, 1.8);
+            reverb(&mut b, 0.5, 0.4, 0.15, 0.3);
+            b
+        }
+        FullDrawGlint => {
+            // Two bright pings a fifth apart (the wick string singing) over a soft sparkle.
+            let a = metal(
+                0.5,
+                1568.0,
+                &[(1.0, 1.0, 0.18), (2.01, 0.4, 0.1), (3.0, 0.2, 0.06)],
+            );
+            let b2 = metal(
+                0.5,
+                2349.0,
+                &[(1.0, 1.0, 0.2), (2.0, 0.35, 0.1), (2.98, 0.15, 0.06)],
+            );
+            let sparkle = noise(r, 0.2, Pass::High, 7000.0, 9000.0, 0.7, 0.002, 0.06);
+            layer(&[(&a, 0.8, 0.0), (&b2, 0.8, 0.045), (&sparkle, 0.3, 0.0)])
+        }
+        WeakPointTick => {
+            let tick = metal(0.12, 3100.0, &[(1.0, 1.0, 0.03), (2.7, 0.5, 0.02)]);
+            let snap = click(r, 0.003);
+            let thud = thump(0.08, 300.0, 140.0, 0.01, 0.025);
+            layer(&[(&tick, 1.0, 0.0), (&snap, 0.7, 0.0), (&thud, 0.5, 0.0)])
         }
         // ----- arsenal-client: melee and knacks (docs/refit.md, docs/audio.md "Melee") -------
         // The Trimmer is shear steel (a snip, a thin ringing whistle), the Tamper a foundry

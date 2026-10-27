@@ -677,10 +677,14 @@ impl InGame {
         // 5. Visual time (hitstop) and the camera.
         let vdt = self.feedback.update(dt);
         if in_game {
-            self.combat_update(common, vdt);
+            self.combat_update(common, vdt, dt);
         }
         let alpha = self.timestep.alpha();
         let scene = self.update_camera(common, alpha, dt, vdt);
+        // This frame's predicted shots, from this frame's muzzle (docs/feel.md).
+        if in_game && !self.sp_paused {
+            self.combat_after_ticks(common);
+        }
 
         // 6. Draw the world and the UI.
         self.draw_world(common, out, dt, vdt);
@@ -733,7 +737,8 @@ impl InGame {
         timestep.set_hz(net.tick_rate() as f64);
         let dt = shared::sim::tick_dt(net.tick_rate());
         tick_events.clear();
-        for _ in 0..timestep.advance(io.dt as f64) {
+        let ticks = timestep.advance(io.dt as f64);
+        for _ in 0..ticks {
             if let Some(bot) = bot.as_mut() {
                 let world = net.world().map(|w| &w.collision.world);
                 let me = net.local_state().map(|s| s.position);
@@ -751,6 +756,15 @@ impl InGame {
                 combat.after_tick(net);
             }
         }
+        // No tick this frame but a fire / punch button changed: the next tick's shot is
+        // shown now (press-frame feedback, docs/feel.md). The input is built from a copy so
+        // the latched presses still go to that tick.
+        if ticks == 0 && bot.is_none() {
+            let next = controls
+                .clone()
+                .build(io.input, &common.settings.bindings, gameplay);
+            combat.lookahead(net, &next);
+        }
         let feet = net.local_state().map_or(Vec3::ZERO, |s| s.position);
         let tuning = net.tuning().movement.clone();
         let events = std::mem::take(&mut self.tick_events);
@@ -759,7 +773,6 @@ impl InGame {
         }
         self.tick_events = events;
         self.potg_record_local_shots();
-        self.combat_after_ticks(common);
     }
 
     fn update_camera(&mut self, common: &Common, alpha: f32, dt: f32, vdt: f32) -> SceneParams {

@@ -4,7 +4,10 @@
 //! sigils, splinter bursts, Bellows pellets and gusts, Arclash arcs / chains / wisps /
 //! Discharge novas, Tumbler bombs, Breach and Gravewell, thorn ricochets, deflections and
 //! parries, enemies walking / winding up / dying, the HUD with damage and hard damage, hit
-//! markers, the kill feed and the death screen.
+//! markers, the kill feed and the death screen; and the feel pass (`feel_*.png`, docs/feel.md):
+//! the muzzle flash on the shot's frame, own projectiles leaving the muzzle at once, bigger
+//! glowing projectiles, the bow at rest / half / full draw, parryable needles flaring in punch
+//! reach, a parry and the deflected needle.
 //!
 //! ```text
 //! cargo run -p client --release --example combat_shots -- [out_dir]   # default target/combat_shots
@@ -321,6 +324,138 @@ fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
     game.send_chat("/loadout quill bellows arclash tumbler");
     game.send_chat("/killall");
     h.frames(game, 30, still);
+}
+
+/// The feel pass (`docs/feel.md`, `feel_*.png`): the muzzle flash on the frame the shot is
+/// predicted, tracers, own rivets / bombs / arrows leaving the muzzle before the server reports
+/// them, the bow at rest, half and full draw, a needle seen far off, flaring in punch reach,
+/// parried and flying back.
+fn feel_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let aimed = |g: &mut InGame, buttons: Buttons| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t);
+        }
+        hold(g, buttons);
+    };
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 70, still);
+    game.send_chat("/loadout quill riveter:volley,flare longwick:triple,pinning tumbler");
+    h.frames(game, 20, still);
+    let claimed = game.combat.stand_ins.stats.claimed;
+
+    // The Quill: the flash on the shot's own frame, the tracer a few frames on.
+    select(game, 0, 0);
+    h.frames(game, 12, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 1, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("feel_muzzle_flash");
+    h.frames(game, 4, |g, _| aimed(g, Buttons::NONE));
+    h.shot("feel_tracer");
+    h.frames(game, 25, still);
+
+    // The Riveter: rivets streaming from the muzzle; a Volley of ten.
+    select(game, 1, 0);
+    h.frames(game, 12, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 7, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("feel_rivets");
+    h.frames(game, 20, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 1, |g, _| aimed(g, Buttons::ALT_FIRE));
+    h.frames(game, 3, still);
+    h.shot("feel_volley");
+    h.frames(game, 40, still);
+
+    // The Tumbler: a bomb out of the barrel, glowing as it flies.
+    select(game, 3, 0);
+    h.frames(game, 12, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 1, |g, _| aimed(g, Buttons::FIRE));
+    h.frames(game, 7, still);
+    h.shot("feel_bomb");
+    h.frames(game, 60, still);
+
+    // The Longwick: at rest, half drawn, full draw (zoomed, the ring), the arrow flying.
+    select(game, 2, 0);
+    h.frames(game, 20, |g, _| aimed(g, Buttons::NONE));
+    h.shot("feel_bow_rest");
+    h.frames(game, 18, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("feel_bow_half");
+    h.frames(game, 22, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("feel_bow_full_cue");
+    h.frames(game, 20, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("feel_bow_full");
+    h.frames(game, 1, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 4, still);
+    h.shot("feel_bow_arrow");
+    h.frames(game, 30, still);
+    // Triple Nock: armed (a press), drawn, loosed: three arrows fanning out.
+    h.frames(game, 2, |g, i| {
+        aimed(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 45, |g, _| aimed(g, Buttons::FIRE));
+    h.frames(game, 1, |g, _| aimed(g, Buttons::NONE));
+    h.frames(game, 3, still);
+    h.shot("feel_triple_nock");
+    h.frames(game, 40, still);
+    let stats = game.combat.stand_ins.stats;
+    println!(
+        "stand-ins: {stats:?} ({} handed over in this pass; own projectiles appeared {:.0} ms \
+         after the shot on average, drawn from the muzzle meanwhile)",
+        stats.claimed - claimed,
+        stats.mean_wait() * 1000.0
+    );
+
+    // A needle: far off, then in punch reach (its ring flares), parried, flying back.
+    game.send_chat("/killall");
+    select(game, 0, 0);
+    h.frames(game, 30, still);
+    game.controls.pitch = 0.0;
+    let enemy_shot = |e: &shared::protocol::EntityState| {
+        kind::is_projectile(e.kind)
+            && e.flags & projectile_flags::ENEMY != 0
+            && e.flags & projectile_flags::PARRIED == 0
+    };
+    game.send_chat("/orb 18");
+    let (mut far, mut reach, mut punched) = (false, false, false);
+    for _ in 0..150 {
+        let me = eye(game).unwrap_or(Vec3::ZERO);
+        let orb = find_entity(game, enemy_shot);
+        if let Some(p) = orb {
+            aim_at(game, p);
+        }
+        let d = orb.map(|p| p.distance(me));
+        let b = if !punched && d.is_some_and(|d| d < 2.2) {
+            punched = true;
+            Buttons::PUNCH
+        } else {
+            Buttons::NONE
+        };
+        hold(game, b);
+        h.frame(game);
+        if !far && d.is_some_and(|d| d < 11.0) {
+            far = true;
+            h.shot("feel_needle_incoming");
+        }
+        if !reach && d.is_some_and(|d| d < 3.2) {
+            reach = true;
+            h.shot("feel_needle_in_reach");
+        }
+        if punched {
+            h.shot("feel_parry");
+            break;
+        }
+    }
+    h.frames(game, 12, still);
+    h.shot("feel_parry_deflected");
+    h.frames(game, 30, still);
+    game.send_chat("/loadout quill bellows arclash tumbler");
+    h.frames(game, 20, still);
 }
 
 /// The expansion arsenal's projectiles, blasts, burning patch and status effects, staged
@@ -1038,6 +1173,7 @@ fn main() -> anyhow::Result<()> {
 
     arsenal_previews(&mut h, &mut game);
     arsenal_weapon_shots(&mut h, &mut game);
+    feel_shots(&mut h, &mut game);
 
     // Enemies attacking: walking, winding up (we're still god-moded).
     game.send_chat("/notarget");

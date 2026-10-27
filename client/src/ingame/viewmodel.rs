@@ -169,7 +169,8 @@ impl Viewmodel {
             a.bob_phase = (a.bob_phase + speed * 1.2 * dt) % (std::f32::consts::TAU * 64.0);
         }
         a.switch = (a.switch + dt / SWITCH_TIME).min(1.0);
-        a.fire_kick = (a.fire_kick - dt / 0.3).max(0.0);
+        // Recoil snaps back fast, then settles (docs/feel.md): most of it is gone in 0.1 s.
+        a.fire_kick = (a.fire_kick * (-7.0 * dt).exp() - 0.6 * dt).max(0.0);
         for p in [&mut a.punch, &mut a.throw] {
             if *p > 0.0 {
                 *p += dt / 0.4;

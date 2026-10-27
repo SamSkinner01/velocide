@@ -525,7 +525,8 @@ Prediction duties:
   `OwnState` the prediction is re-based on `combat.weapons` and the unacked inputs are replayed
   without effects (`client_combat` test: 0 mismatches over 587 inputs at 100 ms RTT, every
   weapon and mode incl. a charged Discharge). Recoil and knockback stay server-side (movement
-  reconciliation).
+  reconciliation). A button change between ticks plays the next tick's shot on that frame
+  (`WeaponPredictor::lookahead`, `docs/feel.md`); the tick then finds it played.
 * **Death**: `NetClient::tick` predicts (and sends) `sim::neutral_input` for inputs up to
   the predicted respawn (`OwnCombat::dead_at`: `seq ≤ own.seq + respawn_in`), so the corpse
   doesn't mispredict; the death screen shows "YOU DIED", the killer line from the `Killed`
@@ -534,8 +535,9 @@ Prediction duties:
   at `replicated_position(e, render_tick, …)` (consistent with lag compensation, parry and
   ricochet validation). **Your own projectiles** are taken from the newest snapshot and drawn
   at the present (`server_tick_estimate`, at most 6 ticks past the newest snapshot), starting
-  at the drawn muzzle and blending onto the true path over 0.15 s, so a bomb leaves the
-  barrel at once instead of an interpolation delay (~130 ms) later; your own explosions
+  at the drawn muzzle and blending onto the true path over 0.15 s; before the server reports
+  one, a local stand-in flies it from the muzzle on the shot's frame and hands over to it
+  without a pop or a double (`stand_in.rs`, `docs/feel.md`); your own explosions
   (`Fx::Explosion::owner`) play on arrival to match (an own Breach's bang was already played
   by the prediction).
 
@@ -551,13 +553,13 @@ spawn protected; death screen.
 |---|---|
 | **PLAYER** entity | drawn 10 % larger than life (visual only); body/stance from `LOW_PROFILE`; weapon model and ability from `protocol::player_weapon(state)` (the expansion's weapons borrow their class's model for now); `CHARGING` with Discharge → Arclash capacitor glow + crackling arcs (charge level from `player_weapon`); `BRANDED` → turning brand sigil above the head; `PARRY` → punch pose; `INVULNERABLE` → dash afterimage; `PROTECTED` → spawn shimmer; `DEAD` → corpse/ragdoll, no name tag; name tag health bar from `health` (+ hard from `aux`) for teammates |
 | **enemy** entity (16..64) | model/colours from the `EnemyDef` with that `net_kind` (same RON files); animation by `state` and attack index (Idle, Alert: the type's alert bark, Chase: walk/run by speed, Windup: the attack's telegraph pose + `colors.telegraph` glint driven by `aux & 0xFF` progress + the attack's wind-up sound, Strike: the strike + its sound, Recover, Stunned: dazed / swatted, Dying: slump, split and melt); `PARRYABLE` → flash `colors.parry` (yellow); `AIMING` → the aim laser from the muzzle along yaw / pitch (red), `AIM_LOCKED` → white-hot + `HeronLock`; `BRANDED` → turning brand sigil (a diamond and a point-down triangle, camera-facing) above it; hits → wax and molten droplets + sparks + `EnemyHurt`; death → one big ember burst + smouldering corpse; health bar from `health` / `aux >> 16`; `AIRBORNE` → flail (details: `docs/enemies.md`) |
-| **projectiles** | bomb: tumbling studded ball, fuse sparks and a flickering fuse band (`BombBounce` on `ProjectileBounce`); gravewell: canister with a green light, `STUCK` → claws down, vortex of motes drawn in from the pull radius, `GravewellHum` once; wisp: spinning ball of lightning, crackling arcs, violet light, `WispHum` every 0.45 s; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim) |
+| **projectiles** | bomb: tumbling studded ball, fuse sparks and a flickering fuse band (`BombBounce` on `ProjectileBounce`); gravewell: canister with a green light, `STUCK` → claws down, vortex of motes drawn in from the pull radius, `GravewellHum` once; wisp: spinning ball of lightning, crackling arcs, violet light, `WispHum` every 0.45 s; ember bomb: a glowing slag ball with a smoke and ember trail, light, `EmberFlight`; needle: a long glowing streak; `PARRIED` → white-hot tint + streak; `PENDING` → hide (it is "in" the victim). Every projectile is drawn at least ×2 with a halo, core and streak; parryable ones carry a parry-colour ring that flares in punch reach (`docs/feel.md`) |
 | **EMBER_BURST** | glowing embers (`palette().heal`) rising off a faint glow over a wisp of smoke, `state/10` m radius, burst size from `health` (pool), re-puffing while the pool lasts; `BIG` → the same, looser (the heat release itself is drawn by the dying enemy) |
 | **THORN** | flying: the glass spike along its path; `DROPPING`: tumbling; `PLANTED`: tip-first in the surface along `velocity` (quivers after landing), drawn ×1.5 with a steady halo and a pulse ring so the relay reads at a distance; `LYING`: flat on the floor; disappears on removal (shatter via `Ricochet` / `ThornExpired`) |
 | `Damaged` | red screen flash scaled by amount, direction indicator towards `-direction`, `Hurt` sound, camera kick; `blocked: Invulnerable` → dodge flash (no damage); hard-damage segment grows; `killed` → death |
-| `HitConfirm` | hit marker (`Hitmarker`), `Headshot` sound + red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` when `killed` |
+| `HitConfirm` | hit marker (`Hitmarker`; markers pop in), `Headshot` + `WeakPointTick` and a red marker for `HEADSHOT`/`WEAK_POINT`, dull marker for `ARMOURED`, damage number at `point`, `KillConfirm` (+ a ring) when `killed` |
 | `Killed` | kill feed (`KILLER [ATTACK] VICTIM 38m HEADSHOT RETURNED RICOCHET xN AIR`: the distance whenever the killer has a body and it wasn't a suicide; only kills involving a player; red when it involves you); `Death` + red flash + death screen for you; the heat release (embers, wax and slag lumps, smoke, a scorch) comes from the enemy entity entering `Dying` (also `EnemyDeath` / `EmberRelease` sounds) |
-| `Parried` | for the parrier: client hitstop 0.12 s, white flash, `PARRY` banner, `Parry` sound (+ `Heal` when `healed`); for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
+| `Parried` | for the parrier: usually already shown on the punch's frame (the client tests the same rule on what it draws, `docs/feel.md`), then only `Heal` when `healed`; otherwise now: hitstop 0.16 s, white flash, shake, `PARRY` banner, `Parry` + `ParryImpact`, a shock ring from the fist; for others: `Parry` sound at `position`; everyone: white glow + sparks at `position` |
 | `Respawned` | `Respawn` sound/effect at `position` |
 | `Fx::Shot` | remote muzzle flash + 3D weapon sound at the shooter (interpolated position), hitscan tracers (jagged arcs for `Arc`) from the shooter's muzzle to each end, impact sparks/decals at the ends; `Gust` → the air puff along the muzzle direction |
 | `Fx::Ricochet` | bright tracer through `points`, thorn shatter at each thorn point, `Ricochet` sound (pitch up per bounce) |

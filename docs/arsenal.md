@@ -149,7 +149,7 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | 5 | Thresher | Scatter | 7 × 7 dmg, 11°, 45 m, 0.42 s, automatic while held |
 | 6 | Riveter | Rapid | rivet projectile 90 m/s, gravity 6, 7 dmg, 1.2° spread, 0.09 s (5 ticks: 12/s at 60 Hz; 11/s is not a whole number of ticks) |
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
-| 8 | Longwick | Draw | hold to draw (0.75 s to full), release: arrow 45–120 m/s, 22–105 dmg by draw, gravity 14, 0.25 s before the next draw; a tap looses a weak, slow arrow |
+| 8 | Longwick | Draw | hold to draw (0.62 s to full), release: arrow 55–135 m/s, 22–105 dmg by draw, gravity 10, 0.25 s before the next draw; a tap looses a weak, slow arrow (handling: `docs/feel.md`) |
 | 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 16° cone: 3 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
 | 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 30 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
 | 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 75 dmg to everything in it, kb 16 |
@@ -503,7 +503,7 @@ third party).
 | Kiln | damage 1.2 | 3.6 / 5 ticks + 12 dps burn | ~1.8 s inside 13 m, and the 3 s burn keeps going (36) — the counterplay is breaking contact, so the spray itself had to threaten |
 | Tumbler | 1.0 | 65 a direct bomb | 2 direct: 0.85 s; splash kills take three |
 | Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.3 s; three 32s (96) were a body one-shot in 0.16 s with any brand |
-| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.64 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (48) is not; body: 2 full draws, 1.49 s |
+| Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.53 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (48) is not; body: 2 full draws, 1.27 s |
 | Both Barrels | damage 0.4 | 24 × 3.2 = 77 | 192 point blank was a one-shot; it stays the blast-jump |
 | Wisp | damage 0.7 | 5.6 a zap | it aims itself: 40 dps of free damage was too much |
 | Discharge | damage 0.9 | 22.5–72 | no one-shot even with a hit before it |

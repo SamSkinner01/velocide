@@ -1102,15 +1102,17 @@ fn gun_game(rig: &mut Rig) {
         .and_then(InGame::net)
         .map(|n| n.tuning().gun_game.ladder.clone())
         .unwrap_or_default();
+    // The weapons carried (the knack stays the player's own: Surge here, since the requested
+    // Thorn is PvE only).
     let held = |c: &Client| {
         c.game_ref()
             .and_then(InGame::net)
             .and_then(|n| n.own_combat())
-            .map(|o| o.combat.weapons.loadout)
+            .map(|o| o.combat.weapons.loadout.slots)
     };
     rig.check(
         !ladder.is_empty()
-            && held(&host) == Some(shared::loadout::Loadout::single(ladder[0]))
+            && held(&host) == Some(shared::loadout::Loadout::single(ladder[0]).slots)
             && gun_tier(&host) == Some(0),
         "GG: everyone starts with the first build only",
     );
@@ -1149,7 +1151,7 @@ fn gun_game(rig: &mut Rig) {
         held(cs[0])
             == ladder
                 .get(tier as usize)
-                .map(|b| shared::loadout::Loadout::single(*b))
+                .map(|b| shared::loadout::Loadout::single(*b).slots)
     });
     rig.check(ok, "GG: the host holds its tier's build");
     host.pad(GamepadButton::Select, true);

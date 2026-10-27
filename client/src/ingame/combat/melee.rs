@@ -792,8 +792,20 @@ pub fn hit_weapon(attack: Attack, held: Option<WeaponKind>) -> Option<MeleeWeapo
 }
 
 /// The hurled piece a replicated `HURL` projectile carries (`state` = the carrier's weapon id).
-pub fn hurled_weapon(e: &EntityState) -> MeleeWeapon {
-    model::of_id(e.state as u8).unwrap_or(MeleeWeapon::Trimmer)
+/// `held`: the local melee weapon, for a local stand-in (`stand_in.rs`) that has no `state`.
+pub fn hurled_weapon(e: &EntityState, held: Option<MeleeWeapon>) -> MeleeWeapon {
+    model::of_id(e.state as u8)
+        .or(held)
+        .unwrap_or(MeleeWeapon::Trimmer)
+}
+
+/// The melee weapon a weapon state holds (`None`: a gun, or nothing).
+pub fn held(s: &shared::sim::WeaponState) -> Option<MeleeWeapon> {
+    if s.is_unarmed() {
+        None
+    } else {
+        model::of(s.current())
+    }
 }
 
 /// Whether a replicated entity is a hurled piece.
@@ -814,7 +826,14 @@ pub fn remote_hurl(ctx: &mut FxCtx, player: PlayerId, at: Vec3) {
 
 impl MeleeView {
     /// The replicated hurled pieces' wakes this frame, and where one vanished (it struck).
-    pub fn update_replicated(&mut self, f: &EntityFrame, ctx: &mut UpdateCtx) {
+    /// (`held`: the local melee weapon, for stand-ins.) The halo, core and streak are the
+    /// entity drawer's (`entities::projectile_look`); these are the sparks off its spin.
+    pub fn update_replicated(
+        &mut self,
+        f: &EntityFrame,
+        held: Option<MeleeWeapon>,
+        ctx: &mut UpdateCtx,
+    ) {
         let dt = ctx.dt.max(0.0);
         let mut seen = Vec::new();
         for (e, time, offset) in f.projectiles() {
@@ -823,11 +842,11 @@ impl MeleeView {
             }
             let at = shared::sim::projectiles::replicated_position(e, time, f.tick_rate, f.tuning)
                 + offset;
-            let weapon = hurled_weapon(e);
+            let weapon = hurled_weapon(e, held);
             // Not right in front of the eye (an own throw starts at the camera).
             let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
             if age > 0.06 {
-                hurled_trail(ctx.effects, ctx.beams, ctx.rng, weapon, at, e.velocity, dt);
+                hurled_sparks(ctx.effects, ctx.rng, weapon, at, dt);
             }
             seen.push((e.id, weapon, at, e.velocity));
         }
@@ -852,6 +871,7 @@ impl MeleeView {
         &self,
         lib: Option<&ModelLibrary>,
         f: &EntityFrame,
+        held: Option<MeleeWeapon>,
         draws: &mut Vec<DrawItem>,
         lights: &mut Vec<PointLight>,
     ) {
@@ -865,7 +885,7 @@ impl MeleeView {
                 continue;
             }
             let age = ((time - e.aux as f64) / f.tick_rate.max(1) as f64) as f32;
-            let weapon = hurled_weapon(e);
+            let weapon = hurled_weapon(e, held);
             if let Some(lib) = lib {
                 draw_hurled(lib, weapon, at, e.velocity, age.max(0.0), draws);
             }
@@ -887,6 +907,65 @@ pub struct UpdateCtx<'a> {
 }
 
 impl InGame {
+    /// The Trimmer's deflect as you see it (`docs/feel.md`'s parry path): on the frame of a
+    /// slash, a parryable hostile projectile drawn inside the slash's arc and reach in front of
+    /// the eye is turned back *now*, with the parry's flash, hitstop and sound; the server's
+    /// `Parried` (the same test on the swing's tick) then only confirms it.
+    pub(super) fn combat_predict_deflect(&mut self, common: &mut crate::app::Common) {
+        let now = self.time;
+        if self
+            .combat
+            .parry_predicted_at
+            .is_some_and(|at| now - at < super::PARRY_CONFIRM_WINDOW)
+        {
+            return;
+        }
+        let Some(net) = self.session.as_ref().map(crate::net::Session::client) else {
+            return;
+        };
+        let t = &net.tuning().combat;
+        let eye = self.last_camera.position;
+        let view = self.last_camera.rotation * Vec3::NEG_Z;
+        let local = net.local_player_id().map(|p| p.0 as u16);
+        let render_tick = net.render_tick();
+        let half_arc = (t.trimmer.arc_degrees * 0.5).to_radians().cos();
+        let hit = net.remote_entities().iter().find_map(|e| {
+            let pk = shared::sim::ProjectileKind::from_net_kind(e.kind)?;
+            let flags = e.flags;
+            if !pk.parryable()
+                || Some(e.owner) == local
+                || flags
+                    & (shared::protocol::projectile_flags::STUCK
+                        | shared::protocol::projectile_flags::PARRIED)
+                    != 0
+            {
+                return None;
+            }
+            let p =
+                shared::sim::projectiles::replicated_position(e, render_tick, net.tick_rate(), t);
+            let to = p - eye;
+            (to.length() <= t.trimmer.reach && to.normalize_or_zero().dot(view) >= half_arc)
+                .then_some(p)
+        });
+        let Some(at) = hit else {
+            return;
+        };
+        self.combat.parry_predicted_at = Some(now);
+        let blade = self.viewmodel.last_draw().map_or(eye + view * 0.6, |d| {
+            eye + self.last_camera.rotation * d.muzzle
+        });
+        super::parry_feedback(
+            &mut self.feedback,
+            &mut common.audio,
+            &mut self.effects,
+            &mut self.combat.beams,
+            blade,
+            view,
+        );
+        self.effects.sparks(at, -view, 18);
+        self.hud.banner("DEFLECT", common.theme.bone, now);
+    }
+
     /// Stages a melee visual client-side (tools and screenshots; see [`MeleePreview`]).
     #[doc(hidden)]
     pub fn preview_melee(&mut self, preview: MeleePreview) {
@@ -1088,7 +1167,35 @@ pub fn hurled_light(weapon: MeleeWeapon, position: Vec3) -> PointLight {
     }
 }
 
-/// A hurled piece's wake: a violet streak and a few sparks thrown off its spin.
+/// Sparks thrown off a hurled piece's spin.
+pub fn hurled_sparks(
+    effects: &mut Effects,
+    rng: &mut Rng,
+    weapon: MeleeWeapon,
+    position: Vec3,
+    dt: f32,
+) {
+    if rng.unit() < dt * 30.0 {
+        effects.spawn(Particle {
+            position,
+            velocity: rng.dir() * 2.0,
+            gravity: 4.0,
+            max_life: 0.3,
+            size: Vec2::splat(if weapon == MeleeWeapon::Tamper {
+                0.1
+            } else {
+                0.06
+            }),
+            color: hot(ability_color(SwingKind::Hurl), 1.3, 1.0),
+            texture: FxTex::Spark,
+            additive: true,
+            ..Default::default()
+        });
+    }
+}
+
+/// A staged hurled piece's wake (previews; the replicated ones get the entity drawer's glow):
+/// a violet streak and aura and the sparks off its spin.
 pub fn hurled_trail(
     effects: &mut Effects,
     beams: &mut Beams,
@@ -1115,23 +1222,7 @@ pub fn hurled_trail(
         additive: true,
         ..Default::default()
     });
-    if rng.unit() < dt * 30.0 {
-        effects.spawn(Particle {
-            position,
-            velocity: rng.dir() * 2.0,
-            gravity: 4.0,
-            max_life: 0.3,
-            size: Vec2::splat(if weapon == MeleeWeapon::Tamper {
-                0.1
-            } else {
-                0.06
-            }),
-            color: hot(c, 1.3, 1.0),
-            texture: FxTex::Spark,
-            additive: true,
-            ..Default::default()
-        });
-    }
+    hurled_sparks(effects, rng, weapon, position, dt);
 }
 
 /// A hurled piece striking the level or a target.

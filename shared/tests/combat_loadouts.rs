@@ -255,7 +255,9 @@ fn the_player_entity_carries_weapon_ability_and_draw() {
         (weapon, ability),
         (WeaponKind::Longwick, Ability::PinningArrow)
     );
-    let expected = 20.0 / 45.0 * 255.0;
+    // 20 ticks into the draw (`longwick.draw_time` to full).
+    let full = shared::sim::combat::secs_to_ticks(a.tuning.combat.longwick.draw_time, 60, 1);
+    let expected = 20.0 / full as f32 * 255.0;
     assert!((level as f32 - expected).abs() <= 3.0, "{level}");
     assert_ne!(e.flags & player_flags::DRAWING, 0);
     a.set_buttons(p, Buttons::NONE);

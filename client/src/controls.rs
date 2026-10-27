@@ -424,6 +424,11 @@ pub struct Controls {
     pub weapons: WeaponSelect,
     /// Buttons pressed (even briefly) since the last tick.
     latched: Buttons,
+    /// The view when a fire / punch button was first pressed since the last tick: the next
+    /// tick's input aims there, so the shot goes where the crosshair was on the click's frame
+    /// (where its press-frame feedback was drawn, docs/feel.md), not where it drifted by the
+    /// tick.
+    press_aim: Option<(f32, f32)>,
     /// Movement axes / buttons injected by the autopilot (`--bot`), replacing the devices.
     pub override_move: Option<(f32, f32, Buttons)>,
 }
@@ -462,6 +467,9 @@ impl Controls {
         for (action, button) in BUTTON_ACTIONS {
             if bindings.pressed(input, action) {
                 self.latched.set(button, true);
+                if matches!(action, Action::Fire | Action::AltFire | Action::Punch) {
+                    self.press_aim.get_or_insert((self.yaw, self.pitch));
+                }
             }
         }
         let mut change = WeaponChange::None;
@@ -495,6 +503,7 @@ impl Controls {
     /// Forget latched presses (e.g. when gameplay input is suppressed by chat or a menu).
     pub fn clear_latched(&mut self) {
         self.latched = Buttons::NONE;
+        self.press_aim = None;
     }
 
     /// Per fixed tick: the input to send. `gameplay` false (chat open, menu) sends a neutral
@@ -505,9 +514,10 @@ impl Controls {
         bindings: &Bindings,
         gameplay: bool,
     ) -> PlayerInput {
+        let (yaw, pitch) = self.press_aim.take().unwrap_or((self.yaw, self.pitch));
         let mut out = PlayerInput {
-            yaw: self.yaw,
-            pitch: self.pitch,
+            yaw,
+            pitch,
             weapon: self.weapons.current,
             weapon_mode: self.weapons.mode(),
             ..Default::default()

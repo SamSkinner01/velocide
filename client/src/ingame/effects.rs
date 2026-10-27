@@ -111,10 +111,25 @@ struct Textures {
     scorch: TextureId,
 }
 
+/// A sprite drawn for one frame only (glows that follow something: projectile halos).
+#[derive(Clone, Copy, Debug)]
+struct Billboard {
+    position: Vec3,
+    size: f32,
+    color: Vec4,
+    texture: FxTex,
+    rotation: f32,
+}
+
+/// Most one-frame billboards per frame (extra ones are dropped).
+const MAX_BILLBOARDS: usize = 512;
+
 /// Particle and decal manager.
 pub struct Effects {
     tex: Option<Textures>,
     particles: Vec<Particle>,
+    /// One-frame additive billboards ([`Effects::billboard`]), drawn and cleared by `draw`.
+    billboards: Vec<Billboard>,
     next_replace: usize,
     decals: Vec<(Decal, f32)>,
     next_decal: usize,
@@ -151,6 +166,7 @@ impl Effects {
         Self {
             tex: None,
             particles: Vec::with_capacity(256),
+            billboards: Vec::new(),
             next_replace: 0,
             decals: Vec::with_capacity(MAX_DECALS),
             next_decal: 0,
@@ -178,6 +194,7 @@ impl Effects {
 
     /// Removes everything (level change, restart).
     pub fn clear(&mut self) {
+        self.billboards.clear();
         self.particles.clear();
         self.decals.clear();
         self.next_decal = 0;
@@ -565,11 +582,50 @@ impl Effects {
         }
     }
 
-    /// Appends sprites and decals for this frame.
-    pub fn draw(&self, sprites: &mut Vec<Sprite>, decals: &mut Vec<Decal>) {
+    /// An additive sprite for this frame only: glows that follow something that moves
+    /// (projectile halos and cores). Unlike a particle it is never aged, so hitstop can't pile
+    /// them up.
+    pub fn billboard(
+        &mut self,
+        position: Vec3,
+        size: f32,
+        color: Vec4,
+        texture: FxTex,
+        rotation: f32,
+    ) {
+        if self.billboards.len() < MAX_BILLBOARDS && position.is_finite() && size > 0.0 {
+            self.billboards.push(Billboard {
+                position,
+                size,
+                color,
+                texture,
+                rotation,
+            });
+        }
+    }
+
+    /// One-frame billboards waiting to be drawn.
+    pub fn billboard_count(&self) -> usize {
+        self.billboards.len()
+    }
+
+    /// Appends sprites and decals for this frame (and forgets this frame's billboards).
+    pub fn draw(&mut self, sprites: &mut Vec<Sprite>, decals: &mut Vec<Decal>) {
+        let billboards = std::mem::take(&mut self.billboards);
         let Some(tex) = &self.tex else {
             return;
         };
+        for b in &billboards {
+            sprites.push(Sprite {
+                position: b.position,
+                size: Vec2::splat(b.size),
+                color: b.color,
+                texture: tex.sprites[b.texture as usize],
+                uv_rect: Vec4::new(0.0, 0.0, 1.0, 1.0),
+                rotation: b.rotation,
+                additive: true,
+            });
+        }
         for p in &self.particles {
             let t = (p.life / p.max_life).clamp(0.0, 1.0);
             let scale = 1.0 + (p.end_scale - 1.0) * t;

@@ -222,6 +222,10 @@ pub struct CombatTuning {
     pub self_damage_fraction: f32,
     /// Maximum range of hitscan weapons.
     pub hitscan_range: f32,
+    /// Player-owned projectiles test *targets* with their radius plus this much (m), on top of
+    /// the hit assist: a shot that visibly grazes a body counts. The level is tested with the
+    /// plain radius, so shots don't snag on edges (`docs/feel.md`).
+    pub projectile_hit_pad: f32,
 
     // Fist / parry
     /// Seconds the punch counts as a parry after pressing it.
@@ -320,6 +324,7 @@ impl Default for CombatTuning {
             player_head_multiplier: 2.0,
             self_damage_fraction: 0.35,
             hitscan_range: 400.0,
+            projectile_hit_pad: 0.2,
 
             parry_window: 0.2,
             parry_range: 3.0,
@@ -915,13 +920,13 @@ pub struct LongwickTuning {
 impl Default for LongwickTuning {
     fn default() -> Self {
         Self {
-            draw_time: 0.75,
+            draw_time: 0.62,
             interval: 0.25,
-            min_speed: 45.0,
-            max_speed: 120.0,
+            min_speed: 55.0,
+            max_speed: 135.0,
             min_damage: 22.0,
             max_damage: 105.0,
-            arrow_gravity: 14.0,
+            arrow_gravity: 10.0,
             arrow_radius: 0.05,
             arrow_lifetime: 4.0,
             ability_power: 1.0,
@@ -2164,6 +2169,7 @@ impl CombatTuning {
             parry_damage_multiplier, explosion_up_bias);
         clamp!(self, d, 0.0, MAX_DIST; hitscan_range, parry_range, parry_close_range,
             parry_auto_aim_range, melee_parry_range, punch_range);
+        clamp!(self, d, 0.0, 2.0; projectile_hit_pad);
         clamp!(self, d, 0.0, 360.0; parry_cone_degrees, parry_auto_aim_degrees,
             punch_cone_degrees);
         clamp!(self, d, 0.0, MAX_SPEED; parry_max_speed, punch_knockback, slam_knockback);
