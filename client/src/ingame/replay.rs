@@ -38,7 +38,7 @@ use engine::ui::hud::{self as hud_draw, CrosshairStyle, TextFeed};
 use engine::ui::text::line_width;
 use engine::ui::{Align, Rect, TextStyle, Theme, UiDrawExt, UiKey};
 use glam::{Vec2, Vec3, Vec4, vec2};
-use shared::loadout::{Ability, WeaponKind};
+use shared::loadout::{Ability, Knack, WeaponClass, WeaponKind};
 use shared::movement::{MoveMode, MoveState};
 use shared::protocol::{
     EntityState, Fx, FxEvent, GameEvent, NetFrame, NetId, kind, player_armed, player_flags,
@@ -746,7 +746,22 @@ impl InGame {
                         player: me,
                         hit: false,
                     },
-                    FireIntent::ThrowThorn => Fx::ThornThrown { player: me },
+                    FireIntent::Knack(Knack::Thorn) => Fx::ThornThrown { player: me },
+                    FireIntent::Knack(knack) => Fx::Knack { player: me, knack },
+                    // Melee swings (the Hurl flies: a shot like the other projectiles).
+                    FireIntent::Primary { weapon, .. } | FireIntent::Ability { weapon, .. }
+                        if weapon.class() == WeaponClass::Melee
+                            && intent.attack() != Some(Attack::Hurl) =>
+                    {
+                        let Some(attack) = intent.attack() else {
+                            continue;
+                        };
+                        Fx::Swing {
+                            player: me,
+                            attack,
+                            hits: 0,
+                        }
+                    }
                     FireIntent::Ability { charge, .. }
                         if intent.attack() == Some(Attack::Discharge) =>
                     {

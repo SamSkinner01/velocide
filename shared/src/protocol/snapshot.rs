@@ -82,7 +82,7 @@ pub mod kind {
     /// `WeaponKind` (bits 0–3; [`super::UNARMED_WEAPON_ID`] = fists only) | selected `Ability`
     /// (bits 4–8) | charge / draw level (bits 9–15), packed and read only through
     /// [`super::pack_player_weapon`] / [`super::pack_player_unarmed`] /
-    /// [`super::player_weapon`] / [`super::player_armed`]; `health` = health; `aux` = hard damage (bits 0–7) | thorn
+    /// [`super::player_weapon`] / [`super::player_armed`]; `health` = health; `aux` = hard damage (bits 0–7) | knack
     /// charges (8–11) | (12–15 unused) | wall-cling normal as a quantised yaw (16–31, while
     /// `WALL_CLING`). See `docs/combat.md`, `docs/arsenal.md`.
     pub const PLAYER: u16 = 0;
@@ -138,7 +138,20 @@ pub mod kind {
     pub const EMBER_ARROW: u16 = 75;
     /// Branding arrow (Brand on the Longwick).
     pub const BRAND_ARROW: u16 = 76;
-    // 77..=79: reserved for the arsenal.
+    // 77..=79 and 96..=103: the refit's melee and knacks (docs/arsenal.md).
+    /// Hurl (melee ability): the thrown blade / hammer-head, gravity `hurl.gravity`; `state` =
+    /// the carrier's `WeaponKind` id (Trimmer: a blade, Tamper: a hammer-head).
+    pub const HURL: u16 = 77;
+    /// Kindle Flask (knack): lobbed (`knacks.kindle_flask.gravity`); a `KINDLE_POOL` where it
+    /// lands.
+    pub const KINDLE_FLASK: u16 = 78;
+    /// Snare (knack): thrown (`knacks.snare.gravity`); `STUCK` once it lies on the floor
+    /// (`position` current), [`super::projectile_flags::ARMED`] once armed. Sprung or expired:
+    /// removed.
+    pub const SNARE: u16 = 79;
+    /// Soot Pot (knack): thrown (`knacks.soot_pot.gravity`); bursts into a `SOOT_CLOUD`.
+    pub const SOOT_POT: u16 = 96;
+    // 97..=103: reserved for the arsenal.
     /// Tumbler bomb (`state` = world bounces left before it explodes).
     pub const BOMB: u16 = 72;
     /// Tumbler Gravewell canister (`STUCK` while it pulls).
@@ -158,7 +171,13 @@ pub mod kind {
     /// A burning patch (Flare): `position` = centre on the ground, `owner` = player,
     /// `state` = radius (dm), `aux` = tick it burns out. Burns hostiles inside.
     pub const BURNING_PATCH: u16 = 136;
-    // 137..=139: reserved for the arsenal.
+    /// A Kindle Flask's healing pool: `position` = centre on the ground, `owner` = thrower,
+    /// `state` = radius (dm), `aux` = tick it dries up.
+    pub const KINDLE_POOL: u16 = 137;
+    /// A Soot Pot's cloud: `position` = centre, `owner` = thrower, `state` = radius (dm), `aux`
+    /// = tick it clears. Moulds can't see into, out of or through it; draw it dense.
+    pub const SOOT_CLOUD: u16 = 138;
+    // 139: reserved for the arsenal.
     // 140..=143: enemy hazards (enemies area, docs/enemies.md).
     /// The Smelter's slag line on the ground: `position` = start, `velocity` = end − start
     /// (it follows the floor between them), `flags` = [`super::slag_flags`], `state` = width
@@ -232,6 +251,9 @@ pub mod player_flags {
     pub const DRAWING: u32 = 1 << 14;
     /// Branded by a Brand shot: takes extra damage, draws a sigil (weapons area).
     pub const BRANDED: u32 = 1 << 15;
+    // Bit 16: the refit's knacks (arsenal, docs/arsenal.md).
+    /// Tallow Skin (knack) active: half damage, no knockback (a waxy sheen).
+    pub const TALLOW: u32 = 1 << 16;
 }
 
 /// Flag bits of enemy entities.
@@ -316,6 +338,8 @@ pub mod projectile_flags {
     pub const PENDING: u32 = 1 << 2;
     /// Originally fired by an enemy.
     pub const ENEMY: u32 = 1 << 3;
+    /// A Snare lying on the floor has armed: the next hostile close by springs it.
+    pub const ARMED: u32 = 1 << 4;
 }
 
 /// Flag bits of ember bursts.
