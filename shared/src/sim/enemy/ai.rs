@@ -379,6 +379,20 @@ impl SimWorld {
             .target
             .and_then(|id| players.iter().find(|p| p.id == id))
             .copied();
+        // A soot cloud hides the target (into, out of or through it, `knacks.rs`): it is lost
+        // at once, and a laser's wind-up breaks off.
+        let target = match target {
+            Some(tp) if self.soot_blocks(e.eye(), tp.chest) => {
+                e.target = None;
+                e.nav.reset();
+                if e.aiming() {
+                    e.aim_locked = false;
+                    e.set_state(AiState::Chase, 0);
+                }
+                None
+            }
+            other => other,
+        };
         // Line of sight to the target (attacks, ranged positioning, losing interest).
         e.has_los = target.is_some_and(|tp| {
             tp.chest.distance(e.eye()) <= def.ai.sight_range
@@ -658,17 +672,26 @@ impl SimWorld {
             .filter(|p| p.targetable)
             .map(|p| (p.id, p.chest.distance(eye), p.chest))
             .filter(|(_, d, chest)| {
-                *d <= ai.sight_range && !world.line_blocked(eye, *chest, MASK_SHOTS)
+                *d <= ai.sight_range
+                    && !world.line_blocked(eye, *chest, MASK_SHOTS)
+                    && !self.soot_blocks(eye, *chest)
             })
             .map(|(id, d, _)| (id, d))
             .collect();
         let is_visible = |id: PlayerId| visible.iter().any(|v| v.0 == id);
         // Someone hurting us badly takes priority.
         let threshold = ai.aggro_switch_fraction * e.max_health;
+        // (Nobody hidden in soot, `knacks.rs`.)
+        let hidden = |p: &PlayerView| self.soot_blocks(eye, p.chest);
         if let Some(a) = e
             .aggro
             .iter()
-            .filter(|a| a.1 >= threshold && players.iter().any(|p| p.id == a.0 && p.targetable))
+            .filter(|a| {
+                a.1 >= threshold
+                    && players
+                        .iter()
+                        .any(|p| p.id == a.0 && p.targetable && !hidden(p))
+            })
             .max_by(|a, b| a.1.total_cmp(&b.1))
         {
             return (Some(a.0), is_visible(a.0));
@@ -688,7 +711,7 @@ impl SimWorld {
                 // Arena spawns hunt the nearest player even without seeing them.
                 let nearest = players
                     .iter()
-                    .filter(|p| p.targetable)
+                    .filter(|p| p.targetable && !hidden(p))
                     .min_by(|a, b| {
                         a.position
                             .distance_squared(eye)
