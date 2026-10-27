@@ -336,7 +336,7 @@ pub fn surge_hud(list: &mut UiDrawList, c: Rect, strength: f32, now: f64) {
         let a = (seed % std::f64::consts::TAU) as f32;
         let dir = vec2(a.cos(), a.sin() * 0.6);
         let phase = ((now * 3.5 + seed).fract()) as f32;
-        let r0 = c.width() * (0.32 + 0.3 * phase);
+        let r0 = c.height() * (0.42 + 0.35 * phase);
         let len = 40.0 + 50.0 * strength;
         let from = center + dir * r0;
         let steps = 10;
