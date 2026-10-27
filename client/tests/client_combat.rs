@@ -192,8 +192,10 @@ fn melee_and_knack_prediction_matches_the_server() {
             weapon_mode: ((t / 160) % 2) as u8,
             ..Default::default()
         };
-        inp.buttons.set(Buttons::FIRE, t % 30 < 18);
-        inp.buttons.set(Buttons::ALT_FIRE, t % 50 > 40);
+        // Swing early in each weapon's window, the ability in its second half: Whirl and
+        // Upswing take the next swing (like Both Barrels the next shot), so they need one ready.
+        inp.buttons.set(Buttons::FIRE, t % 80 < 20);
+        inp.buttons.set(Buttons::ALT_FIRE, t % 80 >= 40);
         inp.buttons.set(Buttons::THROW, t % 120 == 7);
         inp.buttons.set(Buttons::PUNCH, t.is_multiple_of(41));
         Some(inp)
