@@ -418,6 +418,16 @@ person both arms follow the move (`melee::arms`), the Trimmer's left half in the
 | Hurl | wound back past the ear, flung; the hand comes back up empty | the spinning blade / hammer-head (the `HURL` projectile: `state` = the carrier, drawn 1.25×, a violet aura, light and streak), an impact where it vanishes | `HurlThrow`, `HurlHit` |
 | Upswing | from low in front up past the face | a crescent rising; a burst of dust and sparks under what it launches | `Upswing` |
 
+**Deflects**: a Trimmer slash checks, on the frame it is predicted, for a parryable hostile
+projectile drawn inside its arc and reach in front of the eye and turns it back at once with
+the parry's flash, hitstop and sound (`InGame::combat_predict_deflect`, the punch's path in
+`docs/feel.md`); the server's `Parried` then only confirms it. **Thrown things** follow
+feel's projectile scheme: `HURL`, `KINDLE_FLASK`, `SNARE` and `SOOT_POT` have their own looks
+in `entities::projectile_look` (halo, core, streak: violet, kindling gold-green, amber,
+fuse orange) and local stand-ins from the hand on the press frame (`stand_in.rs`; a stand-in
+snare sticks where it lands); the pieces themselves are drawn by `melee.rs` / `knacks.rs`
+(a stand-in Hurl shows the weapon in hand).
+
 Hits: a `HitConfirm` of a melee attack (not the Hurl, whose piece makes its own impact) plays
 the blow where it struck: the Trimmer slices (sparks, molten wax, a bright nick, `TrimmerHit`,
 a tiny hitstop), the Tamper lands (lumps, dust, a shock ring, a light, `TamperHit`, 0.06 s
