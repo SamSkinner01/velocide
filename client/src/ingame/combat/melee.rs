@@ -510,15 +510,17 @@ impl MeleeView {
             }
             f.position += step;
             f.velocity.y -= HURL_GRAVITY * dt;
-            hurled_trail(
-                ctx.effects,
-                ctx.beams,
-                ctx.rng,
-                f.weapon,
-                f.position,
-                f.velocity,
-                dt,
-            );
+            if f.age > 0.06 {
+                hurled_trail(
+                    ctx.effects,
+                    ctx.beams,
+                    ctx.rng,
+                    f.weapon,
+                    f.position,
+                    f.velocity,
+                    dt,
+                );
+            }
         }
         for (weapon, at, dir) in landed {
             hurl_impact(ctx.effects, ctx.audio, ctx.rng, weapon, at, dir);
@@ -1088,7 +1090,21 @@ pub fn hurled_trail(
 ) {
     let c = ability_color(SwingKind::Hurl);
     let back = velocity * dt.clamp(0.0, 0.05) * 2.0;
-    beams.beam(position - back, position, 0.1, hot(c, 1.5, 0.55), 0.12);
+    beams.beam(position - back, position, 0.06, hot(c, 1.5, 0.55), 0.12);
+    // A violet aura round the spinning piece (it is dark iron and steel).
+    effects.spawn(Particle {
+        position,
+        max_life: 0.06,
+        size: Vec2::splat(if weapon == MeleeWeapon::Tamper {
+            0.9
+        } else {
+            0.7
+        }),
+        color: c.truncate().extend(0.5),
+        texture: FxTex::Glow,
+        additive: true,
+        ..Default::default()
+    });
     if rng.unit() < dt * 30.0 {
         effects.spawn(Particle {
             position,

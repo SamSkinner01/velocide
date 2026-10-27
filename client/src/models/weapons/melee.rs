@@ -117,7 +117,7 @@ pub fn duration(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
 pub fn impact(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
     match (weapon, kind) {
         (MeleeWeapon::Trimmer, SwingKind::Slash) => 0.3,
-        (MeleeWeapon::Tamper, SwingKind::Slash) => 0.19,
+        (MeleeWeapon::Tamper, SwingKind::Slash) => 0.13,
         (_, SwingKind::Lunge) => 0.2,
         (_, SwingKind::Whirl) => 0.6,
         (_, SwingKind::Hurl) => 0.3,
@@ -226,9 +226,9 @@ fn track(weapon: MeleeWeapon, kind: SwingKind) -> Vec<(f32, Key, Ease)> {
         // and is hauled back up.
         (MeleeWeapon::Tamper, SwingKind::Slash) => vec![
             (0.0, TAMP_REST, Smooth),
-            (0.09, key(0.2, -0.12, -0.24, 0.0, 0.7, 0.15), Out),
-            (0.19, key(0.06, -0.22, -0.36, 0.08, -1.3, 0.08), In),
-            (0.27, key(0.06, -0.19, -0.36, 0.08, -1.15, 0.08), Out),
+            (0.05, key(0.2, -0.12, -0.24, 0.0, 0.7, 0.15), Out),
+            (0.13, key(0.06, -0.22, -0.36, 0.08, -1.3, 0.08), In),
+            (0.22, key(0.06, -0.19, -0.36, 0.08, -1.15, 0.08), Out),
             (0.42, key(0.07, -0.23, -0.36, 0.08, -1.25, 0.1), Smooth),
             (1.0, TAMP_REST, Smooth),
         ],
@@ -441,7 +441,7 @@ fn hands_together(swing: &Swing) -> bool {
     let p = swing.progress;
     swing.active()
         && match swing.kind {
-            SwingKind::Slash => (0.02..0.18).contains(&p),
+            SwingKind::Slash => (0.01..0.12).contains(&p),
             SwingKind::Whirl => true,
             SwingKind::Hurl => p < 0.3,
             SwingKind::Upswing => (0.2..0.6).contains(&p),
@@ -621,8 +621,8 @@ fn arm_track(weapon: MeleeWeapon, kind: SwingKind) -> Vec<(f32, ArmKey, Ease)> {
         // Cocked behind the head (the haft pointing back), then down in front.
         (MeleeWeapon::Tamper, SwingKind::Slash) => vec![
             (0.0, rest, Smooth),
-            (0.09, arm(0.1, 2.6, 0.5, 0.0, 0.0), Out),
-            (0.19, arm(0.3, 0.75, 0.1, -1.3, 0.0), In),
+            (0.05, arm(0.1, 2.6, 0.5, 0.0, 0.0), Out),
+            (0.13, arm(0.3, 0.75, 0.1, -1.3, 0.0), In),
             (0.42, arm(0.3, 0.72, 0.12, -1.25, 0.0), Smooth),
             (1.0, rest, Smooth),
         ],

@@ -337,14 +337,14 @@ pub fn surge_hud(list: &mut UiDrawList, c: Rect, strength: f32, now: f64) {
         let dir = vec2(a.cos(), a.sin() * 0.6);
         let phase = ((now * 3.5 + seed).fract()) as f32;
         let r0 = c.width() * (0.32 + 0.3 * phase);
-        let len = 30.0 + 40.0 * strength;
+        let len = 40.0 + 50.0 * strength;
         let from = center + dir * r0;
-        let steps = 8;
+        let steps = 10;
         for s in 0..steps {
             let p = from + dir * (len * s as f32 / steps as f32);
             list.fill(
-                Rect::from_center_size(p, Vec2::splat(2.0)),
-                fade(color, 0.5 * strength * (s as f32 / steps as f32)),
+                Rect::from_center_size(p, Vec2::splat(3.0)),
+                fade(color, 0.85 * strength * (s as f32 / steps as f32)),
             );
         }
     }
@@ -474,7 +474,7 @@ pub fn pool_effects(
     let r = radius.max(0.5);
     let strength = left.clamp(0.0, 1.0).sqrt();
     // Kindling embers drifting up all over the pool.
-    let mut budget = (dt * 60.0 * r / 3.5 * strength).max(0.0);
+    let mut budget = (dt * 110.0 * r / 3.5 * strength).max(0.0);
     while budget > 0.0 {
         if budget < 1.0 && rng.unit() > budget {
             break;
@@ -505,7 +505,7 @@ pub fn pool_effects(
             max_life: rng.range(0.8, 1.4),
             size: Vec2::splat(r * 0.5),
             end_scale: 1.4,
-            color: heal.truncate().extend(0.18 * strength),
+            color: heal.truncate().extend(0.3 * strength),
             texture: FxTex::Glow,
             additive: true,
             ..Default::default()

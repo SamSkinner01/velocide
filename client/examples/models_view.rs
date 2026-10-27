@@ -1176,17 +1176,17 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
         (
             "TAMPER SLAM: WIND",
             MeleeWeapon::Tamper,
-            swing(SwingKind::Slash, 0.09, false),
+            swing(SwingKind::Slash, 0.05, false),
         ),
         (
             "TAMPER SLAM: FALLING",
             MeleeWeapon::Tamper,
-            swing(SwingKind::Slash, 0.15, false),
+            swing(SwingKind::Slash, 0.1, false),
         ),
         (
             "TAMPER SLAM: IMPACT",
             MeleeWeapon::Tamper,
-            swing(SwingKind::Slash, 0.19, false),
+            swing(SwingKind::Slash, 0.13, false),
         ),
         (
             "TAMPER SLAM: RECOVER",
@@ -1350,8 +1350,8 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             11u8,
             [
                 idle,
-                swing(SwingKind::Slash, 0.09, false),
-                swing(SwingKind::Slash, 0.2, false),
+                swing(SwingKind::Slash, 0.05, false),
+                swing(SwingKind::Slash, 0.13, false),
                 swing(SwingKind::Upswing, 0.32, false),
                 swing(SwingKind::Hurl, 0.15, false),
             ],
