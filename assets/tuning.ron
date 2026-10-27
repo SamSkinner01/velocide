@@ -440,7 +440,7 @@
         // Swings test an arc in front of the eye (reach from the eye, full aperture), against
         // the hit shapes the swinger saw (lag compensation) with hit assist, line of sight.
         trimmer: (
-            damage: 30.0,
+            damage: 36.0,          // 30: below the scatterguns at 5 m from 3 m in (docs/balance.md)
             interval: 0.32,
             reach: 3.0,
             arc_degrees: 70.0,
@@ -449,7 +449,7 @@
             ability_power: 1.0,
         ),
         tamper: (
-            damage: 75.0,          // to everything in the arc
+            damage: 85.0,          // to everything in the arc (75: as the Trimmer, docs/balance.md)
             interval: 0.85,
             reach: 3.4,
             arc_degrees: 100.0,
@@ -469,7 +469,7 @@
         ),
         whirl: (
             radius: 3.5,
-            damage_scale: 1.2,
+            damage_scale: 1.5,     // it takes the swing's place now (docs/balance.md)
             knockback: 12.0,       // outward ...
             up: 0.35,              // ... with this upward bias
             cooldown: 4.0,
@@ -484,7 +484,7 @@
             cooldown: 2.5,
         ),
         upswing: (
-            damage_scale: 0.8,     // in the carrier's arc
+            damage_scale: 1.4,     // in the carrier's arc; it takes the swing's place now
             launch: 14.0,          // upward speed for what it hits
             hop: 5.0,              // and for the swinger
             cooldown: 3.0,
@@ -697,7 +697,8 @@
                 Cinderbox: (damage: 0.75),
                 Longwick: (damage: 0.5, interval: 0.85),
                 Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise
-                Tamper: (damage: 0.8),        // its abilities are multiples of the swing
+                Trimmer: (damage: 0.84),      // 30 a slash: four, 0.95 s, as before the PvE raise
+                Tamper: (damage: 0.7),        // 59.5 a swing; its abilities are multiples of it
             },
             abilities: {
                 BothBarrels: (damage: 0.25),  // 48 body / 96 head: 0.4 one-shot a head
@@ -716,6 +717,9 @@
             },
             overrides: {
                 "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
+                // Half damage for 3 s won every even duel (twice every time to kill).
+                "knacks.tallow_skin.damage_scale": 0.7,
+                "knacks.tallow_skin.duration": 2.0,
             },
         ),
     ),

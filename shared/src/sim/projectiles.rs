@@ -648,6 +648,13 @@ impl SimWorld {
                 flags.insert(DamageFlags::RETURNED);
             }
         }
+        // A thrown blade / hammer-head strikes the body like every melee hit (no weak points,
+        // no headshots: a Tamper's Hurl to a PvP head was a one-shot).
+        let part = if p.kind == ProjectileKind::Hurl {
+            HitPart::Body
+        } else {
+            part
+        };
         let mut info = DamageInfo::new(p.damage, p.owner, p.attack)
             .at(p.position, dir)
             .part(part)

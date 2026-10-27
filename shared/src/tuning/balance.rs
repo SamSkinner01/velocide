@@ -147,8 +147,9 @@ impl Default for BalanceTuning {
                 },
             ),
             (WeaponKind::Kiln, scale(0.9)),
-            // Its abilities hit for a multiple of the swing: 60 keeps them under a one-shot.
-            (WeaponKind::Tamper, scale(0.8)),
+            (WeaponKind::Trimmer, scale(0.84)),
+            // Its abilities hit for a multiple of the swing: 59.5 keeps them under a one-shot.
+            (WeaponKind::Tamper, scale(0.7)),
         ]);
         let abilities = BTreeMap::from([
             (Ability::BothBarrels, scale(0.25)),
@@ -171,7 +172,12 @@ impl Default for BalanceTuning {
             (Ability::TripleNock, scale(0.55)),
             (Ability::EmberArrow, scale(0.5)),
         ]);
-        let overrides = BTreeMap::from([("quill.brand_multiplier".to_string(), 1.25)]);
+        let overrides = BTreeMap::from([
+            ("quill.brand_multiplier".to_string(), 1.25),
+            // Half damage for 3 s won every even duel.
+            ("knacks.tallow_skin.damage_scale".to_string(), 0.7),
+            ("knacks.tallow_skin.duration".to_string(), 2.0),
+        ]);
         Self {
             pve: BalanceProfile::default(),
             pvp: BalanceProfile {

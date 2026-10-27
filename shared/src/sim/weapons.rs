@@ -810,9 +810,14 @@ fn step_build(
 }
 
 /// Abilities that are the primary's shot fired another way (Both Barrels: both barrels at
-/// once; Volley: ten of its shots at once). They need the primary ready and use it up.
+/// once; Volley: ten of its shots at once; Whirl and Upswing: the melee weapon's swing, spun
+/// round or rising). They need the primary ready and use it up: a Tamper's swing and a Whirl
+/// on one tick were 132 to a PvP body.
 fn takes_primary_shot(ability: Ability) -> bool {
-    matches!(ability, Ability::BothBarrels | Ability::Volley)
+    matches!(
+        ability,
+        Ability::BothBarrels | Ability::Volley | Ability::Whirl | Ability::Upswing
+    )
 }
 
 /// Deterministic pseudo-random numbers for spread (splitmix64 of a seed).

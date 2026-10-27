@@ -1348,7 +1348,7 @@ pub struct TrimmerTuning {
 impl Default for TrimmerTuning {
     fn default() -> Self {
         Self {
-            damage: 30.0,
+            damage: 36.0,
             interval: 0.32,
             reach: 3.0,
             arc_degrees: 70.0,
@@ -1375,7 +1375,7 @@ pub struct TamperTuning {
 impl Default for TamperTuning {
     fn default() -> Self {
         Self {
-            damage: 75.0,
+            damage: 85.0,
             interval: 0.85,
             reach: 3.4,
             arc_degrees: 100.0,
@@ -1436,7 +1436,7 @@ impl Default for WhirlTuning {
     fn default() -> Self {
         Self {
             radius: 3.5,
-            damage_scale: 1.2,
+            damage_scale: 1.5,
             knockback: 12.0,
             up: 0.35,
             cooldown: 4.0,
@@ -1489,7 +1489,7 @@ pub struct UpswingTuning {
 impl Default for UpswingTuning {
     fn default() -> Self {
         Self {
-            damage_scale: 0.8,
+            damage_scale: 1.4,
             launch: 14.0,
             hop: 5.0,
             cooldown: 3.0,

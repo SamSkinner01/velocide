@@ -48,21 +48,14 @@ pub const MOULDS: [&str; 8] = [
 /// The ranges every table is measured at (m, feet to feet).
 pub const RANGES: [f32; 3] = [5.0, 15.0, 30.0];
 
-/// The weapons the tables and the bands cover: every class but Melee for now (the Trimmer and
-/// the Tamper join once their behaviour lands, arsenal's milestone 2; `docs/balance.md`).
+/// The weapons the tables and the bands cover (all of them).
 pub fn weapons() -> Vec<WeaponKind> {
-    WeaponKind::ALL
-        .into_iter()
-        .filter(|w| w.class() != WeaponClass::Melee)
-        .collect()
+    WeaponKind::ALL.to_vec()
 }
 
 /// The classes of [`weapons`].
 pub fn classes() -> Vec<WeaponClass> {
-    WeaponClass::ALL
-        .into_iter()
-        .filter(|c| *c != WeaponClass::Melee)
-        .collect()
+    WeaponClass::ALL.to_vec()
 }
 
 /// Which balance profile (and level kind) a measurement runs with.
@@ -246,6 +239,15 @@ pub struct Bench {
     detonations: u32,
     /// The bow looses at this fraction of a full draw (1.0: full draws).
     pub draw: f32,
+    /// Players take real damage and die (a duel): no top-up, the real `max_health`.
+    real_health: bool,
+    /// PvP opponents use their knack (looking at their feet) on this run tick.
+    pub opponent_knack_at: Option<u32>,
+    /// Hold the shooter at this many HP missing (no hard damage) and record what heals it.
+    pub wounded: Option<f32>,
+    /// HP the shooter was healed by (with `wounded`).
+    pub healed: f32,
+    run_tick: u32,
 }
 
 /// 100 m square floor at y = 0 (small: every world builds a nav grid for its Moulds).
@@ -359,6 +361,7 @@ fn ballistics(c: &CombatTuning, intent: FireIntent) -> Option<(f32, f32, f32)> {
                 )),
                 Ability::Limpet => Some((c.limpet.speed, c.limpet.gravity, 0.0)),
                 Ability::Mortar => Some((c.mortar.speed, c.mortar.gravity, c.mortar.angle_degrees)),
+                Ability::Hurl => Some((c.hurl.speed, c.hurl.gravity, 0.0)),
                 _ => None,
             }
         }
@@ -435,7 +438,20 @@ impl Bench {
             detonating: false,
             detonations: 0,
             draw: 1.0,
+            real_health: false,
+            opponent_knack_at: None,
+            wounded: None,
+            healed: 0.0,
+            run_tick: 0,
         }
+    }
+
+    /// A PvP duel: players take real damage and die (the opponent's death ends a run).
+    pub fn duel(base: &Tuning, assume: Assume, build: WeaponBuild) -> Self {
+        let mut b = Self::new(base, Side::Pvp, assume, build);
+        b.real_health = true;
+        b.tuning.combat.max_health = effective(base, Side::Pvp, assume).combat.max_health;
+        b
     }
 
     /// A Mould `name` with its feet at `at`, facing the shooter (or away: `behind`), with
@@ -492,6 +508,7 @@ impl Bench {
         p.movement.mode = shared::movement::MoveMode::Walk;
         p.yaw = std::f32::consts::PI;
         p.combat.protection = 0;
+        p.combat.damage = 0.0;
         self.tracked.push(Tracked {
             target: HitTarget::Player(id),
             position: at,
@@ -513,10 +530,17 @@ impl Bench {
     }
 
     fn restore(&mut self) {
+        let lunging = self.world.melee.lunges.contains_key(&self.shooter);
         if let Some(p) = self.world.players.get_mut(&self.shooter) {
-            p.movement.position = self.shooter_at;
-            p.movement.velocity = Vec3::ZERO;
-            p.movement.on_ground = true;
+            if !lunging {
+                p.movement.position = self.shooter_at;
+                p.movement.velocity = Vec3::ZERO;
+                p.movement.on_ground = true;
+            }
+            if let Some(missing) = self.wounded {
+                p.combat.damage = missing;
+                p.combat.hard = 0.0;
+            }
         }
         for t in &mut self.tracked {
             match t.target {
@@ -535,9 +559,11 @@ impl Bench {
                         p.movement.on_ground = true;
                         p.movement.slow_time = 0.0;
                         p.combat.protection = 0;
-                        // Kept topped up: only the events count.
-                        p.combat.damage = 0.0;
-                        p.combat.hard = 0.0;
+                        if !self.real_health {
+                            // Kept topped up: only the events count.
+                            p.combat.damage = 0.0;
+                            p.combat.hard = 0.0;
+                        }
                     }
                 }
             }
@@ -643,6 +669,7 @@ impl Bench {
         let start = self.world.tick;
         let mut uses = 0;
         self.detonations = 0;
+        self.run_tick = 0;
         let mut pressed = 0;
         let mut idle = 0;
         loop {
@@ -669,6 +696,9 @@ impl Bench {
                 .filter(|t| matches!(t.target, HitTarget::Entity(_)))
                 .count();
             if real > 0 && trace.deaths.len() >= real && self.mortal() {
+                break;
+            }
+            if self.real_health && !trace.deaths.is_empty() {
                 break;
             }
             let used = if limpet { self.detonations } else { uses };
@@ -739,9 +769,33 @@ impl Bench {
         self.prev = buttons;
         let mut inputs = TickInputs::new();
         inputs.insert(self.shooter, vec![input]);
+        if let Some(at) = self.opponent_knack_at {
+            for t in &self.tracked {
+                if let HitTarget::Player(id) = t.target {
+                    let knack = self.run_tick == at;
+                    inputs.insert(
+                        id,
+                        vec![PlayerInput {
+                            seq: self.seq,
+                            yaw: std::f32::consts::PI,
+                            pitch: -1.45,
+                            buttons: if knack { Buttons::THROW } else { Buttons::NONE },
+                            view_tick: self.world.tick + 1,
+                            ..Default::default()
+                        }],
+                    );
+                }
+            }
+        }
+        self.run_tick += 1;
         let events = self.world.step(&inputs, &self.tuning, None);
         let time = (self.world.tick - start - 1) as f32 * DT;
         for e in &events {
+            if let SimEvent::Healed { player, amount, .. } = e
+                && *player == self.shooter
+            {
+                self.healed += amount;
+            }
             if let SimEvent::Damage(d) = e
                 && self.tracked.iter().any(|t| t.target == d.target)
             {
@@ -864,12 +918,35 @@ pub fn on_endless_pack(
     b.run(trigger, Aim::Body, stop)
 }
 
-/// The range an ability is measured at in PvE: point-blank ones (Gust, Discharge, Breach) at
-/// 4 m, the rest at 10 m.
+/// The range an ability is measured at (m, feet to feet; on Gnawers in PvE): point-blank ones
+/// (Gust, Discharge, Breach) at 4 m, the melee swings (Whirl, Upswing) at contact (2 m), the
+/// Lunge across a 4.5 m gap, the rest at 10 m.
 pub fn ability_range(ability: Ability) -> f32 {
     match ability {
         Ability::Gust | Ability::Discharge | Ability::Breach => 4.0,
+        Ability::Whirl | Ability::Upswing => MELEE_RANGE,
+        Ability::Lunge => 4.5,
         _ => 10.0,
+    }
+}
+
+/// Melee distance, feet to feet, to a Gnawer or a player (m): well inside every swing's reach.
+pub const MELEE_RANGE: f32 = 2.0;
+
+/// Melee distance to Mould `name`: its hit shape's radius plus 1.2 m.
+pub fn contact_range(name: &str) -> f32 {
+    let defs = shared::sim::EnemyRegistry::builtin();
+    let def = defs.get(name).expect("a shipped Mould");
+    def.hit_radius.unwrap_or(def.radius) + 1.2
+}
+
+/// The range `weapon` is measured at against Mould `name` in a table at `range`: melee weapons
+/// always at contact.
+pub fn range_on(weapon: WeaponKind, name: &str, range: f32) -> f32 {
+    if weapon.class() == WeaponClass::Melee {
+        contact_range(name)
+    } else {
+        range
     }
 }
 
@@ -965,10 +1042,57 @@ pub fn build_gain(base: &Tuning, assume: Assume, build: WeaponBuild, pack: bool)
 }
 
 /// The range a primary is measured at: 5 m for the close-range ones (the scatterguns, the
-/// Kiln's 13 m cone), 15 m for the rest.
+/// Kiln's 13 m cone), melee at [`MELEE_RANGE`], 15 m for the rest.
 pub fn weapon_range(weapon: WeaponKind) -> f32 {
     match weapon {
         WeaponKind::Bellows | WeaponKind::Thresher | WeaponKind::Kiln => 5.0,
+        WeaponKind::Trimmer | WeaponKind::Tamper => MELEE_RANGE,
         _ => 15.0,
     }
+}
+
+/// A PvP duel: `build`'s primary held at the opponent's body from `range` until they die; the
+/// opponent uses `knack` (if any) on the first tick. Seconds to the kill.
+pub fn duel(
+    base: &Tuning,
+    build: WeaponBuild,
+    knack: Option<shared::loadout::Knack>,
+    range: f32,
+) -> Option<f32> {
+    let mut b = Bench::duel(base, Assume::default(), build);
+    let id = b.opponent(range);
+    if let Some(k) = knack {
+        let quill = WeaponKind::Quill.default_build();
+        b.world
+            .force_loadout(id, Some(Loadout::single(quill).with_knack(k)));
+        // A tick before the first shot (it would land first on the same tick).
+        b.opponent_knack_at = Some(0);
+        b.run_idle(DT, Aim::Body);
+        b.opponent_knack_at = None;
+    }
+    let t = b.run(Trigger::Primary, Aim::Body, Stop::secs(10.0));
+    t.deaths.first().copied()
+}
+
+/// HP per second the shooter is healed by (embers drawn in), held 40 HP down, holding
+/// `build`'s primary for 10 s on a Gnawer (`pack`: six) at `range` (the swings at contact).
+pub fn heal_rate(base: &Tuning, build: WeaponBuild, pack: bool, range: f32) -> f32 {
+    let mut b = Bench::new(base, Side::Pve, Assume::default(), build);
+    b.wounded = Some(40.0);
+    if pack {
+        for i in 0..6 {
+            let col = (i % 3) as f32 - 1.0;
+            let row = (i / 3) as f32;
+            b.mould(
+                "gnawer",
+                Vec3::new(col * 1.6, 0.0, -range - row * 1.6),
+                false,
+                None,
+            );
+        }
+    } else {
+        b.mould_at("gnawer", range, false, None);
+    }
+    let t = b.run(Trigger::Primary, Aim::Body, Stop::secs(10.0));
+    b.healed / t.secs.max(DT)
 }

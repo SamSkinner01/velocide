@@ -5,7 +5,8 @@
 //! cargo run -p shared --release --example balance_report               # everything
 //! cargo run -p shared --release --example balance_report -- --refit    # with feel's
 //!     0.2 m projectile hit pad assumed (until it lands)
-//! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots abilities
+//! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots
+//!     abilities knacks healing
 //! cargo run -p shared --release --example balance_report -- --tuning path/to/tuning.ron
 //! ```
 
@@ -13,7 +14,7 @@
 mod balance_support;
 
 use balance_support::*;
-use shared::loadout::WeaponClass;
+use shared::loadout::{Knack, WeaponClass, WeaponKind};
 use shared::tuning::Tuning;
 
 /// Seconds, or a dash when it never happened.
@@ -49,6 +50,15 @@ fn row(cells: &[String]) {
     println!("| {} |", cells.join(" | "));
 }
 
+/// A weapon's row label: melee weapons are measured at contact.
+fn weapon_label(w: WeaponKind) -> String {
+    if w.class() == WeaponClass::Melee {
+        format!("{} (contact)", w.name())
+    } else {
+        w.name().to_string()
+    }
+}
+
 fn mould_label(name: &str, behind: bool) -> String {
     let mut s = name.to_string();
     if let Some(c) = s.get_mut(0..1) {
@@ -71,8 +81,8 @@ fn primaries(base: &Tuning, assume: Assume) {
     println!("## Primaries (PvE)\n");
     println!(
         "Per trigger: one pull on a big body at 5 m (a salvo, a full draw, a blast; burns \
-         included). Sustained: the trigger held for 10 s on a Gnawer, aimed at the body / the \
-         head (DPS).\n"
+         included; melee: a swing at contact). Sustained: the trigger held for 10 s on a Gnawer, \
+         aimed at the body / the head (DPS; melee at contact, in the first column).\n"
     );
     let ranges: Vec<String> = RANGES
         .iter()
@@ -83,12 +93,19 @@ fn primaries(base: &Tuning, assume: Assume) {
     header(&cols);
     let c = &effective(base, Side::Pve, assume).combat;
     for w in weapons() {
+        let melee = w.class() == WeaponClass::Melee;
+        let first = range_on(w, "gaoler", 5.0);
         let mut cells = vec![
-            w.name().to_string(),
-            num(per_trigger(base, Side::Pve, w, 5.0, Aim::Body, 1.0)),
+            weapon_label(w),
+            num(per_trigger(base, Side::Pve, w, first, Aim::Body, 1.0)),
             format!("{:.2}", w.primary_interval(c)),
         ];
         for r in RANGES {
+            if melee && r != RANGES[0] {
+                cells.push("—".into());
+                continue;
+            }
+            let r = range_on(w, "gnawer", r);
             let mut cell = Vec::new();
             for aim in [Aim::Body, Aim::Weak(0)] {
                 let t = on_mould(
@@ -132,9 +149,10 @@ fn ttk(base: &Tuning, assume: Assume) {
             cols.extend(names.iter().map(String::as_str));
             header(&cols);
             for w in weapons() {
-                let mut cells = vec![w.name().to_string()];
+                let mut cells = vec![weapon_label(w)];
                 for (m, behind) in mould_rows() {
                     let health = mould_health(base, m, difficulty);
+                    let r = range_on(w, m, r);
                     let mut cell = Vec::new();
                     for aim in [Aim::Body, weak_of(m, behind)] {
                         let t = on_mould(
@@ -160,7 +178,7 @@ fn ttk(base: &Tuning, assume: Assume) {
 }
 
 fn swarm(base: &Tuning, assume: Assume) {
-    println!("## Swarm: six Gnawers (NORMAL) in a pack, front row at 10 m\n");
+    println!("## Swarm: six Gnawers (NORMAL) in a pack, front row at 10 m (melee: at contact)\n");
     println!(
         "Seconds until the last one falls (aim: the nearest one's body). The builds are the \
          weapon's defaults, ability A / B used whenever ready.\n"
@@ -168,9 +186,10 @@ fn swarm(base: &Tuning, assume: Assume) {
     header(&["weapon", "primary", "+ ability A", "+ ability B"]);
     for w in weapons() {
         let b = w.default_build();
-        let mut cells = vec![w.name().to_string()];
+        let mut cells = vec![weapon_label(w)];
+        let r = range_on(w, "gnawer", 10.0);
         for trigger in [Trigger::Primary, Trigger::Both(0), Trigger::Both(1)] {
-            let t = on_pack(base, assume, b, trigger, 10.0, 20.0);
+            let t = on_pack(base, assume, b, trigger, r, 20.0);
             let all = (t.deaths.len() >= 6)
                 .then(|| t.deaths.last().copied())
                 .flatten();
@@ -189,7 +208,8 @@ fn pvp(base: &Tuning, assume: Assume) {
     println!("## PvP (100 HP)\n");
     println!(
         "Per trigger at 5 m, aimed at the body / the head; time to kill holding the trigger, \
-         every shot aimed at the body / the head (s; 0 = one pull).\n"
+         every shot aimed at the body / the head (s; 0 = one pull). Melee at 2 m in the first \
+         column (no headshots).\n"
     );
     let ranges: Vec<String> = RANGES
         .iter()
@@ -199,12 +219,19 @@ fn pvp(base: &Tuning, assume: Assume) {
     cols.extend(ranges.iter().map(String::as_str));
     header(&cols);
     for w in weapons() {
-        let pull = |aim| kill(per_trigger(base, Side::Pvp, w, 5.0, aim, 1.0));
+        let melee = w.class() == WeaponClass::Melee;
+        let first = if melee { MELEE_RANGE } else { 5.0 };
+        let pull = |aim| kill(per_trigger(base, Side::Pvp, w, first, aim, 1.0));
         let mut cells = vec![
-            w.name().to_string(),
+            weapon_label(w),
             format!("{} / {}", pull(Aim::Body), pull(Aim::Weak(0))),
         ];
         for r in RANGES {
+            let r = if melee && r == RANGES[0] {
+                MELEE_RANGE
+            } else {
+                r
+            };
             let mut cell = Vec::new();
             for head in [false, true] {
                 let t = on_player(
@@ -226,7 +253,7 @@ fn pvp(base: &Tuning, assume: Assume) {
     println!(
         "With the default build's ability A / B used whenever ready (the same tick as the \
          primary when both are ready): all-body time to kill at the weapon's range (5 m for \
-         the scatterguns and the Kiln, 15 m for the rest).\n"
+         the scatterguns and the Kiln, 2 m for melee, 15 m for the rest).\n"
     );
     header(&["weapon", "range m", "primary", "+ ability A", "+ ability B"]);
     for w in weapons() {
@@ -363,6 +390,55 @@ fn abilities(base: &Tuning, assume: Assume) {
     }
 }
 
+fn knacks(base: &Tuning) {
+    println!("## Knacks in a PvP duel\n");
+    println!(
+        "Real 100 HP: every primary held at the opponent's body at its range; the opponent \
+         uses its knack on the first tick (the Kindle Flask at its own feet, standing in the \
+         pool). Seconds to the kill. Snare, Soot Pot and Surge don't act in a standing duel \
+         (a trap, Moulds' sight, mobility).\n"
+    );
+    header(&[
+        "attacker",
+        "range m",
+        "no knack",
+        "Tallow Skin",
+        "Kindle Flask",
+    ]);
+    for w in weapons() {
+        let b = w.default_build();
+        let r = weapon_range(w);
+        let mut cells = vec![w.name().to_string(), format!("{r:.0}")];
+        for k in [None, Some(Knack::TallowSkin), Some(Knack::KindleFlask)] {
+            cells.push(secs(duel(base, b, k, r)));
+        }
+        row(&cells);
+    }
+    println!();
+}
+
+fn healing(base: &Tuning) {
+    println!("## Healing from embers (PvE)\n");
+    println!(
+        "HP per second the shooter draws in while 40 HP down, holding the primary for 10 s on \
+         one Gnawer / on six (melee at contact; the rest at their range). Hits shed embers \
+         worth `embers.heal_fraction` (melee weapons: `melee_weapon_heal_fraction`) of the \
+         damage, drawn in by the closest Shrike within `embers.radius`.\n"
+    );
+    header(&["weapon", "range m", "one Gnawer", "six"]);
+    for w in weapons() {
+        let b = w.default_build();
+        let r = range_on(w, "gnawer", weapon_range(w));
+        row(&[
+            w.name().to_string(),
+            format!("{r:.1}"),
+            num(heal_rate(base, b, false, r)),
+            num(heal_rate(base, b, true, r)),
+        ]);
+    }
+    println!();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let assume = Assume {
@@ -415,5 +491,11 @@ fn main() {
     }
     if want("abilities") {
         abilities(&base, assume);
+    }
+    if want("knacks") {
+        knacks(&base);
+    }
+    if want("healing") {
+        healing(&base);
     }
 }
