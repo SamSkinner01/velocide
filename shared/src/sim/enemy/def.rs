@@ -9,10 +9,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::sim::projectiles::ProjectileKind;
+use crate::sim::{HitPart, HitShape, HitTarget, Hitbox};
 
 /// Built-in definitions (compiled in, so the server works without an assets directory and
 /// tests don't depend on edited files). Files in `assets/enemies/` override them by name.
@@ -96,6 +97,28 @@ impl Default for WeakPoint {
             offset: Vec3::new(0.0, 1.6, 0.0),
             radius: 0.25,
             multiplier: 2.0,
+        }
+    }
+}
+
+/// An extra body hit shape (a capsule, a sphere when `a == b`) for what the upright body
+/// capsule doesn't cover: wings, a long body or neck, a shield, a slung crucible.
+/// `HitPart::Body` (body damage, armour applies as usual).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BodyShape {
+    /// Local offsets of the capsule's ends (see the module docs).
+    pub a: Vec3,
+    pub b: Vec3,
+    pub radius: f32,
+}
+
+impl Default for BodyShape {
+    fn default() -> Self {
+        Self {
+            a: Vec3::ZERO,
+            b: Vec3::ZERO,
+            radius: 0.3,
         }
     }
 }
@@ -618,6 +641,12 @@ pub struct EnemyDef {
     pub net_kind: u16,
     /// Model name for the client (`assets/models/<model>.gltf` or a procedural model).
     pub model: String,
+    /// Drawn size of the model: the client scales it by this about its origin (the feet; the
+    /// Harrier's hover centre). Presentation only: the movement capsule (`radius`, `height`)
+    /// keeps the nav grid and the level's doors and ledges as they are, and the hit shapes
+    /// (`hit_radius`, `body_top`, `body_shapes`, `weak_points`) are sized to the scaled model
+    /// in this file (docs/enemies.md "Sizes and hit shapes").
+    pub model_scale: f32,
     /// Base health (co-op scaling multiplies it).
     pub health: f32,
     pub speed: f32,
@@ -630,6 +659,11 @@ pub struct EnemyDef {
     /// Top of the *body hitbox* capsule (so a head weak point can sit above it); `None` =
     /// `height`.
     pub body_top: Option<f32>,
+    /// Radius of the body hitbox capsule; `None` = the movement `radius`. Hit shapes cover
+    /// the (scaled) model, which can be wider than the capsule it moves with.
+    pub hit_radius: Option<f32>,
+    /// Extra body hit shapes beside the upright body capsule ([`BodyShape`]).
+    pub body_shapes: Vec<BodyShape>,
     pub eye_height: f32,
     pub step_height: f32,
     pub locomotion: Locomotion,
@@ -655,6 +689,7 @@ impl Default for EnemyDef {
             name: "Enemy".into(),
             net_kind: crate::protocol::kind::ENEMY_FIRST,
             model: String::new(),
+            model_scale: 1.0,
             health: 50.0,
             speed: 6.0,
             acceleration: 50.0,
@@ -662,6 +697,8 @@ impl Default for EnemyDef {
             radius: 0.45,
             height: 1.9,
             body_top: None,
+            hit_radius: None,
+            body_shapes: Vec::new(),
             eye_height: 1.6,
             step_height: 0.45,
             locomotion: Locomotion::Ground,
@@ -693,6 +730,49 @@ impl EnemyDef {
     /// Weak point index by name.
     pub fn weak_point(&self, name: &str) -> Option<usize> {
         self.weak_points.iter().position(|w| w.name == name)
+    }
+
+    /// [`EnemyDef::model_scale`], kept sane (a file can say anything): 0.25..4, else 1.
+    pub fn draw_scale(&self) -> f32 {
+        if self.model_scale.is_finite() && self.model_scale > 0.0 {
+            self.model_scale.clamp(0.25, 4.0)
+        } else {
+            1.0
+        }
+    }
+
+    /// The hit shapes of one of these standing with its feet at `feet`, facing `yaw`: the
+    /// upright body capsule (`hit_radius`, from the feet to `body_top`), the extra
+    /// `body_shapes`, then a sphere per weak point (`HitPart::Weak(i)`). The server's hit tests
+    /// and lag compensation use these (`Enemy::hitbox`); clients draw them in debug views.
+    pub fn hitbox(&self, target: HitTarget, feet: Vec3, yaw: f32) -> Hitbox {
+        let rot = Quat::from_rotation_y(yaw);
+        let at = |offset: Vec3| feet + rot * offset;
+        let r = self.hit_radius.unwrap_or(self.radius).max(0.05);
+        let h = self.body_top.unwrap_or(self.height).max(2.0 * r);
+        let mut shapes = Vec::with_capacity(1 + self.body_shapes.len() + self.weak_points.len());
+        shapes.push(HitShape::capsule(
+            HitPart::Body,
+            feet + Vec3::Y * r,
+            feet + Vec3::Y * (h - r),
+            r,
+        ));
+        for s in &self.body_shapes {
+            shapes.push(HitShape::capsule(
+                HitPart::Body,
+                at(s.a),
+                at(s.b),
+                s.radius.max(0.01),
+            ));
+        }
+        for (i, w) in self.weak_points.iter().enumerate() {
+            shapes.push(HitShape::sphere(
+                HitPart::Weak(i.min(u8::MAX as usize) as u8),
+                at(w.offset),
+                w.radius,
+            ));
+        }
+        Hitbox { target, shapes }
     }
 }
 

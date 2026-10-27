@@ -1337,6 +1337,7 @@ impl InGame {
             burning: own_flags & player_flags::BURNING != 0,
             pinned: own_flags & player_flags::PINNED != 0,
             parry_window: weapons.parry as f32 / (t.parry_window * rate as f32).max(1.0),
+            spectating: self.spectate.is_active(),
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);

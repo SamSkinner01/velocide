@@ -215,8 +215,9 @@ and fires nothing.
 ## Hit assist
 
 Player-owned attacks test against shapes inflated by `combat.hit_assist`
-(`SimWorld::hit_pads(attacker, target)`): enemy bodies +0.2 m, enemy weak points / heads
-+0.1 m; in PvP player bodies +0.12 m, heads +0.06 m. Enemy (and world-owned) attacks get
+(`SimWorld::hit_pads(attacker, target)`): enemy bodies +0.35 m, enemy weak points / heads
++0.15 m (the Moulds' hit shapes themselves already cover their drawn models, `docs/enemies.md`
+"Sizes and hit shapes"); in PvP player bodies +0.12 m, heads +0.06 m. Enemy (and world-owned) attacks get
 `HitPads::NONE`. Applied at test time to the (rewound) plain shapes:
 
 * rays (every hitscan, splinters, ricochet legs, Breach, the fist's aim ray):
@@ -376,9 +377,11 @@ Every field has a default. Local offsets: +X right, +Y up, −Z forward, from th
 |---|---|
 | `name`, `net_kind` | display name; replicated kind (16..64, unique: Gnawer 20, Censer 21, Harrier 22, Gaoler 23, Heron 24; 16–19 retired) |
 | `model` | client model name |
+| `model_scale` | drawn size of the model (the client scales it about its origin); presentation only (default 1) |
 | `health` | base health (co-op: `× (1 + 0.5 (players − 1))`, hook `SimWorld::enemy_health_scale`) |
 | `speed`, `acceleration`, `turn_rate` | m/s, m/s², deg/s |
 | `radius`, `height`, `body_top` | movement capsule; top of the body hitbox (`None` = height) so a head can sit above it |
+| `hit_radius`, `body_shapes` | radius of the body hitbox (`None` = the capsule's: hit shapes are sized to the drawn model, the capsule to the level); extra body capsules `[(a, b, radius)]` (local offsets) for wings, shields, crucibles... (`EnemyDef::hitbox` builds them all) |
 | `eye_height`, `step_height` | sight origin; climbable ledge |
 | `locomotion` | `Ground` or `Flying(min_height, max_height)` (hovers, no gravity) |
 | `knockback_scale` | light enemies > 1 |

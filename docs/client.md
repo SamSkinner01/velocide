@@ -40,6 +40,7 @@ the debug overlay.
 | `ingame::warmup` | the lobby's warm-up on the game screen: lobby overlay, Ready key, HUD card, countdown banner, the hub's ready board and console signs (docs/lobby.md) |
 | `ingame::replay` | play of the game (docs/potg.md): `Recorder` (rolling 20 s of frames, events, `Fx`, own predicted shots), `Clip`, the title card and the first-person replay through the game's own drawers |
 | `ingame::style_hud`, `ingame::mode_hud` | style meter + style feed + rank banner; game-mode state and HUD (checkpoints, downed / revive, extraction, deathmatch clock), score cells, results glue (docs/style_modes.md) |
+| `ingame::spectate` | `Spectate`: watching a teammate while dead / downed / out in PvE — their eyes (camera rig, viewmodel from the replicated entity) or a wall-aware chase camera, FIRE / ALT_FIRE cycle, JUMP toggles; its HUD (docs/style_modes.md "Spectating") |
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
 | `level_mesh` | `LevelRender`: level geometry for the renderer |

@@ -12,20 +12,23 @@
     name: "Censer",
     net_kind: 21,
     model: "censer",
+    // Drawn 1.2x its built size (the movement capsule stays as it was).
+    model_scale: 1.2,
     health: 80.0,
     speed: 5.0,
     acceleration: 40.0,
     turn_rate: 360.0,
     radius: 0.6,
     height: 2.5,
-    // The body hitbox stops at the shoulders; the brazier head sits on top of them.
-    body_top: Some(1.95),
-    eye_height: 2.2,
+    // The body hitbox covers the robe up to the shoulders; the brazier head sits on top of them.
+    hit_radius: Some(0.74),
+    body_top: Some(2.35),
+    eye_height: 2.65,
     step_height: 0.45,
     locomotion: Ground,
     knockback_scale: 1.0,
     weak_points: [
-        (name: "lantern", kind: Head, offset: (0.0, 2.22, -0.1), radius: 0.42, multiplier: 2.0),
+        (name: "lantern", kind: Head, offset: (0.0, 2.68, -0.12), radius: 0.5, multiplier: 2.0),
     ],
     armour: None,
     attacks: [
@@ -67,7 +70,7 @@
                 count: 3,
                 interval: 0.12,
                 spread: 16.0,
-                muzzle: (0.0, 3.05, -0.35),
+                muzzle: (0.0, 3.66, -0.42),
                 lead: 0.7,
                 lob: true,
             )),

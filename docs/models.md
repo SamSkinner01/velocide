@@ -71,7 +71,8 @@ let info = lib.draw_player_scaled(&player_anim, feet_pos, shrike::REMOTE_SCALE, 
 // any root (e.g. view space for a preview in the viewmodel pass: menus::customize)
 let info = lib.draw_shrike(&player_anim, root, &tint, &mut draws);
 
-// enemies
+// enemies (drawn kind.scale() = the definition's model_scale times their built size, about
+// the root: docs/enemies.md "Sizes and hit shapes")
 let root = EnemyAnim::root(position + Vec3::Y * kind.root_lift(), yaw); // feet (Harrier: hover centre)
 lib.draw_enemy(&enemy_anim, root, &Tint::default(), &mut draws);
 let at = lib.enemy_attack_point(&enemy_anim, root); // jaw / censer pot / beak / door or flail / lens
