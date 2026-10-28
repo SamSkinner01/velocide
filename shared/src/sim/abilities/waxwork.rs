@@ -143,8 +143,11 @@ impl SimWorld {
     /// Hit shapes of every standing double (a player's, where it stands).
     pub(crate) fn waxwork_hitboxes(&self, t: &Tuning, out: &mut Vec<Hitbox>) {
         for w in self.abilities.waxwork.doubles.values() {
-            let target = HitTarget::Player(decoy_id(w.owner));
-            out.push(super::super::player_hitbox(target, &w.body, &t.movement));
+            out.push(super::super::player_hitbox(
+                decoy_id(w.owner),
+                &w.body,
+                &t.movement,
+            ));
         }
     }
 

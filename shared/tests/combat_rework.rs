@@ -914,3 +914,47 @@ fn the_riposte_turns_a_parryable_shot_from_the_front_back_but_not_one_from_behin
     assert!(!a.world.projectiles.contains_key(&from_behind));
     assert!(a.health(p) < c().max_health, "hit in the back");
 }
+
+#[test]
+fn a_lagging_archer_blinks_to_where_they_saw_the_arrow() {
+    // 150 ms behind (a round trip and interpolation): the arrow on their screen is well short
+    // of the server's (docs/feel.md, "Hit registration").
+    let (mut a, p) = armed(
+        WeaponKind::Longwick,
+        [Ability::BlinkArrow, Ability::PinningArrow],
+    );
+    let lag = 9.0;
+    a.view_lag.insert(p, lag);
+    a.ticks(2);
+    a.held.get_mut(&p).unwrap().pitch = 0.05;
+    a.tap(p, Buttons::ALT_FIRE, 0);
+    hold(&mut a, p, Buttons::FIRE, 40, 0);
+    let arrow = |a: &Arena| {
+        a.world
+            .projectiles
+            .values()
+            .find(|x| x.kind == ProjectileKind::BlinkArrow)
+            .map(|x| x.position)
+    };
+    let mut path = Vec::new();
+    for _ in 0..20 {
+        a.tick();
+        path.push(arrow(&a).expect("in flight"));
+    }
+    let present = arrow(&a).unwrap();
+    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
+    let to = ev
+        .iter()
+        .find_map(|e| match e {
+            SimEvent::Blink { to, .. } => Some(*to),
+            _ => None,
+        })
+        .expect("blinked");
+    let middle = to + Vec3::Y * (a.tuning.movement.standing_height * 0.5);
+    let seen = path[path.len() - 1 - lag as usize];
+    assert!(middle.distance(seen) < 3.0, "at {middle}, seen at {seen}");
+    assert!(
+        present.distance(middle) > 10.0,
+        "not the server's {present}"
+    );
+}

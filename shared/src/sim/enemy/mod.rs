@@ -173,6 +173,28 @@ pub fn melt_depth(state: AiState, progress: f32) -> f32 {
     }
 }
 
+/// [`EnemyDef::hitbox`] of one standing at `feet` facing `yaw`, sunk and sagged into its
+/// puddle by melt depth `depth` ([`melt_depth`]): `Enemy::hitbox`, and clients rebuilding the
+/// shapes from a replicated state.
+pub fn melted_hitbox(
+    def: &EnemyDef,
+    target: HitTarget,
+    feet: Vec3,
+    yaw: f32,
+    depth: f32,
+) -> Hitbox {
+    let mut hitbox = def.hitbox(target, feet, yaw);
+    if depth > 0.0 {
+        let sag = 1.0 - MELT_SAG * depth;
+        let sink = MELT_SINK * depth * def.height * def.draw_scale();
+        for s in &mut hitbox.shapes {
+            s.a.y = feet.y + (s.a.y - feet.y) * sag - sink;
+            s.b.y = feet.y + (s.b.y - feet.y) * sag - sink;
+        }
+    }
+    hitbox
+}
+
 /// A jump on the nav path being made (`AiState::Leap`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LeapPlan {
@@ -492,20 +514,13 @@ impl Enemy {
     /// does ([`MELT_SINK`], [`MELT_SAG`]): what is still above the floor can be shot, down to
     /// the puddle.
     pub fn hitbox(&self) -> Hitbox {
-        let mut hitbox = self
-            .def
-            .hitbox(HitTarget::Entity(self.id), self.feet(), self.yaw);
-        let depth = self.melt_depth();
-        if depth > 0.0 {
-            let sag = 1.0 - MELT_SAG * depth;
-            let sink = MELT_SINK * depth * self.def.height * self.def.draw_scale();
-            let feet = self.feet().y;
-            for s in &mut hitbox.shapes {
-                s.a.y = feet + (s.a.y - feet) * sag - sink;
-                s.b.y = feet + (s.b.y - feet) * sag - sink;
-            }
-        }
-        hitbox
+        melted_hitbox(
+            &self.def,
+            HitTarget::Entity(self.id),
+            self.feet(),
+            self.yaw,
+            self.melt_depth(),
+        )
     }
 
     /// Changes state. The last attack's parry window survives Strike/Recover/Chase: a lagging

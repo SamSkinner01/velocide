@@ -1891,6 +1891,10 @@ pub struct NetTuning {
     pub interp_delay_ms: f32,
     /// Max rewind for lag compensation.
     pub lag_comp_max_ms: f32,
+    /// Most flight (ms) a player's projectile makes up on its first step: it is fired from the
+    /// shooter's view time, so it flies as the shooter saw it leave (`sim::projectiles`). Also
+    /// bounded by `lag_comp_max_ms` and the shooter's RTT, like any rewind; 0 = off.
+    pub projectile_lag_comp_max_ms: f32,
     /// Extra time (ms) a parry is accepted after the server thinks it was too late.
     pub parry_tolerance_ms: f32,
     /// Prediction errors are smoothed out at this rate (fraction of remaining error per second).
@@ -1912,6 +1916,7 @@ impl Default for NetTuning {
             snapshot_rate: 30.0,
             interp_delay_ms: 50.0,
             lag_comp_max_ms: 350.0,
+            projectile_lag_comp_max_ms: 350.0,
             parry_tolerance_ms: 80.0,
             correction_smoothing: 12.0,
             correction_snap_distance: 3.0,
@@ -2943,8 +2948,9 @@ impl NetTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
         clamp!(self, d, 1.0, 1000.0; snapshot_rate);
-        clamp!(self, d, 0.0, MAX_MS; interp_delay_ms, lag_comp_max_ms, parry_tolerance_ms,
-            max_extrapolation_ms, interp_delay_max_ms);
+        clamp!(self, d, 0.0, MAX_MS; interp_delay_ms, lag_comp_max_ms,
+            projectile_lag_comp_max_ms, parry_tolerance_ms, max_extrapolation_ms,
+            interp_delay_max_ms);
         clamp!(self, d, 0.0, 1000.0; correction_smoothing);
         clamp!(self, d, 0.0, MAX_DIST; correction_snap_distance);
         clamp!(self, d, 0.0, MAX_MULT; interp_jitter_factor);

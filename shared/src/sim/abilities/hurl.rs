@@ -101,7 +101,7 @@ impl SimWorld {
         // What this tick's motion passes (the projectile's own sweep doesn't test targets).
         let dt = self.dt();
         let motion = p.velocity * dt - Vec3::Y * (0.5 * p.gravity * dt * dt);
-        let pad = p.radius + super::super::projectiles::projectile_target_pad(t, p.owner);
+        let pad = p.radius + super::super::projectiles::projectile_target_pad(&t.combat, p.owner);
         let struck = self
             .abilities
             .hurl

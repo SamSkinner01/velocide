@@ -86,29 +86,37 @@ impl SimWorld {
                     self.projectiles.remove(&id);
                 }
             }
-            AbilityPhase::Recast => self.blink(c.t, c.id),
+            AbilityPhase::Recast => self.blink(c),
             AbilityPhase::Release => {}
         }
     }
 
-    /// The step: player `id` to their arrow.
-    fn blink(&mut self, t: &Tuning, id: PlayerId) {
+    /// The step: the caster to their arrow, where they saw it when they pressed (an arrow is
+    /// lag-compensated: its owner draws it a round trip and an interpolation delay behind the
+    /// server's, `SimWorld::projectile_seen`).
+    fn blink(&mut self, c: &AbilityCast) {
+        let (t, id) = (c.t, c.id);
         let Some(b) = self.abilities.blink.out.remove(&id) else {
             return;
         };
-        // In flight: where it is now (then it is gone either way).
-        let flying = b
-            .arrow
-            .and_then(|arrow| self.projectiles.remove(&arrow))
-            .map(|a| a.position);
+        // Where the caster saw it (then it is gone either way).
+        let seen = b.arrow.and_then(|arrow| {
+            let a = self.projectiles.get(&arrow)?;
+            let at = self.projectile_seen(t, a, id, c.input);
+            self.projectiles.remove(&arrow);
+            Some(at)
+        });
         let Some(p) = self.players.get(&id).filter(|p| !p.combat.dead) else {
             return;
         };
         let from = p.movement.position;
         let mut body = p.movement;
-        let (spot, normal) = match (b.landed, flying) {
-            (Some(landed), _) => landed,
-            (None, Some(at)) => (at, Vec3::ZERO),
+        let (spot, normal) = match (b.landed, seen) {
+            // Seen stuck (or struck): in front of the surface it stuck in.
+            (Some(landed), Some(at)) if at.distance(landed.0) < 0.5 => landed,
+            (Some(landed), None) => landed,
+            // Seen still flying (the server's may have stuck since): where it was seen.
+            (_, Some(at)) => (at, Vec3::ZERO),
             (None, None) => (*b.path.last().unwrap_or(&from), Vec3::ZERO),
         };
         let Some((feet, crouched)) = self.blink_spot(t, &body, spot, normal, &b.path) else {

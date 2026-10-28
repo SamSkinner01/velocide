@@ -35,7 +35,7 @@ use super::{
 };
 use crate::input::PlayerInput;
 use crate::protocol::NetId;
-use crate::tuning::Tuning;
+use crate::tuning::{CombatTuning, Tuning};
 
 /// One ray to trace.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +146,24 @@ pub struct TraceResult {
     pub impact: Option<Impact>,
 }
 
+/// Hit assist for an attack by `attacker` on `target` ([`SimWorld::hit_pads`]; clients
+/// testing what their own attacks touch use it too): player-owned attacks get the
+/// `combat.hit_assist` pads (enemies' or other players' sizes); everything else none.
+pub fn assist_pads(t: &CombatTuning, attacker: Owner, target: HitTarget) -> HitPads {
+    let a = &t.hit_assist;
+    match (attacker, target) {
+        (Owner::Player(_), HitTarget::Entity(_)) => HitPads {
+            body: a.enemy_body_pad,
+            weak: a.enemy_weak_pad,
+        },
+        (Owner::Player(_), HitTarget::Player(_)) => HitPads {
+            body: a.player_body_pad,
+            weak: a.player_head_pad,
+        },
+        _ => HitPads::NONE,
+    }
+}
+
 impl SimWorld {
     /// Clamped lag-compensation view time of player `id`'s input: at most
     /// [`SimWorld::max_rewind_ticks`] in the past (the client chooses its view time; the
@@ -205,18 +223,7 @@ impl SimWorld {
     /// Hit assist for an attack by `attacker` on `target`: player-owned attacks get the
     /// `combat.hit_assist` pads (enemies' or other players' sizes); everything else none.
     pub fn hit_pads(&self, t: &Tuning, attacker: Owner, target: HitTarget) -> HitPads {
-        let a = &t.combat.hit_assist;
-        match (attacker, target) {
-            (Owner::Player(_), HitTarget::Entity(_)) => HitPads {
-                body: a.enemy_body_pad,
-                weak: a.enemy_weak_pad,
-            },
-            (Owner::Player(_), HitTarget::Player(_)) => HitPads {
-                body: a.player_body_pad,
-                weak: a.player_head_pad,
-            },
-            _ => HitPads::NONE,
-        }
+        assist_pads(&t.combat, attacker, target)
     }
 
     /// Fires a group of rays from one input (one shot, a pellet spread) against the
