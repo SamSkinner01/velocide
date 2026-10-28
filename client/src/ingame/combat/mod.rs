@@ -13,6 +13,8 @@
 //!   handed over to the server's when they arrive (`docs/feel.md`).
 //! * [`melee`] and [`knacks`] (docs/refit.md): slash trails, melee hits and abilities; the Q
 //!   slot's knacks (HUD slot, flask and pool, snare, soot cloud, Tallow Skin, Surge).
+//! * [`tricks`] (docs/rework.md, area client-a): the Lamplighter's scope, beam and tell, and the
+//!   reworked Precision, Draw and Melee abilities.
 //!
 //! The `impl InGame` block at the bottom is the glue the in-game screen calls each frame:
 //! `combat_game_event` (reliable `GameEvent`s), `combat_after_ticks` (predicted shots),
@@ -26,6 +28,7 @@ pub mod hud;
 pub mod knacks;
 pub mod melee;
 pub mod stand_in;
+pub mod tricks;
 pub mod weapon_feel;
 
 use engine::audio::{PlayParams, Sfx};
@@ -308,6 +311,8 @@ pub struct CombatClient {
     /// Melee trails, streaks and hurled pieces; the knacks' things (`melee.rs`, `knacks.rs`).
     pub melee: melee::MeleeView,
     pub knacks: knacks::KnackView,
+    /// The Lamplighter and the reworked abilities (`tricks/`).
+    pub tricks: tricks::Tricks,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -345,6 +350,7 @@ impl CombatClient {
             stand_ins: stand_in::StandIns::new(),
             melee: melee::MeleeView::new(),
             knacks: knacks::KnackView::new(),
+            tricks: tricks::Tricks::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             early: Vec::new(),
@@ -370,6 +376,7 @@ impl CombatClient {
         self.early.clear();
         self.melee.clear();
         self.knacks.clear();
+        self.tricks.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.parry_predicted_at = None;
@@ -1351,6 +1358,33 @@ impl InGame {
             combat.arsenal.play_pending(&mut ctx);
         }
 
+        // The Lamplighter's tells, the reworked abilities' lines and steps (tricks/).
+        {
+            let look = |id| {
+                net.players()
+                    .get(&id)
+                    .map(|p| p.cosmetics)
+                    .unwrap_or_default()
+            };
+            let frame = tricks::TrickFrame {
+                entities,
+                remote,
+                world,
+                camera: last_camera,
+                local,
+                look: &look,
+                viewmodel_fov: common.settings.viewmodel_fov,
+            };
+            combat.tricks.update(
+                &frame,
+                effects,
+                &mut combat.beams,
+                &mut common.audio,
+                &mut combat.rng,
+                vdt,
+            );
+        }
+
         // Melee trails and streaks, the knacks' things (melee.rs, knacks.rs).
         let local_body = net.local_state().map(|s| s.position);
         let local_code = local.map(|p| p.0 as u16);
@@ -1395,6 +1429,10 @@ impl InGame {
         );
         let eased = draw * draw * (3.0 - 2.0 * draw);
         rig.set_zoom(1.0 - BOW_ZOOM * eased);
+        // The Lamplighter's scope (tricks/lamplighter.rs) zooms much further.
+        if let Some(focus) = combat.tricks.staged_focus() {
+            rig.set_zoom(tricks::lamplighter::zoom(focus));
+        }
         if full_now {
             feedback.flash(glam::Vec3::new(1.0, 0.86, 0.5), 0.14);
         }
@@ -1458,6 +1496,29 @@ impl InGame {
         self.combat
             .knacks
             .draw(lib, &mut out.draws, &mut out.lights);
+        // The reworked abilities' models, and revealed hostiles over the walls (tricks/).
+        let look = |id| {
+            net.players()
+                .get(&id)
+                .map(|p| p.cosmetics)
+                .unwrap_or_default()
+        };
+        let frame = tricks::TrickFrame {
+            entities: net.remote_entities(),
+            remote: &self.remote,
+            world: net.world().map(|w| &w.collision.world),
+            camera: &self.last_camera,
+            local: net.local_player_id(),
+            look: &look,
+            viewmodel_fov: common.settings.viewmodel_fov,
+        };
+        self.combat.tricks.draw(
+            lib,
+            &frame,
+            &mut out.draws,
+            &mut out.lights,
+            &mut out.viewmodel,
+        );
     }
 
     /// Combat HUD layer (after `Hud::draw`).
@@ -1532,6 +1593,10 @@ impl InGame {
             time: now,
         };
         self.combat.hud.draw(list, &common.theme, &info);
+        // The Lamplighter's scope and focus ring, the tally, the blink prompt (tricks/).
+        if !dead {
+            self.combat.tricks.hud(list, &self.last_camera, None, now);
+        }
         // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
         let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
         if !dead {

@@ -1,7 +1,8 @@
 //! First-person camera: sits at the predicted, smoothed eye position and layers the camera
 //! feel on top: speed FOV kick, view roll (slides / wall running), landing dip, stair
 //! smoothing, slide eye height, the low view while downed and screen shake, plus the weapon
-//! feel (`docs/feel.md`): a short view punch per shot and the bow's zoom at full draw.
+//! feel (`docs/feel.md`): a short view punch per shot, the bow's zoom at full draw and the
+//! Lamplighter's scope (docs/rework.md), which also slows the mouse to match.
 //!
 //! Everything here is presentation: it reads the predicted [`MoveState`] and the server's
 //! [`MovementTuning`] (via `shared::movement::{view_roll, fov_kick, landing_dip}`) and never
@@ -34,6 +35,9 @@ const PUNCH_OMEGA: f32 = 40.0;
 const MAX_PUNCH: f32 = 0.03;
 /// Zoom smoothing (1/s).
 const ZOOM_RATE: f32 = 10.0;
+/// The narrowest view a zoom can ask for (tan(fov/2) × 0.3; the Lamplighter's full focus is
+/// × 0.4).
+pub const MAX_ZOOM: f32 = 0.3;
 
 fn approach(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
     current + (target - current) * (1.0 - (-rate * dt).exp())
@@ -53,7 +57,7 @@ pub struct CameraRig {
     punch: f32,
     punch_velocity: f32,
     /// How much the field of view is narrowed (0 = none; the bow's full draw zooms in a
-    /// little: 0.1 = tan(fov/2) × 0.9) and its target.
+    /// little: 0.1 = tan(fov/2) × 0.9; the Lamplighter's full focus 0.6) and its target.
     zoom_in: f32,
     zoom_in_target: f32,
 }
@@ -112,13 +116,20 @@ impl CameraRig {
         }
     }
 
-    /// Field-of-view scale to ease towards (1 = no zoom; 0.9 = 10 % narrower).
+    /// Field-of-view scale to ease towards (1 = no zoom; 0.9 = 10 % narrower; the most is
+    /// [`MAX_ZOOM`]).
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom_in_target = if zoom.is_finite() {
-            1.0 - zoom.clamp(0.5, 1.0)
+            1.0 - zoom.clamp(MAX_ZOOM, 1.0)
         } else {
             0.0
         };
+    }
+
+    /// The current zoom as a scale of tan(fov/2) (1 = none). Mouse look is multiplied by it, so
+    /// the crosshair crosses the zoomed view as fast as the unzoomed one (`Controls::look`).
+    pub fn zoom_scale(&self) -> f32 {
+        1.0 - self.zoom_in
     }
 
     /// Current view punch (radians, >= 0).
@@ -307,6 +318,14 @@ mod tests {
             fov = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
         }
         assert!((fov - wide).abs() < 0.05);
+        // The Lamplighter's scope: tan(fov/2) × 0.4, and the mouse scale follows it.
+        rig.set_zoom(0.4);
+        for _ in 0..300 {
+            fov = rig.update(&frame(&state, &tuning, &settings)).fov_y_degrees;
+        }
+        let scoped = 2.0 * ((wide * 0.5).to_radians().tan() * 0.4).atan().to_degrees();
+        assert!((fov - scoped).abs() < 0.05, "{fov} vs {scoped}");
+        assert!((rig.zoom_scale() - 0.4).abs() < 1e-3);
     }
 
     #[test]

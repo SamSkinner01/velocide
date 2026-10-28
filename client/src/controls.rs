@@ -446,17 +446,29 @@ impl Controls {
 
     /// Per frame: mouse and right-stick look.
     pub fn look(&mut self, input: &InputState, settings: &Settings, dt: f32) {
+        self.look_zoomed(input, settings, dt, 1.0);
+    }
+
+    /// [`Self::look`] through a zoomed view: `zoom` is the view's tan(fov/2) scale
+    /// (`CameraRig::zoom_scale`, the Lamplighter's scope), and the look turns that much slower,
+    /// so aiming feels the same on screen at any zoom.
+    pub fn look_zoomed(&mut self, input: &InputState, settings: &Settings, dt: f32, zoom: f32) {
+        let zoom = if zoom.is_finite() {
+            zoom.clamp(0.05, 1.0)
+        } else {
+            1.0
+        };
         apply_mouse_look(
             &mut self.yaw,
             &mut self.pitch,
-            input.mouse_delta(),
+            input.mouse_delta() * zoom,
             settings,
         );
         apply_stick_look(
             &mut self.yaw,
             &mut self.pitch,
             input.right_stick(),
-            dt,
+            dt * zoom,
             settings,
         );
     }

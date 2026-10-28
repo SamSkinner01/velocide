@@ -67,6 +67,9 @@ pub struct Palette {
     /// Burning slag on the floor (the Smelter's lines once lit; their telegraph uses
     /// `telegraph`).
     pub hazard: Vec4,
+    /// A hostile revealed by a Beacon Arrow: its silhouette through walls, the beacon's light
+    /// (docs/rework.md).
+    pub revealed: Vec4,
 
     // --- the player ----------------------------------------------------------------------------
     /// Embers drawn into your wick (kindling), heal popups.
@@ -126,6 +129,7 @@ pub const STANDARD: Palette = Palette {
     frenzy: c(0.45, 0.75, 1.0),
     elite: c(1.0, 0.88, 0.5),
     hazard: c(1.0, 0.62, 0.1),
+    revealed: c(1.0, 0.86, 0.38),
     heal: c(1.0, 0.62, 0.22),
     damage: rgb(238, 38, 44),
     flash_damage: Vec3::new(0.9, 0.05, 0.04),
@@ -179,6 +183,7 @@ pub const PROTANOPIA: Palette = Palette {
     frenzy: c(0.86, 1.0, 0.86),
     elite: c(0.46, 0.86, 1.0),
     hazard: c(1.0, 1.0, 0.9),
+    revealed: c(0.55, 1.0, 0.95),
     heal: c(1.0, 0.8, 0.2),
     damage: rgb(255, 110, 40),
     flash_damage: Vec3::new(1.0, 0.3, 0.0),
@@ -251,6 +256,7 @@ pub const TRITANOPIA: Palette = Palette {
     frenzy: c(0.86, 1.0, 0.86),
     elite: c(1.0, 1.0, 0.32),
     hazard: c(1.0, 1.0, 0.86),
+    revealed: c(0.6, 1.0, 0.5),
     heal: c(1.0, 0.8, 0.45),
     flash_heal: Vec3::new(1.0, 0.8, 0.45),
     hard_damage: rgb(60, 140, 200),
@@ -581,6 +587,16 @@ mod tests {
             ("elite / telegraph", p.elite, p.telegraph, World, 12.0),
             ("hazard / telegraph", p.hazard, p.telegraph, World, 20.0),
             ("hazard / dark wall", p.hazard, DARK_WALL, World, 25.0),
+            // The rework (docs/rework.md): a revealed hostile's silhouette over the walls.
+            ("revealed / dark wall", p.revealed, DARK_WALL, World, 30.0),
+            ("revealed / telegraph", p.revealed, p.telegraph, World, 15.0),
+            (
+                "revealed / weak point",
+                p.revealed,
+                p.weak_point,
+                World,
+                12.0,
+            ),
         ]
     }
 
@@ -633,6 +649,7 @@ mod tests {
                 ("frenzy", p.frenzy),
                 ("elite", p.elite),
                 ("hazard", p.hazard),
+                ("revealed", p.revealed),
             ] {
                 let d = FOUNDRY
                     .iter()

@@ -875,6 +875,216 @@ fn refit_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 30, still);
 }
 
+/// The rework (docs/rework.md, area client-a), staged client-side (`rework_*.png`): the
+/// Lamplighter's scope at half and full focus, its beam, its tell seen from across the room,
+/// a Wickline biting the level and a Mould, the Tally held and marked, a wax double (as its side
+/// sees it, as an opponent does, slumping and bursting), a Blink step and a beacon revealing
+/// the Moulds behind a wall.
+fn rework_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::tricks::TrickPreview as T;
+    use client::ingame::combat::tricks::tally::Tallying;
+    use client::ingame::combat::tricks::wickline::Anchor;
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 70, still);
+    if let Some(t) = nearest_enemy(game, false) {
+        aim_at(game, t);
+    }
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let (yaw, pitch) = (game.controls.yaw, game.controls.pitch);
+    let aim = shared::input::look_dir(yaw, pitch);
+    let fwd = shared::input::look_dir(yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = eye - Vec3::Y * 1.6;
+    let target = nearest_enemy(game, false).unwrap_or(eye + aim * 12.0);
+
+    // The scope: half focus, then full.
+    game.preview_tricks(T::Focus {
+        focus: 0.5,
+        seconds: 0.5,
+    });
+    h.frames(game, 25, still);
+    h.shot("rework_scope_half");
+    game.preview_tricks(T::Focus {
+        focus: 1.0,
+        seconds: 1.0,
+    });
+    h.frames(game, 40, still);
+    h.shot("rework_scope_full");
+    // A full-focus beam through the Mould and on behind it.
+    let muzzle = eye + right * 0.18 - Vec3::Y * 0.12 + aim * 0.5;
+    game.preview_tricks(T::Beam {
+        from: muzzle,
+        ends: vec![target, target + aim * 8.0],
+        focus: 1.0,
+    });
+    h.frames(game, 2, still);
+    h.shot("rework_beam");
+    h.frames(game, 60, still);
+
+    // A Lamplighter focusing from across the room: a third of the way, then full and aimed at
+    // you; then side on.
+    let sniper = eye + fwd * 16.0 + right * 8.0 + Vec3::Y * 1.8;
+    game.preview_tricks(T::Tell {
+        muzzle: sniper,
+        aim: (eye + right * 1.5 - sniper).normalize(),
+        focus: 0.35,
+        seconds: 0.2,
+    });
+    h.frames(game, 6, still);
+    h.shot("rework_tell");
+    h.frames(game, 10, still);
+    game.preview_tricks(T::Tell {
+        muzzle: sniper,
+        aim: (eye - sniper).normalize(),
+        focus: 1.0,
+        seconds: 0.2,
+    });
+    h.frames(game, 6, still);
+    h.shot("rework_tell_full");
+    h.frames(game, 10, still);
+    let side = eye + fwd * 9.0 + right * 6.0;
+    game.preview_tricks(T::Tell {
+        muzzle: side,
+        aim: -right,
+        focus: 0.8,
+        seconds: 0.2,
+    });
+    h.frames(game, 6, still);
+    h.shot("rework_tell_side");
+    h.frames(game, 10, still);
+
+    // Wickline: into the level ahead, then onto the Mould.
+    let wall = game
+        .net()
+        .and_then(|n| n.world())
+        .and_then(|w| {
+            w.collision.world.cast_ray(
+                eye,
+                (fwd + Vec3::Y * 0.25).normalize(),
+                34.0,
+                engine::physics::MASK_SHOTS,
+            )
+        })
+        .map_or(eye + fwd * 20.0 + Vec3::Y * 4.0, |hit| hit.point);
+    game.preview_tricks(T::Wickline {
+        from: muzzle,
+        anchor: Anchor::Level(wall),
+    });
+    h.frames(game, 4, still);
+    h.shot("rework_wickline");
+    h.frames(game, 30, still);
+    game.preview_tricks(T::Wickline {
+        from: muzzle,
+        anchor: Anchor::Body(shared::protocol::NetId(u32::MAX), target),
+    });
+    h.frames(game, 6, still);
+    h.shot("rework_wickline_mould");
+    h.frames(game, 30, still);
+
+    // The Tally: held with two marked.
+    let moulds: Vec<(Vec3, f32)> = game
+        .net()
+        .map(|n| {
+            n.remote_entities()
+                .iter()
+                .filter(|e| kind::is_enemy(e.kind))
+                .map(|e| (e.position + Vec3::Y * 1.0, 2.0))
+                .collect()
+        })
+        .unwrap_or_default();
+    game.preview_tricks(T::Tally {
+        held: Some(Tallying {
+            count: moulds.len().min(2),
+            max: 4,
+            assist_degrees: 1.5,
+            left: 0.55,
+        }),
+        targets: moulds.iter().take(2).copied().collect(),
+        seconds: 0.4,
+    });
+    h.frames(game, 12, still);
+    h.shot("rework_tally");
+    h.frames(game, 20, still);
+
+    // The wax double: as its side sees it, as an opponent does, then slumping and bursting.
+    let double = floor + fwd * 4.0 + right * 1.2;
+    let facing = yaw + std::f32::consts::PI - 0.5;
+    game.preview_tricks(T::Waxwork {
+        feet: double,
+        yaw: facing,
+        waxy: true,
+        seconds: 0.6,
+    });
+    game.preview_tricks(T::Waxwork {
+        feet: double - right * 2.6,
+        yaw: facing + 0.6,
+        waxy: false,
+        seconds: 0.6,
+    });
+    h.frames(game, 20, still);
+    h.shot("rework_waxwork");
+    h.frames(game, 30, still);
+    h.shot("rework_waxwork_slump");
+    h.frames(game, 16, still);
+    h.shot("rework_waxwork_burst");
+    h.frames(game, 40, still);
+
+    // A Blink step across the view, and the prompt.
+    game.preview_tricks(T::Blink {
+        from: floor + fwd * 5.0 - right * 3.0,
+        to: floor + fwd * 9.0 + right * 3.5,
+    });
+    game.preview_tricks(T::BlinkPrompt {
+        left: 0.6,
+        seconds: 0.3,
+    });
+    h.frames(game, 5, still);
+    h.shot("rework_blink");
+    h.frames(game, 30, still);
+
+    // A beacon among the Moulds; then from behind a wall, their silhouettes.
+    let pack = moulds.first().map_or(target, |m| m.0);
+    game.preview_tricks(T::Beacon {
+        at: pack - Vec3::Y * 0.8 - fwd * 1.5 + right * 1.0,
+        radius: 16.0,
+        seconds: 6.0,
+    });
+    h.frames(game, 20, still);
+    h.shot("rework_beacon");
+    h.frames(game, 60, still);
+
+    // Behind the proving ground's tall block: Moulds on its far side, a beacon among them, and
+    // their silhouettes seen through it.
+    game.send_chat("/killall");
+    game.send_chat("/tp -50 0.1 -28.5");
+    h.frames(game, 20, still);
+    game.controls.yaw = -std::f32::consts::FRAC_PI_2;
+    game.controls.pitch = 0.0;
+    h.frames(game, 10, still);
+    spawn(game, 3);
+    h.frames(game, 40, still);
+    let pack = nearest_enemy(game, false).unwrap_or(Vec3::new(-42.0, 1.0, -28.5));
+    game.preview_tricks(T::Beacon {
+        at: pack - Vec3::Y * 0.7 + Vec3::X * 1.5,
+        radius: 16.0,
+        seconds: 6.0,
+    });
+    game.send_chat("/tp -22 0.1 -28.5");
+    h.frames(game, 30, still);
+    h.frames(game, 10, |g, _| {
+        aim_at(g, pack);
+        hold(g, Buttons::NONE)
+    });
+    h.shot("rework_revealed");
+    game.send_chat("/killall");
+    game.send_chat("/tp 0 0.1 6");
+    h.frames(game, 30, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -915,6 +1125,14 @@ fn main() -> anyhow::Result<()> {
     game.send_chat("/notarget");
     spawn(&mut game, 4);
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
+
+    // The rework's tricks; `COMBAT_SHOTS=rework` stops after them (quick look).
+    rework_previews(&mut h, &mut game);
+    if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
+        println!("{} screenshots in {}", h.shots.len(), h.out.display());
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return Ok(());
+    }
 
     // Melee and knacks; `COMBAT_SHOTS=refit` stops after them (quick look).
     refit_previews(&mut h, &mut game);

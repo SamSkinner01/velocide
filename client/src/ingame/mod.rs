@@ -645,7 +645,9 @@ impl InGame {
         // 3. Look (every frame) + latch presses / weapon selection.
         if playing && self.bot.is_none() {
             let view = vec2(self.controls.yaw, self.controls.pitch);
-            self.controls.look(input, &common.settings, dt);
+            // Scoped in (the Lamplighter), the look slows with the zoom.
+            let zoom = self.camera.zoom_scale();
+            self.controls.look_zoomed(input, &common.settings, dt, zoom);
             // Watching a teammate: the buttons pick who, the look turns the chase camera.
             self.spectate_controls(common, input, view);
         }
@@ -1226,6 +1228,8 @@ impl InGame {
             settings: &common.settings,
             time: now,
         };
+        // The Lamplighter's scope under the HUD (combat/tricks).
+        self.combat_scope(list, now);
         self.hud.draw(list, &common.theme, &info);
         // Arena encounter readout ("WAVE 2/3 - 5 LEFT").
         encounter_hud::draw(list, &common.theme, net.remote_entities());
