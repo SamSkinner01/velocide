@@ -12,7 +12,8 @@ and the in-game updater. Change it first if any of them needs something else.
 The workflow `.github/workflows/release.yml` (GitHub Actions, GitHub-hosted runners) replaces
 the Forgejo one:
 
-- every pull request and push: fmt, clippy (`-D warnings`) and the whole test suite;
+- every pull request, and every push to `main` or a `v*` tag: fmt, clippy (`-D warnings`), the
+  whole test suite and both platforms' builds;
 - every push to `main` that passes: a release tagged `build-<run number>`;
 - every `v*` tag that passes: a release under that tag;
 - each new release is marked *latest*; the newest 10 `build-*` releases are kept, older ones
