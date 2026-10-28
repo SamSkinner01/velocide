@@ -1,0 +1,155 @@
+# Checks, builds and releases VELOCIDE. docs/distribution.md is the contract (release names,
+# assets, build identity); docs/hosting.md "Releases from CI" explains it for people.
+#
+#   every pull request, push to main and v* tag   check (fmt, clippy, tests), linux, windows
+#   a push to main                                then the release build-<run number>
+#   a v* tag                                      then the release under that tag
+#
+# A release is made only when check and both builds pass. It carries the four standalone
+# binaries and PLAY.txt, is marked latest (so .../releases/latest/download/<name> always fetches
+# it), and only the newest 10 build-* releases are kept.
+#
+# The compiling jobs install their packages and the Rust toolchain with scripts/ci/setup.sh and
+# build with scripts/build_dist.sh, the same scripts scripts/package.sh runs locally.
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The toolchain every job installs (the version the game is developed with).
+  RUST_VERSION: "1.97.1"
+  CARGO_TERM_COLOR: always
+  # The version this run builds: the tag, else build-<run number> (the release a push to main
+  # makes; a pull request's builds carry the name without a release).
+  RELEASE: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+
+defaults:
+  run:
+    shell: bash
+
+# A newer push to the same branch or pull request cancels an older run's check and builds (so
+# that run releases nothing). A tag's run is never cancelled, and neither is a release job once
+# it has started.
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    concurrency:
+      group: ${{ github.workflow }}-check-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref_type != 'tag' }}
+    env:
+      # No debug info: target/ is about 4 GB instead of 13 with line tables (the runner has
+      # 14-20 GB free), and backtraces still name the functions.
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: bash scripts/ci/setup.sh check
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
+      - name: Disk use
+        if: ${{ !cancelled() }}
+        run: df -h / && du -sh target
+
+  linux:
+    runs-on: ubuntu-24.04
+    # 20.04 keeps the binaries on glibc 2.31 (any distro from about 2020 on).
+    container: ubuntu:20.04
+    timeout-minutes: 60
+    concurrency:
+      group: ${{ github.workflow }}-linux-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref_type != 'tag' }}
+    steps:
+      # git for a real checkout (without it the files are downloaded instead), zstd for the cache.
+      - name: Git and zstd
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            git ca-certificates zstd >/dev/null
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: bash scripts/ci/setup.sh linux
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
+      - name: Build
+        run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh linux
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: |
+            dist/velocide-linux-x86_64
+            dist/velocide-server-linux-x86_64
+            dist/PLAY.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  # Cross-compiled with MinGW, on the runner itself (Ubuntu 24.04, as package.sh's container).
+  windows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    concurrency:
+      group: ${{ github.workflow }}-windows-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: bash scripts/ci/setup.sh windows
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-bin: false
+      - name: Build
+        run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh windows
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: |
+            dist/velocide-windows-x86_64.exe
+            dist/velocide-server-windows-x86_64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: [check, linux, windows]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: ${{ github.workflow }}-release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        run: bash scripts/ci/github_release.sh publish "$RELEASE" dist
+      - name: Prune old builds
+        run: bash scripts/ci/github_release.sh prune build- 10
