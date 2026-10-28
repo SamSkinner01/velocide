@@ -526,6 +526,22 @@ pub fn build() -> Vec<ModelPart> {
     p.finish()
 }
 
+/// First-person placement: held low on the right like the long guns and turned a little out,
+/// so the long tube runs in towards the centre without its lens reaching the crosshair; the
+/// chamber's flame sits in plain view. Focusing settles it lower and further out
+/// ([`FOCUS_SHIFT`], [`view_rotation`]) until, at full focus, only its tube and lens reach into
+/// the scope's aperture, low in its right corner, the rest under the vignette: the sight stays
+/// clear.
+pub const VIEW_OFFSET: Vec3 = Vec3::new(0.13, -0.128, -0.3);
+pub const FOCUS_SHIFT: Vec3 = Vec3::new(0.06, -0.075, 0.02);
+
+/// The rifle's view rotation at `focus` 0..1 (on top of the common one): turned out a little
+/// (yaw right), more and dipped as it settles.
+pub fn view_rotation(focus: f32) -> Quat {
+    let f = smoothstep(unit(focus));
+    Quat::from_rotation_y(-0.07 - 0.07 * f) * Quat::from_rotation_x(-0.05 * f)
+}
+
 /// How far the sleeve stands out (model space, along -Z) at `focus` / `kick`: it runs out as
 /// the lens is focused and snaps back past rest on the shot, then settles.
 pub fn sleeve_offset(focus: f32, kick: f32) -> f32 {

@@ -112,6 +112,9 @@ pub struct Tricks {
     pub lamplighter: lamplighter::LamplighterView,
     pub wickline: wickline::WicklineView,
     pub blink: blink::BlinkView,
+    /// The Lamplighter is in hand (or a preview holds its focus): its scope shows as the view
+    /// zooms (another weapon's zoom, the bow's, has no vignette).
+    pub scoped: bool,
     staged: Vec<Staged>,
     /// Previews waiting for the next update.
     pending: Vec<TrickPreview>,
@@ -323,6 +326,9 @@ impl Tricks {
     /// Under the HUD: the Lamplighter's lens vignette at the view's current zoom scale
     /// (`CameraRig::zoom_scale`; nothing unscoped).
     pub fn scope(&self, list: &mut UiDrawList, zoom: f32, time: f64) {
+        if !self.scoped {
+            return;
+        }
         let c = Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
         lamplighter::draw_scope(list, c, lamplighter::scope_strength(zoom), time);
     }

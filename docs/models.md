@@ -115,7 +115,10 @@ lets the client flash telegraph parts on top of what the pose already does. `glo
 every `Glow` / `Core` mesh (`rig::neutral_mesh`) and draws that in the role colour at the
 brightness of `Pose::glow × Tint::glow` (or `Pose::core`) **capped at full**, so the hue
 survives where the art's HDR multipliers would wash it out to white. With `None` nothing
-changes, so the standard look keeps each model's own glow colours.
+changes, so the standard look keeps each model's own glow colours. `flat` (default `None`)
+draws a whole figure in one colour, lit, from greyscale copies of *every* part (the library
+uploads those for the Shrike and its kit only): the Waxwork's double, a Shrike poured in pale
+tallow with its shading kept and its colours gone (`ingame::combat::tricks::waxwork`).
 
 ## Animation inputs
 
@@ -271,10 +274,12 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | Kiln (ceramic ember sprayer: long terracotta spout on top with glazed bands, firebox belly underneath with grated, glowing doors, a chimney with a hinged damper, brass feed cap) | `weapon_kiln.gltf` | body, damper (rattles), coals *Core* (door grates, chimney mouth), glow *Glow* (spout throat, cap lamp) |
 | Trimmer (hooked wick-shears carried as two blades, ~0.6 m each: straight blued blades bent at the end into an angled jaw, a bright bevel, a brass pivot boss, leather-wrapped handles, brass finger loops closed round the knuckles; the right half carries the snuffer box on its spine with a wick stub smouldering in it; bind pose = the closed pair side by side) | `weapon_trimmer.gltf` | blade_r (grip at the origin), edge_r[blade_r] *Glow* (the honed edge), wick[blade_r] *Core*, blade_l (mirrored, grip at `trimmer::LEFT_GRIP`), edge_l[blade_l] *Glow* |
 | Tamper (foundry ramming hammer, ~0.95 m: an ash haft up the grip's axis with a leather grip and brass pommel; a black-iron head with the rammer's broad round foot ringed in brass on its face, a wedge peen behind, langets down the haft, slag glowing in vents on its flanks) | `weapon_tamper.gltf` | haft, head[haft] (pivot `tamper::HEAD_CENTER`), band[head] *Glow* (round its waist), vent[head] *Core* |
+| Lamplighter (the sniper, docs/rework.md; a lamplighter's long pole turned rifle, ~1.27 m: a dark wooden stock with a brass butt plate and a leather cheek pad, a pistol grip, a blackened-bronze receiver with brass side plates; a lantern chamber in front of it — a glass drum between brass end plates, four cage bars, a chimney vent and cap, a lit wick on the chamber's floor; the long aged-brass tube of the pole with iron bands and a wooden fore grip under it, a knurled black focus ring with a brass lever; a telescoping sleeve at the end carrying the lens in a flared bell and the pole's brass hook curling over it) | `weapon_lamplighter.gltf` | body, stock, glass (translucent chamber), wick *Core* (the flame: grows and brightens with the focus), glow *Glow* (receiver inlays, chamber collar ring, stock studs), ring (the focus ring, turns about the bore), sleeve (runs out with the focus, snaps back on the shot), lens[sleeve] *Core* (translucent: lit by the same flame), sleeve_glow[sleeve] *Glow* (the bell's lip) |
 | right arm (1st person) | `vm_arm.gltf` | forearm (cloth wraps), hand (glove), trim *Team* (cord round the bracer), bracer (brass) |
 | left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
 | arsenal projectiles | `proj_arrow/arrow_pinning/arrow_ember/rivet/cinder_rocket/flak_shell/limpet/mortar_shell/flare.gltf` | `body` + `glow`, all flying along -Z: taper arrow (wax shaft, red cock vane, iron head, the taper's flame behind it, ~0.72 m), pinning arrow (dark shaft, barbed steel head, chain, steel-blue rings), ember arrow (iron cage round a bulb of coals), rivet (red-hot, domed head at the back), cinder rocket (clay casing, brass nose, fins, cinder exhaust), flak shell (brass case, rose timer band, ring of pellet tips), limpet (iron dome on four claws facing -Z, a lamp to blink), mortar shell (fat iron teardrop, tail fins, lilac bands, fuse nose), flare (brass-capped tube, sputtering flame head) |
+| the rework's arrows (`models::tricks`, docs/rework.md) | `proj_arrow_blink/beacon.gltf` | `body` + `glow`, flying along -Z like the other arrows (~0.72 m): the Blink arrow (pale shaft, a short iron point before a glass bead holding a cold mint flame, mint rings down the shaft, pale fletching with a mint cock vane); the Beacon arrow (dark shaft, gold fletching with a red cock vane, a steel spike and behind it a little brass lantern — base plate, four cage bars, cap, hanging ring — round a gold bulb, `tricks::BEACON_BULB`) |
 | knacks (`models::knacks`) | `prop_kindle_flask/snare/soot_pot.gltf` | flask: `body` (brass cage, wax stopper, sling) + `glass` (translucent belly) + `embers` *Glow* (kindling inside); snare (~0.9 m wax trap on the floor): `base` (poured wax disc, brass ring, hinges) + `jaw_r` / `jaw_l` (toothed brass half hoops, open flat; `knacks::snare_pose(armed, sprung, time)` snaps them up past upright) + `lamp` *Glow* (the wick lamp: dull arming, pulsing armed, flashing sprung); soot pot: `body` (black clay, cord net, rag) + `fuse` *Glow* |
 | enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
@@ -344,7 +349,11 @@ tube, Longwick rest / half / full draw / release, Kiln rest / spraying / Dischar
 blade, the slam's wind / fall / impact / recovery, Lunge, Whirl, Hurl, Upswing),
 `melee_weapons` / `melee_weapons_34` (real scale), `melee_hurled`, `melee_3p_trimmer` /
 `melee_3p_tamper` (third person through the swings), `knack_props` (flask, pot, snare
-arming / armed / sprung), `vm_00..22` (each
+arming / armed / sprung), `lamp_side` / `lamp_34` / `lamp_close` (the Lamplighter at real
+scale through its focus: rest, half, full, the shot; the lantern chamber at rest and at full
+focus), `lamp_vm_0..3` (first person: rest, half focus, full focus, the shot),
+`rework_arrows` (the Blink and Beacon arrows beside the plain and the pinning arrow),
+`vm_00..22` (each
 weapon rest / kick / alt mode, Quill crest folding, Bellows
 pump, Arclash Discharge 40 % / full, Tumbler drum turning, switch, punch, thorn throw, bob +
 sway), `weapons` / `weapons_34` (the guns at real scale), `projectiles`, `thorns` (planted at

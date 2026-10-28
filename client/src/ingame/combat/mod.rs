@@ -1430,7 +1430,9 @@ impl InGame {
         let eased = draw * draw * (3.0 - 2.0 * draw);
         rig.set_zoom(1.0 - BOW_ZOOM * eased);
         // The Lamplighter's scope (tricks/lamplighter.rs) zooms much further.
-        if let Some(focus) = combat.tricks.staged_focus() {
+        let staged = combat.tricks.staged_focus();
+        combat.tricks.scoped = staged.is_some();
+        if let Some(focus) = staged {
             rig.set_zoom(tricks::lamplighter::zoom(focus));
         }
         if full_now {

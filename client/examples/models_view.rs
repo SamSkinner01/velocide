@@ -1682,6 +1682,40 @@ fn rework_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
         shot,
     ));
 
+    // First person: rest, half focus, full focus, the shot.
+    for (i, (name, focus, kick)) in [
+        ("REST", 0.0f32, 0.0f32),
+        ("FOCUS .5", 0.5, 0.0),
+        ("FULL FOCUS", 1.0, 0.0),
+        ("SHOT", 0.0, 0.9),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.7, 7.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            75.0,
+        ));
+        let eased = focus * focus * (3.0 - 2.0 * focus);
+        let turn = lamplighter::view_rotation(focus);
+        let rot = Quat::from_euler(engine::glam::EulerRot::YXZ, 0.045, 0.42 * kick, 0.0) * turn;
+        let offset = lamplighter::VIEW_OFFSET
+            + lamplighter::FOCUS_SHIFT * eased
+            + Vec3::new(0.0, -0.008, 0.09 * 0.52) * kick;
+        let gun = Mat4::from_scale_rotation_translation(Vec3::splat(0.52), rot, offset);
+        lib.get(ModelId::Lamplighter).draw(
+            &pose(focus, kick),
+            gun,
+            &Tint::default(),
+            &mut shot.viewmodel,
+        );
+        let arm = gun * Mat4::from_quat(turn.inverse());
+        lib.get(ModelId::ArmRight)
+            .draw_static(arm, &Tint::default(), &mut shot.viewmodel);
+        shots.push((format!("lamp_vm_{i}"), format!("LAMPLIGHTER {name}"), shot));
+    }
+
     // The rework's arrows beside the plain and the pinning arrow.
     let arrows = [
         (ModelId::Arrow, "ARROW"),

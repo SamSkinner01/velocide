@@ -282,6 +282,36 @@ its index, so generation is deterministic.
     bite) and a chain jerking taut; `SootBurst` (1.4 s) a dull clay pop, shards and soot
     billowing out, low-passed; `TallowSkin` a soft sizzling slide and a waxy settle under an
     FM shimmer; `Surge` the wick flaring (a fwoom) and a hard rush of air.
+- **The rework** (`docs/rework.md`, area client-a; a block marked `client-a: the rework` at the
+  end of `Sfx`). The Lamplighter is glass and brass lit by a wick, the Wickline a burning cord,
+  the Tally chalk, the Waxwork hot wax, the arrows' tricks air and light, the Riposte steel.
+  - **Lamplighter.** `LamplighterFocus` (1.4 s, stop it on release, like `SkewerCharge`): the
+    focus ring ratcheting round faster and faster (bright 2.6 kHz ticks, 0.12 → 0.05 s apart),
+    a glassy triangle hum climbing 320 Hz → 1.3 kHz over 0.9 s then holding with a tremble,
+    and the wick hissing up under it. `LamplighterFull` one clear lens note (C7 with a soft
+    twelfth) over the flame's whoomph, with an echo. `LamplighterFire` (−11, the loudest gun:
+    a focused shot is rare and should carry) a low, hard crack, a bright hiss falling 7 →
+    1.8 kHz down the beam, a 150 → 38 Hz boom and the brass tube ringing (880 Hz partials) into
+    a reverb tail; the client plays it quieter and higher for a tap. `LamplighterTell` (0.6 s,
+    soft both ends, −21) a faint high glassy shimmer (A7 and E8 with a slow wobble) played at
+    another player's Lamplighter every 0.55 s while it focuses, louder with the focus: the
+    sniper can be heard as well as seen.
+  - **Precision abilities.** `WicklineFire` a whip-crack, a falling saw zip and the cord's
+    crackle; `WicklineZip` the yank: a low plucked twang as the cord snaps taut, a tug and a
+    hard rush of air. `TallyMark` a dry chalk stroke and a small 2.9 kHz tick per target
+    tallied; `TallyShot` (2 variants) a short dry crack with a little weight, one per shot of
+    the release a few hundredths of a second apart. `WaxworkCast` a thick glugging pour (a
+    band-passed noise throbbing at 9 → 14 Hz) with a sizzle, then a hollow knock as the double
+    sets; `WaxworkBurst` a wet sag, then a soft boom, hot wax splattering and a long sizzle.
+  - **The arrows.** `Blink` a short sucking rush that swells to its end (a whoosh run
+    backwards), a pop where you arrive and a bright FM shimmer. `BeaconLight` a whoomph and a
+    bright E6 bell that keeps ringing, with an echo; `BeaconHum` (1.2 s, soft both ends: re-
+    trigger while a beacon burns) a low pulsing triangle hum with a faint ring on it.
+  - **Melee.** `HurlReturn` the piece's whirr dipping as it turns and rising again as it comes
+    back; `HurlCatch` the glove slapping round the haft and a short ring. `RiposteGuard` steel
+    scraping on steel, a set and a held ring; `RiposteBlock` (2 variants) a hard bright clang
+    (780–860 Hz inharmonic partials) and a burst of sparks, driven; `RiposteCounter` a heavy
+    whoosh let go all at once and a ringing edge.
 - **Parry.** The loudest and brightest sound in the game (spectral centroid 6.2 kHz): a
   transient crack, a long inharmonic clang (C6 with partials at ×1.5, 2.76, 5.4, 8.9 and 13.3),
   a beating 3.52 kHz shimmer, a fast whoosh, then saturation and a reverb tail. Nothing else
@@ -447,6 +477,13 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 | Melee: hurl throw, Tallow Skin, Surge, Trimmer slash (3/s) | −15 … −16 |
 | Melee: snare set, knack throw | −17 … −18 |
 | Melee: snare armed, kindle pool | −20 |
+| Rework: Lamplighter shot | −11 |
+| Rework: Waxwork burst, Riposte block / counter | −13 |
+| Rework: Tally shot, Blink, Lamplighter full focus, Wickline, Beacon light | −14 … −15 |
+| Rework: Waxwork cast, hurl catch, Riposte guard | −16 … −17 |
+| Rework: tally mark, hurl return | −18 |
+| Rework: Lamplighter focus | −19 |
+| Rework: Lamplighter tell, beacon hum | −21 |
 
 Each track is mastered so the full mix's loudest 400 ms sits at **−21 LU** (Campaign and
 Arena), −23 (Menu) or −22 (Results), with peaks at −5 dBFS or lower. In practice:
