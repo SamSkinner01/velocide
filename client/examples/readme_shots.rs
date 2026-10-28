@@ -1,5 +1,6 @@
 //! The in-game screenshots in README.md (`docs/images/`), rendered headless on the real client
-//! (GPU, no window) against real servers. The fights are played for real for 20 s and scored
+//! (GPU, no window) against real servers. The fights are played for real for 20 s (the arena
+//! encounter again, up to three times, until it has given four moments) and scored
 //! every few frames (Moulds in view, not behind walls, nearer ones count more; no rank-up or
 //! wave banner over the middle, the camera about level); the best moments, at least 0.75 s
 //! apart, are written as `<scene>_1.png` (the best) to `<scene>_4.png`, for
@@ -444,13 +445,20 @@ fn fight(s: &mut Shots, level: &str, encounter: usize, colour: bool) -> anyhow::
     wait_in_game(s, &mut c)?;
     command(s, &mut c, "/god");
     command(s, &mut c, &format!("/goto encounter {encounter}"));
-    command(s, &mut c, &format!("/encounter {encounter}"));
     let mut picks = Picks::new(45);
     let mut banners = Banners::default();
-    for i in 0..1200 {
+    // The scatterguns clear the encounter quickly and every rank-up banner spoils a few frames:
+    // play it again (up to three times) until there are enough moments to pick from.
+    for i in 0..3 * 1200 {
+        if i % 1200 == 0 {
+            if picks.list.len() >= Picks::KEEP {
+                break;
+            }
+            command(s, &mut c, &format!("/encounter {encounter}"));
+        }
         s.run(&mut c, 1, |g| fight_step(g, i, 0.6));
         banners.update(&c.game);
-        if i < 240 || !i.is_multiple_of(4) || !composed(&c.game, &banners) {
+        if i % 1200 < 240 || !i.is_multiple_of(4) || !composed(&c.game, &banners) {
             continue;
         }
         let score = moulds_in_view(&c.game);
