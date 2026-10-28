@@ -11,8 +11,11 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use super::PlayerId;
-use crate::protocol::NetId;
+use super::enemy::{AiState, EnemyRegistry, melt_depth, melted_hitbox};
+use super::{PlayerId, player_hitbox};
+use crate::movement::MoveState;
+use crate::protocol::{EntityState, NetId, enemy_flags, kind, player_flags};
+use crate::tuning::MovementTuning;
 
 /// Who a hitbox belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -156,6 +159,11 @@ fn ray_capsule(origin: Vec3, dir: Vec3, pa: Vec3, pb: Vec3, radius: f32) -> Opti
 /// plain shapes (m): farther than any target is deep.
 const THROUGH_TARGET: f32 = 8.0;
 
+/// Anything moving faster than this between two recorded or replicated ticks (m per tick)
+/// teleported (a respawn, a rally, a blink): clients show it where it was until the tick it
+/// is somewhere else, and lag compensation rewinds it the same way ([`Hitbox::blend`]).
+pub const TELEPORT_PER_TICK: f32 = 3.0;
+
 /// Extra radius for forgiving hit tests: `body` for [`HitPart::Body`] shapes, `weak` for heads
 /// and weak points. [`HitPads::NONE`] = the plain shapes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -280,6 +288,21 @@ impl Hitbox {
         }
     }
 
+    /// `self` at one recorded tick, `other` `span` ticks later, at `t` (0..=1) between them:
+    /// interpolated as clients interpolate what they display, so a target that teleported
+    /// ([`TELEPORT_PER_TICK`]) is where it was until `other`'s tick.
+    pub fn blend(&self, other: &Hitbox, t: f32, span: f32) -> Hitbox {
+        let jumped = self
+            .center()
+            .zip(other.center())
+            .is_some_and(|(a, b)| a.distance(b) > TELEPORT_PER_TICK * span.max(1e-3));
+        match (jumped, t < 1.0) {
+            (false, _) => self.lerp(other, t),
+            (true, true) => self.clone(),
+            (true, false) => other.clone(),
+        }
+    }
+
     /// Nearest hit along a ray: (distance, part).
     pub fn ray_hit(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(f32, HitPart)> {
         self.shapes
@@ -331,6 +354,40 @@ impl Hitbox {
             .find(|s| s.part == part)
             .map(HitShape::center)
     }
+}
+
+/// The hit shapes the server tests for a replicated entity, rebuilt from that state (what a
+/// client displays): a living player by its stance (`LOW_PROFILE`: crouched or sliding), a
+/// living Mould by its definition, facing and melt. `None` for the dead and dying, other
+/// kinds and enemy kinds `defs` doesn't know.
+pub fn replicated_hitbox(
+    e: &EntityState,
+    defs: &EnemyRegistry,
+    t: &MovementTuning,
+) -> Option<Hitbox> {
+    if e.kind == kind::PLAYER {
+        if e.flags & player_flags::DEAD != 0 {
+            return None;
+        }
+        let m = MoveState {
+            crouched: e.flags & player_flags::LOW_PROFILE != 0,
+            ..MoveState::spawn(e.position)
+        };
+        return Some(player_hitbox(e.id.as_player()?, &m, t));
+    }
+    if !kind::is_enemy(e.kind) || e.flags & enemy_flags::DYING != 0 {
+        return None;
+    }
+    let def = defs.by_kind(e.kind)?;
+    let depth =
+        AiState::from_u16(e.state).map_or(0.0, |s| melt_depth(s, (e.aux & 0xFF) as f32 / 255.0));
+    Some(melted_hitbox(
+        &def,
+        HitTarget::Entity(e.id),
+        e.position,
+        e.yaw,
+        depth,
+    ))
 }
 
 #[cfg(test)]

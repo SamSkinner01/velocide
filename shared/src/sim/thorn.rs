@@ -486,7 +486,7 @@ impl SimWorld {
         };
         // A target it would hit before the thorn takes the hit (the normal test).
         if p.kind.hits_targets() {
-            let target_radius = p.radius + projectile_target_pad(t, p.owner);
+            let target_radius = p.radius + projectile_target_pad(&t.combat, p.owner);
             let before = motion * f;
             let hit_first = boxes
                 .iter()

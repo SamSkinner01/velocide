@@ -80,7 +80,9 @@ pub use enemy::{AiState, Enemy, EnemyDef, EnemyRegistry, EnemyScale, SpawnOption
 pub use grind::{GrindEvent, GrindResult, GrindStatus};
 pub use gungame::{GunGameEvent, GunGameResult};
 pub use highlight::{Highlight, HighlightRules, HighlightTracker};
-pub use hitbox::{HitPads, HitPart, HitShape, HitTarget, Hitbox};
+pub use hitbox::{
+    HitPads, HitPart, HitShape, HitTarget, Hitbox, TELEPORT_PER_TICK, replicated_hitbox,
+};
 pub use modes::{
     EndReason, Grade, Grades, LifeState, MatchPhase, MatchResults, ModeEvent, ModeRules, ModeState,
     PlayerResult, PlayerStats, ScoreEntry, Scoreboard,
@@ -320,28 +322,34 @@ impl SimPlayer {
         }
     }
 
-    /// Body capsule (feet to shoulders) + head sphere at the eyes. The body stops below the
-    /// head so the head is exposed from every side (headshots).
+    /// Body capsule (feet to shoulders) + head sphere at the eyes ([`player_hitbox`]).
     pub fn hitbox(&self, t: &MovementTuning) -> Hitbox {
-        let (center, half_height, radius) = self.movement.capsule(t);
-        let head = self.movement.eye_position(t);
-        let head_radius = radius * 0.6;
-        let bottom = center - Vec3::Y * half_height;
-        let top_y = (center.y + half_height)
-            .min(head.y - head_radius - radius * 0.875)
-            .max(bottom.y);
-        Hitbox {
-            target: HitTarget::Player(self.id),
-            shapes: vec![
-                HitShape::capsule(
-                    HitPart::Body,
-                    bottom,
-                    Vec3::new(center.x, top_y, center.z),
-                    radius,
-                ),
-                HitShape::sphere(HitPart::Head, head, head_radius),
-            ],
-        }
+        player_hitbox(self.id, &self.movement, t)
+    }
+}
+
+/// The hit shapes of player `id` in movement state `m`: a body capsule (feet to shoulders) and
+/// a head sphere at the eyes. The body stops below the head so the head is exposed from every
+/// side (headshots).
+pub fn player_hitbox(id: PlayerId, m: &MoveState, t: &MovementTuning) -> Hitbox {
+    let (center, half_height, radius) = m.capsule(t);
+    let head = m.eye_position(t);
+    let head_radius = radius * 0.6;
+    let bottom = center - Vec3::Y * half_height;
+    let top_y = (center.y + half_height)
+        .min(head.y - head_radius - radius * 0.875)
+        .max(bottom.y);
+    Hitbox {
+        target: HitTarget::Player(id),
+        shapes: vec![
+            HitShape::capsule(
+                HitPart::Body,
+                bottom,
+                Vec3::new(center.x, top_y, center.z),
+                radius,
+            ),
+            HitShape::sphere(HitPart::Head, head, head_radius),
+        ],
     }
 }
 
@@ -686,6 +694,9 @@ pub struct SimWorld {
     pub(crate) events: Vec<SimEvent>,
     /// The projectile step of the current tick has run.
     pub(crate) projectiles_stepped: bool,
+    /// While an input's intents resolve: the view its projectiles fly from (lag compensation,
+    /// `projectiles.rs`).
+    pub(crate) launch_view: Option<projectiles::LaunchView>,
     next_spawn: usize,
     next_dynamic_id: u32,
     /// Anything below this height is out of the level.
@@ -743,6 +754,7 @@ impl SimWorld {
             warmup_rules: None,
             events: Vec::new(),
             projectiles_stepped: false,
+            launch_view: None,
             next_spawn: 0,
             next_dynamic_id: NetId::DYNAMIC_START,
             kill_floor,
@@ -993,6 +1005,7 @@ impl SimWorld {
                 player.pitch = input.pitch;
                 let alive = !player.combat.dead;
                 let move_input = if alive { *input } else { neutral_input(input) };
+                let feet_before = player.movement.position;
                 let ev = player_move_step(
                     &mut player.movement,
                     &move_input,
@@ -1028,16 +1041,22 @@ impl SimWorld {
                 {
                     self.slam_shockwave(tuning, *id, slam);
                 }
+                // The projectiles they launch fly from this input's view time (lag
+                // compensation like a hitscan rewind; `projectiles.rs`).
+                self.launch_view =
+                    history.map(|_| self.launch_view_of(tuning, *id, input, feet_before));
                 for intent in intents {
                     self.resolve_intent(tuning, history, *id, input, intent);
                 }
                 // Held abilities that look where the player aims every tick (the Tally).
                 self.abilities_after_input(tuning, history, *id, input);
+                self.launch_view = None;
             }
         }
 
-        // 2. Projectiles, then parry windows against their new positions.
-        self.step_projectiles(tuning);
+        // 2. Projectiles (new ones first make up their shooter's view lag), then parry
+        //    windows against their new positions.
+        self.step_projectiles(tuning, history);
         self.projectiles_stepped = true;
         self.tick_parry_windows(tuning);
 

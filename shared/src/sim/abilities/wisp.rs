@@ -203,7 +203,7 @@ impl SimWorld {
             .world
             .cast_sphere(p.position, p.radius, motion, MASK_SHOTS)
             .map_or(1.0, |h| h.fraction);
-        let reach = p.radius + projectile_target_pad(t, p.owner);
+        let reach = p.radius + projectile_target_pad(&t.combat, p.owner);
         let first = boxes
             .iter()
             .filter(|h| self.can_hit(p.owner, h.target))

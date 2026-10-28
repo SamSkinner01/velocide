@@ -654,6 +654,13 @@ impl InGame {
         self.controls.weapons.set_loadout(&loadout);
         if playing {
             let change = self.controls.latch(input, &common.settings.bindings);
+            // A shot fired on this frame is aimed at what the screen shows now: the next
+            // input carries this frame's view time with its aim (lag compensation).
+            if self.controls.aim_latched()
+                && let Some(session) = self.session.as_mut()
+            {
+                session.client_mut().latch_view();
+            }
             match change {
                 WeaponChange::None => {}
                 WeaponChange::Weapon => {

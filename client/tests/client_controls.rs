@@ -148,6 +148,37 @@ fn a_click_between_ticks_aims_where_the_crosshair_was_on_its_frame() {
 }
 
 #[test]
+fn a_release_between_ticks_aims_where_the_crosshair_was_on_its_frame() {
+    // A drawn bow looses on the release: let go of fire at view A, the view turns on to B
+    // before the tick: the loosing input aims at A (docs/feel.md, "Hit registration").
+    let s = Settings::default();
+    let mut c = Controls::new();
+    let mut input = InputState::new();
+    input.handle_gamepad_event(GamepadEvent::Axis(GamepadAxis::RightTrigger, 1.0));
+    c.latch(&input, &s.bindings);
+    c.build(&input, &s.bindings, true);
+    input.end_frame();
+    // Held: nothing latched.
+    c.set_view(0.2, 0.0);
+    c.latch(&input, &s.bindings);
+    assert!(!c.aim_latched());
+    assert_eq!(c.build(&input, &s.bindings, true).yaw, 0.2);
+    input.end_frame();
+    c.set_view(0.5, 0.1);
+    input.handle_gamepad_event(GamepadEvent::Axis(GamepadAxis::RightTrigger, 0.0));
+    c.latch(&input, &s.bindings);
+    assert!(c.aim_latched(), "the release fixed the aim");
+    input.end_frame();
+    c.set_view(0.8, 0.2);
+    c.latch(&input, &s.bindings);
+    let loose = c.build(&input, &s.bindings, true);
+    assert!(!loose.buttons.contains(Buttons::FIRE));
+    assert_eq!((loose.yaw, loose.pitch), (0.5, 0.1));
+    assert!(!c.aim_latched());
+    assert_eq!(c.build(&input, &s.bindings, true).yaw, 0.8);
+}
+
+#[test]
 fn build_uses_latest_view_sticks_and_selection() {
     let s = Settings::default();
     let mut c = Controls::new();
