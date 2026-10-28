@@ -20,6 +20,20 @@
 //! `pos(t) = p0 + v0·Δ − ½·g·Δ²·ŷ` (Δ = (t − aux)/tick_rate; g = the kind's gravity, 0 when
 //! `PARRIED`). The entity only changes when the trajectory changes (bounce, parry, stick), so
 //! a sky full of projectiles costs almost no bandwidth.
+//!
+//! **Lag compensation** (`docs/feel.md`, "Hit registration"): a player's projectile flies from
+//! the moment its shooter aimed it, not from when the input reached the server. The input's
+//! view time `V` (the tick the shooter's screen showed, clamped like a hitscan rewind and by
+//! `net.projectile_lag_comp_max_ms`) is flight time 0: on its first step the projectile makes
+//! up the `now − 1 − V` ticks of flight the shooter already watched ([`CatchUp`]), each tick of
+//! it swept against the hit shapes rewound to that moment of the shooter's view (the level
+//! is static), then flies on in the present. So the server's projectile at tick `τ` is where
+//! the shooter's own stand-in showed it at render tick `τ`, among the targets as they were
+//! then: the shooter draws its own projectiles at the render tick like everything else
+//! (`client::ingame::combat::stand_in`) and what they see hit is what hits. A contact made on
+//! the way is moved onto the target as it is now (where a blast goes off, a Limpet sticks).
+//! Fair for the targets the way a hitscan rewind is: the same bound, and nothing is tested in
+//! the past once the projectile has caught up.
 
 use engine::physics::{MASK_SHOTS, SweepHit};
 use glam::Vec3;
@@ -27,7 +41,11 @@ use serde::{Deserialize, Serialize};
 
 use super::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
 use super::trail::Trail;
-use super::{HitPads, HitPart, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
+use super::{
+    HitPads, HitPart, HitTarget, Hitbox, HitboxHistory, PlayerId, SimEvent, SimWorld,
+    TELEPORT_PER_TICK,
+};
+use crate::input::PlayerInput;
 use crate::protocol::{EntityState, NetId, kind, owner_code, projectile_flags, thorn_flags};
 use crate::tuning::{CombatTuning, Tuning};
 
@@ -216,6 +234,12 @@ impl ProjectileKind {
         false
     }
 
+    /// Fired from an input, it flies from the shooter's view time ([`CatchUp`]; the owner's
+    /// client draws it at its render tick). Every player kind; enemies fire none from inputs.
+    pub fn lag_compensated(self) -> bool {
+        !matches!(self, ProjectileKind::EmberBomb | ProjectileKind::Needle)
+    }
+
     /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets, a
     /// thrown Snare falls to the floor past them).
     pub fn hits_targets(self) -> bool {
@@ -336,6 +360,33 @@ pub struct PendingImpact {
     pub incoming: Vec3,
 }
 
+/// The view an input's projectiles fly from (see the module docs): set by `SimWorld::step`
+/// while that input's intents resolve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LaunchView {
+    pub player: PlayerId,
+    /// The shooter's view time (ticks), clamped to [`LaunchView::max_rewind_ms`] before now.
+    pub view: f64,
+    /// The rewind bound (ms): `net.projectile_lag_comp_max_ms`, the hitscan one, the RTT's.
+    pub max_rewind_ms: f32,
+    /// Where the shooter was before this input's movement minus after it: its projectiles
+    /// leave from where the movement started, a tick closer to where the shooter's camera
+    /// was (it draws the last ticks interpolated) — a fast-moving archer's arrow starts on
+    /// the crosshair's line, not a tick of running off it (`docs/feel.md`).
+    pub eye_shift: Vec3,
+}
+
+/// Flight a projectile fired from an input makes up on its first step (see the module docs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CatchUp {
+    /// Flight time 0: the shooter's view time (ticks).
+    pub view: f64,
+    /// Ticks of flight before this tick's own step (`spawn tick − 1 − view`).
+    pub ticks: f32,
+    /// The rewind bound (ms) for the history.
+    pub max_rewind_ms: f32,
+}
+
 /// A live projectile.
 #[derive(Clone, Debug)]
 pub struct Projectile {
@@ -370,6 +421,8 @@ pub struct Projectile {
     /// Per-target re-hit timers (target, tick it may be damaged again) for kinds that touch
     /// targets repeatedly; cleared by a deflection.
     pub contacts: Vec<(HitTarget, u32)>,
+    /// Flight to make up on the first step (fired from an input; taken by that step).
+    pub catch_up: Option<CatchUp>,
 }
 
 impl Projectile {
@@ -450,6 +503,21 @@ impl SimWorld {
         };
         let lifetime = secs_to_ticks(kind.lifetime(c), self.tick_rate, 1) as u32;
         let launch_tick = self.launch_tick_now();
+        // Fired from an input: from where the shooter's movement started, and it has already
+        // flown since the shooter's view time (its fuse and lifetime too).
+        let launch = self
+            .launch_view
+            .filter(|v| owner == Owner::Player(v.player) && kind.lag_compensated());
+        let position = launch.map_or(position, |v| position + v.eye_shift);
+        let catch_up = launch.and_then(|v| {
+            let ticks = (launch_tick as f64 - v.view) as f32;
+            (ticks > 1e-3).then_some(CatchUp {
+                view: v.view,
+                ticks,
+                max_rewind_ms: v.max_rewind_ms,
+            })
+        });
+        let flown = catch_up.map_or(0, |c| c.ticks.floor() as u32);
         let p = Projectile {
             id,
             kind,
@@ -463,7 +531,7 @@ impl SimWorld {
             damage,
             explosion: kind.explosive(c),
             spawn_tick: now,
-            expire_tick: now + lifetime,
+            expire_tick: now + lifetime.saturating_sub(flown).max(1),
             speed: velocity.length(),
             launch_tick,
             launch_position: position,
@@ -478,20 +546,57 @@ impl SimWorld {
             pending: None,
             trail: Trail::new(),
             contacts: Vec::new(),
+            catch_up,
         };
         self.projectiles.insert(id, p);
         Some(id)
     }
 
-    /// Steps every projectile one tick (after player inputs, before enemies act).
-    pub(crate) fn step_projectiles(&mut self, t: &Tuning) {
+    /// The view the projectiles fired from player `id`'s `input` fly from: its view time,
+    /// clamped by the hitscan rewind bound ([`SimWorld::view_time`]) and
+    /// `net.projectile_lag_comp_max_ms`; `feet_before`: where that input's movement started
+    /// (the stance stays the one after it).
+    pub fn launch_view_of(
+        &self,
+        t: &Tuning,
+        id: PlayerId,
+        input: &PlayerInput,
+        feet_before: Vec3,
+    ) -> LaunchView {
+        let rate = self.tick_rate as f64;
+        let cap = (t.net.projectile_lag_comp_max_ms.max(0.0) as f64 / 1000.0 * rate)
+            .min(self.max_rewind_ticks(t, id));
+        let eye_shift = self.players.get(&id).map_or(Vec3::ZERO, |p| {
+            let shift = feet_before - p.movement.position;
+            // Not across a teleport (a respawn this tick).
+            if shift.is_finite() && shift.length() <= TELEPORT_PER_TICK {
+                shift
+            } else {
+                Vec3::ZERO
+            }
+        });
+        LaunchView {
+            player: id,
+            view: self.view_time(t, id, input).max(self.tick as f64 - cap),
+            max_rewind_ms: (cap * 1000.0 / rate) as f32,
+            eye_shift,
+        }
+    }
+
+    /// Steps every projectile one tick (after player inputs, before enemies act). `history`:
+    /// the hit shapes in the past, for the flight new projectiles make up ([`CatchUp`]).
+    pub(crate) fn step_projectiles(&mut self, t: &Tuning, history: Option<&dyn HitboxHistory>) {
         let boxes = self.current_hitboxes(t);
+        let mut past = PastShapes {
+            history,
+            frames: Vec::new(),
+        };
         let ids: Vec<NetId> = self.projectiles.keys().copied().collect();
         for id in ids {
             let Some(mut p) = self.projectiles.remove(&id) else {
                 continue;
             };
-            if self.step_projectile(t, &mut p, &boxes) {
+            if self.step_projectile(t, &mut p, &boxes, &mut past) {
                 self.projectiles.insert(id, p);
             }
         }
@@ -502,7 +607,13 @@ impl SimWorld {
     }
 
     /// One tick of one projectile. Returns false when it is gone.
-    fn step_projectile(&mut self, t: &Tuning, p: &mut Projectile, boxes: &[Hitbox]) -> bool {
+    fn step_projectile(
+        &mut self,
+        t: &Tuning,
+        p: &mut Projectile,
+        boxes: &[Hitbox],
+        past: &mut PastShapes,
+    ) -> bool {
         let now = self.tick;
         if let Some(pending) = p.pending {
             if now >= pending.apply_tick {
@@ -543,7 +654,82 @@ impl SimWorld {
             self.wisp_zap(t, p, boxes);
         }
 
-        let dt = self.dt();
+        // Fired from an input: first the flight its shooter already watched.
+        let caught_up = p.catch_up.take();
+        if let Some(c) = caught_up {
+            if self.catch_up(t, p, c, boxes, past) == Some(false) {
+                return false;
+            }
+            if p.is_frozen() {
+                return true;
+            }
+        }
+        // A player's projectile against targets moving this tick (with a history: the shapes
+        // a tick ago show how far the players came; the enemies move after it).
+        let moves = match (p.owner, past.history) {
+            (Owner::Player(_), Some(_)) => {
+                let i = past.ensure(self, t, (now - 1) as f64, t.net.lag_comp_max_ms);
+                TargetMoves::Present(past.get(i))
+            }
+            _ => TargetMoves::Still,
+        };
+        let keep = self
+            .move_projectile(t, p, boxes, moves, 1.0, None)
+            .unwrap_or(true);
+        if keep && caught_up.is_some() && !p.is_frozen() {
+            // Replicated from where the made-up flight brought it.
+            p.relaunch(self.tick);
+        }
+        keep
+    }
+
+    /// The flight `p` makes up ([`CatchUp`]): tick by tick (the fraction first), each swept
+    /// against the hit shapes as the shooter saw them during it. `Some(keep)` once it touched
+    /// something (then it stops making up), `None` if it flew through. `present`: the current
+    /// shapes (a target contact is moved onto the target as it is now).
+    fn catch_up(
+        &mut self,
+        t: &Tuning,
+        p: &mut Projectile,
+        c: CatchUp,
+        present: &[Hitbox],
+        past: &mut PastShapes,
+    ) -> Option<bool> {
+        let whole = c.ticks.floor();
+        let legs = std::iter::once(c.ticks - whole).chain(std::iter::repeat_n(1.0, whole as usize));
+        let mut flown = 0.0f64;
+        for leg in legs.filter(|l| *l > 1e-4) {
+            let start = past.ensure(self, t, c.view + flown, c.max_rewind_ms);
+            flown += leg as f64;
+            let end = past.ensure(self, t, c.view + flown, c.max_rewind_ms);
+            let moves = TargetMoves::Since(past.get(start));
+            let shapes = past.get(end);
+            if let Some(keep) = self.move_projectile(t, p, shapes, moves, leg, Some(present))
+                && (!keep || p.is_frozen())
+            {
+                return Some(keep);
+            }
+        }
+        None
+    }
+
+    /// Moves `p` along its trajectory for `ticks` (≤ 1) of flight, sweeping the level and the
+    /// hit shapes `boxes` (moving as `moves` says: swept in each target's frame, a projectile
+    /// touches a target crossing its path where that target is at that moment, as the shooter
+    /// saw it). `Some(keep)` if it touched something (handled; `keep`: it is still there),
+    /// `None` if it flew on. With `present` (`boxes` are the past, a catch-up) a target contact
+    /// is first moved by how far that target has moved since, so whatever happens there
+    /// happens on the target as it is now.
+    fn move_projectile(
+        &mut self,
+        t: &Tuning,
+        p: &mut Projectile,
+        boxes: &[Hitbox],
+        moves: TargetMoves,
+        ticks: f32,
+        present: Option<&[Hitbox]>,
+    ) -> Option<bool> {
+        let dt = self.dt() * ticks;
         let motion = p.velocity * dt - Vec3::Y * (0.5 * p.gravity * dt * dt);
         let new_velocity = p.velocity - Vec3::Y * (p.gravity * dt);
         let world_hit = self
@@ -556,32 +742,40 @@ impl SimWorld {
         if p.kind.hits_targets() {
             // Player projectiles are fatter against targets than against the level
             // (`combat.projectile_hit_pad`): a visible graze counts, edges don't snag.
-            let target_radius = p.radius + projectile_target_pad(t, p.owner);
+            let target_radius = p.radius + projectile_target_pad(&t.combat, p.owner);
             let first = boxes
                 .iter()
-                .filter(|h| self.can_hit(p.owner, h.target))
-                .filter_map(|h| {
+                .enumerate()
+                .filter(|(_, h)| self.can_hit(p.owner, h.target))
+                .filter_map(|(i, h)| {
                     let pads = self.hit_pads(t, p.owner, h.target);
-                    h.sweep_sphere_padded(p.position, motion, target_radius, pads)
-                        .map(|(f, part)| (f, h.target, part))
+                    // The target moves `d` during the move; `boxes` show it at `at` of it.
+                    let (d, at) = self.target_move(&moves, i, h, dt);
+                    h.sweep_sphere_padded(p.position + d * at, motion - d, target_radius, pads)
+                        .map(|(f, part)| (f, h, part, d * (f - at)))
                 })
-                .filter(|(f, _, _)| *f <= world_f)
+                .filter(|(f, ..)| *f <= world_f)
                 .min_by(|a, b| a.0.total_cmp(&b.0));
-            if let Some((f, target, part)) = first {
-                p.position += motion * f;
+            if let Some((f, hit, part, shift)) = first {
+                let target = hit.target;
+                let moved = present
+                    .and_then(|now| now.iter().find(|h| h.target == target))
+                    .and_then(|now| Some(now.center()? - hit.center()? - shift))
+                    .unwrap_or(Vec3::ZERO);
+                p.position += motion * f + moved;
                 p.velocity = new_velocity;
-                return self.projectile_hit_target(t, p, target, part, dir);
+                return Some(self.projectile_hit_target(t, p, target, part, dir));
             }
         }
 
         if let Some(hit) = world_hit {
             p.position += motion * hit.fraction + hit.normal * 0.02;
             p.velocity = new_velocity;
-            return self.projectile_hit_world(t, p, hit);
+            return Some(self.projectile_hit_world(t, p, hit));
         }
         p.position += motion;
         p.velocity = new_velocity;
-        true
+        None
     }
 
     /// Feet position of a player or enemy.
@@ -902,7 +1096,7 @@ impl SimWorld {
             // A projectile that hit through `projectile_hit_pad` went off up to that much
             // further out: its direct hit loses nothing for it.
             let d = if is_direct && projectile.is_some() && direct == Some(h.target) {
-                (d - projectile_target_pad(t, owner)).max(0.0)
+                (d - projectile_target_pad(&t.combat, owner)).max(0.0)
             } else {
                 d
             };
@@ -975,12 +1169,88 @@ impl SimWorld {
     }
 }
 
+/// The hit shapes as they were, for this tick's catch-ups ([`CatchUp`]), rewound once per
+/// moment (an input's projectiles share their view time).
+pub(crate) struct PastShapes<'a> {
+    history: Option<&'a dyn HitboxHistory>,
+    /// (time in 1/256 ticks, shapes).
+    frames: Vec<(i64, Vec<Hitbox>)>,
+}
+
+impl PastShapes<'_> {
+    /// Rewinds every hit shape to `time` (ticks; within `max_rewind_ms` of the newest recorded
+    /// tick) unless that is done, for [`PastShapes::get`]. Without a history (or before it has
+    /// frames): the current shapes.
+    fn ensure(&mut self, world: &SimWorld, t: &Tuning, time: f64, max_rewind_ms: f32) -> usize {
+        let key = (time * 256.0).round() as i64;
+        if let Some(i) = self.frames.iter().position(|(k, _)| *k == key) {
+            return i;
+        }
+        let shapes = self
+            .history
+            .map(|h| h.rewind_hitboxes(time, max_rewind_ms))
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| world.current_hitboxes(t));
+        self.frames.push((key, shapes));
+        self.frames.len() - 1
+    }
+
+    fn get(&self, i: usize) -> &[Hitbox] {
+        &self.frames[i].1
+    }
+}
+
+/// How the targets move during a projectile's move (`move_projectile`).
+#[derive(Clone, Copy)]
+enum TargetMoves<'a> {
+    /// They stand still: enemies' projectiles test the shapes as they are (and everything
+    /// without a history).
+    Still,
+    /// A catch-up leg: the shapes are its end, these its start.
+    Since(&'a [Hitbox]),
+    /// This tick's step: the shapes are the current ones, these the last tick's. Players have
+    /// moved since; enemies move after the projectiles (by their velocity).
+    Present(&'a [Hitbox]),
+}
+
+impl SimWorld {
+    /// How far target `h` (index `i` of the shapes tested) moves during a projectile move of
+    /// `dt` seconds (at most a tick), and at which fraction of the move its shapes are (0 its
+    /// start, 1 its end). One that teleported ([`TELEPORT_PER_TICK`]) is taken as it is.
+    fn target_move(&self, moves: &TargetMoves, i: usize, h: &Hitbox, dt: f32) -> (Vec3, f32) {
+        let since = |then: &[Hitbox]| {
+            then.get(i)
+                .filter(|b| b.target == h.target)
+                .or_else(|| then.iter().find(|b| b.target == h.target))
+                .and_then(|b| Some(h.center()? - b.center()?))
+                .unwrap_or(Vec3::ZERO)
+        };
+        let (d, at) = match (*moves, h.target) {
+            (TargetMoves::Still, _) => (Vec3::ZERO, 1.0),
+            (TargetMoves::Since(then), _) | (TargetMoves::Present(then), HitTarget::Player(_)) => {
+                (since(then), 1.0)
+            }
+            (TargetMoves::Present(_), HitTarget::Entity(id)) => (
+                self.enemies
+                    .get(&id)
+                    .map_or(Vec3::ZERO, |e| e.velocity * dt),
+                0.0,
+            ),
+        };
+        if d.is_finite() && d.length_squared() <= TELEPORT_PER_TICK * TELEPORT_PER_TICK {
+            (d, at)
+        } else {
+            (Vec3::ZERO, 1.0)
+        }
+    }
+}
+
 /// Extra radius a projectile of `owner` gets against *targets* (never the level): players'
 /// projectiles (a parried one included) get `combat.projectile_hit_pad`, enemies' none (enemy
 /// attacks test the real shapes).
-pub fn projectile_target_pad(t: &Tuning, owner: Owner) -> f32 {
+pub fn projectile_target_pad(t: &CombatTuning, owner: Owner) -> f32 {
     match owner {
-        Owner::Player(_) => t.combat.projectile_hit_pad.max(0.0),
+        Owner::Player(_) => t.projectile_hit_pad.max(0.0),
         Owner::Enemy(_) | Owner::World => 0.0,
     }
 }
