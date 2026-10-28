@@ -1207,16 +1207,16 @@ pub fn builtin_level(name: &str) -> Option<LevelDef> {
     (name == BUILTIN_LEVEL).then(proving_ground)
 }
 
-/// Loads `assets/levels/<name>.ron`, falling back to a built-in level of that name.
+/// Loads `assets/levels/<name>.ron` (from disk, else its embedded copy), falling back to a
+/// built-in level of that name.
 pub fn load_level(name: &str) -> anyhow::Result<LevelDef> {
-    let path = LevelDef::path_for(name);
-    if path.exists() {
-        return LevelDef::load(&path);
+    let path = LevelDef::asset_path(name);
+    if crate::asset_files::find(&path).is_some() {
+        return LevelDef::load_named(name);
     }
     builtin_level(name).ok_or_else(|| {
         anyhow::anyhow!(
-            "level '{name}' not found ({} does not exist and there is no built-in level of that name)",
-            path.display()
+            "level '{name}' not found ({path} is neither in the assets folder nor embedded, and there is no built-in level of that name)"
         )
     })
 }

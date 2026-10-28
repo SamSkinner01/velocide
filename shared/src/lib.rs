@@ -21,7 +21,10 @@ pub const GAME_NAME: &str = "VELOCIDE";
 /// Default UDP port for hosted games.
 pub const DEFAULT_PORT: u16 = 47420;
 
-/// Root directory for runtime assets (levels, tuning, shaders). See [`engine::assets_dir`].
+/// The assets folder on disk (levels, tuning, shaders). See [`engine::assets_dir`]; read
+/// files through [`asset_files`] (a file missing on disk falls back to its built-in copy).
 pub fn assets_dir() -> std::path::PathBuf {
     engine::assets_dir()
 }
+
+pub use engine::asset_files;

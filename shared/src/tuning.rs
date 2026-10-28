@@ -2794,6 +2794,8 @@ impl GrindTuning {
 }
 
 impl Tuning {
+    /// `tuning.ron` in the assets folder on disk: hot reload watches it, the tuning editor
+    /// writes it. [`Tuning::load_default`] falls back to its embedded copy.
     pub fn default_path() -> PathBuf {
         crate::assets_dir().join("tuning.ron")
     }
@@ -2820,9 +2822,14 @@ impl Tuning {
     /// Loads and sanitizes a tuning file (out-of-range values are clamped with a warning).
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)?;
-        let mut tuning: Tuning = ron::from_str(&text)?;
+        Self::parse(&text, &path.display().to_string())
+    }
+
+    /// Parses and sanitizes tuning RON; the clamping warning names it `what`.
+    fn parse(text: &str, what: &str) -> anyhow::Result<Self> {
+        let mut tuning: Tuning = ron::from_str(text)?;
         if tuning.sanitize() {
-            log::warn!("{}: out-of-range values were clamped", path.display());
+            log::warn!("{what}: out-of-range values were clamped");
         }
         Ok(tuning)
     }
@@ -2834,6 +2841,21 @@ impl Tuning {
             Ok(t) => t,
             Err(err) => {
                 log::warn!("using default tuning ({}: {err})", path.display());
+                Self::default()
+            }
+        }
+    }
+
+    /// The game's tuning: `tuning.ron` from the assets folder on disk, else its embedded copy
+    /// (`shared::asset_files`); defaults (with a warning) if it is invalid.
+    pub fn load_default() -> Self {
+        let loaded = crate::asset_files::read_to_string("tuning.ron").and_then(|text| {
+            Self::parse(&text, "tuning.ron").map_err(|e| anyhow::anyhow!("tuning.ron: {e}"))
+        });
+        match loaded {
+            Ok(t) => t,
+            Err(err) => {
+                log::warn!("using default tuning ({err})");
                 Self::default()
             }
         }
@@ -2899,6 +2921,16 @@ mod tests {
             !shipped.sanitize(),
             "assets/tuning.ron has out-of-range values"
         );
+    }
+
+    #[test]
+    fn the_default_tuning_is_the_shipped_file_also_when_embedded() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/tuning.ron");
+        let shipped = Tuning::load(&path).unwrap();
+        assert_eq!(Tuning::load_default(), shipped);
+        let embedded = crate::asset_files::embedded("tuning.ron").expect("embedded");
+        let embedded = Tuning::parse(std::str::from_utf8(embedded).unwrap(), "embedded").unwrap();
+        assert_eq!(embedded, shipped);
     }
 
     #[test]

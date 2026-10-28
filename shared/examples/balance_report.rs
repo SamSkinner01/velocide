@@ -453,7 +453,7 @@ fn main() {
             eprintln!("--tuning needs a path");
             std::process::exit(1);
         }
-        None => Tuning::load_or_default(&Tuning::default_path()),
+        None => Tuning::load_default(),
     };
     let sections: Vec<&str> = args
         .iter()

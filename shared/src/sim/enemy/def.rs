@@ -15,47 +15,6 @@ use serde::{Deserialize, Serialize};
 use crate::sim::projectiles::ProjectileKind;
 use crate::sim::{HitPart, HitShape, HitTarget, Hitbox};
 
-/// Built-in definitions (compiled in, so the server works without an assets directory and
-/// tests don't depend on edited files). Files in `assets/enemies/` override them by name.
-const BUILTIN: &[(&str, &str)] = &[
-    (
-        "gnawer",
-        include_str!("../../../../assets/enemies/gnawer.ron"),
-    ),
-    (
-        "censer",
-        include_str!("../../../../assets/enemies/censer.ron"),
-    ),
-    (
-        "harrier",
-        include_str!("../../../../assets/enemies/harrier.ron"),
-    ),
-    (
-        "gaoler",
-        include_str!("../../../../assets/enemies/gaoler.ron"),
-    ),
-    (
-        "heron",
-        include_str!("../../../../assets/enemies/heron.ron"),
-    ),
-    (
-        "bellwether",
-        include_str!("../../../../assets/enemies/bellwether.ron"),
-    ),
-    (
-        "snuffer",
-        include_str!("../../../../assets/enemies/snuffer.ron"),
-    ),
-    (
-        "smelter",
-        include_str!("../../../../assets/enemies/smelter.ron"),
-    ),
-    (
-        "effigy",
-        include_str!("../../../../assets/enemies/effigy.ron"),
-    ),
-];
-
 /// How an enemy moves.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Locomotion {
@@ -847,12 +806,16 @@ pub struct EnemyRegistry {
 }
 
 impl EnemyRegistry {
-    /// The compiled-in definitions only.
+    /// The built-in definitions only: the embedded copies of `assets/enemies/*.ron` (as they
+    /// were when the binary was built), so tests don't depend on edited files.
     pub fn builtin() -> Self {
         let mut r = Self::default();
-        for (name, text) in BUILTIN {
+        for name in crate::asset_files::embedded_list("enemies", "ron") {
+            let text = crate::asset_files::embedded(&format!("enemies/{name}.ron"))
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .unwrap_or_default();
             match EnemyDef::parse(text) {
-                Ok(def) => r.insert(name, def),
+                Ok(def) => r.insert(&name, def),
                 Err(err) => log::error!("built-in enemy '{name}' is invalid: {err}"),
             }
         }
@@ -884,7 +847,8 @@ impl EnemyRegistry {
         r
     }
 
-    /// `assets/enemies/` (with built-in fallbacks).
+    /// `assets/enemies/` on disk over the built-ins: the union of both, the disk file winning
+    /// for the same name.
     pub fn load_default() -> Self {
         Self::load_dir(&crate::assets_dir().join("enemies"))
     }
