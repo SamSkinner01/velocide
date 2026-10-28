@@ -616,6 +616,13 @@ impl SimWorld {
     /// Is `attacker` allowed to hurt `victim`? (Same-team damage is blocked except for
     /// knockback.)
     pub fn is_hostile(&self, attacker: Owner, victim: HitTarget) -> bool {
+        // A Waxwork's double is as hostile as its owner (`abilities/waxwork.rs`).
+        let victim = match victim {
+            HitTarget::Player(id) => {
+                HitTarget::Player(super::abilities::waxwork::decoy_owner(id).unwrap_or(id))
+            }
+            other => other,
+        };
         match (attacker, victim) {
             (Owner::World, _) => true,
             (Owner::Player(a), HitTarget::Player(v)) => a != v && self.rules.friendly_fire,

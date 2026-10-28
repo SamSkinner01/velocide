@@ -59,7 +59,6 @@ impl SimWorld {
                 Some(false)
             }
             ProjectileKind::Bolas => self.bolas_hit_target(t, p, target, part, dir),
-            ProjectileKind::LanternToss => self.lantern_hit_target(t, p, target),
             ProjectileKind::BlinkArrow => self.blink_arrow_hit_target(t, p, target, part, dir),
             ProjectileKind::BeaconArrow => self.beacon_arrow_hit_target(t, p, target, part, dir),
             ProjectileKind::SootPot => {
@@ -98,6 +97,7 @@ impl SimWorld {
                 Some(false)
             }
             ProjectileKind::Bolas => self.bolas_hit_world(t, p, hit),
+            ProjectileKind::Hurl => self.hurl_hit_world(t, p),
             ProjectileKind::LanternToss => self.lantern_hit_world(t, p, hit),
             ProjectileKind::BlinkArrow => self.blink_arrow_hit_world(t, p, hit),
             ProjectileKind::BeaconArrow => self.beacon_arrow_hit_world(t, p, hit),

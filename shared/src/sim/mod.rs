@@ -328,9 +328,9 @@ impl SimPlayer {
     }
 }
 
-/// The hit shapes of player `id` in movement state `m`: a body capsule (feet to shoulders) and
-/// a head sphere at the eyes. The body stops below the head so the head is exposed from every
-/// side (headshots).
+/// The hit shapes of player `id` in movement state `m` (a player, or a Waxwork's double under
+/// its decoy id): a body capsule (feet to shoulders) and a head sphere at the eyes. The body
+/// stops below the head so the head is exposed from every side (headshots).
 pub fn player_hitbox(id: PlayerId, m: &MoveState, t: &MovementTuning) -> Hitbox {
     let (center, half_height, radius) = m.capsule(t);
     let head = m.eye_position(t);
@@ -1273,6 +1273,8 @@ impl SimWorld {
         for e in self.enemies.values().filter(|e| e.is_alive()) {
             out.push(e.hitbox());
         }
+        // Waxworks' doubles stand in for their owners (`abilities/waxwork.rs`).
+        self.waxwork_hitboxes(tuning, out);
     }
 }
 

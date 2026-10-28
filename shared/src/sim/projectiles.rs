@@ -259,7 +259,8 @@ impl ProjectileKind {
     }
 
     /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets, a
-    /// thrown Snare and a tossed Lantern fall to the floor past them).
+    /// thrown Snare and a tossed Lantern fall to the floor past them, the Hurl strikes what it
+    /// passes itself: `abilities/hurl.rs`).
     pub fn hits_targets(self) -> bool {
         !matches!(
             self,
@@ -267,6 +268,7 @@ impl ProjectileKind {
                 | ProjectileKind::Wisp
                 | ProjectileKind::Snare
                 | ProjectileKind::LanternToss
+                | ProjectileKind::Hurl
         )
     }
 
@@ -1179,7 +1181,9 @@ impl SimWorld {
         let mut hits = Vec::new();
         for h in self.current_hitboxes(t) {
             let alive = match h.target {
-                HitTarget::Player(id) => self.players.get(&id).is_some_and(|p| !p.combat.dead),
+                HitTarget::Player(id) => {
+                    self.players.get(&id).is_some_and(|p| !p.combat.dead) || self.is_decoy(id)
+                }
                 HitTarget::Entity(id) => self.enemies.get(&id).is_some_and(|e| e.is_alive()),
             };
             if !alive {

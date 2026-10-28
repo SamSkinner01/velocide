@@ -308,6 +308,10 @@ impl SimWorld {
                     // Replicated as the projectile's `state`: a blade or a hammer-head.
                     proj.bounces_left = weapon.id() as u32;
                 }
+                // It comes back (`abilities/hurl.rs`).
+                if let Some(pid) = spawned {
+                    self.hurl_thrown(pid, id, start);
+                }
                 self.push_fired(id, attack, eye);
                 return;
             }

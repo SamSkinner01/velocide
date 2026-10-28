@@ -6,8 +6,8 @@
 //! cone). It can be destroyed (`lantern.health`). One at a time; a new one replaces the old.
 //! Its shots are `Fx::LanternShot`.
 //!
-//! * **Settling**: wherever the toss ends — on the level, on a body (at its feet), at the end
-//!   of its flight — the lantern stands on the floor below that point (`floor_below`, at most
+//! * **Settling**: wherever the toss ends — on the level (it falls past bodies), at the end of
+//!   its flight — the lantern stands on the floor below that point (`floor_below`, at most
 //!   [`SETTLE_DEPTH`] down); with no floor there (a pit) it is lost.
 //! * **Shooting** ([`SimWorld::step_lantern`]): from [`MUZZLE_HEIGHT`] above its foot, at the
 //!   nearest hostile of its owner whose (padded) shape is within `range`, aimed at its centre
@@ -191,18 +191,6 @@ impl SimWorld {
     ) -> Option<bool> {
         let at = p.position + hit.normal * 0.05;
         self.lantern_settle(t, p, at);
-        Some(false)
-    }
-
-    /// The toss hit a body: it settles at its feet.
-    pub(crate) fn lantern_hit_target(
-        &mut self,
-        t: &Tuning,
-        p: &mut Projectile,
-        target: HitTarget,
-    ) -> Option<bool> {
-        let feet = self.target_origin(target).unwrap_or(p.position);
-        self.lantern_settle(t, p, feet + Vec3::Y * 0.1);
         Some(false)
     }
 

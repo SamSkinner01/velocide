@@ -464,11 +464,13 @@ impl SimWorld {
         world_f: f32,
         boxes: &[Hitbox],
     ) -> bool {
-        // (An orbiting Wisp circles its owner: it reaches nothing.)
+        // (An orbiting Wisp circles its owner, a Hurl on its way back homes on its thrower:
+        // neither is sent anywhere else.)
+        let bound = projectile_flags::ORBITING | projectile_flags::RETURNING;
         if self.thorns.is_empty()
             || !matches!(p.owner, Owner::Player(_))
             || !p.kind.relays_off_thorns()
-            || p.ability_flags & projectile_flags::ORBITING != 0
+            || p.ability_flags & bound != 0
         {
             return false;
         }

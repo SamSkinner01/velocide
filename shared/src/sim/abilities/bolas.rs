@@ -27,6 +27,11 @@ use super::super::{DamageEvent, HitPart, HitTarget, PlayerId, SimEvent, SimWorld
 use super::AbilityCast;
 use crate::tuning::Tuning;
 
+/// A Waxwork's double (its decoy id: `waxwork.rs`)?
+fn is_decoy_target(target: HitTarget) -> bool {
+    matches!(target, HitTarget::Player(id) if super::waxwork::decoy_owner(id).is_some())
+}
+
 /// A cord binding two hostiles: damage either takes is shared with the other.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cord {
@@ -121,6 +126,10 @@ impl SimWorld {
         let Owner::Player(owner) = p.owner else {
             return Some(false);
         };
+        // A Waxwork's double isn't bound (it stands still anyway).
+        if is_decoy_target(target) {
+            return None;
+        }
         let b = &t.combat.bolas;
         // (`Attack::Bolas` on its own hit, `projectile_direct_damage`.)
         if p.damage > 0.0 {
@@ -132,7 +141,7 @@ impl SimWorld {
         let mut second: Option<(f32, HitTarget, Vec3)> = None;
         let world = &self.collision.world;
         for h in self.current_hitboxes(t) {
-            if h.target == target || !self.can_hit(p.owner, h.target) {
+            if h.target == target || is_decoy_target(h.target) || !self.can_hit(p.owner, h.target) {
                 continue;
             }
             let pads = self.hit_pads(t, p.owner, h.target);

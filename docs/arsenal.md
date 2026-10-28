@@ -178,6 +178,7 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | 9 | Kiln | Rapid | every 0.08 s (5 ticks) a 13 m / 20° cone: 4 dmg + 1 Burn stack to everything inside (line of sight, no weak points, no ricochet) |
 | 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 36 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
 | 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 85 dmg to everything in it, kb 16 |
+| 12 | Lamplighter | Precision | hold to focus (0.9 s to full), release one exact hitscan beam, 35–130 by the focus (weak points ×2); a full focus pierces into one more target behind at ×0.7; 0.35 s before the next focus (below, "The rework's abilities, as built") |
 
 ### Thorns relay any weapon (rework)
 
@@ -519,6 +520,32 @@ go (`AbilityPhase::Release`), at `until`, or when its owner dies or stops holdin
 **The Waxwork's decoy id**: a double stands in for its owner as `HitTarget::Player(owner | 0x80)`
 in Mould targeting and hit tests (`abilities/waxwork.rs`); player ids stay below 128.
 
+## The rework's abilities, as built (arsenal-a)
+
+Server side, `shared/src/sim/abilities/` (one file each) and `weapons.rs`; numbers are the
+contract's starting points (`assets/tuning.ron`; the balance area owns the final ones).
+Everything a weapon decides stays predicted (`step_weapons`); impulses, the blink and
+server-decided cooldowns are server-side and the owner re-bases (the client counts those
+re-bases as `WeaponPredictor::server_cooldowns`, not as mispredictions).
+
+| ability / weapon | as built |
+|---|---|
+| Lamplighter (primary) | `PrimaryStyle::Focus`: the draw's code path (`WeaponState::draw`, weapon-aware `draw_ticks_of` / `draw_fraction`), replicated `DRAWING` + the level like the bow. Release: `lamplighter_beam` — `min_damage`→`max_damage` linear in the focus, exact, `hitscan_range`; at a full focus `fire_piercing` through `pierce` (2) targets, ×`pierce_falloff` (0.7) for the second (`PIERCED`). PvP ×0.54 damage, ×0.75 interval: 70 body / 140 head at full focus, two body shots in 1.6 s |
+| Wickline | instant; a lag-compensated ray to 34 m (`first_target_on_ray` with hit assist, then the level). The level first: a zip (what of the velocity runs against the line is dropped, +24 m/s along it, at least 4 m/s up). A light hostile (base health < 300, any PvP player): 10 dmg (`Attack::Wickline`, a hitscan hit) and a yank towards the caster (16 m/s with a little lift, enemies × their knockback scale, PvP ×0.5). A heavy one: the caster zips to it, no damage. Nothing in range: half the cooldown (server-side). `Fx::Wickline` |
+| Tally | channel (up to 1.2 s). The press starts the tally; after every input (`abilities_after_input`, with the history) each hostile whose padded shapes (+ distance × tan 0.75°) the crosshair ray meets within 45 m, in sight, is marked with the part it met (a later weak point / head upgrades a body mark), up to 4 (PvP 3: an override). The marks are `PlayerCombat::tallied` (`NetId`s; players as `NetId::player`) and `TALLYING`. The release: one ray per mark still hittable and in sight, aimed at the marked part of what the caster sees at the release, 30 dmg each (`Attack::Tally`, through `trace_shot`: what is in the way takes it); `Fx::TallyFired`. No marks: no shot, a quarter of the cooldown (server-side) |
+| Waxwork | instant, live 5 s (cooldown 10 s from its end). A double where its owner stands (their `MoveState`, look, pose flags and weapon state): 60 HP, `kind::WAXWORK`. It stands in as `HitTarget::Player(owner | 0x80)` (`decoy_id`): a player's hit shapes in `SimWorld::hitboxes` (lag compensation records it), `can_hit` / `is_hostile` / explosions treat it as its owner (their own and co-op teammates' shots pass), `apply_damage` hands its damage to `damage_waxwork` (head ×2 unless explosive; a `SimEvent::Damage` for hit markers; modes' stats skip it). Moulds see it as a player view; `select_target` takes the nearest double within 25 m in sight (soot hides it) before anyone (`LURED`). Destroyed: it bursts at once and the owner's cooldown starts (`end_live`); at its end it slumps for 0.4 s (`SLUMPING`) and bursts: up to 30 dmg (explosion falloff, line of sight, never its owner) and 1 Burn stack to everything hostile within 3.5 m (`Attack::Waxwork`) |
+| Blink Arrow | armed; the release looses `BLINK_ARROW` (0.8 × an arrow's hit) and makes it live for its flight + 1.5 s. It sticks in the level (`STUCK`, window 1.5 s: `shorten_live`) or strikes a target (its hit, then gone, window 1.5 s). The recast steps to the arrow where its owner saw it (`SimWorld::projectile_seen`: arrows are lag-compensated, the owner draws theirs a round trip and an interpolation delay behind the server's — some 28 m at 100 ms on a full draw): the feet go where the body's middle is just in front of the spot (stuck: in front of the surface; on a floor: on it; seen still flying: where it was seen), else the nearest point back along its kept path (0.25 m steps, also 0.4 m up) where a standing or crouched capsule fits (`intersects_capsule`); speed 6 m/s along the flight; `Fx::Blink`. No recast in time: the cooldown runs, the arrow goes |
+| Beacon Arrow | armed; `BEACON_ARROW` (0.6 × an arrow's hit) sticks where it lands — in the level, or in what it struck (rides along) — and lights for 6 s. `is_revealed(target)`: within 16 m of a lit beacon and hostile to its owner (never the owner) → `REVEALED` on the entity, ×1.15 from every player's damage (`DamageFlags::REVEALED`; the world's isn't). Unstuck, it lights nothing |
+| Hurl (twist) | `hits_targets` is off: `hurl_tick` sweeps its own motion every tick (current shapes, hit assist, the body only) striking each hostile once per leg: ×1.5 out, ×1.0 back (`return_damage_scale`). It turns back at 14 m from the hand or at the level (`GUIDED | RETURNING`, no gravity, homing on the chest at 30 m/s, re-launched every tick). The Trimmer's blade passes through; the Tamper's head turns at the first target (which the way back skips). Within 1 m of the chest: caught, 40 % of the cooldown back (server-side), `Fx::HurlCaught`. The level on the way back: gone |
+| Riposte | channel (up to 1.0 s), 0.6 speed; the guard (120°, no limit). A blocked blow from a Mould staggers it (after the Moulds' step: `riposte.stagger`); an enemy's parryable projectile reaching it from the front is turned back like a parry (`redirect_projectile`, the parry multipliers and auto-aim), any other is destroyed — both count as blocks. The first block heals like a parry (`parry_reward`, `HealSource::Parry`). The release with blocks: a counter-swing in the carrier's arc (lag-compensated) at ×(2.0 + 0.5 per further block, ≤ 3.0) its swing, `MELEE`, `Swing { attack: Riposte }`; without: nothing. Cooldown 4 s from the release. PvP ×0.55 |
+| the guard | `guard.rs` (see "The rework on the wire"); shared with arsenal-b's Bulwark |
+
+Measured (`balance_report -- abilities pvp oneshots`, PvP): Lamplighter 70.2 / 140 a full
+focus, 1.60 s body TTK; Wickline 10 / 20; Tally 30 / 60 a shot; Blink Arrow 42 / 84 and Beacon
+Arrow 31.5 / 63 at a full draw; Hurl 75.6 on the Trimmer (both legs), 89.2 on the Tamper (it
+turns at its target). Riposte and Waxwork read 0 there (the harness's targets don't attack; the
+burst comes at 5 s).
+
 ## Client: melee and knacks (refit, area arsenal-client)
 
 What you see and hear of the melee weapons and the knacks. Models in
@@ -751,6 +778,24 @@ its range).
   Trimmer's slash (and style's RICOCHET), out of reach / behind left alone, the Whirl; the Kiln's
   spray, the Gust, a full Discharge; a player's blast flinging at `relay_damage` through a
   chain, an enemy's not.
+* `shared/tests/combat_rework.rs` (arsenal-a's set): the Lamplighter (a tap, half and full
+  focus, the pierce at ×0.7, the head ×2, `DRAWING` + level), the Wickline (the zip, a light
+  target yanked + 10, a heavy one pulls you, a miss = half the cooldown, PvP half yank), the
+  Tally (marks in order in own state, `TALLYING`, a shot at each part passed over, nothing
+  tallied = a quarter, PvP three), the Waxwork (a Gnawer lured to it, `LURED`, its burst and
+  Burn when destroyed, the natural end sparing its owner, PvP shots at the double, the owner's
+  passing), the Blink Arrow (the step in front of a wall at 6 m/s, the window running out, a
+  tight spot), the Beacon Arrow (revealed in its radius only, ×1.15 from players, riding
+  along, out after 6 s), the Hurl (both legs on two targets, the head turning at the first, the
+  range and the catch's refund), the Riposte (a Gnawer's bite blocked, staggered, the counter;
+  nothing blocked = no swing; a needle turned back from the front, landing from behind).
+* `shared/src/sim/abilities/guard.rs` (unit): front-only, whole explosions, no knockback, Burn /
+  world / floor hazards pass, turning turns it, a spent Bulwark shatters (its cooldown, the
+  slow lifted), teammates aren't caught, the guard drops with its ability.
+* `shared/src/sim/weapons.rs` (unit): held abilities (press, hold, release, limit, switching
+  away), live abilities (recast, running out, ended by the server, the build's other ability
+  usable meanwhile), Stoke's rate and overheat, the Lamplighter's focus, the Blink Arrow's live
+  window, the Whirl taking the swing.
 * `shared/tests/combat_arsenal.rs`: every new primary (Lancet bloom, Thresher, Riveter flight,
   Cinderbox salvo, Longwick draw, Kiln + Burn), Burn stacks / refresh / kill credit / no
   LONGSHOT, Skewer pierce and falloff, Flurry, Slug, the Flak airburst and contact burst,

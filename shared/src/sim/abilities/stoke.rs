@@ -11,7 +11,7 @@
 //! It is judged when the hit lands: a rivet still flying when the Stoke runs out burns nothing.
 
 use super::super::combat::{Attack, DamageFlags, Owner};
-use super::super::{DamageEvent, PlayerId, SimWorld};
+use super::super::{DamageEvent, HitTarget, PlayerId, SimWorld};
 use super::AbilityCast;
 use crate::loadout::WeaponKind;
 use crate::tuning::Tuning;
@@ -67,6 +67,12 @@ impl SimWorld {
         let Some(weapon) = event.info.attack.primary_of() else {
             return;
         };
+        // (Burn doesn't stick to a Waxwork's double.)
+        if let HitTarget::Player(target) = event.target
+            && super::waxwork::decoy_owner(target).is_some()
+        {
+            return;
+        }
         if weapon == WeaponKind::Kiln || !self.is_stoked(id, weapon) {
             return;
         }
