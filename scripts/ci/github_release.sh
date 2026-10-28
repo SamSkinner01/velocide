@@ -62,8 +62,19 @@ These links always fetch the newest version, to bookmark or pass on:
 EOF
 }
 
+# Whether <tag> may be marked latest: not when it is an older build-<n> than the latest release
+# (a re-run of an old run would otherwise offer every player a downgrade, and the VPS deploys
+# whatever is latest).
+newest() {
+    local tag=$1 latest
+    latest=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+    if [[ "$tag" =~ ^build-([0-9]+)$ ]] && [[ "$latest" =~ ^build-([0-9]+)$ ]]; then
+        [ "${tag#build-}" -ge "${latest#build-}" ]
+    fi
+}
+
 publish() {
-    local tag=$1 dir=$2 name files=()
+    local tag=$1 dir=$2 name files=() latest=--latest
     for name in "${ASSETS[@]}"; do
         [ -f "$dir/$name" ] || { echo "error: $dir/$name is missing" >&2; exit 1; }
         files+=("$dir/$name")
@@ -74,6 +85,10 @@ publish() {
         exit 1
     fi
 
+    if ! newest "$tag"; then
+        echo "a newer release is latest already: $tag won't be marked latest"
+        latest=--latest=false
+    fi
     local notes_file
     notes_file=$(mktemp)
     notes "$tag" >"$notes_file"
@@ -81,10 +96,10 @@ publish() {
         echo "release $tag exists already (a re-run): replacing its assets"
         gh release upload "$tag" "${files[@]}" --clobber
         gh release edit "$tag" --target "$SHA" --title "$(title "$tag")" --notes-file "$notes_file" \
-            --draft=false --latest
+            --draft=false "$latest"
     else
         gh release create "$tag" "${files[@]}" --target "$SHA" --title "$(title "$tag")" \
-            --notes-file "$notes_file" --latest
+            --notes-file "$notes_file" "$latest"
     fi
     rm -f "$notes_file"
     gh release view "$tag" --json url,tagName,targetCommitish,assets \

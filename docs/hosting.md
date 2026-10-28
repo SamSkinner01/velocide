@@ -117,7 +117,7 @@ Add these to `ExecStart`. `velocide-server --help` lists them all.
 | `--name "Friday Night"` | server name |
 | `--dev-commands` | enables `/god`, `/spawn` and so on for the lobby host. Leave this off on a public server. |
 | `--online` | list it in the server browser through the online service built into the game (docs/rendezvous.md); `--rendezvous HOST:PORT` names another |
-| `--private` / `--relay-only` / `--online-only` | online: code only (not listed) / joiners go through the relay / only joiners the service introduces get in from the internet |
+| `--private` / `--relay-only` / `--allow-direct` | online: code only (not listed) / joiners go through the relay / also let anyone in by address (online, by default only joiners the service introduces get in from the internet) |
 | `--exit-when-replaced PATH` | exit once PATH points at another binary and nobody is connected (deploys; systemd starts the new one) |
 
 How a session runs:

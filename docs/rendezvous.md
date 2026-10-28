@@ -44,7 +44,7 @@ service introduced (the gate, below).
   host on the LAN only and say so on the host and join pages.
 - Command line: `--host --online code|public|off`, `--join ABCD-EFGH`, `--relay-only`,
   `--rendezvous HOST:PORT`. Dedicated server: `--online`, `--rendezvous HOST:PORT`,
-  `--private`, `--relay-only`, `--online-only` (only introduced joiners from the internet).
+  `--private`, `--relay-only`, `--allow-direct` (also let anyone in by address).
 
 ## How a join works
 
@@ -52,18 +52,23 @@ service introduced (the gate, below).
    at its address, then sends `Join { code, protocol, three netcode client ids, LAN address,
    relay_only }` from the same UDP socket its netcode will use.
 2. The service checks the code (rate-limited per IP), the protocol version and the host's bans,
-   opens a relay session, and sends:
+   picks a relay session (it takes a relay slot only once an end binds it), and sends:
    - the host an `Introduce` (MACed with the host's secret, resent every 250 ms until
-     acknowledged): the joiner's public address (unless relay only), its LAN address (only if
-     both share a public IP), its three client ids, the host's relay credential and a ban tag;
+     acknowledged, backing off: 6 sends in ~4 s): the joiner's public address (unless relay
+     only), its LAN address (only if both share a public IP), its three client ids, the host's
+     relay credential and a ban tag;
    - the joiner a `JoinOk`: the host's public address (unless relay only), the host's LAN
      address (same public IP only) and the joiner's relay credential.
 3. The host punches toward the joiner; the joiner tries, in order, **LAN** (1.5 s), **direct**
    (3 s, punching every 100 ms) and the **relay** (10 s), each with its own netcode client and
    client id. The first that connects wins.
+   The joiner binds its end of the relay session when it gets to the relay; the host's end is
+   the address of its listing.
 4. The host's gate admits the connection because its client id is one the introduction
-   announced, from an address the introduction allows (the joiner's IP, its LAN IP, or the
-   relay session). The introduction is used up: the other two ids no longer get in.
+   announced, from an address the introduction allows: its relay session, its LAN address, or
+   **one** address of its public IP (the first seen: its NAT may use another port toward the
+   host than toward the service). The introduction is used up: the other two ids no longer get
+   in.
 
 Relayed peers appear to netcode under stand-in addresses in `100::/64` (the IPv6 discard
 prefix, so no real packet ever comes from one): `rendezvous::relay_addr(session)`. The
@@ -115,13 +120,17 @@ is built so that nobody *off* the path can.
 The rules, and where they are enforced:
 
 - **No reflection or amplification** (`Service::reply_unverified`). A sender that hasn't proven
-  its address gets at most one reply per datagram, never bigger than the datagram, from a
-  global budget (2000/s). `Hello` and `Probe` are padded to 64 bytes so their answers fit. A
-  spoofed flood can't make the service send more to a victim than the attacker sent.
+  its address gets at most one reply per datagram, never bigger than the datagram, from a budget
+  per source network (/24: 50/s) and in all (20 000/s). `Hello` and `Probe` are padded to 64
+  bytes so their answers fit. A spoofed flood can't make the service send more to a victim than
+  the attacker sent, and one network can't use up everyone's cookies. These errors carry no
+  request nonce (another version's can't be read), so they are only believed before the service
+  has answered properly once: forging one can't take a host offline or end a game.
 - **Address proof before state** (`Keys::cookie`). Everything that creates or changes state
   needs a cookie: an HMAC of the sender's IP and port and the minute, valid for 60–120 s, sent
-  only to that address. Per-IP rate limits apply only after this check, so their table can't be
-  filled from spoofed addresses (and it is bounded: 65 536 IPs).
+  only to that address. Rate limits apply only after this check, per IP (40 then 10/s; its table
+  is bounded: 65 536 IPs) and in all (20 000/s), so many IPs together can't overwork it either.
+  The browser's sorted list is rebuilt at most once a second.
 - **Ownership** (`Keys::host_secret`, `Service::owned`). A listing's heartbeats, unregister,
   bans and acknowledgements need its 32-byte secret, compared in constant time. Introductions
   to a host carry an HMAC under that secret; the host ignores any without a valid one, any not
@@ -130,19 +139,32 @@ The rules, and where they are enforced:
   joins are limited to a burst of 5 then one every 2 s per IP. A private game isn't listed
   anywhere, and the service never logs codes.
 - **The gate** (`HostAgent::on_receive`, `HostAgent::admit`; `OnlineConfig::gate`, on for
-  online listen servers). From the internet, only packets from introduced joiners reach netcode
-  at all, and only a connection with an announced client id is admitted, once. Knowing the
-  host's address isn't enough to get in, so a code is a real access key, and kicks hold: a kick
-  bans the joiner's IP at the gate and, through a ban tag (an HMAC of host and IP that tells the
-  host nothing), at the service. Loopback (the host's own client) and the LAN (private IPv4)
-  skip the gate. A dedicated server's gate is off by default (it is joinable by address anyway),
-  `--online-only` turns it on.
+  online hosts, listen and dedicated: `--allow-direct` turns it off). From the internet, only
+  packets from introduced joiners reach netcode at all, one address per introduction, and only
+  a connection with an announced client id is admitted, once. Knowing the host's address isn't
+  enough to get in, so a code is a real access key. Loopback (the host's own client) and the
+  host's own LAN (the /24 of its LAN address) skip the gate.
+- **Kicks hold** (`Server::kick_player`, `HostAgent::ban`). A kick by the server's owner (a
+  listen server's host, a dedicated server's console) bans the joiner's IP at the host, voids
+  its other joins in flight, and sends the service a ban tag (an HMAC of host and IP that tells
+  the host nothing) so its joins are refused there too. A joiner behind the host's own public
+  IP is banned at the host only (at the service the tag would ban the host's own network), and
+  one on the host's own LAN can always come back over the LAN, which skips the gate. On a
+  dedicated server the lobby host is just whoever came first: their kicks don't ban.
+- **netcode's handshake table** (`server::transport::ConnectGuard`, every server). In unsecure
+  mode a client writes its own connect token, expiry and timeout included, and netcode keeps
+  an entry per address that asks to connect until that expiry, refusing everyone once it has
+  4096. The guard passes a connection request only if its token expires within 7 minutes and
+  only for 8 addresses of one IP and 2048 in all at once; connected clients that send nothing
+  for 15 s are dropped whatever timeout they asked for.
 - **Relays can't be hijacked or turned into proxies** (`Service::relay`, `relay_bind`). A
-  session is created only by a join, between that host and that joiner. Packets are forwarded
-  only between its two bound addresses. Binding an end (after a restart, or when a NAT changes
-  ports) needs that end's credential: an HMAC of session, role, expiry and host, valid 24 h.
-- **Bounded resources and bills** (`ServiceConfig`). 1024 listings (4 per IP), 512 relay
-  sessions (16 per host, 8 per joiner IP), 16 pending introductions per listing, 64 KiB/s per
+  session exists only for a join, between that host and that joiner, and only once an end binds
+  it with its credential (an HMAC of session, role, expiry and host, valid 24 h; also how ends
+  rebind after a restart or a NAT change). Packets are forwarded only between its two bound
+  addresses.
+- **Bounded resources and bills** (`ServiceConfig`). 4096 listings (4 per IP), 512 relay
+  sessions in use (16 per host, 8 per joiner IP; joins that connect directly don't take one),
+  16 pending introductions per listing (a host keeps 32, at most 3 per joiner), 64 KiB/s per
   relayed direction (512 KiB burst for level loads), 2 MiB/s and 20 GB per day relayed in all,
   so a heavy user can't run up the VPS's traffic bill. Idle relays close after 30 s.
 - **Privacy.** The browser shows only the code, name, mode, level and player count; addresses
@@ -153,15 +175,21 @@ The rules, and where they are enforced:
 - **Parsing.** The crate forbids `unsafe` and denies `unwrap`, `expect`, `panic!` and slice
   indexing outside tests; every read is bounds-checked; nothing allocates more than the datagram
   holds. A fuzz test throws 200 000 random and corrupted datagrams at the decoder.
-- **What a malicious host can do to joiners** is what any server could already do (the game
-  validates and size-limits everything a server sends, docs/network.md); the public browser
-  makes strangers' servers one click away, which is why the client side of that boundary was
-  part of the audit.
+- **What a malicious host can do to joiners** is what any server could already do: the game
+  validates and size-limits what a server sends (docs/network.md), and names, chat lines,
+  notices and level lists are cut to what a well-behaved server sends. The public browser makes
+  strangers' servers one click away, which is why the client side of that boundary was part of
+  the audit. Datagrams bigger than any of ours are dropped one by one (on Windows such a
+  datagram used to end the connection).
 
 **Not protected:** an on-path attacker (see above), and denial of service by bandwidth (the
-service rate-limits work, not the link). A botnet guessing codes from many IPs is slowed by
-the per-IP limit but not stopped; a guessed code lets a stranger into a lobby, where the host
-can kick (and so ban) them.
+service rate-limits work, not the link). Resource limits hold per IP, so a botnet with many
+IPs can still fill the listing table, the relay table, the control budget or (with spoofed
+sources) the cookie budget for as long as it keeps at it; likewise a server with the gate off
+(`--allow-direct`, or a LAN/port-forwarded host) can have its handshake table filled by
+spoofed connection requests until 7 minutes after they stop. A botnet guessing codes is slowed
+by the per-IP limit but not stopped; a guessed code lets a stranger into a lobby, where the
+host can kick (and so ban) them.
 
 ## Restarts
 
@@ -180,7 +208,9 @@ With a new key (the file was lost) hosts get new codes and relayed games end.
 
 `velocide-rendezvous --help` lists the flags (limits above, `--bind`, `--key-file`,
 `--exit-when-replaced`, `--probe HOST:PORT [--expect VERSION]`). It needs nothing but UDP
-port 47400; the release asset `velocide-rendezvous-linux-x86_64` is a standalone binary.
+port 47400; the release asset `velocide-rendezvous-linux-x86_64` is a standalone binary. The
+key file is written whole under a temporary name and linked into place, so a crash on first
+start can't leave a short key behind.
 
 The game finds the service through `VELOCIDE_RENDEZVOUS` (`host:port`) compiled into the game
 and the dedicated server (`rendezvous::BUILT_IN_SERVICE`), the repository variable of the same
@@ -189,25 +219,48 @@ name in CI; the player's setting or `--rendezvous` overrides it.
 ## Deploying
 
 Like the chess project, CI updates the VPS on every release. Unlike it, the key CI holds can do
-nothing but ask the VPS to install a release from GitHub:
+nothing but ask the VPS to install the newest release from GitHub:
 
 ```
 release job publishes build-<n>  ─▶  deploy job: ssh velocide-deploy@VPS "deploy build-<n>"
                                       authorized_keys: restrict,command="/usr/local/bin/velocide-deploy"
-                                      └─ checks the request is "deploy <tag>" (never runs it)
-                                      └─ downloads that release's assets from github.com over
-                                         HTTPS, checks GitHub's SHA-256 digests
+                                      └─ checks the request is "deploy <tag>" or "probe" (never runs it)
+                                      └─ installs GitHub's *latest* release, whatever was asked
+                                         (no downgrades): its assets from github.com over HTTPS,
+                                         checked against GitHub's SHA-256 digests
                                       └─ /opt/velocide/deploy/releases/<tag>/, flips `current`
-                                      └─ waits for the service to answer --probe as <tag>,
-                                         else flips back
+                                      └─ waits for the service to answer a probe datagram (sent
+                                         from Python) as <tag>, else flips back and checks again
 services: --exit-when-replaced notices `current` moved, exits, systemd starts the new binary
-          (the online service at once; the dedicated server once nobody is connected)
+          in its sandbox (the online service at once; the dedicated server once nobody is
+          connected)
 ```
 
-A leaked deploy key can at most make the VPS reinstall an official release. The deploy user
-owns only `/opt/velocide/deploy`, has no sudo, and can't change its own `authorized_keys`
-(root owns them). The services run as throwaway `DynamicUser`s with a tight systemd sandbox
-(`scripts/deploy/*.service`): no capabilities, read-only system, only IP sockets.
+A leaked deploy key can at most make the VPS install the release that is already the newest.
+The deploy user owns only `/opt/velocide/deploy`, has no sudo, and can't change its own
+`authorized_keys` (root owns them). Neither it nor root ever executes what it downloads: only
+systemd does, as throwaway `DynamicUser`s in a tight sandbox (`scripts/deploy/*.service`: no
+capabilities, read-only system, only IP sockets). `setup-vps.sh` refuses symlinks on its paths
+and never re-owns the deploy user's files. The script ignores SIGPIPE and SIGHUP, so a dropped
+SSH connection can't stop it between the switch and the health check; it logs to
+`/opt/velocide/deploy/deploy.log`. A re-run of an old workflow run never marks its release
+latest again (`github_release.sh`), so it can't offer players or the VPS a downgrade either.
+
+**What everything trusts:** the game's updater and the VPS install what this repository
+publishes as its latest release. So anyone who can write to the repository (or push a `v*`
+tag, whose run gets the deploy secrets) can ship code to every player and the VPS. GitHub
+settings that narrow that (recommended):
+
+- Settings → Rules → Rulesets: protect `main` (pull requests, no force pushes) and let only
+  you create `v*` tags.
+- Settings → Environments → `production`: required reviewer (you), and deployments only from
+  `main` and `v*` tags.
+- Settings → General → Releases: immutable releases (assets can't be replaced once published;
+  `github_release.sh`'s re-run path then fails instead of replacing them).
+- The workflow pins every action to a commit SHA and the build container to a digest.
+
+Signing releases with a key kept off GitHub (and checking it in the updater and the deploy
+script) would make even a compromised repository unable to ship code; that is not done yet.
 
 ### One-time setup
 
@@ -236,13 +289,17 @@ owns only `/opt/velocide/deploy`, has no sudo, and can't change its own `authori
    | secret (environment `production`) | `DEPLOY_SSH_KEY` | contents of `~/.ssh/velocide_deploy` |
    | secret (environment `production`) | `DEPLOY_KNOWN_HOSTS` | output of `ssh-keyscan -t ed25519 play.example.com` |
 
-   Under Settings → Environments → `production`, limit deployments to `main` and `v*` tags.
+   `ssh-keyscan` trusts whatever answers: compare its key with
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` run on the VPS itself (its console).
+   Under Settings → Environments → `production`, add yourself as required reviewer and limit
+   deployments to `main` and `v*` tags (see "What everything trusts" above).
 6. Push to `main`. The next release's game has the service built in, and the deploy job puts
    that release on the VPS.
 
 Until `DEPLOY_HOST` is set the deploy job is skipped and nothing else waits for it. Logs:
 `journalctl -u velocide-rendezvous -f` (counters every 5 minutes: listings, relays, packets,
-malformed, bad cookies, rate limited, refused, joins, relayed MB). Health:
+malformed, bad cookies, rate limited, refused, joins, relayed MB) and
+`/opt/velocide/deploy/deploy.log`. Health, from anywhere:
 `velocide-rendezvous --probe play.example.com`.
 
 ## Code

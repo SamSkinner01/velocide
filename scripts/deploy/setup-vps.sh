@@ -10,6 +10,10 @@
 # user, sandboxed), opens the UDP ports in ufw if ufw is on, installs the newest release and
 # starts the services. Running it again updates the units and the deploy script, and replaces
 # the deploy key.
+#
+# Root never runs, reads into or re-owns anything under /opt/velocide/deploy (the deploy user
+# owns it, so root treats it as untrusted): it only creates what is missing, refuses symlinks
+# on the way, and checks the service through the deploy script as the deploy user.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -42,7 +46,16 @@ for tool in curl python3 flock sha256sum systemctl runuser; do
     command -v "$tool" >/dev/null || die "$tool is missing (apt-get install curl python3 util-linux coreutils)"
 done
 
+# A directory root creates or uses: refused if something put a symlink there.
+no_link() {
+    [ ! -L "$1" ] || die "$1 is a symlink: remove it (and find out who made it) first"
+}
+
 home=/var/lib/velocide-deploy
+for path in /opt/velocide /opt/velocide/deploy /opt/velocide/deploy/releases \
+    "$home" "$home/.ssh" "$home/.ssh/authorized_keys"; do
+    no_link "$path"
+done
 if ! id velocide-deploy >/dev/null 2>&1; then
     useradd --system --no-create-home --home-dir "$home" --shell /bin/sh velocide-deploy
 fi
@@ -54,7 +67,10 @@ chown root:root "$home/.ssh/authorized_keys"
 chmod 644 "$home/.ssh/authorized_keys"
 
 install -d -o root -g root -m 755 /opt/velocide
-install -d -o velocide-deploy -g velocide-deploy -m 755 /opt/velocide/deploy /opt/velocide/deploy/releases
+# Made once; never chowned again by root (it belongs to the deploy user from then on).
+for dir in /opt/velocide/deploy /opt/velocide/deploy/releases; do
+    [ -d "$dir" ] || install -d -o velocide-deploy -g velocide-deploy -m 755 "$dir"
+done
 install -o root -g root -m 755 velocide-deploy /usr/local/bin/velocide-deploy
 
 install -o root -g root -m 644 velocide-rendezvous.service /etc/systemd/system/
@@ -76,9 +92,9 @@ if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
     for p in "${ports[@]}"; do ufw allow "$p"; done
 fi
 
-sleep 2
-if /opt/velocide/deploy/current/velocide-rendezvous --probe 127.0.0.1:47400 >/dev/null; then
-    echo "==> the online service answers on UDP 47400"
+sleep 3
+if version=$(runuser -u velocide-deploy -- /usr/local/bin/velocide-deploy probe); then
+    echo "==> the online service answers on UDP 47400: $version"
 else
     echo "warning: the online service doesn't answer yet: journalctl -u velocide-rendezvous" >&2
 fi

@@ -18,6 +18,10 @@
 #
 # The compiling jobs install their packages and the Rust toolchain with scripts/ci/setup.sh and
 # build with scripts/build_dist.sh, the same scripts scripts/package.sh runs locally.
+#
+# Actions are pinned to full commit SHAs (the tag in the comment) and the build container to a
+# digest, so a moved tag upstream can't change what is built and shipped. Update them on
+# purpose: `git ls-remote https://github.com/<owner>/<action> refs/tags/<tag>`.
 name: release
 
 on:
@@ -58,11 +62,11 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "false"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh check
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
@@ -79,7 +83,8 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     # 20.04 keeps the binaries on glibc 2.31 (any distro from about 2020 on).
-    container: ubuntu:20.04
+    # By digest (ubuntu:20.04 as of 2026-10): what ships can't change under a moved tag.
+    container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
     timeout-minutes: 60
     concurrency:
       group: ${{ github.workflow }}-linux-${{ github.ref }}
@@ -91,11 +96,11 @@ jobs:
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates zstd >/dev/null
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh linux
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
@@ -103,7 +108,7 @@ jobs:
         env:
           VELOCIDE_RENDEZVOUS: ${{ vars.VELOCIDE_RENDEZVOUS }}
         run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh linux
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux
           path: |
@@ -122,11 +127,11 @@ jobs:
       group: ${{ github.workflow }}-windows-${{ github.ref }}
       cancel-in-progress: ${{ github.ref_type != 'tag' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh windows
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
@@ -134,7 +139,7 @@ jobs:
         env:
           VELOCIDE_RENDEZVOUS: ${{ vars.VELOCIDE_RENDEZVOUS }}
         run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh windows
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows
           path: |
@@ -156,8 +161,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist
           merge-multiple: true
@@ -198,7 +203,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o BatchMode=yes -o ConnectTimeout=20 "$DEPLOY_USER@$DEPLOY_HOST" "deploy $RELEASE"
+            -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=8 -- "$DEPLOY_USER@$DEPLOY_HOST" "deploy $RELEASE"
       - name: Forget the key
         if: always()
         run: rm -f ~/.ssh/deploy_key

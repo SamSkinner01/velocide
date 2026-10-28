@@ -5,7 +5,9 @@
 # After a deploy it keeps the running match going and exits once nobody is connected; systemd
 # then starts the new binary (players on the new version can't join an old server anyway).
 # --online lists it in the server browser through the service built into the release
-# (repository variable VELOCIDE_RENDEZVOUS): remove it if the builds have none.
+# (repository variable VELOCIDE_RENDEZVOUS; remove it if the builds have none). Online, only
+# joiners the service introduces get in from the internet; add --allow-direct to also let
+# players join by address.
 [Unit]
 Description=VELOCIDE dedicated server
 After=network-online.target velocide-rendezvous.service
