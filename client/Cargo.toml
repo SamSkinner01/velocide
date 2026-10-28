@@ -33,3 +33,10 @@ renetcode = "2"
 log.workspace = true
 env_logger.workspace = true
 anyhow.workspace = true
+# The update check (src/update): GitHub's releases API and downloads over HTTPS, on a
+# background thread. rustls with the ring provider and bundled Mozilla roots: no OpenSSL (the
+# Linux binary would need the distro's libssl) and no aws-lc-rs (cmake / nasm to cross-compile
+# for Windows).
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+serde_json = "1"
+sha2 = "0.10"

@@ -7,6 +7,7 @@
 //! - [`palette`]: colour-blind-safe colours by role (follows the colour-vision setting).
 //! - [`settings`], [`controls`], [`ui_input`], [`cli`], [`bot`], [`frame`]: shared plumbing.
 //! - [`level_mesh`]: level geometry for the renderer.
+//! - [`update`]: the update check and self-update (docs/distribution.md).
 //!
 //! Architecture and extension points: `docs/client.md`.
 
@@ -23,3 +24,4 @@ pub mod net;
 pub mod palette;
 pub mod settings;
 pub mod ui_input;
+pub mod update;

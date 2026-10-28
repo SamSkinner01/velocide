@@ -20,6 +20,10 @@
 //! screen fills the [`FrameBuffers`] and returns a [`ScreenOutput`] → settings changes are
 //! applied → cursor grab follows the screen's request → audio update → debug overlay →
 //! render → screen transition.
+//!
+//! The update check (`crate::update`) starts in `init` and runs beside all of this; the main
+//! menu shows its prompt. After an update the menu quits like QUIT does and `main` starts the
+//! new executable once [`run`] has returned.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -40,6 +44,7 @@ use crate::menus::main_menu::MainMenu;
 use crate::models::ModelLibrary;
 use crate::settings::Settings;
 use crate::ui_input::UiInputMapper;
+use crate::update::Updater;
 
 /// Everything the app hands to [`run`]'s `Game::init` (engine's `init` takes no arguments).
 pub struct Launch {
@@ -122,6 +127,9 @@ pub struct Common {
     /// Player, weapon, enemy and prop models (`client::models`), loaded once
     /// ([`Common::load_models`]).
     pub models: Option<ModelLibrary>,
+    /// This launch's update check; the main menu shows its prompt. Off unless the app
+    /// started it ([`Updater::for_launch`]), so headless tools and tests never go online.
+    pub update: Updater,
 }
 
 impl Common {
@@ -145,6 +153,7 @@ impl Common {
             launch,
             stats: FrameStats::default(),
             models: None,
+            update: Updater::off(),
         };
         common.apply_accessibility();
         common
@@ -341,6 +350,9 @@ impl VelocideApp {
         if let Screen::Game(game) = &mut self.screen {
             game.apply_settings(&self.common.settings);
         }
+        self.common
+            .update
+            .set_enabled(self.common.settings.check_for_updates);
     }
 
     /// Global hotkeys, unless a text field or key capture owns the keyboard.
@@ -418,6 +430,8 @@ impl Game for VelocideApp {
         );
 
         common.load_models(&mut ctx.renderer);
+        // Release builds ask GitHub for a newer release (in the background).
+        common.update = Updater::for_launch(&common.launch, &common.settings);
         #[cfg(feature = "debug-ui")]
         let debug_ui = engine::debug_ui::DebugUi::new(ctx);
         let menu = MainMenu::new(&mut ctx.renderer, &common);

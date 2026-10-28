@@ -126,6 +126,25 @@ fn settings_files_from_before_accessibility_still_load() {
 }
 
 #[test]
+fn check_for_updates_round_trips_and_defaults_on() {
+    // On for new players and for files written before the setting existed.
+    assert!(Settings::default().check_for_updates);
+    let old = Settings::from_ron(r#"(fov: 100.0, player_name: "OLD SHRIKE")"#).unwrap();
+    assert!(old.check_for_updates);
+    let path = scratch("updates");
+    let s = Settings {
+        check_for_updates: false,
+        ..Default::default()
+    };
+    s.save(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("check_for_updates: false"), "{text}");
+    let back = Settings::load(&path);
+    assert_eq!(back, s);
+    assert!(!back.check_for_updates);
+}
+
+#[test]
 fn accessibility_values_are_repaired_and_cues_follow_the_mode() {
     let s = Settings::from_ron(
         "(accessibility: (color_vision: (mode: Protanopia, strength: 7.5), future: 1))",

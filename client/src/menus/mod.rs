@@ -1,6 +1,6 @@
-//! Menus: the main menu (with single-player level select, host, join and settings pages),
-//! the lobby screen for hosted / joined games, the shared settings screen and the drawing
-//! helpers that give them their look.
+//! Menus: the main menu (with single-player level select, host, join and settings pages, and
+//! the update prompt), the lobby screen for hosted / joined games, the shared settings screen
+//! and the drawing helpers that give them their look.
 //!
 //! The pause menu lives with the in-game code (`ingame::pause`) but reuses
 //! [`settings_menu::SettingsMenu`].
@@ -18,3 +18,5 @@ pub mod main_menu;
 pub mod results;
 pub mod settings_menu;
 pub mod style;
+/// The main menu's update prompt (UPDATE NOW / LATER, download progress, failures).
+pub mod update_prompt;

@@ -82,11 +82,11 @@ pub fn hints(list: &mut UiDrawList, t: &Theme, canvas: Rect, left: &str, right: 
     );
 }
 
-/// Version / build text.
+/// Version / build text: `build-42 (1a2b3c4) // PROTOCOL 7` (`dev` for dev builds).
 pub fn build_tag() -> String {
     format!(
-        "v{} // PROTOCOL {}",
-        env!("CARGO_PKG_VERSION"),
+        "{} // PROTOCOL {}",
+        shared::build_info::label(),
         shared::protocol::PROTOCOL_VERSION
     )
 }

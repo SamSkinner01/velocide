@@ -6,7 +6,8 @@
 //! file gives the defaults (with a warning) and never stops the game; unknown fields are
 //! ignored and missing ones use their defaults, so old files keep working. Accessibility
 //! options (colour vision, shape cues) are their own `accessibility` section, the LOADOUT
-//! screen (current loadout + presets) its own `loadout` section.
+//! screen (current loadout + presets) its own `loadout` section. Files from before a setting
+//! existed get its default (e.g. "Check for updates" on).
 
 use std::path::{Path, PathBuf};
 
@@ -289,6 +290,8 @@ pub struct Settings {
     /// Grind records: the best wave reached per arena and difficulty
     /// ([`Settings::best_grind_wave`]).
     pub grind_best: std::collections::BTreeMap<String, u32>,
+    /// Ask GitHub for a newer release at launch (release builds only; `client::update`).
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -326,6 +329,7 @@ impl Default for Settings {
             sp_mode: shared::lobby::GameMode::Campaign,
             difficulty: shared::lobby::Difficulty::Normal,
             grind_best: Default::default(),
+            check_for_updates: true,
         }
     }
 }

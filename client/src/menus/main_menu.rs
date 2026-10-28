@@ -2,7 +2,8 @@
 //! max players), JOIN GAME (address, name), CUSTOMISE (your Shrike's look, `menus::customize`),
 //! LOADOUT (`menus::loadout`), SETTINGS, QUIT. HOST and JOIN continue in the lobby
 //! (`menus::lobby`). A level renders behind it; messages (disconnect reasons, connection errors)
-//! appear in a modal box. The warm-up hub is never offered as a level.
+//! appear in a modal box, then the update prompt when a newer release is out
+//! (`menus::update_prompt`, on the root page only). The warm-up hub is never offered as a level.
 //!
 //! Adding a page: add a [`Page`] variant, a menu item in `root_items`, and a `fn xxx_page`
 //! drawing a panel that returns a [`Transition`] when it starts something.
@@ -19,6 +20,7 @@ use super::customize::CustomizeMenu;
 use super::loadout::{self, LoadoutMenu};
 use super::settings_menu::{self, SettingsMenu};
 use super::style;
+use super::update_prompt::UpdatePrompt;
 use crate::app::Common;
 use crate::cli::StartMode;
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
@@ -66,6 +68,7 @@ pub struct MainMenu {
     customize: CustomizeMenu,
     /// The LOADOUT page (made when it opens: it reads the tuning file for its numbers).
     loadout: Option<LoadoutMenu>,
+    update_prompt: UpdatePrompt,
 }
 
 /// Playable levels: `assets/levels/*.ron` plus the built-in level, without the warm-up hub
@@ -126,6 +129,7 @@ impl MainMenu {
             settings: SettingsMenu::new(),
             customize: CustomizeMenu::new(),
             loadout: None,
+            update_prompt: UpdatePrompt::new(),
         }
     }
 
@@ -193,9 +197,15 @@ impl MainMenu {
         let mut transition = None;
         let mut sound = None;
         let mut settings_resp = settings_menu::SettingsResponse::default();
+        // A newer release: offered on the root page, after any notice.
+        let update = match (self.page, &self.message) {
+            (Page::Root, None) => common.update.prompt(),
+            _ => None,
+        };
         {
             let theme = &common.theme;
             let settings = &mut common.settings;
+            let updater = &mut common.update;
             let FrameBuffers {
                 ui: list,
                 viewmodel,
@@ -268,7 +278,7 @@ impl MainMenu {
                     5.0,
                     "WAX. WICK. VELOCITY.",
                 );
-                let modal = self.message.is_some();
+                let modal = self.message.is_some() || update.is_some();
                 let in_page = self.page != Page::Root;
                 // Root column (greyed out while a page or message is open).
                 ui.area(Rect::new(vec2(28.0, 138.0), vec2(290.0, 340.0)), |ui| {
@@ -342,6 +352,15 @@ impl MainMenu {
                         sound = Some(Sfx::UiBack);
                         self.message = None;
                         self.return_focus = Some("SINGLE PLAYER");
+                    }
+                } else if let Some(prompt) = &update {
+                    let r = self.update_prompt.ui(&mut ui, updater, prompt);
+                    sound = r.sound.or(sound);
+                    if r.closed {
+                        self.return_focus = Some("SINGLE PLAYER");
+                    }
+                    if r.restart {
+                        transition = Some(Transition::Quit);
                     }
                 }
                 style::hints(

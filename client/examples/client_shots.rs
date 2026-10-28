@@ -1,6 +1,7 @@
 //! Renders the real client screens headless (GPU, no window) with scripted input and saves
 //! PNGs: every main-menu page (the LOADOUT page also with its ability, weapon and knack
-//! pickers and the HUNTER preset loaded), each settings tab, a notice, single-player gameplay (bot driven),
+//! pickers and the HUNTER preset loaded), each settings tab, a notice, the update prompt (a new
+//! release, its download, a failure), single-player gameplay (bot driven),
 //! the pause menu (+ its loadout and settings pages), chat, the scoreboard and the connecting
 //! screen. Used to check layout and look without clicking through the game.
 //!
@@ -17,6 +18,7 @@ use client::frame::{FrameBuffers, FrameIo, ScreenOutput};
 use client::ingame::InGame;
 use client::menus::main_menu::MainMenu;
 use client::settings::Settings;
+use client::update::{Latest, Release, State, UpdateConfig, Updater};
 use engine::audio::Audio;
 use engine::gfx::{RetroSettings, UiDrawList};
 use engine::input::{GamepadButton, GamepadEvent, InputState};
@@ -217,6 +219,48 @@ fn main() -> anyhow::Result<()> {
     menu.show_message(Some("Disconnected: connection timed out".into()));
     h.menu(&mut menu, &[]);
     h.shot("menu_notice");
+    // The update prompt (after the notice is closed): a newer release, its download, a
+    // failure. Fixed states: nothing goes online.
+    h.menu(&mut menu, &[&[Escape]]);
+    let latest = Latest {
+        release: Release {
+            tag_name: "build-43".into(),
+            target_commitish: "9f3c2e1d0b4a5968776655443322110fedcba987".into(),
+            html_url: "https://github.com/SamSkinner01/velocide/releases/tag/build-43".into(),
+            assets: Vec::new(),
+        },
+        commit: "9f3c2e1d0b4a5968776655443322110fedcba987".into(),
+    };
+    let config = UpdateConfig {
+        api: "http://127.0.0.1:9".into(),
+        repo: "SamSkinner01/velocide".into(),
+        version: "build-42".into(),
+        commit: "4c7d21aa93be0f6e1d2c3b4a5968778899aabbcc".into(),
+        exe: std::env::temp_dir().join("velocide-client-shots-exe"),
+    };
+    for (name, state) in [
+        ("menu_update", State::Available(latest.clone())),
+        (
+            "menu_update_download",
+            State::Downloading {
+                latest: latest.clone(),
+                done: 23_900_000,
+                total: 51_400_000,
+            },
+        ),
+        (
+            "menu_update_failed",
+            State::Failed {
+                latest: latest.clone(),
+                reason: "can't write C:\\Games\\velocide: Access is denied. (os error 5)".into(),
+            },
+        ),
+    ] {
+        h.common.update = Updater::showing(Some(config.clone()), state);
+        h.menu(&mut menu, &[]);
+        h.shot(name);
+    }
+    h.common.update = Updater::off();
     menu.free(&mut h.renderer);
 
     // ---- single-player ------------------------------------------------------------------------

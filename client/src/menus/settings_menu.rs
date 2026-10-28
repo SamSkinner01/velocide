@@ -1,8 +1,8 @@
 //! Settings screen (used by the main menu and the pause menu): tabs for Video/Retro, Audio,
-//! Controls (sensitivity, invert, key rebinding), Gameplay and Accessibility (colour vision,
-//! shape cues, with a live palette preview). Changes apply live (the caller sets
-//! `Common::settings_changed` when [`SettingsResponse::changed`]) and are saved when the
-//! player leaves the screen.
+//! Controls (sensitivity, invert, key rebinding), Gameplay (also the update check and the
+//! version) and Accessibility (colour vision, shape cues, with a live palette preview).
+//! Changes apply live (the caller sets `Common::settings_changed` when
+//! [`SettingsResponse::changed`]) and are saved when the player leaves the screen.
 
 use engine::color_vision::ColorVisionMode;
 use engine::input::{Binding, InputState, Key};
@@ -243,12 +243,19 @@ fn gameplay_tab(ui: &mut Ui, s: &mut Settings, r: &mut SettingsResponse) {
     r.changed |= ui.toggle("SPEEDOMETER", &mut s.show_speed);
     r.changed |= ui.toggle("FPS COUNTER", &mut s.show_fps);
     r.changed |= ui.toggle("PING DISPLAY", &mut s.show_ping);
+    ui.heading("UPDATES");
+    r.changed |= ui.toggle("CHECK FOR UPDATES", &mut s.check_for_updates);
     ui.enabled_scope(false, |ui| {
+        ui.value_row("VERSION", &shared::build_info::label());
         ui.value_row(
             "NETCODE",
             &format!("PROTOCOL {}", shared::protocol::PROTOCOL_VERSION),
         );
     });
+    ui.label_wrapped(
+        "Everyone in a game needs the same version. Release builds look for a new one at \
+         launch and offer it on the main menu.",
+    );
 }
 
 fn reset_tab(tab: usize, s: &mut Settings) {
@@ -279,6 +286,7 @@ fn reset_tab(tab: usize, s: &mut Settings) {
             s.show_speed = d.show_speed;
             s.show_fps = d.show_fps;
             s.show_ping = d.show_ping;
+            s.check_for_updates = d.check_for_updates;
         }
         _ => s.accessibility = d.accessibility,
     }
