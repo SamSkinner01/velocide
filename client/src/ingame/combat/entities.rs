@@ -207,9 +207,10 @@ pub struct EntityFrame<'a> {
     pub render_tick: f64,
     pub tick_rate: u32,
     pub tuning: &'a CombatTuning,
-    /// The local player's own projectiles from the newest snapshot, drawn at `own_time` (the
-    /// present) so a shot leaves the barrel immediately instead of an interpolation delay
-    /// later. Own projectiles in `entities` are skipped.
+    /// The local player's own projectiles from the newest snapshot: the ones not flown from
+    /// the shot's view time (deflected ones) are drawn from here at `own_time` (the present);
+    /// the rest from `entities` at the render tick, their stand-ins covering the start
+    /// (`stand_in.rs`).
     pub own: &'a [EntityState],
     pub own_time: f64,
     /// Owner code of the local player.
@@ -233,17 +234,34 @@ const MUZZLE_BLEND: f32 = 0.15;
 
 impl EntityFrame<'_> {
     /// Every projectile to show: the entity, the time to evaluate its trajectory at and a
-    /// visual offset (own projectiles start at the muzzle).
+    /// visual offset (own projectiles start at the muzzle). The local player's own are drawn at
+    /// the render tick like the rest when the server flies them from the shot's view time
+    /// (`stand_in::on_render_clock`), else at `own_time`.
     pub(crate) fn projectiles(&self) -> impl Iterator<Item = (&EntityState, f64, Vec3)> {
         let own = self.local_owner;
+        let stand_ins = self.stand_ins;
         self.entities
             .iter()
-            .filter(move |e| kind::is_projectile(e.kind) && Some(e.owner) != own)
-            .map(|e| (e, self.render_tick, Vec3::ZERO))
+            .filter(move |e| {
+                kind::is_projectile(e.kind)
+                    && (Some(e.owner) != own
+                        || (super::stand_in::on_render_clock(e)
+                            && !stand_ins.is_some_and(|s| s.hidden(e.id))))
+            })
+            .map(move |e| {
+                // Just handed over from a stand-in: drawn where the stand-in was, easing onto
+                // its own path.
+                match stand_ins.and_then(|s| s.handover(e.id)) {
+                    Some((ahead, offset)) if Some(e.owner) == own => {
+                        (e, self.render_tick + ahead, offset)
+                    }
+                    _ => (e, self.render_tick, Vec3::ZERO),
+                }
+            })
             .chain(
                 self.own
                     .iter()
-                    .filter(|e| kind::is_projectile(e.kind))
+                    .filter(|e| kind::is_projectile(e.kind) && !super::stand_in::on_render_clock(e))
                     .map(|e| {
                         // Just handed over from a stand-in: drawn where the stand-in was,
                         // easing onto its own path.
@@ -265,7 +283,7 @@ impl EntityFrame<'_> {
             .chain(
                 self.stand_ins
                     .into_iter()
-                    .flat_map(|s| s.drawn(self.own_time)),
+                    .flat_map(|s| s.drawn(self.own_time, self.render_tick)),
             )
     }
 }

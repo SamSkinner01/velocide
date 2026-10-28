@@ -101,6 +101,12 @@ impl Prediction {
         &self.current
     }
 
+    /// The predicted state before the latest input (where it started moving from).
+    pub fn previous_state(&self) -> &MoveState {
+        let mut after = self.history.iter().rev().map(|p| &p.after);
+        after.nth(1).unwrap_or(&self.acked_state)
+    }
+
     /// Last input acknowledged by the server.
     pub fn acked_seq(&self) -> u32 {
         self.acked_seq

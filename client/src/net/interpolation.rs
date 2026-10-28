@@ -16,8 +16,8 @@ use shared::protocol::{EntityState, NetFrame, NetId};
 /// baseline age limit (`server::MAX_BASELINE_AGE_TICKS`).
 pub const FRAME_RETENTION_TICKS: u32 = 180;
 /// Entities moving faster than this between two frames (m per tick) are treated as teleported
-/// and not interpolated.
-pub const TELEPORT_SPEED: f32 = 3.0;
+/// and not interpolated (the server's lag compensation rewinds them the same way).
+pub const TELEPORT_SPEED: f32 = shared::sim::TELEPORT_PER_TICK;
 
 /// How a sample was produced.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

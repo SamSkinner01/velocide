@@ -39,7 +39,8 @@ pub struct WeaponPredictor {
 pub struct PredictedShot {
     pub input: PlayerInput,
     pub intents: Vec<FireIntent>,
-    /// The predicted eye when it fired (projectile stand-ins launch from it).
+    /// The predicted eye when it fired, before its input's movement (projectiles launch from
+    /// there, `shared::sim::projectiles::LaunchView`; so do their stand-ins).
     pub eye: Option<glam::Vec3>,
     /// Its effects were already played on the press frame ([`WeaponPredictor::lookahead`]).
     pub played: bool,
@@ -99,9 +100,18 @@ impl WeaponPredictor {
         }
         let alive = !net.own_combat().is_some_and(|c| c.dead_at(input.seq));
         let mut shot = self.apply(&input, alive, &net.tuning().combat, net.tick_rate());
-        shot.eye = net
-            .local_state()
-            .map(|s| s.eye_position(&net.tuning().movement));
+        // Its projectiles leave from where the input's movement started (in the stance after
+        // it), as on the server.
+        shot.eye = net.prediction().map(|p| {
+            let now = p.state();
+            let back = p.previous_state().position - now.position;
+            let back = if back.length() <= shared::sim::TELEPORT_PER_TICK {
+                back
+            } else {
+                glam::Vec3::ZERO
+            };
+            now.eye_position(&net.tuning().movement) + back
+        });
         Some(shot)
     }
 

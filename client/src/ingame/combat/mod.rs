@@ -543,28 +543,7 @@ fn parry_feedback(
     effects.sparks(fist + view * 0.3, -view, 10);
 }
 
-/// The local player's projectiles from the newest snapshot, the (present) time to draw them
-/// at, and the local owner code.
-fn own_projectiles(net: &NetClient) -> (Vec<EntityState>, f64, Option<u16>) {
-    let Some(me) = net.local_player_id().map(|p| p.0 as u16) else {
-        return (Vec::new(), 0.0, None);
-    };
-    let Some((latest, frame)) = net.frames().latest() else {
-        return (Vec::new(), 0.0, Some(me));
-    };
-    let own = frame
-        .states()
-        .filter(|e| kind::is_projectile(e.kind) && e.owner == me)
-        .collect();
-    // Present time, but never far past what the server has confirmed (impacts we haven't
-    // heard of yet).
-    let now = net
-        .server_tick_estimate()
-        .unwrap_or(latest as f64)
-        .min(latest as f64 + 6.0)
-        .max(net.render_tick());
-    (own, now, Some(me))
-}
+use stand_in::own_projectiles;
 
 /// Approximate displayed hit capsules for client-side tracer ends: (entity, a, b, radius).
 pub(crate) fn entity_capsule(e: &EntityState) -> Option<(Vec3, Vec3, f32)> {
@@ -925,8 +904,10 @@ impl InGame {
                             aim,
                             t,
                         );
-                        // Own projectiles leave the muzzle now, not a round trip later.
+                        // Own projectiles leave the muzzle now, not a round trip later (from
+                        // the view the shot was aimed at, as the server flies them).
                         if let Some(owner) = owner {
+                            let view = stand_in::shot_view(net, input);
                             for l in stand_in::launches(
                                 intent,
                                 aim,
@@ -936,7 +917,7 @@ impl InGame {
                                 live_limpets,
                                 &mut combat.rng,
                             ) {
-                                combat.stand_ins.spawn(l, muzzle, owner, own_now, t);
+                                combat.stand_ins.spawn(l, muzzle, owner, own_now, view, t);
                             }
                         }
                         let charge = match intent {
@@ -1146,6 +1127,8 @@ impl InGame {
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
     /// visuals (Discharge charge, brands), viewmodel charge, music intensity.
     pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32, real_dt: f32) {
+        // Other players are what our shots can hit only in PvP (stand-ins stop in targets).
+        let pvp = self.match_mode().is_pvp();
         let InGame {
             session,
             combat,
@@ -1218,19 +1201,21 @@ impl InGame {
         let own_offset = viewmodel
             .last_draw()
             .map_or(Vec3::ZERO, |d| last_camera.rotation * d.muzzle);
-        // Own projectiles' stand-ins: fly, stop, hand over to the server's (real time: the
-        // projectiles they stand in for don't stop for hitstop).
-        let bodies: Vec<(Vec3, Vec3, f32)> = entities.iter().filter_map(entity_capsule).collect();
-        let rtt = net.stats().rtt_ms / 1000.0;
+        // Own projectiles' stand-ins: fly, stop where the server's will, hand over to the
+        // server's (real time: the projectiles they stand in for don't stop for hitstop).
+        let targets = stand_in::displayed_targets(net, pvp);
+        let rendered = stand_in::rendered_own(net);
         combat.stand_ins.update(
             &stand_in::StandInFrame {
                 own: &own,
                 now: own_time,
+                rendered: &rendered,
+                render: render_tick,
                 tick_rate: rate,
                 tuning: t,
                 world: net.world().map(|w| &w.collision.world),
-                bodies: &bodies,
-                timeout: (rtt * 1.5 + 0.25).clamp(0.3, 1.2),
+                targets: &targets,
+                timeout: stand_in::timeout(net),
             },
             real_dt,
         );
