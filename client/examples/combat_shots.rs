@@ -568,11 +568,7 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("arsenal_limpet_blast");
     h.frames(game, 40, still);
 
-    // A kite (placeholder look) and its blast.
-    fire(game, K::Kite, 0.0, 14.0, 9.0, 20.0);
-    h.frames(game, 20, still);
-    h.shot("arsenal_kite");
-    h.frames(game, 60, |g, _| hold(g, Buttons::NONE));
+    // The kite's blast (the kite itself: `gear_previews`).
     game.preview_arsenal(P::Blast {
         blast: Blast::Kite,
         position: ground + fwd * 4.0,
@@ -582,10 +578,7 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("arsenal_kite_blast");
     h.frames(game, 60, still);
 
-    // A bolas (placeholder look) thrown ahead; statuses on the Moulds.
-    fire(game, K::Bolas, 0.0, 10.0, 4.0, 8.0);
-    h.frames(game, 12, still);
-    h.shot("arsenal_bolas");
+    // Statuses on the Moulds.
     let moulds: Vec<_> = game
         .net()
         .map(|n| {
@@ -1092,6 +1085,132 @@ fn gear_previews(h: &mut Harness, game: &mut InGame) {
     }
 }
 
+/// The rework's Scatter / Rapid / Explosive abilities and the Kindle Flask used for real
+/// (`/loadout ...`): the Bulwark held up, the Stoke and its overheat, a Lantern set down, a
+/// Kite steered, a Bolas thrown at the Moulds, the Wisp orbiting and flung, the drink
+/// (`gear_use_*.png`).
+fn gear_use_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let aim_mould = |g: &mut InGame| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t);
+        }
+    };
+    game.send_chat("/killall");
+    game.send_chat(
+        "/loadout bellows:gust,bulwark riveter:stoke,lantern cinderbox:limpet,kite \
+         thresher:bolas,flak knack:kindle",
+    );
+    spawn(game, 3);
+    h.frames(game, 90, still);
+
+    // The Bulwark held up (and its bar under the crosshair).
+    select(game, 0, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    h.frames(game, 40, |g, _| hold(g, Buttons::ALT_FIRE));
+    h.shot("gear_use_bulwark");
+    h.frames(game, 10, still);
+    h.frames(game, 60, still);
+
+    // The Riveter stoked, firing; then spent and venting.
+    select(game, 1, 0);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 70, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::FIRE)
+    });
+    h.shot("gear_use_stoke");
+    h.frames(game, 180, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::FIRE)
+    });
+    h.shot("gear_use_overheat");
+    h.frames(game, 100, still);
+    // Fresh Moulds for the rest.
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 90, still);
+
+    // A Lantern tossed ahead.
+    select(game, 1, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    game.controls.pitch -= 0.3;
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 20, still);
+    aim_mould(game);
+    h.frames(game, 60, still);
+    h.shot("gear_use_lantern");
+    h.frames(game, 60, still);
+
+    // A Kite launched and steered.
+    select(game, 2, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    game.controls.yaw += 0.5;
+    game.controls.pitch += 0.1;
+    h.frames(game, 30, |g, _| {
+        g.controls.yaw -= 0.015;
+        hold(g, Buttons::ALT_FIRE)
+    });
+    h.shot("gear_use_kite");
+    h.frames(game, 60, still);
+
+    // A Bolas thrown at the Moulds.
+    select(game, 3, 0);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 8, still);
+    h.shot("gear_use_bolas");
+    h.frames(game, 30, still);
+    h.shot("gear_use_bound");
+    h.frames(game, 60, still);
+
+    // The Wisp orbiting you, then flung.
+    game.send_chat("/loadout arclash:wisp,discharge");
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    select(game, 0, 0);
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 45, still);
+    h.shot("gear_use_wisp");
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 6, still);
+    h.shot("gear_use_wisp_flung");
+    h.frames(game, 60, still);
+
+    // The Kindle Flask drunk.
+    hold(game, Buttons::THROW);
+    h.frame(game);
+    h.frames(game, 18, still);
+    h.shot("gear_use_drink");
+    h.frames(game, 40, still);
+    game.send_chat("/loadout quill bellows arclash tumbler knack:thorn");
+    game.send_chat("/killall");
+    h.frames(game, 30, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -1136,6 +1255,7 @@ fn main() -> anyhow::Result<()> {
     // The rework (docs/rework.md); `COMBAT_SHOTS=rework` stops after them (quick look).
     kindle_previews(&mut h, &mut game);
     gear_previews(&mut h, &mut game);
+    gear_use_shots(&mut h, &mut game);
     if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
         println!("{} screenshots in {}", h.shots.len(), h.out.display());
         game.shutdown(&mut h.renderer, &mut h.common);

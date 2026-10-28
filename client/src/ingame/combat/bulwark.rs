@@ -26,6 +26,7 @@ use super::Rng;
 use super::fx::Beams;
 use crate::models::gear::{self, BULWARK_COLOR, BULWARK_SIZE};
 use crate::models::{ModelId, ModelLibrary, Tint};
+use shared::tuning::BulwarkTuning;
 
 /// How far in front of the eye the slab stands (docs/rework.md: 1.2 m).
 pub const OUT: f32 = 1.2;
@@ -45,6 +46,35 @@ pub fn slab_transform(eye: Vec3, yaw: f32, pitch: f32) -> Mat4 {
     let yaw = if yaw.is_finite() { yaw } else { 0.0 };
     let rot = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
     Mat4::from_rotation_translation(rot, eye + rot * (Vec3::NEG_Z * OUT))
+}
+
+/// [`slab_transform`] with the tuning's slab: its distance, its pitch limit, and its size
+/// (the model scaled to `width` × `height`).
+pub fn slab_transform_for(eye: Vec3, yaw: f32, pitch: f32, t: &BulwarkTuning) -> Mat4 {
+    let limit = t.pitch_limit_degrees.to_radians();
+    let pitch = if pitch.is_finite() {
+        pitch.clamp(-limit, limit)
+    } else {
+        0.0
+    };
+    let yaw = if yaw.is_finite() { yaw } else { 0.0 };
+    let rot = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
+    let size = Vec3::new(t.width / BULWARK_SIZE.x, t.height / BULWARK_SIZE.y, 1.0)
+        .clamp(Vec3::splat(0.2), Vec3::splat(4.0));
+    Mat4::from_scale_rotation_translation(size, rot, eye + rot * (Vec3::NEG_Z * t.distance))
+}
+
+/// Where a hit at `hit` (a point on the holder, behind the slab) shows on the slab at `root`:
+/// projected onto its face, kept within it.
+pub fn block_point(root: Mat4, hit: Vec3) -> Vec3 {
+    let local = root.inverse().transform_point3(hit);
+    let half = BULWARK_SIZE * 0.5;
+    let on = Vec3::new(
+        local.x.clamp(-half.x * 0.9, half.x * 0.9),
+        local.y.clamp(-half.y * 0.9, half.y * 0.9),
+        -half.z - 0.02,
+    );
+    root.transform_point3(if local.is_finite() { on } else { Vec3::ZERO })
 }
 
 /// Draws the slab at `root` (`absorbed` 0..1 of what it can take, `flash` 0..1 a blow just

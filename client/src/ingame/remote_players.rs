@@ -95,6 +95,9 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
         },
         charge: if f(player_flags::CHARGING) {
             player_weapon(e.state).2 as f32 / 255.0
+        } else if f(player_flags::STOKED) {
+            // A stoked weapon glows hot (combat::stoke): the charge's brightening.
+            0.5
         } else {
             0.0
         },

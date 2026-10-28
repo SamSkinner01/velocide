@@ -141,32 +141,31 @@ impl WeaponLook for WeaponKind {
 /// | class | abilities |
 /// |---|---|
 /// | Precision | Brand crimson, Wickline ice, Tally white-gold, Waxwork mint |
-/// | Scatter | Gust sky, Bolas orange, Bulwark brass, Flak rose |
-/// | Rapid | Wisp violet, Discharge blue, Stoke amber, Lantern signal red |
-/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite lilac |
+/// | Scatter | Gust sky, Bolas cord orange, Bulwark pale honey, Flak rose |
+/// | Rapid | Wisp violet, Discharge blue, Stoke forge red, Lantern lamplight gold |
+/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite rose |
 /// | Draw | Brand crimson, Blink Arrow lime, Pinning Arrow steel blue, Beacon Arrow ember |
 /// | Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte lime |
 ///
-/// (The rework's abilities took the colours of the ones they replaced; client-a / client-b
-/// may pick their own.)
+/// (The Scatter, Rapid and Explosive abilities of the rework take theirs from `models::gear`.)
 pub fn ability_color(a: Ability) -> Vec4 {
     let c = match a {
         Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
         Ability::Wickline => Vec3::new(0.55, 0.95, 1.0),
         Ability::Gust => Vec3::new(0.72, 0.9, 1.0),
-        Ability::Bolas => Vec3::new(1.0, 0.5, 0.15),
+        Ability::Bolas => super::gear::BOLAS_COLOR.truncate(),
         Ability::Wisp => Vec3::new(0.75, 0.5, 1.0),
         Ability::Discharge => Vec3::new(0.4, 0.8, 1.0),
         Ability::Breach => Vec3::new(1.0, 0.4, 0.1),
         Ability::Gravewell => Vec3::new(0.45, 1.0, 0.55),
         Ability::Tally => Vec3::new(1.0, 0.95, 0.55),
         Ability::Waxwork => Vec3::new(0.35, 1.0, 0.72),
-        Ability::Bulwark => Vec3::new(1.0, 0.82, 0.36),
+        Ability::Bulwark => super::gear::BULWARK_COLOR.truncate(),
         Ability::Flak => Vec3::new(1.0, 0.42, 0.68),
-        Ability::Stoke => Vec3::new(1.0, 0.76, 0.2),
-        Ability::Lantern => Vec3::new(1.0, 0.28, 0.2),
+        Ability::Stoke => super::gear::STOKE_COLOR.truncate(),
+        Ability::Lantern => super::gear::LANTERN_COLOR.truncate(),
         Ability::Limpet => Vec3::new(0.95, 1.0, 0.3),
-        Ability::Kite => Vec3::new(0.82, 0.6, 1.0),
+        Ability::Kite => super::gear::KITE_COLOR.truncate(),
         Ability::BlinkArrow => Vec3::new(0.7, 1.0, 0.35),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
         Ability::BeaconArrow => Vec3::new(1.0, 0.55, 0.16),

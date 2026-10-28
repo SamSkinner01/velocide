@@ -198,10 +198,18 @@ pub fn heart(position: Vec3, velocity: Vec3, bank: f32) -> Vec3 {
     kite_transform(position, velocity, bank).transform_point3(KITE_HEART)
 }
 
-/// The kite bursting at `at` (radius `radius`): the arsenal's fireball with a ring of rose
-/// embers and scraps of burning paper.
-pub fn burst(ctx: &mut FxCtx, at: Vec3, radius: f32) {
-    super::fx::explosion(ctx, at, radius, shared::sim::Attack::Tumble, false);
+/// What the kite's burst adds to the arsenal's blast (`arsenal::Blast::Kite`): a rose shock
+/// ring and scraps of burning paper flung out.
+pub fn burst_scraps(ctx: &mut FxCtx, at: Vec3, radius: f32) {
+    ctx.beams.ring(
+        at + Vec3::Y * 0.2,
+        Vec3::Y,
+        0.5,
+        radius * 1.1,
+        0.12,
+        rose(1.8, 0.9),
+        0.35,
+    );
     for k in 0..18 {
         let a = k as f32 / 18.0 * std::f32::consts::TAU;
         let d = Vec3::new(a.cos(), 0.25 + 0.3 * ctx.rng.unit(), a.sin());
@@ -229,8 +237,6 @@ pub fn burst(ctx: &mut FxCtx, at: Vec3, radius: f32) {
             ..Default::default()
         });
     }
-    ctx.beams
-        .ring(at, Vec3::Y, 0.4, radius, 0.08, rose(1.6, 0.8), 0.3);
 }
 
 /// Launched at `at`: a puff of embers, the sound.

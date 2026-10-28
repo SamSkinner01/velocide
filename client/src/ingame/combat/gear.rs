@@ -16,9 +16,9 @@ use engine::gfx::{DrawItem, PointLight, UiDrawList};
 use engine::physics::{CollisionWorld, MASK_SHOTS};
 use engine::ui::{Rect, Theme};
 use glam::{Mat4, Vec3, Vec4};
-use shared::loadout::WeaponKind;
+use shared::loadout::{Ability, WeaponKind};
 use shared::protocol::NetId;
-use shared::sim::Attack;
+use shared::sim::{AbilityPhase, Attack, FireIntent};
 
 use super::super::InGame;
 use super::super::effects::Effects;
@@ -26,9 +26,13 @@ use super::Rng;
 use super::fx::{Beams, FxCtx};
 use super::stoke::Heat;
 use super::{bolas, bulwark, kite, lantern, relay, stoke, wisp};
+
+/// The replicated gear (`gear/net.rs`).
+mod net;
 use crate::app::Common;
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
 use crate::net::Session;
+pub use net::{NetGear, draws_entity};
 
 /// Something staged client-side by `InGame::preview_gear` (tools: look at the visuals without
 /// the simulation making them).
@@ -210,6 +214,8 @@ pub struct GearView {
     heat: Heat,
     /// Your slab this frame: what it can still take, its time left (the HUD bar).
     own_slab: Option<(f32, f32)>,
+    /// The replicated gear's bookkeeping (`net.rs`).
+    net: net::NetState,
     time: f64,
 }
 
@@ -256,6 +262,20 @@ impl GearView {
     /// Your weapon's heat this frame.
     pub fn heat(&self) -> Heat {
         self.heat
+    }
+
+    /// A predicted ability intent of yours that isn't a shot (`plays_as_shot`): the Wisp flung
+    /// off its orbit. (The Bulwark's slab and the Stoke follow your predicted weapons in
+    /// `update_net`.)
+    pub fn local_intent(&mut self, intent: &FireIntent, audio: &mut Audio) {
+        if let FireIntent::Ability {
+            ability: Ability::Wisp,
+            phase: AbilityPhase::Recast,
+            ..
+        } = intent
+        {
+            audio.play_2d(Sfx::WispFling);
+        }
     }
 
     fn preview(&mut self, p: GearPreview, f: &mut GearFrame) {
@@ -574,9 +594,18 @@ impl GearView {
             let own = o.around.is_none();
             let feet = o.around.or(f.feet).unwrap_or(f.eye - Vec3::Y * 1.6);
             let angle = wisp::orbit_angle(o.age, 0.8);
-            wisp::orbit_effects(f.effects, f.beams, f.rng, feet, angle, own, dt);
+            wisp::orbit_effects(
+                f.effects,
+                f.beams,
+                f.rng,
+                feet,
+                angle,
+                wisp::Orbit::DEFAULT,
+                own,
+                dt,
+            );
             if o.age >= o.seconds {
-                let at = wisp::orbit_position(feet, angle);
+                let at = wisp::orbit_position(feet, angle, wisp::Orbit::DEFAULT);
                 if let Some(dir) = o.fling {
                     wisp::fling(f.effects, f.beams, f.audio, f.rng, at, dir);
                     flung.push((at, dir.normalize_or(Vec3::NEG_Z) * 18.0, 0.0));
@@ -711,7 +740,9 @@ impl GearView {
                 Pending::Relay(attack, turned, thorn, to) => {
                     relay::play(ctx, attack, turned, &[thorn, to])
                 }
-                Pending::KiteBurst(at) => kite::burst(ctx, at, 4.5),
+                Pending::KiteBurst(at) => {
+                    super::arsenal::blast(ctx, super::arsenal::Blast::Kite, at, 4.5)
+                }
                 Pending::WispPop(at) => super::fx::explosion(ctx, at, 4.0, Attack::Wisp, true),
             }
         }
@@ -784,7 +815,8 @@ impl GearView {
         }
         for o in &self.orbits {
             let feet = o.around.unwrap_or(eye - Vec3::Y * 1.6);
-            let at = wisp::orbit_position(feet, wisp::orbit_angle(o.age, 0.8));
+            let at =
+                wisp::orbit_position(feet, wisp::orbit_angle(o.age, 0.8), wisp::Orbit::DEFAULT);
             wisp::draw_orbiting(lib, at, self.time, draws);
         }
         for w in &self.flung {
@@ -858,6 +890,36 @@ impl InGame {
             dt: vdt,
         };
         combat.gear.update(&mut frame);
+        // The replicated gear (net.rs).
+        let (own, own_time, local_owner) = super::own_projectiles(net);
+        let own_offset = viewmodel
+            .last_draw()
+            .map_or(Vec3::ZERO, |d| cam.rotation * d.muzzle);
+        let entity_frame = super::entities::EntityFrame {
+            entities: net.remote_entities(),
+            render_tick: net.render_tick(),
+            tick_rate: net.tick_rate(),
+            tuning: &net.tuning().combat,
+            own: &own,
+            own_time,
+            local_owner,
+            own_offset,
+            stand_ins: Some(&combat.stand_ins),
+            camera: cam.position,
+            view: cam.rotation * Vec3::NEG_Z,
+            world: net.world().map(|w| &w.collision.world),
+        };
+        let local = net.local_player_id().map(NetId::player);
+        let own_entity = local.and_then(|id| net.frames().latest().and_then(|(_, f)| f.get(id)));
+        let gear = NetGear {
+            frame: &entity_frame,
+            local,
+            own: own_entity,
+            weapons: combat.predictor.state(),
+            dead: net.own_combat().is_some_and(|c| c.combat.dead),
+            remote,
+        };
+        combat.gear.update_net(&gear, &mut frame);
         let (glow, body) = stoke::heat_tint(&combat.gear.heat, combat.gear.time);
         viewmodel.set_heat(glow, body);
         if combat.gear.has_pending() {

@@ -443,6 +443,10 @@ impl EntityView {
             }
         }
         for (e, time, offset) in f.projectiles() {
+            // An orbiting wisp is the gear's (gear.rs).
+            if super::gear::draws_entity(e) {
+                continue;
+            }
             self.update_projectile(e, time, offset, f, dt, effects, audio, rng, beams);
         }
         self.enemies.retain(|_, v| v.seen);
@@ -1017,7 +1021,7 @@ impl EntityView {
             }
         }
         for (e, time, offset) in f.projectiles() {
-            if e.flags & projectile_flags::PENDING != 0 {
+            if e.flags & projectile_flags::PENDING != 0 || super::gear::draws_entity(e) {
                 continue;
             }
             let Some(model) = projectile_model(e.kind) else {

@@ -25,7 +25,7 @@ use engine::gfx::{DrawItem, UiDrawList};
 use engine::ui::draw::fade;
 use engine::ui::{Rect, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
-use shared::protocol::{EntityState, NetId};
+use shared::protocol::{EntityState, NetId, player_flags};
 use shared::sim::PlayerId;
 
 use super::super::InGame;
@@ -655,7 +655,12 @@ impl InGame {
         );
         let velocity = net.local_state().map_or(Vec3::ZERO, |s| s.velocity);
         let alive = !net.own_combat().is_some_and(|c| c.combat.dead);
-        let strength = if alive { k.strength(false, None) } else { 0.0 };
+        // The server's HASTE flag on you (your entity in the latest snapshot).
+        let local = net.local_player_id().map(NetId::player);
+        let flag = local
+            .and_then(|id| net.frames().latest().and_then(|(_, f)| f.get(id)))
+            .is_some_and(|e| e.flags & player_flags::HASTE != 0);
+        let strength = if alive { k.strength(flag, None) } else { 0.0 };
         let fov = k.own_frame(
             effects,
             &mut common.audio,
@@ -667,6 +672,20 @@ impl InGame {
             vdt,
         );
         camera.set_fov_boost(fov);
+        // Others' haste: the trail and embers off their wicks.
+        let players: Vec<EntityState> = net.remote_players().copied().collect();
+        k.update_others(
+            effects,
+            &mut combat.beams,
+            &mut common.audio,
+            &mut combat.rng,
+            &players,
+            &|e: &EntityState| {
+                e.flags & player_flags::HASTE != 0 && e.flags & player_flags::DEAD == 0
+            },
+            local,
+            vdt,
+        );
         if k.has_staged() {
             let view = &combat.entities;
             let thorn_position = |id: NetId| view.thorn_position(id);

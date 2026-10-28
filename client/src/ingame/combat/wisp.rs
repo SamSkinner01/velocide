@@ -17,11 +17,34 @@ use super::Rng;
 use super::fx::Beams;
 use crate::models::{ModelId, ModelLibrary, Tint, WeaponKind, WeaponLook as _};
 
-/// The orbit's radius and height above the caller's feet (docs/rework.md: 1.6 m, chest).
+/// The orbit's radius and height above the caller's feet (docs/rework.md: 1.6 m, chest;
+/// `arclash.wisp_orbit_*` in play).
 pub const ORBIT_RADIUS: f32 = 1.6;
 pub const ORBIT_HEIGHT: f32 = 1.2;
-/// Turns per second round the caller.
-pub const ORBIT_RATE: f32 = 0.55;
+/// Turns per second round the caller (the staged ones: `wisp_orbit_rate` 240°/s).
+pub const ORBIT_RATE: f32 = 240.0 / 360.0;
+
+/// How big an orbit is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Orbit {
+    pub radius: f32,
+    pub height: f32,
+}
+
+impl Orbit {
+    pub const DEFAULT: Orbit = Orbit {
+        radius: ORBIT_RADIUS,
+        height: ORBIT_HEIGHT,
+    };
+
+    /// The tuning's orbit.
+    pub fn of(t: &shared::tuning::CombatTuning) -> Orbit {
+        Orbit {
+            radius: t.arclash.wisp_orbit_radius,
+            height: t.arclash.wisp_orbit_height,
+        }
+    }
+}
 /// Drawn this much larger than its model.
 const SCALE: f32 = 1.25;
 
@@ -34,12 +57,13 @@ pub fn orbit_angle(age: f32, phase: f32) -> f32 {
     phase + age * ORBIT_RATE * std::f32::consts::TAU
 }
 
-/// Where an orbiting wisp is round a caller standing at `feet`, at orbit angle `angle`.
-pub fn orbit_position(feet: Vec3, angle: f32) -> Vec3 {
+/// Where an orbiting wisp is round a caller standing at `feet`, at orbit angle `angle` (about
+/// +Y from +X: `atan2(dz, dx)`).
+pub fn orbit_position(feet: Vec3, angle: f32, orbit: Orbit) -> Vec3 {
     feet + Vec3::new(
-        angle.cos() * ORBIT_RADIUS,
-        ORBIT_HEIGHT + 0.08 * (angle * 3.0).sin(),
-        angle.sin() * ORBIT_RADIUS,
+        angle.cos() * orbit.radius,
+        orbit.height + 0.08 * (angle * 3.0).sin(),
+        angle.sin() * orbit.radius,
     )
 }
 
@@ -60,10 +84,11 @@ pub fn orbit_effects(
     rng: &mut Rng,
     feet: Vec3,
     angle: f32,
+    orbit: Orbit,
     own: bool,
     dt: f32,
 ) {
-    let pos = orbit_position(feet, angle);
+    let pos = orbit_position(feet, angle, orbit);
     let n = 10;
     let width = if own { 0.025 } else { 0.05 };
     for i in 0..n {
@@ -71,8 +96,8 @@ pub fn orbit_effects(
         let a1 = angle - (i + 1) as f32 / n as f32 * std::f32::consts::PI;
         let fade = 1.0 - i as f32 / n as f32;
         beams.frame_beam(
-            orbit_position(feet, a0),
-            orbit_position(feet, a1),
+            orbit_position(feet, a0, orbit),
+            orbit_position(feet, a1, orbit),
             width,
             violet(1.5, 0.6 * fade),
         );
@@ -137,7 +162,7 @@ mod tests {
     fn the_wisp_circles_its_caller_at_chest_height() {
         let feet = Vec3::new(3.0, 1.0, -2.0);
         for age in [0.0f32, 0.3, 1.1, 5.9] {
-            let p = orbit_position(feet, orbit_angle(age, 0.4));
+            let p = orbit_position(feet, orbit_angle(age, 0.4), Orbit::DEFAULT);
             let flat = Vec2::new(p.x - feet.x, p.z - feet.z).length();
             assert!((flat - ORBIT_RADIUS).abs() < 1e-4);
             assert!((p.y - feet.y - ORBIT_HEIGHT).abs() < 0.1);

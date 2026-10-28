@@ -1084,6 +1084,15 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.effects.glow(q(*from), lime, 1.0, 0.2);
             ctx.effects.glow(q(*to), lime, 1.2, 0.25);
         }
+        // A Bulwark's block (its slab's chips and cracks), the Bolas's bind and cord, the
+        // Lantern's shots: gear.rs, which knows the slabs, the bound bodies and the lanterns
+        // (`GearView::note_fx`).
+        Fx::GuardBlock {
+            ability: Ability::Bulwark,
+            ..
+        }
+        | Fx::BolasBound { .. }
+        | Fx::LanternShot { .. } => {}
         Fx::GuardBlock {
             position, broke, ..
         } => {
@@ -1091,23 +1100,6 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.effects.sparks(at, Vec3::Y, if *broke { 24 } else { 8 });
             ctx.effects
                 .glow(at, Vec4::new(1.0, 0.9, 0.6, 0.8), 0.6, 0.12);
-        }
-        Fx::BolasBound { positions } => {
-            let pts: Vec<Vec3> = positions.iter().map(|p| q(*p)).collect();
-            let cord = hot(ability_color(Ability::Bolas), 1.5);
-            for w in pts.windows(2) {
-                ctx.beams.beam(w[0], w[1], 0.025, cord, 0.4);
-            }
-            for p in &pts {
-                ctx.effects.glow(*p, cord, 0.7, 0.2);
-            }
-        }
-        Fx::LanternShot { origin, ends, .. } => {
-            let o = q(*origin);
-            let red = hot(ability_color(Ability::Lantern), 1.6);
-            for end in ends {
-                ctx.beams.beam(o, q(*end), 0.025, red, 0.12);
-            }
         }
         Fx::HurlCaught { .. } => {}
         // The Flak ring (or a Gust-deflected shell bursting): the arsenal's flak burst.
