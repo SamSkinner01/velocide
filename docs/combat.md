@@ -236,8 +236,8 @@ Player-owned attacks test against shapes inflated by `combat.hit_assist`
 2. Ray vs level (`MASK_SHOTS`: world + doors) gives the far limit; ray vs every rewound
    hitbox the shooter `can_hit` (alive and hostile: not itself, not co-op teammates, not
    corpses; hit assist) — the nearest one is hit.
-3. The first thorn within `ricochet_radius` of the ray before that limit (if the shot can
-   ricochet) takes the shot instead: it shatters and the shot re-fires from it (see
+3. The first thorn within `ricochet_radius` of the ray before that limit (every player ray
+   can ricochet) takes the shot instead: it shatters and the shot re-fires from it (see
    Ricochet).
 4. A hit → `apply_damage` with `HITSCAN` (+ `RICOCHET`), part from the shape, knockback
    along the ray. The last leg's `Impact` (point, direction, surface normal or target) feeds
@@ -337,10 +337,13 @@ From a shattered thorn the shot re-fires at: the nearest other live thorn within
 within `target_range` (40 m), else the nearest hittable target in range — aiming at its first
 visible weak point / head, else its body. No target → continues in the original direction.
 Each bounce multiplies damage by 1.5 (`24 → 36 → 54`, ×2 on a head). Bounce legs use current
-hitboxes/thorns (they auto-aim at current positions). Quill shots ricochet (primary, Brand,
-Splinter — the main shot, not the splinters); Bellows pellets, Arclash zaps and Wisp zaps
-don't. In PvP the targets are opposing players. Events: `SimEvent::Ricochet { shooter,
-attack, points }` (thorn positions…, final end) and `ThornShattered`.
+hitboxes/thorns (they auto-aim at current positions). Every player ray ricochets (any hitscan
+primary or ability; a pellet spread uses a thorn once: the first pellet to reach it). The
+other attack families relay too (`docs/arsenal.md` "Thorns relay any weapon", `thorn.rs`):
+projectiles turn at the thorn, swings / cones / novas / blasts fling it as a ray. In PvP the
+targets are opposing players. Events: `SimEvent::Ricochet { shooter, attack, points,
+projectile }` (thorn positions…, final end; `projectile`: the one that turned) and
+`ThornShattered`.
 
 ## Brands
 

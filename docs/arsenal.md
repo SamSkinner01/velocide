@@ -15,14 +15,15 @@ the server stays authoritative for everything else.
 | `shared::sim::weapons` | `WeaponState`, `step_weapons` (predicted), `FireIntent`, firing styles, `SimWorld::resolve_intent` (what every primary and ability does), `ability_tuning` |
 | `shared::sim::loadouts` | `SimWorld::request_loadout` / `force_loadout` / `loadout` / `spawn_loadout`: when loadouts apply; `pvp_world` / `fit_loadout`: the knack rule |
 | `shared::sim::melee` | the Trimmer and Tamper swings (`in_arc`), Lunge / Whirl / Hurl / Upswing, lunges in progress (`SimWorld::melee`) |
-| `shared::sim::knacks` | `Knack::charges` / `recharge_time`, `SimWorld::use_knack`, Kindle pools, snares, soot clouds (`soot_blocks`), Tallow Skin (`SimWorld::knacks`) |
+| `shared::sim::knacks` | `Knack::charges` / `recharge_time`, `SimWorld::use_knack`, the Kindle Flask's heal over time (`KindleDraught`), snares, soot clouds (`soot_blocks`), Tallow Skin (`SimWorld::knacks`) |
+| `shared::sim::thorn` | thorns in flight / planted / lying, and the relays off them: `relay_projectile`, `fling_thorns` (`relay_cone`, `relay_nova`, `relay_blast`); rays ricochet in `hitscan.rs` |
 | `shared::sim::{hitscan, area, projectiles}` | rays (Skewer's pierce), cones / novas / blasts (the Kiln spray), projectiles and explosions |
 | `shared::sim::payload` | what the new projectiles do on contact: the Flak ring, Limpets, the Flare's patch, the special arrows, the flask / pot breaking, the snare settling |
 | `shared::sim::parry` | punch parries; the Trimmer's deflect (`deflect_in_arc`) shares the projectile part |
 | `shared::sim::status` | Burn, Pinned, burning patches |
 | `shared::sim::combat` | `Attack` (a variant per primary and ability), `KillInfo::weapon`, `SimWorld::attack_weapon`, `DamageFlags::{BURN, PIERCED}` |
 | `shared::sim::style` | `StyleKey` for every primary and ability |
-| `shared::movement` | `MoveState::slow_time` / `slow_scale`: a Pinned player's slow, predicted like the rest of movement |
+| `shared::movement` | `MoveState::slow_time` / `slow_scale`: a Pinned player's slow; `haste_time` / `haste_scale`: the Kindle Flask's haste; both predicted like the rest of movement |
 | `shared::tuning` (`combat`) + `shared::tuning::balance` | the numbers; `BalanceTuning` profiles, `Tuning::for_mode` |
 | `shared::protocol` | `pack_player_weapon` / `player_weapon`, projectile and hazard kinds, flag bits, `Fx::Burst` |
 | `server` | `ClientMessage::SetLoadout`, effective tuning per mode, `/loadout`, `SimEvent::Burst` → `Fx::Burst` |
@@ -141,7 +142,7 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 
 | id | weapon | class | primary (PvE numbers) |
 |---|---|---|---|
-| 0 | Quill | Precision | unchanged (`docs/roster.md`): 24 dmg hitscan, 0.28 s, ricochets off Thorns |
+| 0 | Quill | Precision | unchanged (`docs/roster.md`): 24 dmg hitscan, 0.28 s |
 | 1 | Bellows | Scatter | unchanged: 12 × 8, 8°, 0.8 s |
 | 2 | Arclash | Rapid | as `docs/roster.md`: 7 dmg zaps every 0.1 s (was 6, `docs/balance.md`), chaining |
 | 3 | Tumbler | Explosive | as `docs/roster.md`: bouncing bombs, r 4.5 m, 72 dmg (was 65), 0.85 s |
@@ -154,8 +155,29 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | 10 | Trimmer | Melee | every 0.32 s a 3.0 m / 70° arc: 36 dmg to up to 3 targets, deflects parryable shots ("Melee" below) |
 | 11 | Tamper | Melee | every 0.85 s a 3.4 m / 100° arc: 85 dmg to everything in it, kb 16 |
 
-Only the Quill's shots ricochet off Thorns, whichever ability fires them (its identity): Brand,
-Splinter and Flurry ricochet on the Quill and not on the Lancet; Skewer pierces instead.
+### Thorns relay any weapon (rework)
+
+The Thorn (PvE only) relays **every** weapon (`docs/rework.md` §4, `shared::sim::thorn`). The
+first player attack that reaches a live thorn (flying, dropping, planted or lying) shatters it
+and is relayed to the thorn's ricochet target: another live thorn within `thorn.chain_range`
+(30 m) first, then a branded hostile within `target_range` (40 m), then the nearest hostile —
+its weak point / head if visible, in line of sight. Each relay multiplies the damage by
+`thorn.damage_multiplier` (1.5) and is a ricochet hit (`DamageFlags::RICOCHET`,
+`DamageInfo::ricochets`: style's RICOCHET, the kill feed's "RICOCHET").
+
+| attack | reaches a thorn when | relayed as |
+|---|---|---|
+| rays (every hitscan primary and ability, each pellet, each zap) | the ray passes within `ricochet_radius` (0.6 m) before the level or a target stops it (lag-compensated: the thorn where the shooter saw it) | the ray ricochets on from the thorn (`hitscan.rs`); a pellet spread uses a thorn once (the first pellet to reach it shatters it, the rest fly past); an Arclash zap chains on from what the relay hit |
+| projectiles (bombs, rivets, rockets, arrows, shells, limpets, canisters, wisps, hurled blades; not the thrown knacks) | its sweep comes within `ricochet_radius` + its radius before the level and before a target it would hit this tick | it turns where it reached the thorn onto a straight line at the target (on straight without one), keeping its payload and speed: no gravity from then on (`projectile_flags::RELAYED`), a Tumbler bomb goes off at its next contact; its direct hit, blast and flak pellets deal × the multiplier per relay (`Projectile::ricochets`) |
+| melee swings (the primaries), the Whirl | in the swing's arc (reach, aperture; the thorn counts as a 0.6 m ball) / within the Whirl's radius, as the swinger saw it | flung as a ray of the swing's damage |
+| cones and novas (the Kiln's spray, the Gust, the Discharge) | in the cone / within the nova's radius, as the shooter saw it, line of sight | flung as a ray of the per-hit damage |
+| explosions (every player blast: bombs, rockets, limpets, Breach, the Gravewell, the Wisp's pop, relayed blasts) | within the radius of the centre (+ 0.6 m), line of sight, current positions | flung as a ray of `thorn.relay_damage` (30) |
+
+Every relay is a `SimEvent::Ricochet { shooter, attack, points, projectile }` → `Fx::Ricochet`
+(thorns, then the end; `projectile`: that projectile turned at the first thorn and heads for
+the last point — draw the shatter and the turn, not a tracer). A thorn in the flight of a
+projectile you fire right after throwing it relays it at once (as a shot through a thorn just
+thrown always did).
 
 ## Abilities
 
@@ -252,8 +274,8 @@ fires `FireIntent::Knack(knack)`; `SimWorld::use_knack` (`shared::sim::knacks`) 
 
 | id | knack | as built | charges / recharge |
 |---|---|---|---|
-| 0 | Thorn | the relay spike (`thorn.rs`, `combat.thorn`). **PvE only** | 3 / 3 s |
-| 1 | Kindle Flask | lobbed 15° above the aim (16 m/s); where it breaks (on a body: at its feet) a 3.5 m pool for 4 s heals every living Shrike whose feet are inside 2.5 HP every 0.25 s (10 HP/s, 40 in all) through `PlayerCombat::heal` — never above the effective max, so hard damage still caps it; in PvP only the thrower | 1 / 14 s |
+| 0 | Thorn | the relay spike (`thorn.rs`, `combat.thorn`): every player attack that reaches it is relayed ("Thorns relay any weapon" above). **PvE only** | 3 / 3 s |
+| 1 | Kindle Flask | **drunk** at once (nothing thrown): for 5 s **haste** — ground, air and slide speeds and the ground / air accelerations × 1.3, the dash too (`MoveState::haste_time` / `haste_scale`, next to the Pinned slow: both apply, multiplied; the owner predicts it like the slow, picking it up through reconciliation) — and a heal of 8 HP every second (the first a second after drinking, 40 in all) through `PlayerCombat::heal`: never above the effective max, so hard damage still caps it. Only the drinker, in every mode (PvP too). Death ends the heal. `HASTE` player flag | 1 / 14 s |
 | 2 | Snare | thrown (12 m/s, passes through bodies) to the floor, lies there `STUCK` (off a wall it drops on); 0.6 s after landing it is armed (`ARMED`); the nearest hostile whose feet come within 1.8 m (and at most 2 m above) springs it: 15 dmg (`Attack::Snare`) and Pinned (the Pinning Arrow's times: a Mould rooted 1.4 s, heavies 0.6 s, a player slowed to half for 1 s). Teammates and the owner walk over it. Up to 2 out (a throw with 2 out retires the oldest), 20 s each | 2 / 10 s |
 | 3 | Soot Pot | thrown (18 m/s); bursts on contact (or after 2 s) into a 5 m cloud for 7 s: `soot_blocks` — a Mould whose eye or target is inside it, or whose line of sight crosses it, can't see that player: never picked as a target (aware arena spawns included), a target hidden this way is lost at once, a Heron's laser wind-up breaks off. Players' shots pass through | 1 / 15 s |
 | 4 | Tallow Skin | for 3 s: damage × 0.5 and no knockback (your own blasts still push: blast jumps work); `TALLOW` player flag. PvP: × 0.7 for 2 s (`balance.pvp` overrides: half damage for 3 s won every even duel) | 1 / 16 s |
@@ -331,6 +353,8 @@ Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
 | player `BURNING` | 12 | burning (PvP) |
 | player `PINNED` | 13 | slowed by a Pinning Arrow (PvP) |
 | player `DRAWING` | 14 | drawing the Longwick |
+| player `HASTE` | 17 | hasted by a Kindle Flask (the drinker's `MoveState::haste_time` says how long) |
+| projectile `RELAYED` | 5 | turned at a thorn: flies straight (no gravity) |
 | enemy `BURNING` | 13 | burning |
 | enemy `PINNED` | 14 | rooted by a Pinning Arrow |
 
@@ -347,19 +371,19 @@ Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
 | 75 | `EMBER_ARROW` | arrow gravity, bursts (an `Explosion` with `attack` `EmberArrow`) |
 | 76 | `BRAND_ARROW` | arrow gravity |
 | 77 | `HURL` | the Hurl's blade / hammer-head, gravity `hurl.gravity`; `state` = the carrier's `WeaponKind` id (10 Trimmer: a blade, 11 Tamper: a hammer-head); direct damage |
-| 78 | `KINDLE_FLASK` | gravity `knacks.kindle_flask.gravity`; breaks into a `KINDLE_POOL` (and a `ProjectileImpact`) |
+| 78 | `KINDLE_FLASK` | retired (the flask is drunk, rework): never sent |
 | 79 | `SNARE` | gravity `knacks.snare.gravity`, passes through bodies; `STUCK` once it lies on the floor (`position` current), `ARMED` (projectile flag bit 4) once armed; sprung or worn out: removed |
 | 96 | `SOOT_POT` | gravity `knacks.soot_pot.gravity`; bursts into a `SOOT_CLOUD` (and a `ProjectileImpact`) |
 | 97–103 | reserved for the arsenal | (82–95 are the enemies area's) |
 | 136 | `BURNING_PATCH` | `position` = centre on the floor, `owner` = owner code, `state` = radius (dm), `aux` = burn-out tick |
-| 137 | `KINDLE_POOL` | `position` = centre on the floor, `owner` = thrower, `state` = radius (dm), `aux` = tick it dries up |
+| 137 | `KINDLE_POOL` | retired (no pool, rework): never sent |
 | 138 | `SOOT_CLOUD` | `position` = centre, `owner` = thrower, `state` = radius (dm), `aux` = tick it clears; draw it dense enough to hide players |
 | 139 | reserved | |
 
 `Fx::Burst { shooter, attack, origin, ends }` (everyone, repeated like other important
 effects): a projectile burst into rays — the Flak ring. Owner-only: `OwnState::combat.weapons`
 carries the whole `WeaponState`, loadout included (47 B of own combat state per snapshot with
-the default loadout), and `OwnState::movement` the slow (8 B).
+the default loadout), and `OwnState::movement` the slow and the haste (8 B each).
 
 ### Melee and knacks on the wire (refit, `PROTOCOL_VERSION` 9)
 
@@ -380,8 +404,8 @@ the default loadout), and `OwnState::movement` the slow (8 B).
   `GameEvent::Parried` like a punch parry.
 * **Knacks**: `SimEvent::KnackUsed { player, knack }` → `Fx::Knack` for every knack but the
   Thorn (that one keeps `Fx::ThornThrown`), not sent to the user. `SimEvent::SnareSprung` →
-  `Fx::SnareSprung { position }` to everyone. Kindle pool heals are `SimEvent::Healed` with
-  `HealSource::KindleFlask(pool)` → `Fx::Heal` (from the pool to the lantern).
+  `Fx::SnareSprung { position }` to everyone. Kindle Flask heals are `SimEvent::Healed` with
+  `HealSource::KindleFlask` → `Fx::Heal` (from the drinker's own chest, once a second).
 * The replay records the local player's own swings and knacks as the same `Fx` the others
   receive (`client/src/ingame/replay.rs`).
 
@@ -594,12 +618,24 @@ its range).
   loadout and a knack, the PvP numbers inside the one-shot rules and the time-to-kill band.
 * `shared/tests/combat_knacks.rs`: the PvP rule (Surge in hand, the request kept, the warm-up
   following the next mode), Surge's impulse and charges, Tallow Skin (half damage, no
-  knockback, own blasts still push, replicated, wears off), Kindle pools (the hard-damage cap,
-  the teammate, PvP only the thrower, replicated, dry after 4 s), Snares (held until armed,
+  knockback, own blasts still push, replicated, wears off), the Kindle Flask (drunk, nothing
+  thrown; 8 HP a second from a second on, 40 in all, only the drinker; the hard-damage cap, no
+  heal at full health, death ends it; `HASTE` replicated and gone after 5 s; running and
+  dashing × 1.3, × the slow too; the haste predicted to the bit through running, jumping,
+  sliding and dashing; allowed in PvP, the drinker only), Snares (held until armed,
   springing at the arm tick: damage, Pinned, gone; armed and replicated, teammates walk over;
   two out; a PvP player slowed), the Soot Pot (a Gnawer loses the player and finds them again
   when it clears; a Heron's lock breaks, no needle), the thrown knacks' kinds and landings,
   exact prediction for every knack.
+* `shared/tests/combat_ricochet.rs`: thorns (throw, plant, drop and lie, fizzle, hit assist,
+  hit where a lagging shooter saw one) and the relays: the Quill into a weak point, chains,
+  branded first, PvP targets; every hitscan weapon's ray (Bellows / Thresher pellets once per
+  thorn, Lancet, Arclash, Quill, Brand); projectiles turning (a Riveter rivet straight at the
+  head, replicated `RELAYED` and straight on the wire; a Tumbler bomb going off at the target ×
+  1.5; a full-draw arrow), a target in front of the thorn taking the projectile first; the
+  Trimmer's slash (and style's RICOCHET), out of reach / behind left alone, the Whirl; the Kiln's
+  spray, the Gust, a full Discharge; a player's blast flinging at `relay_damage` through a
+  chain, an enemy's not.
 * `shared/tests/combat_arsenal.rs`: every new primary (Lancet bloom, Thresher, Riveter flight,
   Cinderbox salvo, Longwick draw, Kiln + Burn), Burn stacks / refresh / kill credit / no
   LONGSHOT, Skewer pierce and falloff, Flurry, Slug, the Flak airburst and contact burst,
