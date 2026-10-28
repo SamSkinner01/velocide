@@ -1154,7 +1154,8 @@ fn dead_players_drop_and_respawn() {
 #[test]
 fn server_weapon_state_is_exactly_the_predicted_one() {
     // Every mode, switches, charges, punches and thorns: the server's weapon state is what the
-    // client gets by running `step_weapons` on its own inputs (nothing server-side touches it).
+    // client gets by running `step_weapons` on its own inputs — but for the cooldowns a
+    // server-side outcome changes (a Wickline that missed), which the client re-bases on.
     let (mut a, p, _) = range(
         &[Vec3::new(0.0, 0.0, -12.0), Vec3::new(3.0, 0.0, -9.0)],
         100_000.0,
@@ -1163,6 +1164,7 @@ fn server_weapon_state_is_exactly_the_predicted_one() {
     a.world.players.get_mut(&p).unwrap().combat.god = true;
     let t = a.tuning.clone();
     let mut predicted = a.world.players[&p].combat.weapons;
+    let mut rebases = 0;
     for i in 0..900u32 {
         let phase = i / 75;
         let input = a.held.get_mut(&p).unwrap();
@@ -1178,7 +1180,18 @@ fn server_weapon_state_is_exactly_the_predicted_one() {
         let sent: PlayerInput = *input;
         a.tick();
         step_weapons(&mut predicted, &sent, true, &t.combat, 60);
-        assert_eq!(a.world.players[&p].combat.weapons, predicted, "input {i}");
+        let server = a.world.players[&p].combat.weapons;
+        let rest = WeaponState {
+            alt_cooldown: server.alt_cooldown,
+            live: server.live,
+            ..predicted
+        };
+        assert_eq!(server, rest, "input {i}");
+        if (server.alt_cooldown, server.live) != (predicted.alt_cooldown, predicted.live) {
+            rebases += 1;
+        }
+        predicted = server;
     }
+    assert!(rebases < 30, "{rebases} cooldown re-bases");
     assert_ne!(predicted, WeaponState::default());
 }

@@ -211,7 +211,10 @@ impl SimWorld {
             return false;
         }
         let alive = match target {
-            HitTarget::Player(id) => self.players.get(&id).is_some_and(|p| !p.combat.dead),
+            // A Waxwork's double counts as its owner (`abilities/waxwork.rs`).
+            HitTarget::Player(id) => {
+                self.players.get(&id).is_some_and(|p| !p.combat.dead) || self.is_decoy(id)
+            }
             HitTarget::Entity(id) => self.enemies.get(&id).is_some_and(|e| e.is_alive()),
         };
         alive && self.is_hostile(shooter, target)

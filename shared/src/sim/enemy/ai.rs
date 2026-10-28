@@ -195,7 +195,8 @@ fn fan_offset(i: u32, count: u32, spread: f32) -> f32 {
 
 impl SimWorld {
     pub(crate) fn player_views(&self, t: &Tuning) -> Vec<PlayerView> {
-        self.players
+        let mut views: Vec<PlayerView> = self
+            .players
             .values()
             .map(|p| {
                 let (center, _, radius) = p.movement.capsule(&t.movement);
@@ -209,7 +210,10 @@ impl SimWorld {
                     targetable: is_targetable(p),
                 }
             })
-            .collect()
+            .collect();
+        // Waxworks' doubles look like players to the Moulds (`abilities/waxwork.rs`).
+        views.extend(self.waxwork_views(t));
+        views
     }
 
     /// Builds the level's nav grid now (the server calls this at level load so the first enemy
@@ -748,6 +752,11 @@ impl SimWorld {
     /// (target, target currently visible).
     fn select_target(&self, e: &Enemy, players: &[PlayerView]) -> (Option<PlayerId>, bool) {
         let eye = e.eye();
+        // A Waxwork's double in its lure range and in sight is preferred to anyone
+        // (`abilities/waxwork.rs`).
+        if let Some(decoy) = self.lure_target(eye, players) {
+            return (Some(decoy), true);
+        }
         let world = &self.collision.world;
         let ai = &e.def.ai;
         let visible: Vec<(PlayerId, f32)> = players

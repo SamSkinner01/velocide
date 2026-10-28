@@ -378,6 +378,7 @@ fn prediction_stays_exact_with_a_custom_loadout() {
     dummy(&mut a, Vec3::new(4.0, 0.0, -9.0), 0.0, 1.0e6);
     let t = a.tuning.clone();
     let mut predicted = a.world.players[&p].combat.weapons;
+    let mut rebases = 0;
     for i in 0..1200u32 {
         let phase = i / 75;
         let input = a.held.get_mut(&p).unwrap();
@@ -393,7 +394,21 @@ fn prediction_stays_exact_with_a_custom_loadout() {
         let sent: PlayerInput = *input;
         a.tick();
         step_weapons(&mut predicted, &sent, true, &t.combat, 60);
-        assert_eq!(a.world.players[&p].combat.weapons, predicted, "input {i}");
+        let server = a.world.players[&p].combat.weapons;
+        // A server-side outcome may change a cooldown (a Tally with nothing tallied, a caught
+        // Hurl, a Wickline that missed: docs/rework.md); the client re-bases on those like on
+        // any reconciliation (`WeaponPredictor::sync`). Everything else is predicted exactly.
+        let rest = WeaponState {
+            alt_cooldown: server.alt_cooldown,
+            live: server.live,
+            ..predicted
+        };
+        assert_eq!(server, rest, "input {i}");
+        if (server.alt_cooldown, server.live) != (predicted.alt_cooldown, predicted.live) {
+            rebases += 1;
+        }
+        predicted = server;
     }
+    assert!(rebases < 30, "{rebases} cooldown re-bases");
     assert_ne!(predicted, WeaponState::new(bow_first()));
 }
