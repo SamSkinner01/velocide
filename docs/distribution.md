@@ -37,14 +37,16 @@ full 40-hex commit it was built from.
 Three compile-time environment variables, read with `option_env!` (rustc tracks them, so a
 change rebuilds) and exposed as `shared::build_info`:
 
-| variable           | value                                  | unset                    |
+| variable           | value                                  | unset or empty           |
 | ------------------ | -------------------------------------- | ------------------------ |
 | `VELOCIDE_VERSION` | the release's version, e.g. `build-42` | `dev`                    |
 | `VELOCIDE_COMMIT`  | the full 40-hex commit                 | empty                    |
 | `VELOCIDE_REPO`    | `owner/name` the updater checks        | `SamSkinner01/velocide`  |
 
 `shared::build_info::{VERSION, COMMIT, REPO}` are `&'static str`; `is_release()` is true when
-`COMMIT` is 40 hex digits and `VERSION` isn't `dev`. `scripts/build_dist.sh` sets all three
+`COMMIT` is 40 hex digits and `VERSION` isn't `dev`. `label()` is what players compare (the
+main menu's corner, Settings → Gameplay, both binaries' startup log line): `build-42
+(1a2b3c4)`, or just `dev`. `scripts/build_dist.sh` sets all three
 (VERSION as today, the commit from `git rev-parse HEAD`, the repo from `GITHUB_REPOSITORY`
 when set), so CI builds and `scripts/package.sh` builds are release builds; a plain
 `cargo build` / `cargo run` is a dev build.
@@ -67,7 +69,7 @@ Settings stay where they are (the user's config directory, `client/src/settings.
 ## Update check (client)
 
 - Only in release builds (`build_info::is_release()`), once per launch, on a background
-  thread; never in dev builds, tests or `--bot` / `--quit-after` runs. Off with
+  thread; never in dev builds, tests or `--bot` / `--quit-after` / `--capture` runs. Off with
   `VELOCIDE_NO_UPDATE_CHECK=1` or the settings toggle "Check for updates" (default on).
 - `GET {api}/repos/{REPO}/releases/latest`, where `{api}` is `https://api.github.com` unless
   `VELOCIDE_UPDATE_API` (read at run time, for tests against a local server) says otherwise.
@@ -78,7 +80,8 @@ Settings stay where they are (the user's config directory, `client/src/settings.
   nowhere.
 - The prompt appears on the main menu (if the answer comes in during a match, when the player
   is next on the main menu): the new version, the running one, and that everyone in a game
-  needs the same version. Choices: **Update now**, **Later** (until the next launch).
+  needs the same version. Choices: **Update now**, **Later** (until the next launch; during
+  the download it is **Cancel** and stops it).
 - **Update now** downloads this platform's game asset (table above) into the executable's
   folder as `<exe>.new` with progress shown, checks its size, and its SHA-256 against the
   asset's `digest` (`sha256:<hex>`) when the API gives one, then swaps it in (Windows: rename

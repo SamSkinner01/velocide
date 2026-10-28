@@ -24,7 +24,8 @@ the debug overlay.
 | `menus::results` | `ResultsScreen`: animated campaign / co-op / deathmatch results (docs/style_modes.md) |
 | `menus::loadout` | LOADOUT screen: weapons on slots 1–4, two abilities per build, base numbers, presets (main menu page, lobby overlay, pause menu; docs/ui.md "Loadout screen") |
 | `menus::settings_menu` | settings screen (tabs Video/Retro, Audio, Controls with rebinding, Gameplay, Accessibility with a palette preview), reused by the pause menu |
-| `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers |
+| `menus::backdrop`, `menus::style` | the 3D scene behind the menu, title / shading helpers, the build tag (`build-42 (1a2b3c4) // PROTOCOL n`, `dev` for dev builds) |
+| `menus::update_prompt` | the main menu's update prompt: UPDATE NOW / LATER, download progress, failures with the release page ("Updates" below) |
 | `ingame` (`mod.rs`) | `InGame`: one `net::Session` + everything while playing |
 | `ingame::camera` | `CameraRig`: eye height, FOV kick, view roll, landing dip, stair smoothing, shake |
 | `ingame::feedback` | `Feedback`: screen shake (trauma), hitstop / visual time scale, screen flashes |
@@ -44,6 +45,7 @@ the debug overlay.
 | `ingame::audio_hooks` | local movement sounds from predicted `MoveEvents`, positional remote-player sounds |
 | `ingame::debug`, `ingame::tuning_edit` | F3 overlay (egui with `debug-ui`, text otherwise), tuning editor |
 | `level_mesh` | `LevelRender`: level geometry for the renderer |
+| `update` | the update check and self-update (`Updater`, `State`, `Prompt`); `update::github` (releases API), `update::install` (download, verify, swap) — "Updates" below |
 | `models` | procedural models, rigs and poses (owned by the models area, `docs/models.md`) |
 | `net` | networking core (owned by the network area) |
 
@@ -335,8 +337,9 @@ fog, vertex lights, vsync, shake, flashes, hitstop), FOV (horizontal at 16:9), w
 mouse sensitivity / invert, gamepad look speed / invert, master / effects / music volume
 (squared before the mixer), bindings, player name, last join address, host port and max
 players, last level, HUD toggles (timer, speed, FPS, ping), crosshair, view bob, show weapon,
-fullscreen, and an `accessibility` section (colour-vision mode + correction strength, shape
-cues). Changes apply live and are saved when leaving the settings screen (and when a game
+fullscreen, `check_for_updates` (default on, also for files from before it existed), and an
+`accessibility` section (colour-vision mode + correction strength, shape cues). Changes apply
+live and are saved when leaving the settings screen (and when a game
 starts from the menu).
 
 Applying: `Common::apply_display_settings(renderer)` hands the renderer
@@ -361,6 +364,64 @@ velocide --level L                         = --sp L
          --ready                           ready up in the lobby automatically (--bot implies it)
          --autostart                       host: start the match once everyone is ready
 ```
+
+## Updates (`update`)
+
+Every player in a game must run the same build, so release builds look for a newer GitHub
+release once per launch and offer it on the main menu. The contract (env vars, API calls,
+asset names, the swap) is `docs/distribution.md`; `shared::build_info` says which build this is.
+
+- **When**: `VelocideApp::init` calls `Updater::for_launch`, which checks unless
+  `update::skip_reason` says no: a dev build (`build_info::is_release()` false: plain
+  `cargo build` / `cargo run`), `VELOCIDE_NO_UPDATE_CHECK` set (not `0`), a `--bot`,
+  `--quit-after` or `--capture` run, or the setting (Settings → Gameplay → CHECK FOR
+  UPDATES) off. Turning the setting on later starts the check if only the setting held it
+  back; turning it off hides a waiting prompt. `Common::new` (headless tools, tests) starts
+  with `Updater::off()`, so nothing but the real app goes online.
+- **Threads**: the check and the download each run on a thread of their own and write
+  `update::State` (`Checking` → `UpToDate` / `CheckFailed` / `Available` → `Downloading
+  {done, total}` → `Installed` / `Failed`) into a mutex; the main menu reads
+  `Updater::prompt()` each frame and never waits. Check failures (offline, rate limit, bad
+  JSON) are only logged.
+- **Check** (`update::github`): `GET {api}/repos/{repo}/releases/latest` with `User-Agent:
+  velocide/<version>`, the commit from `target_commitish` or `GET .../commits/{tag}`, an
+  update when it isn't `build_info::COMMIT`. `{api}` is `VELOCIDE_UPDATE_API` (tests) or
+  `https://api.github.com`. HTTP is `ureq` 3 with rustls (ring, bundled Mozilla roots): no
+  OpenSSL, nothing to install on Linux, and it cross-compiles with MinGW.
+- **Prompt** (`menus::update_prompt`, root page only, after any notice): the new version, the
+  running one and that everyone in a game needs the same; UPDATE NOW / LATER (Esc = LATER,
+  until the next launch). While downloading: a progress bar, MB so far, CANCEL (= LATER, the
+  download stops). On failure: the reason, the release page's address and OPEN RELEASE PAGE
+  (`update::open_in_browser`: `rundll32 url.dll,FileProtocolHandler` from System32 on Windows,
+  `open` on macOS, `xdg-open` elsewhere; only `https://` pages, else the repository's latest
+  release page).
+- **Install** (`update::install`): the platform's asset (`github::game_asset_name`) streams
+  into `<exe>.new` next to the executable (the path is taken at startup: on Linux
+  `/proc/self/exe` says "(deleted)" after the swap), hashed on the way; the size must match
+  and the SHA-256 the asset's `digest` when the API gives one; any failure deletes the file.
+  `install::swap_in`: Linux mode 755 and rename over the running exe (`Swap::Replace`);
+  Windows renames the running exe to `<exe>.old` and the new file into its place, renaming the
+  old one back if that fails (`Swap::MoveAside`; renames retry briefly while a virus scanner
+  holds the new file). Both strategies run (and are tested) on any OS.
+- **Restart**: on `Installed` the menu calls `Updater::restart` (records the executable for
+  `update::take_relaunch`) and quits like QUIT, so the screen, settings and window shut down
+  normally; `main` then starts the new executable with the same arguments and returns. The
+  next launch's `install::remove_old` deletes `<exe>.old` (retrying on a thread for a few
+  seconds while the old process is still exiting on Windows).
+
+Tests: unit tests in `update` (release JSON, commit comparison and tag → commit resolution,
+digests, asset per platform, both swaps and the rollback, who checks, prompt states) and
+`tests/update.rs`, which serves canned JSON and a fake game from a `TcpListener` on
+127.0.0.1 through `VELOCIDE_UPDATE_API`: check → download (behind a redirect, with progress)
+→ verify → swap into a scratch folder, plus a cancelled download, a checksum mismatch, a 404,
+an up-to-date build and a repository without releases. `client_shots` renders the prompt
+(`menu_update*.png`) from fixed states (`Updater::showing`).
+
+To try the prompt by hand: build a release client (`VELOCIDE_VERSION=build-1
+VELOCIDE_COMMIT=<40 hex> cargo build --release -p client --bin velocide`), serve a
+`repos/<repo>/releases/latest` JSON whose `target_commitish` differs, and run it with
+`VELOCIDE_UPDATE_API=http://127.0.0.1:<port>` (and `VELOCIDE_REPO=<repo>` at build time if
+it isn't the default).
 
 ## Debug overlay (F3)
 
@@ -399,8 +460,9 @@ scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --
 velocide --sp movement_test --bot --capture shot.png --capture-after 4 --quit-after 6
 ```
 
-- `client_settings`: settings load/save/repair (incl. the accessibility section and files
-  written before it existed), CLI parsing.
+- `client_settings`: settings load/save/repair (incl. the accessibility section, the update
+  toggle and files written before they existed), CLI parsing.
+- `update` (unit) and `tests/update.rs` (local HTTP server): the updater ("Updates" above).
 - `palette` unit tests: every critical colour pair as each deficiency sees it (docs/ui.md
   "Accessibility"); `ingame::cues` and `hud` tests: marker shapes, parry icon placement,
   health popups.
