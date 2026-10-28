@@ -92,6 +92,11 @@ on any Linux distro with glibc 2.31 or newer, so about 2020 or newer. Each relea
 `PLAY.txt` with the controls and how to host and join. There is no macOS build; it would have
 to be built on a Mac.
 
+Anyone who played an older version from a zip: put the new file in a folder of its own, or
+delete the old `assets` folder. An `assets` folder next to the game still overrides the files
+built into it (that is how development works), so an old one would bring back old levels and
+models.
+
 Everyone in a game, the server included, must run the same version (the release's name, such
 as `build-42`). The game checks for a newer release when it starts and offers to update itself
 from the main menu (`docs/distribution.md`), so friends download it by hand only once.
@@ -257,8 +262,8 @@ over parryable enemies, +/− health popups).
 ## For developers
 
 - **Code and design:** read `DESIGN.md`, plus `docs/*.md` for each subsystem.
-- **Tuning while running:** gameplay numbers live in `assets/tuning.ron`, which is watched while
-  the game runs. Edit and save it, and the server reloads it and sends it to every client. The
+- **Tuning while running:** gameplay numbers live in `assets/tuning.ron` (built into release
+  binaries; a file on disk overrides the built-in one), which is watched while the game runs. Edit and save it, and the server reloads it and sends it to every client. The
   F3 overlay has an in-game editor for the movement values.
 - **F3 overlay:** FPS, ping, packet loss, bandwidth, prediction corrections, and a "ghost"
   outline of where the server thinks you are.

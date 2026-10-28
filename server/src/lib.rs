@@ -98,7 +98,7 @@ pub struct ServerConfig {
     /// UDP address to listen on. Use port 0 for an ephemeral port (single-player).
     pub bind: SocketAddr,
     pub max_players: usize,
-    /// Level name (`assets/levels/<name>.ron` or a built-in level).
+    /// Level name (`assets/levels/<name>.ron` on disk or embedded, or a built-in level).
     pub level: String,
     /// Simulation ticks per second.
     pub tick_rate: u32,
@@ -106,9 +106,10 @@ pub struct ServerConfig {
     pub snapshot_rate: Option<f32>,
     /// Network simulator applied to all of the server's traffic.
     pub netsim: Option<NetSimConfig>,
-    /// Tuning file; `None` = `assets/tuning.ron`.
+    /// Tuning file; `None` = `assets/tuning.ron` on disk, else its embedded copy.
     pub tuning_path: Option<PathBuf>,
-    /// Watch the tuning file and push changes to clients.
+    /// Watch the tuning file and push changes to clients (not the embedded copy: without an
+    /// assets folder on disk there is nothing to watch).
     pub watch_tuning: bool,
     /// Delta-compress snapshots (disable only to measure the savings).
     pub delta_compression: bool,
@@ -124,7 +125,8 @@ pub struct ServerConfig {
     /// presented the host token); without one (single-player, `--no-lobby`) every player may.
     /// Commands cost a chat token (same rate limit as chat).
     pub dev_commands: bool,
-    /// Enemy definitions directory; `None` = `assets/enemies` (built-ins as fallback).
+    /// Enemy definitions directory; `None` = `assets/enemies` (the embedded built-ins as
+    /// fallback either way).
     pub enemies_dir: Option<PathBuf>,
 }
 
@@ -354,12 +356,18 @@ impl Server {
         transport: Box<dyn ServerTransport>,
     ) -> anyhow::Result<Server> {
         let level = shared::sim::load_level(&config.level)?;
+        let tuning = match &config.tuning_path {
+            Some(path) => Tuning::load_or_default(path),
+            None => Tuning::load_default(),
+        };
         let tuning_path = config
             .tuning_path
             .clone()
             .unwrap_or_else(Tuning::default_path);
-        let tuning = Tuning::load_or_default(&tuning_path);
-        let watcher = if config.watch_tuning {
+        // A standalone server without an assets folder uses the embedded tuning: nothing to
+        // watch.
+        let watch = config.tuning_path.is_some() || shared::assets_dir().is_dir();
+        let watcher = if config.watch_tuning && watch {
             match FileWatcher::new(&[tuning_path.as_path()]) {
                 Ok(w) => Some(w),
                 Err(err) => {

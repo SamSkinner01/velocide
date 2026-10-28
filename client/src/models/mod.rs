@@ -3,10 +3,10 @@
 //!
 //! Pipeline: every model is built in code ([`ModelId::build`], `engine::assets::meshgen` +
 //! small procedural textures), exported to `assets/models/<file>.gltf` by [`generate_all`]
-//! (`cargo run -p client --example models_gen`) and loaded at runtime with
-//! `engine::assets::gltf::load` by [`ModelLibrary::load`]. If a file is missing or does not
-//! match the model's part table, that model is regenerated in memory (with a warning) so the
-//! game always starts.
+//! (`cargo run -p client --example models_gen`), embedded in the game at build time, and loaded
+//! at runtime with `engine::assets::gltf::load_asset` (the file on disk wins over the embedded
+//! copy) by [`ModelLibrary::load`]. If a file is missing or does not match the model's part
+//! table, that model is regenerated in memory (with a warning) so the game always starts.
 //!
 //! Rig structure (part names, parents, pivots, shading) lives in code ([`ModelId::joints`]);
 //! the glTF files hold each part's mesh in bind pose (model space), its texture and base

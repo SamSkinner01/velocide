@@ -323,7 +323,7 @@ survive bad or hostile data. Limits and validations (each has a regression test)
 | what | limit / check | where |
 |---|---|---|
 | levels (files the server loads, `LoadLevel` a client receives) | `LevelDef::validate`: every number finite, coordinates within ±1e4 m, ≤ 16384 brushes, 1024 lights, 256 spawns / checkpoints / encounters, 1024 doors / jump pads / kill volumes, 64 waves per encounter, 128 spawns per wave, 4096 props, strings ≤ 256 bytes; a client disconnects with "The server sent an invalid level (…)" | `shared::level` |
-| level props | model path relative, plain names only, `.gltf` / `.glb`, inside the canonical assets folder after symlinks, a regular file ≤ 16 MiB; else skipped with a warning | `client::level_mesh::resolve_prop_model` |
+| level props | model path relative, plain names only, `.gltf` / `.glb`, inside the canonical assets folder after symlinks, a regular file ≤ 16 MiB; with nothing at that path on disk, the game's embedded copy of that exact name; else skipped with a warning | `client::level_mesh::{resolve_prop_model, find_prop_model}` |
 | tuning | `Tuning::sanitize`: NaN → default, distances ≤ 1e4 m, speeds ≤ 1e3 m/s, times ≤ 1 h, rates > 0, counts (pellets, fan shots, volley...) ≤ 64 | `shared::tuning` |
 | parries | a projectile punched back and forth never exceeds `parry_max_speed` (250 m/s) / `parry_max_damage` (400) | `shared::sim::parry` |
 | world | ≤ 256 enemies (`MAX_ENEMIES`), ≤ 1024 projectiles (`MAX_PROJECTILES`): further spawns are skipped (waves spawn what fits); net ids wrap around safely | `shared::sim` |

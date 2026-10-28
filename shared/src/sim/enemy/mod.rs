@@ -1169,4 +1169,26 @@ mod tests {
         assert!((e.local_to_world(Vec3::NEG_Z) - Vec3::NEG_X).length() < 1e-6);
         assert!((e.forward() - Vec3::NEG_X).length() < 1e-6);
     }
+
+    #[test]
+    fn definitions_on_disk_override_and_extend_the_builtins() {
+        let dir = std::env::temp_dir().join(format!("velocide-enemies-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("gnawer.ron"), "(name: \"Gnawer\", health: 7.0)").unwrap();
+        std::fs::write(dir.join("newt.ron"), "(name: \"Newt\", net_kind: 999)").unwrap();
+        std::fs::write(dir.join("broken.ron"), "(health: ").unwrap();
+        let builtin = EnemyRegistry::builtin();
+        let r = EnemyRegistry::load_dir(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            r.len(),
+            builtin.len() + 1,
+            "the builtins plus newt, not broken"
+        );
+        assert_eq!(r.get("gnawer").unwrap().health, 7.0);
+        assert_ne!(builtin.get("gnawer").unwrap().health, 7.0);
+        assert_eq!(r.get("newt").unwrap().name, "Newt");
+        assert_eq!(r.get("censer"), builtin.get("censer"));
+    }
 }

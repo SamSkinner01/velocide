@@ -20,11 +20,16 @@ cargo test -p client                            # mesh validity, glTF round trip
   material per part, named after the part).
 - `models::generate_all(dir)` writes one self-contained `.gltf` per model (base64 buffers,
   embedded PNG textures, nearest samplers) and reads each file back to verify it.
-- `ModelLibrary::load(&mut renderer)` loads every file from `engine::assets_dir()/models`,
-  checks it against the model's part table, subtracts each part's pivot (meshes become
-  joint-local) and uploads meshes / textures (identical textures are shared). A missing or
-  mismatching file is **regenerated in memory** with a `log::warn!` — the game always starts.
-  `lib.regenerated` lists models that were not loaded from disk.
+- The files are compiled into the game (`engine::asset_files`), so it needs no assets folder.
+  `ModelLibrary::load(&mut renderer)` loads every model with `gltf::load_asset`: the file in
+  `engine::assets_dir()/models` if there is one, else the embedded copy. It checks each against
+  the model's part table, subtracts each part's pivot (meshes become joint-local) and uploads
+  meshes / textures (identical textures are shared). A missing or mismatching file is
+  **regenerated in memory** with a `log::warn!` — the game always starts. `lib.regenerated`
+  lists models that were not loaded. The test `every_model_is_embedded_and_matches_its_part_table`
+  fails if a committed file is missing or out of date with its part table.
+- The next `cargo build` after `models_gen` embeds the new files (the files on disk win in the
+  meantime).
 - The rig structure (part names, parents, pivots, shading) lives in code
   (`ModelId::joints()`); glTF holds geometry, textures and base colours. If you edit a file in
   Blender keep the mesh / node names; parts are matched by name.

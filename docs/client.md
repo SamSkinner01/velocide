@@ -441,7 +441,8 @@ offset), server vs predicted position, particles / decals, trauma / hitstop.
   same machine) hot-reloads the file and broadcasts the tuning; the status line confirms when
   the server applied it, and prediction uses it from then on (tested end to end in
   `tests/client_tuning_reload.rs`). Remember: `shared` tests expect the committed file to
-  match the defaults.
+  match the defaults. It needs the assets folder on disk: a standalone game without one runs
+  on the embedded `tuning.ron` and has nothing to write to or reload.
 
 Press Esc to free the cursor and interact with the window. Without `debug-ui`
 (`--no-default-features`) a compact text overlay shows the same key numbers.

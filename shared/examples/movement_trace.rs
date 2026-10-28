@@ -269,7 +269,7 @@ fn main() {
         world: &collision.world,
         jump_pads: &level.jump_pads,
     };
-    let t: MovementTuning = Tuning::load_or_default(&Tuning::default_path()).movement;
+    let t: MovementTuning = Tuning::load_default().movement;
 
     let mut ran = false;
     for sc in all.iter().filter(|s| name == "all" || s.name == name) {

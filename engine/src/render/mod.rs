@@ -376,8 +376,8 @@ impl Renderer {
         settings: &RetroSettings,
     ) -> Renderer {
         let layouts = Layouts::new(&device);
-        let pipelines =
-            Pipelines::new(&device, &layouts, &ShaderSources::embedded(), output_format);
+        let embedded_shaders = ShaderSources::embedded();
+        let pipelines = Pipelines::new(&device, &layouts, &embedded_shaders, output_format);
         let point_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("point repeat"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -464,6 +464,17 @@ impl Renderer {
             rgba: vec![255; 4],
         });
         renderer.font = renderer.create_texture(&crate::ui::font::build_atlas());
+        // Shaders in the assets folder on disk win over the embedded ones, unless they don't
+        // compile (an old folder next to a newer game): then the embedded ones stay.
+        match ShaderSources::load() {
+            Ok(sources) if sources == embedded_shaders => {}
+            sources => {
+                let dir = crate::assets_dir().join("shaders");
+                if let Err(e) = renderer.set_shaders(sources, &dir) {
+                    log::error!("using the embedded shaders, {} fail:\n{e}", dir.display());
+                }
+            }
+        }
         renderer
     }
 
@@ -746,15 +757,25 @@ impl Renderer {
     // ----------------------------------------------------------------------------------------
     // Shaders
 
-    /// Re-reads `assets/shaders/*.wgsl` and rebuilds every pipeline. On a compile error the old
-    /// pipelines stay active and the error message is returned.
+    /// Re-reads `assets/shaders/*.wgsl` (a file missing on disk from its embedded copy) and
+    /// rebuilds every pipeline. On a compile error the old pipelines stay active and the error
+    /// message is returned.
     pub fn reload_shaders(&mut self) -> Result<(), String> {
-        self.reload_shaders_from(&crate::assets_dir().join("shaders"))
+        self.set_shaders(ShaderSources::load(), &crate::assets_dir().join("shaders"))
     }
 
-    /// Like [`Renderer::reload_shaders`] but from an explicit directory.
+    /// Like [`Renderer::reload_shaders`] but from an explicit directory (every file there).
     pub fn reload_shaders_from(&mut self, dir: &Path) -> Result<(), String> {
-        let result = ShaderSources::from_dir(dir).and_then(|sources| {
+        self.set_shaders(ShaderSources::from_dir(dir), dir)
+    }
+
+    /// Builds every pipeline from `sources` (read from `dir`), keeping the old ones on error.
+    fn set_shaders(
+        &mut self,
+        sources: Result<ShaderSources, String>,
+        dir: &Path,
+    ) -> Result<(), String> {
+        let result = sources.and_then(|sources| {
             let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
             let pipelines = Pipelines::new(&self.device, &self.layouts, &sources, self.output_format);
             match pollster::block_on(scope.pop()) {
@@ -775,7 +796,7 @@ impl Renderer {
             Ok(pipelines) => {
                 self.pipelines = pipelines;
                 self.shader_error = None;
-                log::info!("shaders reloaded from {}", dir.display());
+                log::info!("shaders loaded from {}", dir.display());
                 Ok(())
             }
             Err(error) => {
@@ -785,7 +806,8 @@ impl Renderer {
         }
     }
 
-    /// Watch `assets/shaders/` and reload automatically (checked once per `render`).
+    /// Watch `assets/shaders/` and reload automatically (checked once per `render`). Without
+    /// that folder on disk (only the embedded shaders) there is nothing to watch.
     pub fn set_shader_hot_reload(&mut self, enabled: bool) {
         if !enabled {
             self.shader_watcher = None;
@@ -793,6 +815,10 @@ impl Renderer {
         }
         if self.shader_watcher.is_none() {
             let dir = crate::assets_dir().join("shaders");
+            if !dir.is_dir() {
+                log::info!("no {} on disk, shader hot reload is off", dir.display());
+                return;
+            }
             match FileWatcher::new_dir(&dir) {
                 Ok(watcher) => self.shader_watcher = Some(watcher),
                 Err(e) => log::warn!("cannot watch {}: {e}", dir.display()),
@@ -1689,6 +1715,14 @@ mod tests {
             fog: false,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn embedded_shaders_are_the_assets_folder_ones() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/shaders");
+        assert!(ShaderSources::from_dir(&dir) == Ok(ShaderSources::embedded()));
+        // Every file is on disk in the repo, so `load` reads the same text.
+        assert!(ShaderSources::load() == Ok(ShaderSources::embedded()));
     }
 
     /// Unlit quad covering the middle of the view, 2 m in front of the camera.

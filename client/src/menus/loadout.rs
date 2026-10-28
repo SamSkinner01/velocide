@@ -262,9 +262,9 @@ impl Default for LoadoutMenu {
 }
 
 impl LoadoutMenu {
-    /// For the menus: PvE and PvP numbers from the local tuning file.
+    /// For the menus: PvE and PvP numbers from the local tuning file (or its embedded copy).
     pub fn new() -> Self {
-        Self::with_tuning(&Tuning::load_or_default(&Tuning::default_path()))
+        Self::with_tuning(&Tuning::load_default())
     }
 
     /// PvE and PvP numbers from `tuning` (its balance profiles).

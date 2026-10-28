@@ -367,24 +367,30 @@ impl LevelCollision {
 }
 
 impl LevelDef {
+    /// The levels folder on disk (`level_gen` writes here).
     pub fn dir() -> PathBuf {
         crate::assets_dir().join("levels")
     }
 
-    /// Path of a level by name (file stem).
-    pub fn path_for(name: &str) -> PathBuf {
-        Self::dir().join(format!("{name}.ron"))
+    /// Path of a level by name (file stem) inside the assets folder: `levels/<name>.ron`.
+    pub fn asset_path(name: &str) -> String {
+        format!("levels/{name}.ron")
     }
 
     /// Reads, parses and [validates](LevelDef::validate) a level file.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
+        Self::parse(&text, &path.display().to_string())
+    }
+
+    /// Parses and validates a level's RON; errors name it `what`.
+    fn parse(text: &str, what: &str) -> anyhow::Result<Self> {
         let level: LevelDef =
-            ron::from_str(&text).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+            ron::from_str(text).map_err(|e| anyhow::anyhow!("parsing {what}: {e}"))?;
         level
             .validate()
-            .map_err(|e| anyhow::anyhow!("invalid level {}: {e}", path.display()))?;
+            .map_err(|e| anyhow::anyhow!("invalid level {what}: {e}"))?;
         Ok(level)
     }
 
@@ -467,23 +473,16 @@ impl LevelDef {
         check_num("par_time", self.par_time, 0.0, MAX_LEVEL_TIME)
     }
 
+    /// Loads `levels/<name>.ron`: the file in the assets folder on disk, else the copy
+    /// embedded in the binary ([`crate::asset_files`]).
     pub fn load_named(name: &str) -> anyhow::Result<Self> {
-        Self::load(&Self::path_for(name))
+        let path = Self::asset_path(name);
+        Self::parse(&crate::asset_files::read_to_string(&path)?, &path)
     }
 
-    /// Names (file stems) of all levels in `assets/levels`, sorted.
+    /// Names (file stems) of all levels in `assets/levels`, on disk and embedded, sorted.
     pub fn list() -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(Self::dir())
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let p = e.path();
-                (p.extension()? == "ron").then(|| p.file_stem()?.to_str().map(str::to_owned))?
-            })
-            .collect();
-        names.sort();
-        names
+        crate::asset_files::list("levels", "ron")
     }
 
     /// Builds the collision world. Brush colliders get `tag` = brush index; door colliders get
@@ -551,6 +550,8 @@ mod tests {
     fn all_shipped_levels_parse() {
         let names = LevelDef::list();
         assert!(!names.is_empty());
+        // The repo's levels are all embedded too (the standalone binaries carry them).
+        assert_eq!(names, crate::asset_files::embedded_list("levels", "ron"));
         for name in names {
             // `load` validates too.
             let level = LevelDef::load_named(&name).unwrap_or_else(|e| panic!("{name}: {e}"));

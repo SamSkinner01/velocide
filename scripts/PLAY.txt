@@ -14,6 +14,8 @@ START THE GAME
     (Or in the file manager: Properties -> Permissions -> "Allow executing file as program",
     then double-click it.) You need a working Vulkan driver (on Debian/Ubuntu:
     mesa-vulkan-drivers, or the NVIDIA driver).
+  Played an older version from a zip? Put the new file in a folder of its own, or delete the
+  old "assets" folder: an assets folder next to the game replaces the files built into it.
 
 UPDATES
   The game checks for a new version each time it starts. When there is one, the main menu

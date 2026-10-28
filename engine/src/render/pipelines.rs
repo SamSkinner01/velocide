@@ -1,7 +1,8 @@
 //! Shader sources, bind group layouts and every render pipeline.
 //!
-//! Shaders live in `assets/shaders/*.wgsl`. They are embedded at compile time as the startup
-//! default and can be re-read from disk at runtime (`Renderer::reload_shaders`).
+//! Shaders live in `assets/shaders/*.wgsl`. The renderer starts with the files in the assets
+//! folder on disk, else the copies compiled into the binary (`asset_files`), and can re-read
+//! them at runtime (`Renderer::reload_shaders`).
 
 use std::path::Path;
 
@@ -16,7 +17,7 @@ pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth3
 pub(crate) const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// WGSL sources of all shaders. `common` is prepended to `scene` and `fx`.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct ShaderSources {
     pub common: String,
     pub scene: String,
@@ -26,21 +27,37 @@ pub(crate) struct ShaderSources {
 }
 
 impl ShaderSources {
+    /// The copies compiled into the binary (`assets/shaders` when it was built).
     pub fn embedded() -> Self {
-        Self {
-            common: include_str!("../../../assets/shaders/common.wgsl").to_owned(),
-            scene: include_str!("../../../assets/shaders/scene.wgsl").to_owned(),
-            fx: include_str!("../../../assets/shaders/fx.wgsl").to_owned(),
-            post: include_str!("../../../assets/shaders/post.wgsl").to_owned(),
-            blit: include_str!("../../../assets/shaders/blit.wgsl").to_owned(),
-        }
+        Self::read_with(|name| {
+            let path = format!("shaders/{name}");
+            let bytes = crate::asset_files::embedded(&path)
+                .ok_or_else(|| format!("{path} is not embedded"))?;
+            std::str::from_utf8(bytes)
+                .map(str::to_owned)
+                .map_err(|_| format!("{path} is not UTF-8"))
+        })
+        .expect("builds with the `client` feature embed assets/shaders")
     }
 
+    /// `shaders/*.wgsl` from the assets folder on disk, each file missing there from its
+    /// embedded copy.
+    pub fn load() -> Result<Self, String> {
+        Self::read_with(|name| {
+            crate::asset_files::read_to_string(&format!("shaders/{name}"))
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    /// The files in `dir` only.
     pub fn from_dir(dir: &Path) -> Result<Self, String> {
-        let read = |name: &str| {
+        Self::read_with(|name| {
             let path = dir.join(name);
             std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
-        };
+        })
+    }
+
+    fn read_with(read: impl Fn(&str) -> Result<String, String>) -> Result<Self, String> {
         Ok(Self {
             common: read("common.wgsl")?,
             scene: read("scene.wgsl")?,

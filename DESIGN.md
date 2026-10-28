@@ -35,7 +35,13 @@ is exactly one code path for SP, co-op and PvP.
   with `alpha`. Nothing gameplay-related depends on frame rate.
 - No `unsafe`, no `unwrap()` on anything that can fail at runtime because of user data/network
   input. `cargo build` and `cargo clippy --workspace --all-targets` must have zero warnings.
-- `engine::assets_dir()` locates `assets/` (env `VELOCIDE_ASSETS` overrides).
+- `engine::assets_dir()` locates `assets/` on disk (env `VELOCIDE_ASSETS` overrides). Every
+  file under `assets/` is also compiled into the binaries (`engine/build.rs`; the headless
+  server only gets `tuning.ron`, `levels/`, `enemies/`), so they run from an empty folder.
+  Read run-time files through `engine::asset_files` (`read`, `read_to_string`, `find`,
+  `list`): a file on disk wins, a missing one falls back to its embedded copy, lists are the
+  union (`docs/distribution.md`). Writers (hot reload, tuning editor, `level_gen`,
+  `models_gen`) use the folder on disk.
 
 ## Original names
 
