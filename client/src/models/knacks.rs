@@ -2,8 +2,8 @@
 //! Shrike throws with Q besides the Thorn.
 //!
 //! - **Kindle flask** (`prop_kindle_flask.gltf`): a squat glass flask in a brass cage with a
-//!   leather sling, stoppered with wax; kindling embers glow inside (`Glow`, the heal colour
-//!   through `Tint::glow`). Flies along -Z (any orientation: it tumbles), ~0.3 m drawn.
+//!   leather sling, stoppered with wax (`stopper`, pulled when it is drunk); kindling embers
+//!   glow inside (`Glow`, the heal colour through `Tint::glow`), ~0.3 m drawn.
 //! - **Snare** (`prop_snare.gltf`): a wax trap laid on the floor, ~0.9 m across: a poured wax
 //!   disc with a brass ring, two toothed brass jaws hinged on the ring that lie open flat while
 //!   it waits and snap up together when it springs ([`snare_pose`]), and a wick lamp in the
@@ -18,10 +18,14 @@ use super::kit::{self, BRASS, DARK_LEATHER, IRON, WRAP, block, gem, limb, rgb, t
 use super::rig::{JointDef, Pose, ROOT, Shade, joint, static_part};
 use super::{ModelId, PartSet};
 
-const FLASK: [JointDef; 3] = [
+/// The flask's wax stopper (a part of its own: drinking pulls it, docs/rework.md).
+pub const FLASK_STOPPER: usize = 3;
+
+const FLASK: [JointDef; 4] = [
     static_part("body", Shade::Lit),
     static_part("glass", Shade::Lit),
     static_part("embers", Shade::Glow),
+    static_part("stopper", Shade::Lit),
 ];
 
 /// The snare's jaw hinges (on the brass ring, either side of the middle).
@@ -138,7 +142,7 @@ fn flask() -> Vec<ModelPart> {
         );
     }
     p.add(
-        0,
+        FLASK_STOPPER,
         tube(
             Vec3::new(0.0, 0.14, 0.0),
             Vec3::new(0.0, 0.2, 0.0),
@@ -148,7 +152,10 @@ fn flask() -> Vec<ModelPart> {
             rgb(0xd9c48e),
         ),
     );
-    p.add(0, gem(Vec3::new(0.0, 0.205, 0.0), 0.03, 0, rgb(0xa8322a)));
+    p.add(
+        FLASK_STOPPER,
+        gem(Vec3::new(0.0, 0.205, 0.0), 0.03, 0, rgb(0xa8322a)),
+    );
     // The leather sling looped round the neck.
     p.add(
         0,
@@ -196,6 +203,7 @@ fn flask() -> Vec<ModelPart> {
     finish_lit(&mut p);
     p.texture(0, kit::tex_plate());
     p.texture(2, kit::tex_glow());
+    p.texture(FLASK_STOPPER, kit::tex_wax());
     p.finish()
 }
 

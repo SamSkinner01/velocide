@@ -15,6 +15,8 @@ pub mod arclash;
 pub mod arm;
 pub mod bellows;
 pub mod cinderbox;
+/// Drinking the Kindle Flask (docs/rework.md): the left hand's drink.
+pub mod drink;
 pub mod fist;
 pub mod kiln;
 pub mod lancet;
@@ -266,6 +268,9 @@ pub struct ViewmodelAnim {
     pub swing: melee::Swing,
     /// What the left hand throws (`throw`): a knack's model; `None` = a Thorn.
     pub throw_item: Option<ModelId>,
+    /// Kindle Flask drink progress 0..1 (0 = not drinking, [`drink`]): the left hand brings
+    /// the flask to the mouth, tips it back and flicks it away; the gun dips meanwhile.
+    pub drink: f32,
 }
 
 impl ViewmodelAnim {
@@ -492,7 +497,9 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
         .max(cinderbox::salvo_kick(anim.salvo));
     let (kick_back, kick_pitch) = kick_amount(w);
     let lowered = (1.0 - smoothstep(anim.switch)).powi(2);
-    let punch = punch_extension(anim.punch).max(throw_extension(anim.throw) * 0.6);
+    let punch = punch_extension(anim.punch)
+        .max(throw_extension(anim.throw) * 0.6)
+        .max(drink::lowering(anim.drink));
     let bob = anim.bob_amount.clamp(0.0, 1.0);
     let (s, c) = anim.bob_phase.sin_cos();
     let bob_offset = Vec3::new(s * 0.008, -(c * c) * 0.009 + 0.0045, 0.0) * bob;
@@ -570,6 +577,9 @@ fn fist_transform(anim: &ViewmodelAnim) -> Option<Mat4> {
             p,
         ));
     }
+    if let Some(hand) = drink::hand(anim.drink) {
+        return Some(hand);
+    }
     let throw = throw_extension(anim.throw);
     if throw > 0.0 {
         let p = anim.throw;
@@ -607,6 +617,14 @@ fn draw_fists(
             Vec3::new(-0.11, -0.135, -0.3) + bob,
         )
     });
+    if drink::drinking(anim.drink) {
+        let mouth = draw_left_hand(lib, anim, left, tint, out);
+        return ViewmodelDrawInfo {
+            muzzle: right.transform_point3(Vec3::new(0.0, 0.0, -0.05)),
+            muzzle_dir: Vec3::NEG_Z,
+            fist: Some(mouth),
+        };
+    }
     let mut pose = Pose::rest(fist::JOINTS.len());
     let flare = 0.6 + punch_extension(anim.punch) * 2.0;
     pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
@@ -636,6 +654,21 @@ fn draw_left_hand(
     pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
     lib.get(ModelId::Fist).draw(&pose, fist, tint, out);
     let mut point = fist.transform_point3(Vec3::new(0.0, 0.0, -0.02));
+    if drink::drinking(anim.drink) {
+        // The Kindle Flask on the fist, its kindling flaring as it is drunk.
+        if let Some(held) = drink::flask(anim.drink, anim.time) {
+            let mut item_pose = lib.get(ModelId::KindleFlask).rest_pose();
+            let g = drink::flask_glow(anim.drink);
+            item_pose.glow = Vec4::new(g, g, g, 1.0);
+            if drink::unstoppered(anim.drink) {
+                item_pose.hide(super::knacks::FLASK_STOPPER);
+            }
+            lib.get(ModelId::KindleFlask)
+                .draw(&item_pose, held, tint, out);
+            point = held.transform_point3(Vec3::Y * 0.15);
+        }
+        return point;
+    }
     if anim.throw > 0.0 && anim.throw < 0.55 {
         let wobble = Quat::from_rotation_y(0.12 * wave(anim.time, 3.0))
             * Quat::from_rotation_x(-0.2 + 0.05 * wave(anim.time, 4.3));

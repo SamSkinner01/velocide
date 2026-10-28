@@ -84,6 +84,16 @@ impl Viewmodel {
         self.anim.throw_item = item;
     }
 
+    /// Starts drinking the Kindle Flask (the left hand, `models::weapons::drink`).
+    pub fn drink(&mut self) {
+        self.anim.drink = 1e-3;
+    }
+
+    /// Drinking the Kindle Flask right now.
+    pub fn drinking(&self) -> bool {
+        crate::models::weapons::drink::drinking(self.anim.drink)
+    }
+
     /// The weapon in the hand (last drawn).
     pub fn weapon(&self) -> WeaponKind {
         self.anim.weapon
@@ -177,6 +187,12 @@ impl Viewmodel {
                 if *p >= 1.0 {
                     *p = 0.0;
                 }
+            }
+        }
+        if a.drink > 0.0 {
+            a.drink += dt / crate::models::weapons::drink::DRINK_TIME;
+            if a.drink >= 1.0 {
+                a.drink = 0.0;
             }
         }
         self.drum.update(dt);
