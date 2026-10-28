@@ -1,29 +1,10 @@
-//! This machine's LAN address, for the lobby's "friends join with ..." line.
-//!
-//! A UDP socket `connect`ed to an outside address makes the OS pick the outgoing interface
-//! (and so our address on that network) without sending a single packet. Machines without a
-//! default route try a few private ranges; if nothing works the caller shows a generic hint.
+//! This machine's LAN address, for the lobby's "friends join with ..." line (the probe itself
+//! is `rendezvous::local_lan_ip`, which online hosting uses too). If it can't be determined
+//! the caller shows a generic hint.
 
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::SocketAddr;
 
-/// Probe targets: a public address first, then private ranges (offline LANs).
-const PROBES: [&str; 4] = [
-    "8.8.8.8:80",
-    "192.168.254.254:9",
-    "10.254.254.254:9",
-    "172.31.254.254:9",
-];
-
-/// The address other machines on the LAN reach us at, if it can be determined.
-pub fn local_lan_ip() -> Option<IpAddr> {
-    PROBES.iter().find_map(|target| {
-        let target: SocketAddr = target.parse().ok()?;
-        let socket = UdpSocket::bind(("0.0.0.0", 0)).ok()?;
-        socket.connect(target).ok()?;
-        let ip = socket.local_addr().ok()?.ip();
-        (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
-    })
-}
+pub use rendezvous::local_lan_ip;
 
 /// "FRIENDS JOIN WITH 192.168.1.20:47420" (or a generic hint).
 pub fn join_hint(port: u16) -> String {

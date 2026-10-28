@@ -50,6 +50,7 @@ pub mod interpolation;
 pub mod lan;
 /// Lobby state, level catalog and host commands on `NetClient` (docs/lobby.md).
 mod lobby;
+pub mod online;
 pub mod prediction;
 pub mod session;
 pub mod transport;
@@ -74,6 +75,7 @@ use shared::tuning::Tuning;
 
 pub use clock::ClockSync;
 pub use interpolation::{SampleInfo, SnapshotBuffer};
+pub use online::OnlineClientTransport;
 pub use prediction::{Correction, Prediction, PredictionStats};
 pub use server::{NetSimConfig, TransportStats};
 pub use session::{JoinTarget, Session, SessionKind, SessionSpec, parse_netsim, resolve_address};
@@ -310,6 +312,39 @@ impl NetClient {
         client.host_token = config.host_token;
         client.cosmetics = config.cosmetics;
         Ok(client)
+    }
+
+    /// Joins the game behind join code `code` through the rendezvous service `service`
+    /// (non-blocking; docs/rendezvous.md). `relay_only` hides our address from the host.
+    pub fn connect_online(
+        service: &str,
+        code: rendezvous::Code,
+        relay_only: bool,
+        config: ClientConfig,
+    ) -> anyhow::Result<Self> {
+        let request = ConnectRequest {
+            protocol_version: config.protocol_version,
+            name: protocol::sanitize_name(&config.name),
+        };
+        let ids = [random_client_id(), random_client_id(), random_client_id()];
+        let transport = OnlineClientTransport::new(
+            service,
+            code,
+            relay_only,
+            ids,
+            request.to_user_data(),
+            config.netsim,
+        )?;
+        let mut client = Self::with_transport(Box::new(transport));
+        client.host_token = config.host_token;
+        client.cosmetics = config.cosmetics;
+        Ok(client)
+    }
+
+    /// What the transport is doing while connecting (joining by code), for the connecting
+    /// screen.
+    pub fn transport_progress(&self) -> Option<String> {
+        self.transport.progress()
     }
 
     /// Uses a custom transport (Steam networking, relays...).
@@ -807,12 +842,13 @@ impl NetClient {
             }
             ServerMessage::PlayerList(list) => {
                 self.players.clear();
-                for info in list {
+                for info in list.into_iter().take(256).map(clean_info) {
                     self.players.insert(info.id, info.clone());
                     self.events.push_back(NetEvent::PlayerJoined(info));
                 }
             }
             ServerMessage::PlayerJoined(info) => {
+                let info = clean_info(info);
                 self.players.insert(info.id, info.clone());
                 self.events.push_back(NetEvent::PlayerJoined(info));
             }
@@ -821,10 +857,15 @@ impl NetClient {
                 self.events.push_back(NetEvent::PlayerLeft { id, name });
             }
             ServerMessage::PlayerUpdated(info) => {
+                let info = clean_info(info);
                 self.players.insert(info.id, info.clone());
                 self.events.push_back(NetEvent::PlayerUpdated(info));
             }
             ServerMessage::Chat { from, text } => {
+                // As the server should have: a stranger's server could send megabytes.
+                let Some(text) = protocol::sanitize_chat(&text) else {
+                    return;
+                };
                 let name = match from {
                     Some(id) => self.player_name(id).unwrap_or("?").to_string(),
                     None => "server".to_string(),
@@ -1057,6 +1098,13 @@ impl Drop for NetClient {
             self.transport.disconnect();
         }
     }
+}
+
+/// A player as a well-behaved server sends it: a malicious host's names could be megabytes
+/// long (the client draws them every frame).
+fn clean_info(mut info: PlayerInfo) -> PlayerInfo {
+    info.name = protocol::sanitize_name(&info.name);
+    info
 }
 
 /// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS

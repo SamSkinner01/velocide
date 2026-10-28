@@ -119,8 +119,12 @@ impl UpdateConfig {
     }
 }
 
-/// `VELOCIDE_UPDATE_API` (read at run time), else GitHub's API.
+/// `VELOCIDE_UPDATE_API` (read at run time; dev builds only, for tests), else GitHub's API.
+/// Release builds always ask GitHub: nothing in the environment can point them elsewhere.
 pub fn api_from_env() -> String {
+    if build_info::is_release() {
+        return github::DEFAULT_API.to_string();
+    }
     std::env::var("VELOCIDE_UPDATE_API")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -434,7 +438,20 @@ fn install_update(shared: &Shared, config: &UpdateConfig, latest: Latest) {
             asset.size,
             new.display()
         );
-        install::download(asset, &new, &config.version, |done| {
+        // From GitHub, the game comes from this repository's release files, over HTTPS only.
+        let from_github = config.api == github::DEFAULT_API;
+        let expected = format!(
+            "https://github.com/{}/releases/download/{}/",
+            config.repo, latest.release.tag_name
+        );
+        if from_github && !asset.browser_download_url.starts_with(&expected) {
+            anyhow::bail!(
+                "the release's download isn't one of {}'s release files: {}",
+                config.repo,
+                asset.browser_download_url
+            );
+        }
+        install::download(asset, &new, &config.version, from_github, |done| {
             if shared.cancel.load(Ordering::SeqCst) {
                 return false;
             }
@@ -447,6 +464,7 @@ fn install_update(shared: &Shared, config: &UpdateConfig, latest: Latest) {
             let _ = std::fs::remove_file(&new);
             anyhow::bail!("cancelled");
         }
+        install::verify_file(&new, asset.size, asset.digest.as_deref())?;
         install::swap_in(&new, &config.exe).inspect_err(|_| {
             // Keep the download only if it is now the one copy of the game.
             if config.exe.exists() {
