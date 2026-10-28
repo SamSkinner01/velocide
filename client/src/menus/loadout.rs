@@ -1762,7 +1762,7 @@ mod tests {
         let [a, b] = l.slot(0).unwrap().abilities;
         assert!(set_ability(&mut l, 0, 0, b));
         assert_eq!(l.slot(0).unwrap().abilities, [b, a], "swapped");
-        assert!(set_ability(&mut l, 0, 1, Ability::EmberArrow));
+        assert!(set_ability(&mut l, 0, 1, Ability::BeaconArrow));
         assert!(
             !set_ability(&mut l, 0, 1, Ability::Gust),
             "not a Draw ability"

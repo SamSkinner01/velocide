@@ -1,7 +1,7 @@
 //! Headless combat screenshots: a real single-player session (in-process server) driven by a
 //! script — dev commands spawn enemies and needles, the local player aims and fires every weapon
 //! mode and throws thorns — and PNGs of the moments worth looking at: Quill tracers, brand
-//! sigils, splinter bursts, Bellows pellets and gusts, Arclash arcs / chains / wisps /
+//! sigils, Wicklines, Bellows pellets, gusts and the Bulwark, Arclash arcs / chains / wisps /
 //! Discharge novas, Tumbler bombs, Breach and Gravewell, thorn ricochets, deflections and
 //! parries, enemies walking / winding up / dying, the HUD with damage and hard damage, hit
 //! markers, the kill feed and the death screen; and the feel pass (`feel_*.png`, docs/feel.md):
@@ -173,18 +173,20 @@ fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
     game.send_chat("/killall");
     spawn(game, 4);
     h.frames(game, 70, still);
-    game.send_chat("/loadout lancet:skewer,flurry thresher:slug,flak riveter:volley,flare cinderbox:limpet,mortar");
+    game.send_chat(
+        "/loadout lancet:tally,waxwork thresher:bolas,flak riveter:stoke,lantern cinderbox:limpet,kite",
+    );
     h.frames(game, 20, still);
 
-    // Lancet: needles, then a Skewer charged and loosed.
+    // Lancet: needles, then a Tally held over the pack and let go.
     select(game, 0, 0);
     h.frames(game, 8, |g, _| aimed(g, Buttons::FIRE));
     h.shot("weapon_lancet");
     h.frames(game, 10, |g, _| aimed(g, Buttons::NONE));
     h.frames(game, 40, |g, _| aimed(g, Buttons::ALT_FIRE));
-    h.shot("weapon_lancet_skewer_charge");
+    h.shot("weapon_lancet_tally_held");
     h.frames(game, 3, |g, _| aimed(g, Buttons::NONE));
-    h.shot("weapon_lancet_skewer");
+    h.shot("weapon_lancet_tally");
     h.frames(game, 30, still);
 
     // Thresher: the drum-fed blast, then a Flak shell bursting in the pack.
@@ -217,7 +219,7 @@ fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
         h.shot("weapon_thresher_flak");
     }
 
-    // Riveter: a stream of hot rivets, then a Flare and its burning patch.
+    // Riveter: a stream of hot rivets, then a Lantern tossed.
     game.send_chat("/killall");
     spawn(game, 3);
     h.frames(game, 60, still);
@@ -238,9 +240,9 @@ fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
         )
     });
     h.frames(game, 70, still);
-    h.shot("weapon_riveter_flare_patch");
+    h.shot("weapon_riveter_lantern");
 
-    // Cinderbox: a salvo, its blasts; limpets thrown, stuck, detonated; a mortar.
+    // Cinderbox: a salvo, its blasts; limpets thrown, stuck, detonated; a kite.
     select(game, 3, 0);
     h.frames(game, 20, still);
     h.frames(game, 9, |g, i| {
@@ -281,14 +283,14 @@ fn arsenal_weapon_shots(h: &mut Harness, game: &mut InGame) {
         )
     });
     h.frames(game, 18, still);
-    h.shot("weapon_cinderbox_mortar");
+    h.shot("weapon_cinderbox_kite");
     h.frames(game, 50, still);
 
     // The Longwick: a full draw, the release; a pinning arrow; the Kiln setting Moulds alight.
     game.send_chat("/killall");
     spawn(game, 4);
     h.frames(game, 60, still);
-    game.send_chat("/loadout longwick:pinning,ember kiln:flare,discharge quill bellows");
+    game.send_chat("/loadout longwick:pinning,beacon kiln:lantern,discharge quill bellows");
     h.frames(game, 20, still);
     select(game, 0, 0);
     h.frames(game, 10, still);
@@ -341,7 +343,7 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     game.send_chat("/killall");
     spawn(game, 3);
     h.frames(game, 70, still);
-    game.send_chat("/loadout quill riveter:volley,flare longwick:triple,pinning tumbler");
+    game.send_chat("/loadout quill riveter:stoke,lantern longwick:blink,pinning tumbler");
     h.frames(game, 20, still);
     let claimed = game.combat.stand_ins.stats.claimed;
 
@@ -354,7 +356,7 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     h.shot("feel_tracer");
     h.frames(game, 25, still);
 
-    // The Riveter: rivets streaming from the muzzle; a Volley of ten.
+    // The Riveter: rivets streaming from the muzzle; stoked.
     select(game, 1, 0);
     h.frames(game, 12, |g, _| aimed(g, Buttons::NONE));
     h.frames(game, 7, |g, _| aimed(g, Buttons::FIRE));
@@ -362,7 +364,7 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 20, |g, _| aimed(g, Buttons::NONE));
     h.frames(game, 1, |g, _| aimed(g, Buttons::ALT_FIRE));
     h.frames(game, 3, still);
-    h.shot("feel_volley");
+    h.shot("feel_stoke");
     h.frames(game, 40, still);
 
     // The Tumbler: a bomb out of the barrel, glowing as it flies.
@@ -387,7 +389,7 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 4, still);
     h.shot("feel_bow_arrow");
     h.frames(game, 30, still);
-    // Triple Nock: armed (a press), drawn, loosed: three arrows fanning out.
+    // The Blink Arrow: armed (a press), drawn, loosed.
     h.frames(game, 2, |g, i| {
         aimed(
             g,
@@ -401,7 +403,7 @@ fn feel_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 45, |g, _| aimed(g, Buttons::FIRE));
     h.frames(game, 1, |g, _| aimed(g, Buttons::NONE));
     h.frames(game, 3, still);
-    h.shot("feel_triple_nock");
+    h.shot("feel_blink_arrow");
     h.frames(game, 40, still);
     let stats = game.combat.stand_ins.stats;
     println!(
@@ -487,10 +489,10 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     };
     let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
 
-    // Arrows in flight (taper, pinning, ember), then stuck / bursting.
+    // Arrows in flight (taper, pinning, beacon), then stuck.
     fire(game, K::Arrow, -0.4, 45.0, 1.5, 6.0);
     fire(game, K::PinningArrow, 0.0, 45.0, 2.5, 6.0);
-    fire(game, K::EmberArrow, 0.4, 45.0, 3.5, 6.0);
+    fire(game, K::BeaconArrow, 0.4, 45.0, 3.5, 6.0);
     h.frames(game, 4, still);
     h.shot("arsenal_arrows");
     h.frames(game, 40, still);
@@ -551,29 +553,24 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("arsenal_limpet_blast");
     h.frames(game, 40, still);
 
-    // A mortar lobbed high, then its blast.
-    fire(game, K::MortarShell, 0.0, 14.0, 9.0, 20.0);
+    // A kite (placeholder look) and its blast.
+    fire(game, K::Kite, 0.0, 14.0, 9.0, 20.0);
     h.frames(game, 20, still);
-    h.shot("arsenal_mortar_shell");
+    h.shot("arsenal_kite");
     h.frames(game, 60, |g, _| hold(g, Buttons::NONE));
     game.preview_arsenal(P::Blast {
-        blast: Blast::Mortar,
+        blast: Blast::Kite,
         position: ground + fwd * 4.0,
-        radius: 6.0,
+        radius: 4.5,
     });
     h.frames(game, 4, still);
-    h.shot("arsenal_mortar_blast");
+    h.shot("arsenal_kite_blast");
     h.frames(game, 60, still);
 
-    // A flare lobbed ahead and the patch it leaves; statuses on the Moulds.
-    fire(game, K::Flare, 0.0, 10.0, 4.0, 12.0);
+    // A bolas (placeholder look) thrown ahead; statuses on the Moulds.
+    fire(game, K::Bolas, 0.0, 10.0, 4.0, 8.0);
     h.frames(game, 12, still);
-    h.shot("arsenal_flare");
-    game.preview_arsenal(P::BurningPatch {
-        position: ground,
-        radius: 3.0,
-        seconds: 4.0,
-    });
+    h.shot("arsenal_bolas");
     let moulds: Vec<_> = game
         .net()
         .map(|n| {
@@ -596,7 +593,7 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
         });
     }
     h.frames(game, 50, still);
-    h.shot("arsenal_burning_patch_status");
+    h.shot("arsenal_status");
     h.frames(game, 200, still);
 }
 
@@ -637,7 +634,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
         h.shot(name);
     };
     game.send_chat("/killall");
-    game.send_chat("/loadout trimmer:lunge,hurl tamper:whirl,upswing knack:kindle");
+    game.send_chat("/loadout trimmer:lunge,hurl tamper:whirl,riposte knack:kindle");
     spawn(game, 3);
     h.frames(game, 70, still);
     close_in(h, game, 2.6);
@@ -660,7 +657,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
     press(h, game, Buttons::ALT_FIRE, 8, "melee_weapon_trimmer_hurl");
     h.frames(game, 40, still);
 
-    // The Tamper: the slam, a Whirl, an Upswing.
+    // The Tamper: the slam, a Whirl, a Riposte's guard.
     game.send_chat("/give");
     spawn(game, 2);
     h.frames(game, 40, still);
@@ -679,7 +676,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
         game,
         Buttons::ALT_FIRE,
         10,
-        "melee_weapon_tamper_upswing",
+        "melee_weapon_tamper_riposte",
     );
     h.frames(game, 40, still);
 
@@ -955,7 +952,7 @@ fn main() -> anyhow::Result<()> {
     h.frames(&mut game, 30, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_brand_sigil");
 
-    // Splinter: the shot bursts into splinters behind the target.
+    // Wickline: the thread to the target.
     select(&mut game, 0, 1);
     h.frames(&mut game, 120, |g, _| hold(g, Buttons::NONE));
     h.frames(&mut game, 8, |g, i| {
@@ -971,11 +968,11 @@ fn main() -> anyhow::Result<()> {
             },
         );
     });
-    h.shot("combat_splinter");
+    h.shot("combat_wickline");
     h.frames(&mut game, 5, |g, _| hold(g, Buttons::NONE));
-    h.shot("combat_splinter_burst");
+    h.shot("combat_wickline_after");
 
-    // Bellows: pellets, then a Gust, then both barrels.
+    // Bellows: pellets, then a Gust, then the Bulwark raised.
     spawn(&mut game, 3);
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     select(&mut game, 1, 0);
@@ -1016,7 +1013,7 @@ fn main() -> anyhow::Result<()> {
             },
         );
     });
-    h.shot("combat_both_barrels");
+    h.shot("combat_bulwark");
     h.frames(&mut game, 40, |g, _| hold(g, Buttons::NONE));
     h.shot("combat_heat_release");
 

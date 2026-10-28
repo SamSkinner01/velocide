@@ -18,7 +18,7 @@ use super::super::feedback::Feedback;
 use super::super::remote_players::RemotePlayers;
 use super::arsenal::{self, Blast};
 use super::{Rng, attack_style, enemy_fx};
-use crate::models::{WeaponKind, WeaponLook as _};
+use crate::models::{Ability, WeaponKind, WeaponLook as _, ability_color};
 use crate::palette::palette;
 
 /// A fading tracer segment.
@@ -459,8 +459,8 @@ pub fn explosion(ctx: &mut FxCtx, position: Vec3, radius: f32, attack: Attack, o
         // The expansion arsenal's blasts (arsenal.rs).
         Attack::Cinderbox => arsenal::blast(ctx, Blast::Cinder, position, radius),
         Attack::Limpet => arsenal::blast(ctx, Blast::Limpet, position, radius),
-        Attack::Mortar => arsenal::blast(ctx, Blast::Mortar, position, radius),
-        Attack::EmberArrow => arsenal::blast(ctx, Blast::EmberArrow, position, radius),
+        Attack::Kite => arsenal::blast(ctx, Blast::Kite, position, radius),
+        Attack::Waxwork => arsenal::blast(ctx, Blast::Waxwork, position, radius),
         Attack::Flak => {
             // The ring flies out across the line of sight (no flight direction in the Fx).
             let across = (position - ctx.listener).normalize_or(Vec3::NEG_Z);
@@ -887,7 +887,7 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             }
             if matches!(
                 attack,
-                Attack::Longwick | Attack::TripleNock | Attack::PinningArrow | Attack::EmberArrow
+                Attack::Longwick | Attack::PinningArrow | Attack::BlinkArrow | Attack::BeaconArrow
             ) {
                 return;
             }
@@ -1079,34 +1079,52 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                     .play(Sfx::ThornShatter, PlayParams::at(p).with_volume(0.6));
             }
         }
-        Fx::Splinters { origin, ends, .. } => {
+        // ---- the rework's effects: placeholders until client-a / client-b draw them ----
+        Fx::Wickline { from, to, .. } => {
+            let wick = hot(ability_color(Ability::Wickline), 1.8);
+            ctx.beams.beam(q(*from), q(*to), 0.03, wick, 0.35);
+            ctx.effects.glow(q(*to), wick, 0.6, 0.15);
+        }
+        Fx::TallyFired { origin, ends, .. } => {
             let o = q(*origin);
-            let ice = hot(WeaponKind::Quill.glow_color(1), 1.8);
+            let gold = hot(ability_color(Ability::Tally), 1.8);
             for end in ends {
                 let end = q(*end);
-                ctx.beams.beam(o, end, 0.022, ice, 0.16);
+                ctx.beams.beam(o, end, 0.03, gold, 0.2);
                 world_impact(ctx.effects, ctx.world, o, end, 3);
             }
-            ctx.effects.glow(o, ice, 0.7, 0.15);
-            for _ in 0..8 {
-                let v = ctx.rng.dir() * ctx.rng.range(3.0, 7.0);
-                ctx.effects.spawn(Particle {
-                    position: o,
-                    velocity: v,
-                    gravity: 10.0,
-                    max_life: ctx.rng.range(0.2, 0.45),
-                    size: Vec2::splat(0.07),
-                    color: Vec4::new(0.8, 1.0, 1.0, 1.0),
-                    end_alpha: 0.2,
-                    texture: FxTex::Shard,
-                    additive: true,
-                    rotation: ctx.rng.angle(),
-                    spin: ctx.rng.range(-12.0, 12.0),
-                    ..Default::default()
-                });
-            }
-            ctx.audio.play(Sfx::SplinterBurst, PlayParams::at(o));
         }
+        Fx::Blink { from, to, .. } => {
+            let lime = hot(ability_color(Ability::BlinkArrow), 1.6);
+            ctx.effects.glow(q(*from), lime, 1.0, 0.2);
+            ctx.effects.glow(q(*to), lime, 1.2, 0.25);
+        }
+        Fx::GuardBlock {
+            position, broke, ..
+        } => {
+            let at = q(*position);
+            ctx.effects.sparks(at, Vec3::Y, if *broke { 24 } else { 8 });
+            ctx.effects
+                .glow(at, Vec4::new(1.0, 0.9, 0.6, 0.8), 0.6, 0.12);
+        }
+        Fx::BolasBound { positions } => {
+            let pts: Vec<Vec3> = positions.iter().map(|p| q(*p)).collect();
+            let cord = hot(ability_color(Ability::Bolas), 1.5);
+            for w in pts.windows(2) {
+                ctx.beams.beam(w[0], w[1], 0.025, cord, 0.4);
+            }
+            for p in &pts {
+                ctx.effects.glow(*p, cord, 0.7, 0.2);
+            }
+        }
+        Fx::LanternShot { origin, ends, .. } => {
+            let o = q(*origin);
+            let red = hot(ability_color(Ability::Lantern), 1.6);
+            for end in ends {
+                ctx.beams.beam(o, q(*end), 0.025, red, 0.12);
+            }
+        }
+        Fx::HurlCaught { .. } => {}
         // The Flak ring (or a Gust-deflected shell bursting): the arsenal's flak burst.
         Fx::Burst { origin, ends, .. } => {
             let ends: Vec<Vec3> = ends.iter().map(|e| q(*e)).collect();

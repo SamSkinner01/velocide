@@ -140,7 +140,7 @@
             player_body_pad: 0.12, // PvP
             player_head_pad: 0.06,
         ),
-        // Thrown relay spikes: plant in the world; Quill shots ricochet off them.
+        // Thrown relay spikes: plant in the world; shots and blows relay off them.
         thorn: (
             charges: 3,
             recharge_time: 3.0,
@@ -156,7 +156,7 @@
             target_range: 40.0,
             damage_multiplier: 1.5, // per bounce
         ),
-        // 1: precision spike-caster (hitscan). Alt A Brand, alt B Splinter.
+        // 1: precision spike-caster (hitscan). Defaults Brand, Wickline.
         quill: (
             damage: 24.0,
             interval: 0.28,
@@ -164,15 +164,9 @@
             brand_cooldown: 2.5,
             brand_duration: 5.0,
             brand_multiplier: 1.35, // branded targets take this much damage from everything
-            splinter_damage: 20.0,
-            splinter_cooldown: 1.1,
-            splinter_count: 6,
-            splinter_cone_degrees: 40.0,
-            splinter_range: 18.0,
-            splinter_shard_damage: 9.0,
             ability_power: 1.0,     // abilities on it vs on their home weapon (docs/arsenal.md)
         ),
-        // 2: twin-barrel blast cannon. Alt A Gust, alt B Both Barrels.
+        // 2: twin-barrel blast cannon. Defaults Gust, Bulwark.
         bellows: (
             pellets: 12,
             pellet_damage: 11.0,   // 8: top DPS on paper, weak in play (docs/balance.md, "Shotguns")
@@ -195,14 +189,9 @@
             gust_cooldown: 1.6,
             deflect_speed_multiplier: 1.25, // hostile projectiles caught in the gust
             deflect_damage_multiplier: 1.5,
-            both_pellets: 24,
-            both_pellet_damage: 8.0,
-            both_cone_degrees: 5.0,
-            both_recoil: 9.0,
-            both_cooldown: 1.8,    // it takes the primary's shot; at 1.4 it doubled the build's DPS (docs/balance.md)
             ability_power: 1.0,
         ),
-        // 3: arc caster. Alt A Wisp, alt B Discharge (hold to charge, release).
+        // 3: arc caster. Defaults Wisp, Discharge (hold to charge, release).
         arclash: (
             zap_interval: 0.1,
             zap_range: 30.0,
@@ -210,16 +199,20 @@
             chain_range: 7.0,
             chain_jumps: 2,
             chain_falloff: 0.75,   // per jump
-            wisp_speed: 12.0,
-            wisp_lifetime: 2.5,
+            wisp_orbit_radius: 1.6, // the Wisp orbits you (docs/rework.md) ...
+            wisp_orbit_height: 1.2, // ... at chest height ...
+            wisp_orbit_rate: 240.0, // ... degrees per second ...
+            wisp_orbit_time: 6.0,   // ... for this long
+            wisp_speed: 18.0,      // flung (ALT again): along the aim ...
+            wisp_lifetime: 2.0,    // ... popping on the first contact or after this
             wisp_radius: 0.3,
-            wisp_zap_interval: 0.2,
-            wisp_zap_range: 6.0,
-            wisp_zap_damage: 11.0, // the weakest damage ability at 8 / 25 / 2.8 s (docs/balance.md)
-            wisp_pop_radius: 4.0,  // world contact or expiry
-            wisp_pop_damage: 30.0,
+            wisp_zap_interval: 0.25,
+            wisp_zap_range: 7.0,
+            wisp_zap_damage: 9.0,
+            wisp_pop_radius: 4.0,
+            wisp_pop_damage: 35.0,
             wisp_pop_knockback: 8.0,
-            wisp_cooldown: 2.4,
+            wisp_cooldown: 4.0,    // starts when it is gone
             discharge_charge_time: 1.0,
             discharge_min_radius: 3.5,
             discharge_max_radius: 8.0,
@@ -336,27 +329,7 @@
             burn_stacks: 1,        // per spray
             ability_power: 0.85,
         ),
-        // Abilities (pools per class: docs/arsenal.md).
-        skewer: (
-            charge_time: 0.8,
-            min_damage: 30.0,
-            max_damage: 90.0,
-            pierce: 3,             // targets passed through ...
-            pierce_falloff: 0.8,   // ... x0.8 each
-            cooldown: 1.4,
-        ),
-        flurry: (
-            shots: 3,
-            gap: 0.06,
-            damage_scale: 1.0,     // of the weapon's primary damage; at 0.8 / 1.6 s the Lancet's
-            spread_degrees: 1.0,   // own Flurry was its weakest pick (docs/balance.md)
-            cooldown: 1.4,
-        ),
-        slug: (
-            damage: 55.0,
-            knockback: 6.0,
-            cooldown: 1.2,
-        ),
+        // Abilities (pools per class: docs/arsenal.md; the rework's new ones further down).
         flak: (
             shell_speed: 45.0,
             shell_radius: 0.12,
@@ -366,24 +339,6 @@
             ring_degrees: 25.0,
             pellet_range: 14.0,
             cooldown: 1.8,
-        ),
-        volley: (
-            shots: 10,
-            cone_degrees: 6.0,
-            damage_scale: 0.85,    // of the weapon's primary damage; with the projectile hit pad
-                                   // ten rivets at 1.0 out-added the Riveter's other picks 1.7x
-            cooldown: 2.2,
-        ),
-        flare: (
-            speed: 22.0,
-            angle_degrees: 10.0,
-            gravity: 16.0,
-            projectile_radius: 0.12,
-            flight_time: 4.0,
-            patch_radius: 3.0,
-            patch_time: 4.0,
-            burn_rate: 2.0,        // Burn stacks per second to everything inside the patch
-            cooldown: 3.0,
         ),
         limpet: (
             speed: 24.0,
@@ -397,24 +352,6 @@
             cooldown: 0.9,         // between throws (docs/balance.md)
             detonate_hold: 0.25,   // hold this long: every charge out detonates
         ),
-        mortar: (
-            speed: 26.0,
-            angle_degrees: 35.0,   // above the aim
-            gravity: 20.0,
-            projectile_radius: 0.2,
-            flight_time: 6.0,
-            explosion_radius: 6.0,
-            damage: 85.0,
-            knockback: 26.0,
-            cooldown: 3.0,
-        ),
-        triple_nock: (
-            arrows: 3,
-            fan_degrees: 7.0,
-            damage_scale: 0.6,     // of a plain arrow at the same draw; three full ones doubled the bow
-            min_draw: 0.3,
-            cooldown: 1.4,
-        ),
         pinning_arrow: (
             enemy_time: 1.4,
             heavy_time: 0.6,
@@ -424,17 +361,9 @@
             damage_scale: 1.0,
             cooldown: 2.5,
         ),
-        ember_arrow: (
-            damage_scale: 0.9,     // the arrow's own hit, of a plain arrow at the same draw; at
-            explosion_radius: 3.0, // 0.75 / 30 it added 6 DPS to the bow (docs/balance.md)
-            damage: 36.0,          // (18 in PvP: a whole number on the loadout screen)
-            knockback: 8.0,
-            burn_stacks: 2,
-            cooldown: 3.0,
-        ),
-        // Burn status (Kiln, Flare patches, Ember Arrow).
+        // Burn status (the Kiln, a stoked weapon, the Waxwork's burst).
         burn: (
-            dps: 5.0,              // per stack: 15/s at the cap (Kiln, Flare, Ember Arrow; docs/balance.md)
+            dps: 5.0,              // per stack: 15/s at the cap (docs/balance.md)
             max_stacks: 3,
             duration: 3.0,         // refreshed by every new stack
             tick_interval: 0.25,   // damage steps
@@ -492,16 +421,14 @@
             speed: 30.0,
             gravity: 6.0,
             projectile_radius: 0.25,
-            flight_time: 2.0,
-            damage_scale: 1.5,
+            flight_time: 3.0,      // both legs
+            damage_scale: 1.5,     // on the way out ...
             knockback: 6.0,
             cooldown: 2.5,
-        ),
-        upswing: (
-            damage_scale: 1.4,     // in the carrier's arc; it takes the swing's place now
-            launch: 14.0,          // upward speed for what it hits
-            hop: 5.0,              // and for the swinger
-            cooldown: 3.0,
+            max_distance: 14.0,    // it turns back this far out (or at the level) ...
+            return_speed: 30.0,    // ... homing on the thrower's chest ...
+            return_damage_scale: 1.0, // ... hitting each hostile once more for this
+            catch_refund: 0.4,     // caught: this much of the cooldown back
         ),
         // The knacks on Q (shared/src/sim/knacks.rs); the Thorn keeps `thorn` above.
         knacks: (
@@ -516,6 +443,10 @@
                 radius: 3.5,           // the pool where it lands ...
                 duration: 4.0,
                 heal_rate: 10.0,       // ... heals HP/s (teammates and you; PvP: only you)
+                haste_time: 5.0,       // drunk (docs/rework.md): haste for this long ...
+                haste_scale: 1.3,      // ... speeds and accelerations x this ...
+                haste_heal: 8.0,       // ... and this many HP ...
+                haste_heal_interval: 1.0, // ... every this many seconds
             ),
             snare: (
                 charges: 2,
@@ -551,6 +482,127 @@
                 speed: 18.0,           // impulse along the look ...
                 vertical: 0.3,         // ... keeping this share of its vertical part
             ),
+        ),
+        // ---- rework (docs/rework.md, docs/arsenal.md): the sniper and the new abilities ----
+        // Lens rifle (Precision): hold to focus, release a hitscan beam (exact).
+        lamplighter: (
+            focus_time: 0.9,       // to a full focus (starts once off its interval)
+            interval: 0.35,        // after a release
+            min_damage: 35.0,      // a tap ...
+            max_damage: 130.0,     // ... to a full focus (weak points x2 as any ray)
+            pierce: 2,             // a full focus passes through the first target ...
+            pierce_falloff: 0.7,   // ... into one more behind it, x0.7
+            zoom: 0.4,             // scope: tan(fov/2) x this at full focus
+            ability_power: 1.0,
+        ),
+        wickline: (
+            range: 34.0,           // hitscan, lag-compensated
+            zip_speed: 24.0,       // anchored in the level: one impulse along the line ...
+            zip_lift: 4.0,         // ... at least this much of it up
+            yank_speed: 16.0,      // a light hostile is yanked to you (x its knockback scale) ...
+            player_yank_scale: 0.5, // ... a PvP player at half
+            damage: 10.0,
+            heavy_health: 300.0,   // from this base health a target yanks you to it instead
+            line_time: 0.35,
+            cooldown: 4.0,
+            miss_cooldown: 0.5,    // a miss: half the cooldown
+        ),
+        tally: (
+            hold_time: 1.2,        // hold ALT at most this long ...
+            range: 45.0,
+            assist_degrees: 1.5,   // ... marking what the crosshair passes over ...
+            max_targets: 4,        // ... up to this many (PvP 3) ...
+            damage: 30.0,          // ... released: a shot at each one still in sight
+            cooldown: 6.0,
+            empty_cooldown: 0.25,  // nothing tallied: a quarter of the cooldown
+        ),
+        waxwork: (
+            duration: 5.0,
+            health: 60.0,
+            lure_range: 25.0,      // Moulds this close that could see it prefer it to you
+            burst_radius: 3.5,     // at its end (or destroyed): hot wax
+            burst_damage: 30.0,
+            burst_knockback: 8.0,
+            burn_stacks: 1,
+            cooldown: 10.0,        // from its end
+        ),
+        bolas: (
+            speed: 30.0,
+            gravity: 8.0,
+            projectile_radius: 0.35,
+            flight_time: 2.0,
+            damage: 0.0,           // the bind is the point: Pinned (the Pinning Arrow's times)
+            link_range: 6.0,       // a second hostile this close to the first is bound too ...
+            link_time: 4.0,        // ... and for this long ...
+            link_share: 0.6,       // ... this much of the damage either takes hits the other
+            cooldown: 5.0,
+        ),
+        bulwark: (
+            width: 2.2,
+            height: 1.8,
+            distance: 1.2,         // out in front, turning with the aim's yaw ...
+            pitch_limit_degrees: 30.0, // ... pitch clamped
+            hold_time: 4.0,
+            cone_degrees: 110.0,   // hostile hits from this front are absorbed ...
+            absorb: 150.0,         // ... until this much, then it shatters
+            move_scale: 0.75,      // your speeds while it is up
+            cooldown: 6.0,         // from when it drops ...
+            broken_cooldown: 9.0,  // ... or this if it shattered
+        ),
+        stoke: (
+            duration: 4.0,         // the primary at x1.6 rate, every hit +1 Burn stack ...
+            rate: 1.6,
+            burn_stacks: 1,
+            kiln_reach: 1.3,       // ... (the Kiln: its cone reaches 30 % further instead) ...
+            overheat: 1.5,         // ... then no primary for this long
+            cooldown: 10.0,        // from the use
+        ),
+        lantern: (
+            toss_speed: 10.0,
+            gravity: 20.0,
+            projectile_radius: 0.2,
+            duration: 8.0,
+            range: 18.0,           // shoots the nearest hostile in sight with your primary ...
+            rate_scale: 0.5,       // ... at half its rate ...
+            damage_scale: 0.6,     // ... and 0.6x its damage
+            kiln_range: 8.0,       // the Kiln's lantern: an 8 m cone
+            health: 80.0,          // Moulds may attack it
+            cooldown: 12.0,
+        ),
+        kite: (
+            speed: 16.0,
+            turn_degrees: 120.0,   // per second, towards the point under your crosshair ...
+            steer_time: 4.0,       // ... while ALT is held, at most this long
+            flight_time: 7.0,
+            projectile_radius: 0.3,
+            explosion_radius: 4.5,
+            damage: 75.0,
+            knockback: 18.0,
+            cooldown: 5.0,
+        ),
+        blink_arrow: (
+            window: 1.5,           // ALT while it flies or this long after it sticks: step to it
+            exit_speed: 6.0,       // along its flight
+            damage_scale: 0.8,     // of a plain arrow at the same draw
+            cooldown: 6.0,         // from the blink (or when the window passes)
+        ),
+        beacon_arrow: (
+            damage_scale: 0.6,
+            duration: 6.0,
+            radius: 16.0,          // hostiles this close to it are revealed ...
+            damage_multiplier: 1.15, // ... and take this much more from every player
+            cooldown: 8.0,
+        ),
+        riposte: (
+            hold_time: 1.0,
+            move_scale: 0.6,
+            cone_degrees: 120.0,   // blows and shots from the front are blocked ...
+            stagger: 0.8,          // ... melee attackers staggered this long
+            damage_scale: 2.0,     // released: a counter-swing at 2x the carrier's swing ...
+            per_block: 0.5,        // ... +0.5x per further block ...
+            max_scale: 3.0,        // ... at most 3x
+            knockback: 12.0,
+            cooldown: 4.0,
         ),
     ),
     // Style meter (shared/src/sim/style.rs, docs/gameplay.md "Style", docs/style_modes.md).
@@ -673,15 +725,16 @@
     gun_game: (
         ladder: [
             (weapon: Arclash, abilities: (Wisp, Discharge)),
-            (weapon: Kiln, abilities: (Flare, Discharge)),
-            (weapon: Thresher, abilities: (Slug, Flak)),
-            (weapon: Riveter, abilities: (Volley, Wisp)),
-            (weapon: Bellows, abilities: (Gust, BothBarrels)),
+            (weapon: Kiln, abilities: (Lantern, Discharge)),
+            (weapon: Thresher, abilities: (Bolas, Flak)),
+            (weapon: Riveter, abilities: (Stoke, Lantern)),
+            (weapon: Bellows, abilities: (Gust, Bulwark)),
             (weapon: Tumbler, abilities: (Breach, Gravewell)),
-            (weapon: Cinderbox, abilities: (Limpet, Mortar)),
-            (weapon: Lancet, abilities: (Skewer, Flurry)),
-            (weapon: Quill, abilities: (Brand, Splinter)),
-            (weapon: Longwick, abilities: (TripleNock, PinningArrow)),
+            (weapon: Cinderbox, abilities: (Limpet, Kite)),
+            (weapon: Lancet, abilities: (Tally, Waxwork)),
+            (weapon: Quill, abilities: (Brand, Wickline)),
+            (weapon: Longwick, abilities: (BlinkArrow, PinningArrow)),
+            (weapon: Lamplighter, abilities: (Wickline, Waxwork)),
         ],
         finale: (weapon: Trimmer, abilities: (Lunge, Hurl)),
         punch_demotes: 1,
@@ -694,8 +747,8 @@
     // Reasoning per number: docs/arsenal.md ("Balance profiles"), measured by
     // `cargo run -p shared --release --example balance_report` (docs/balance.md). PvP aims at
     // 0.8-1.6 s to kill for a skilled player at the weapon's range; one-shots only from
-    // full-draw bow headshots and Slug / full-charge Skewer headshots (and a Bellows blast to
-    // the head inside 5 m, a full one to the body at point blank, 3 m).
+    // full-draw bow headshots and full-focus Lamplighter headshots (and a Bellows blast to the
+    // head inside 5 m, a full one to the body at point blank, 3 m).
     balance: (
         pve: (
             weapons: {},
@@ -713,21 +766,16 @@
                 Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise
                 Trimmer: (damage: 0.84),      // 30 a slash: four, 0.95 s, as before the PvE raise
                 Tamper: (damage: 0.7),        // 59.5 a swing; its abilities are multiples of it
+                Lamplighter: (damage: 0.54, interval: 0.75), // full focus: 70 body, 140 head; 2 body shots in 1.6 s
             },
             abilities: {
-                BothBarrels: (damage: 0.25),  // 48 body / 96 head: 0.4 one-shot a head
-                Wisp: (damage: 0.5),          // 5.5 a zap, as before the PvE raise
+                Wisp: (damage: 0.5),
                 Discharge: (damage: 0.9),
                 Breach: (damage: 0.85),
                 Gravewell: (damage: 0.75),
-                Skewer: (damage: 0.58),
-                Flurry: (damage: 0.6),        // Quill: 3 x 14.4, as before the PvE raise
                 Flak: (damage: 0.8),
-                Volley: (damage: 0.75),       // ten 7 x 0.85s: 89 to the head (1.0 x 0.7 was 98)
                 Limpet: (damage: 0.75),       // 30 a charge, as before the PvE cut
-                Mortar: (damage: 0.75, radius: 0.85),
-                TripleNock: (damage: 0.55),   // a third of an arrow each: three heads at 90 % don't kill
-                EmberArrow: (damage: 0.5),    // a 90 % draw to the head one-shot with the burst + burn
+                Riposte: (damage: 0.55),      // 2-3x the swing: on the Tamper at most 98
             },
             overrides: {
                 "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
@@ -737,6 +785,7 @@
                 // the old shove.
                 "bellows.pellet_knockback": 2.0,
                 "thresher.pellet_knockback": 1.5,
+                "tally.max_targets": 3,
                 // Half damage for 3 s won every even duel (twice every time to kill).
                 "knacks.tallow_skin.damage_scale": 0.7,
                 "knacks.tallow_skin.duration": 2.0,

@@ -369,8 +369,8 @@ fn style_keys_follow_the_attack() {
     );
     assert_eq!(StyleKey::from_attack(Attack::Thorn), Some(StyleKey::Thorn));
     assert_eq!(
-        StyleKey::from_attack(Attack::Splinter),
-        Some(StyleKey::Splinter)
+        StyleKey::from_attack(Attack::Wickline),
+        Some(StyleKey::Wickline)
     );
     assert_eq!(StyleKey::Discharge.label(), "DISCHARGE");
     assert_eq!(StyleBonus::Deflect.label(), "DEFLECT");

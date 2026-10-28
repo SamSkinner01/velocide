@@ -396,23 +396,21 @@ fn ballistics(c: &CombatTuning, intent: FireIntent) -> Option<(f32, f32, f32)> {
             weapon,
             ability,
             charge,
+            ..
         } => {
             if weapon.class() == WeaponClass::Draw {
                 return Some(arrow(charge));
             }
             match ability {
-                Ability::Volley if weapon == WeaponKind::Riveter => {
-                    Some((c.riveter.rivet_speed, c.riveter.rivet_gravity, 0.0))
-                }
-                Ability::Flare => Some((c.flare.speed, c.flare.gravity, c.flare.angle_degrees)),
                 Ability::Gravewell => Some((
                     c.tumbler.gravewell_speed,
                     c.tumbler.gravewell_gravity,
                     c.tumbler.gravewell_angle_degrees,
                 )),
                 Ability::Limpet => Some((c.limpet.speed, c.limpet.gravity, 0.0)),
-                Ability::Mortar => Some((c.mortar.speed, c.mortar.gravity, c.mortar.angle_degrees)),
                 Ability::Hurl => Some((c.hurl.speed, c.hurl.gravity, 0.0)),
+                Ability::Bolas => Some((c.bolas.speed, c.bolas.gravity, 0.0)),
+                Ability::Lantern => Some((c.lantern.toss_speed, c.lantern.gravity, 0.0)),
                 _ => None,
             }
         }
@@ -425,7 +423,7 @@ fn aims_at_feet(intent: FireIntent) -> bool {
     matches!(
         intent,
         FireIntent::Ability {
-            ability: Ability::Gravewell | Ability::Flare,
+            ability: Ability::Gravewell | Ability::Lantern,
             ..
         }
     )
@@ -695,8 +693,8 @@ impl Bench {
         let bow = w.class() == WeaponClass::Draw;
         if trigger.fires_primary() || bow {
             match w.primary_style() {
-                PrimaryStyle::Draw => {
-                    let full = WeaponState::draw_ticks(c, TICK_RATE) as f32;
+                PrimaryStyle::Draw | PrimaryStyle::Focus => {
+                    let full = WeaponState::draw_ticks_of(w, c, TICK_RATE) as f32;
                     let release = (full * self.draw.clamp(0.0, 1.0)).round().max(1.0);
                     if (s.draw as f32) < release {
                         b = b | Buttons::FIRE;
@@ -709,7 +707,7 @@ impl Bench {
             return b;
         };
         let ability = self.build.ability(mode);
-        let ready = s.alt_cooldown[s.slot as usize] == 0;
+        let ready = s.alt_cooldown[s.slot as usize] == 0 && s.live[s.slot as usize] == 0;
         let was = self.prev.contains(Buttons::ALT_FIRE);
         if bow {
             if ready && s.armed == 0 && !was {
@@ -718,7 +716,19 @@ impl Bench {
             return b;
         }
         match ability.style() {
-            AbilityStyle::Instant | AbilityStyle::Burst => b = b | Buttons::ALT_FIRE,
+            AbilityStyle::Instant => b = b | Buttons::ALT_FIRE,
+            // A fresh press whenever it is ready.
+            AbilityStyle::Press => {
+                if ready && !was {
+                    b = b | Buttons::ALT_FIRE;
+                }
+            }
+            // Pressed when ready, held to its limit (the Tally sweeps the target meanwhile).
+            AbilityStyle::Channel => {
+                if s.charge > 0 || (ready && !was) {
+                    b = b | Buttons::ALT_FIRE;
+                }
+            }
             AbilityStyle::Charge => {
                 if s.charge < s.charge_ticks(c, TICK_RATE) {
                     b = b | Buttons::ALT_FIRE;
@@ -850,11 +860,13 @@ impl Bench {
             ..Default::default()
         };
         (input.yaw, input.pitch) = aim_angles(eye, point, None);
-        // Lead what is about to fire (the weapons are deterministic: step a copy).
+        // Lead what is about to fire (the weapons are deterministic: step a copy). A use starts
+        // the cooldown, or a live ability's life (its cooldown waits for its end).
         let mut probe = self.world.players[&self.shooter].combat.weapons;
-        let before = probe.alt_cooldown[probe.slot as usize];
+        let slot = probe.slot as usize;
+        let (before, live_before) = (probe.alt_cooldown[slot], probe.live[slot]);
         let intents = step_weapons(&mut probe, &input, true, &self.tuning.combat, TICK_RATE);
-        let used = probe.alt_cooldown[probe.slot as usize] > before;
+        let used = probe.alt_cooldown[slot] > before || probe.live[slot] > live_before;
         let lead = intents
             .iter()
             .rev()
@@ -1174,12 +1186,12 @@ pub fn on_endless_pack(
 }
 
 /// The range an ability is measured at (m, feet to feet; on Gnawers in PvE): point-blank ones
-/// (Gust, Discharge, Breach) at 4 m, the melee swings (Whirl, Upswing) at contact (2 m), the
-/// Lunge across a 4.5 m gap, the rest at 10 m.
+/// (Gust, Discharge, Breach, the orbiting Wisp) at 4 m, the melee swings (Whirl, Riposte) at
+/// contact (2 m), the Lunge across a 4.5 m gap, the rest at 10 m.
 pub fn ability_range(ability: Ability) -> f32 {
     match ability {
-        Ability::Gust | Ability::Discharge | Ability::Breach => 4.0,
-        Ability::Whirl | Ability::Upswing => MELEE_RANGE,
+        Ability::Gust | Ability::Discharge | Ability::Breach | Ability::Wisp => 4.0,
+        Ability::Whirl | Ability::Riposte => MELEE_RANGE,
         Ability::Lunge => 4.5,
         _ => 10.0,
     }
@@ -1233,6 +1245,9 @@ pub fn per_trigger(
     // Long enough for one pull (a draw, a salvo), short of a second one.
     let one = match weapon.primary_style() {
         PrimaryStyle::Draw => t.combat.longwick.draw_time + t.combat.longwick.interval * 0.5,
+        PrimaryStyle::Focus => {
+            t.combat.lamplighter.focus_time + t.combat.lamplighter.interval * 0.5
+        }
         _ => weapon.primary_interval(&t.combat) - 1.5 * DT,
     };
     let mut b = Bench::new(base, side, Assume::default(), build);
