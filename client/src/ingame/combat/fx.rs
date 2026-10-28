@@ -927,9 +927,14 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             }
         }
         // A relay off thorns, of any weapon (relay.rs).
-        Fx::Ricochet { attack, points, .. } => {
+        Fx::Ricochet {
+            attack,
+            points,
+            projectile,
+            ..
+        } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
-            super::relay::play(ctx, *attack, false, &pts);
+            super::relay::play(ctx, *attack, projectile.is_some(), &pts);
         }
         // Ember bombs burst into embers rather than a fireball (enemy_fx.rs).
         Fx::Explosion {

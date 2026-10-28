@@ -285,11 +285,6 @@ pub fn launches(
                     safe(eye + aim * 0.5),
                     aim * c.flak.shell_speed,
                 ),
-                Ability::Wisp => one(
-                    kind::WISP,
-                    safe(eye + aim * 0.6),
-                    aim * c.arclash.wisp_speed,
-                ),
                 Ability::Bolas => one(kind::BOLAS, safe(eye + aim * 0.5), aim * c.bolas.speed),
                 Ability::Kite => one(kind::KITE, safe(eye + aim * 0.6), aim * c.kite.speed),
                 // The Lantern's toss (gear.rs draws it).

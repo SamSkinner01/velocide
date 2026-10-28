@@ -660,7 +660,18 @@ impl InGame {
         let flag = local
             .and_then(|id| net.frames().latest().and_then(|(_, f)| f.get(id)))
             .is_some_and(|e| e.flags & player_flags::HASTE != 0);
-        let strength = if alive { k.strength(flag, None) } else { 0.0 };
+        // The movement state's haste (predicted like the rest of your movement).
+        let predicted = net.local_state().map(|s| {
+            (
+                s.haste_time,
+                net.tuning().combat.knacks.kindle_flask.haste_time,
+            )
+        });
+        let strength = if alive {
+            k.strength(flag, predicted)
+        } else {
+            0.0
+        };
         let fov = k.own_frame(
             effects,
             &mut common.audio,

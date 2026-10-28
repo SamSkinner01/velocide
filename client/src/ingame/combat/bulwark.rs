@@ -32,6 +32,8 @@ use shared::tuning::BulwarkTuning;
 pub const OUT: f32 = 1.2;
 /// Its pitch follows the aim within this much (docs/rework.md: ±30°).
 pub const PITCH_LIMIT: f32 = 30.0 * std::f32::consts::PI / 180.0;
+/// The slab's centre stands this far below the eye (the server's guard shape).
+pub const SLAB_DROP: f32 = 0.4;
 /// How see-through your own slab is drawn (its alpha on top of the wax's).
 const OWN_ALPHA: f32 = 0.45;
 
@@ -48,8 +50,9 @@ pub fn slab_transform(eye: Vec3, yaw: f32, pitch: f32) -> Mat4 {
     Mat4::from_rotation_translation(rot, eye + rot * (Vec3::NEG_Z * OUT))
 }
 
-/// [`slab_transform`] with the tuning's slab: its distance, its pitch limit, and its size
-/// (the model scaled to `width` × `height`).
+/// [`slab_transform`] with the tuning's slab as the server stands it: centred 0.4 m below the
+/// eye plus `distance` along the facing, its pitch limit, and its size (the model scaled to
+/// `width` × `height`).
 pub fn slab_transform_for(eye: Vec3, yaw: f32, pitch: f32, t: &BulwarkTuning) -> Mat4 {
     let limit = t.pitch_limit_degrees.to_radians();
     let pitch = if pitch.is_finite() {
@@ -61,7 +64,8 @@ pub fn slab_transform_for(eye: Vec3, yaw: f32, pitch: f32, t: &BulwarkTuning) ->
     let rot = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
     let size = Vec3::new(t.width / BULWARK_SIZE.x, t.height / BULWARK_SIZE.y, 1.0)
         .clamp(Vec3::splat(0.2), Vec3::splat(4.0));
-    Mat4::from_scale_rotation_translation(size, rot, eye + rot * (Vec3::NEG_Z * t.distance))
+    let center = eye - Vec3::Y * SLAB_DROP + rot * (Vec3::NEG_Z * t.distance);
+    Mat4::from_scale_rotation_translation(size, rot, center)
 }
 
 /// Where a hit at `hit` (a point on the holder, behind the slab) shows on the slab at `root`:
