@@ -136,8 +136,8 @@ impl Default for BalanceTuning {
         let weapons = BTreeMap::from([
             (WeaponKind::Tumbler, scale(0.9)),
             (WeaponKind::Lancet, scale(0.85)),
-            (WeaponKind::Bellows, scale(0.6)),
-            (WeaponKind::Thresher, scale(0.75)),
+            (WeaponKind::Bellows, scale(0.52)),
+            (WeaponKind::Thresher, scale(0.49)),
             (WeaponKind::Cinderbox, scale(0.75)),
             (
                 WeaponKind::Longwick,
@@ -174,6 +174,12 @@ impl Default for BalanceTuning {
         ]);
         let overrides = BTreeMap::from([
             ("quill.brand_multiplier".to_string(), 1.25),
+            // A full Bellows blast inside 3 m kills a body (the one-shot rule's exception).
+            ("bellows.point_blank_multiplier".to_string(), 1.6),
+            // The PvE pellets push less (a blast staggers a Mould instead): players keep the
+            // old shove.
+            ("bellows.pellet_knockback".to_string(), 2.0),
+            ("thresher.pellet_knockback".to_string(), 1.5),
             // Half damage for 3 s won every even duel.
             ("knacks.tallow_skin.damage_scale".to_string(), 0.7),
             ("knacks.tallow_skin.duration".to_string(), 2.0),

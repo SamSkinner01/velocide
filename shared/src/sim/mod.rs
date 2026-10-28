@@ -52,6 +52,7 @@ pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
 mod payload; // what the expansion's projectiles do on contact: docs/arsenal.md
 pub mod projectiles;
+pub mod scatter; // the scatterguns' blasts (pattern, point blank, stagger): docs/balance.md
 pub mod status; // Burn, Pinned, burning patches: docs/arsenal.md
 pub mod style;
 pub mod thorn;

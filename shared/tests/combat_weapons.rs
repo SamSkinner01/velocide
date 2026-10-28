@@ -333,9 +333,14 @@ fn bellows_blast_and_both_barrels() {
     a.aim(p, body);
     let ev = a.tap(p, Buttons::FIRE, 0);
     let hits = hits_on(&ev, HitTarget::Entity(d[0]));
+    let b = a.tuning.combat.bellows.clone();
     assert_eq!(hits.len(), 12, "12 pellets in an 8 degree cone at 5 m");
-    assert_eq!(dmg(&ev, d[0]), 96.0);
-    assert!(hits.iter().all(|h| h.info.knockback.length() > 1.9));
+    // Past point blank (4 m): every pellet its plain damage.
+    assert_eq!(dmg(&ev, d[0]), 12.0 * b.pellet_damage);
+    assert!(
+        hits.iter()
+            .all(|h| (h.info.knockback.length() - b.pellet_knockback).abs() < 1e-3)
+    );
     assert_eq!(hits[0].info.attack.name(), "Bellows");
     // Both barrels: 24 pellets and a blast-jump recoil; holds the primary too.
     a.ticks(60);
@@ -361,6 +366,28 @@ fn bellows_blast_and_both_barrels() {
         ev.iter()
             .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Blast))
     );
+}
+
+/// Point blank (the shotguns pass, `docs/balance.md`): a blast at a dummy 2 m away lands every
+/// pellet at × `point_blank_multiplier`.
+#[test]
+fn bellows_point_blank_hits_harder() {
+    let (mut a, p, d) = range(&[Vec3::new(0.0, 0.0, -2.0)], 1000.0);
+    a.select(p, BELLOWS, 1);
+    let body = dummy_body(&a, d[0]);
+    a.aim(p, body);
+    let ev = a.tap(p, Buttons::FIRE, 0);
+    let b = a.tuning.combat.bellows.clone();
+    assert!(b.point_blank_multiplier > 1.0);
+    let hits = hits_on(&ev, HitTarget::Entity(d[0]));
+    assert_eq!(hits.len(), 12);
+    for h in &hits {
+        assert!(
+            (h.info.amount - b.pellet_damage * b.point_blank_multiplier).abs() < 1e-3,
+            "{}",
+            h.info.amount
+        );
+    }
 }
 
 #[test]

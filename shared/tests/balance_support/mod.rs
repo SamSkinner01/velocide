@@ -10,11 +10,17 @@
 //! knockback drift, no AI) and take damage without dying unless a scenario uses real health,
 //! so one run gives a damage-over-time curve and every time to kill is read off it.
 //!
+//! Play-like runs ([`Motion`], [`Bench::aim_lag`]) loosen that: targets strafe across the
+//! line of fire (jukes) or run their real AI and take real knockback, and the crosshair
+//! trails the aim point by a human's tracking delay. Every hitscan trigger pull is recorded as
+//! a [`Volley`]: rays fired, rays landed, whether it staggered the Mould.
+//!
 //! Shared by `examples/balance_report.rs` (the tables) and `tests/combat_balance.rs` (the
 //! bands), through `#[path]`.
 
 #![allow(dead_code)]
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use glam::Vec3;
@@ -108,6 +114,20 @@ pub enum Aim {
     Weak(usize),
 }
 
+/// How the tracked targets move.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Motion {
+    /// Held where they stand: position, velocity and facing restored every tick.
+    #[default]
+    Still,
+    /// Strafing across the line of fire at `speed` m/s, turning back every `period` s (a
+    /// juke), at their range and facing the shooter; knockback doesn't move them.
+    Strafe { speed: f32, period: f32 },
+    /// Their own AI and physics: Moulds hunt the shooter (god mode keeps it standing), chase,
+    /// strafe and take the real knockback; players drift with it.
+    Free,
+}
+
 /// Assumptions layered over the shipped tuning, for numbers ahead of other areas' merges. None
 /// at the moment: everything the refit's balance pass assumed (**pve**'s Mould hit shapes and
 /// hit assist, **feel**'s projectile hit pad) is on main, so every run measures it.
@@ -124,10 +144,27 @@ pub struct Hit {
     pub weak: bool,
 }
 
+/// One hitscan trigger pull of the shooter's primary (a blast, a shot, a zap) and what it
+/// landed on the tracked targets.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Volley {
+    /// Seconds since the first input.
+    pub time: f32,
+    /// Rays fired (a scattergun's pellets).
+    pub rays: u32,
+    /// Damage events it caused on the tracked targets (pellets landed; chains count too).
+    pub landed: u32,
+    pub dealt: f32,
+    /// It staggered a tracked Mould (`Enemy::stagger` set on that tick).
+    pub staggered: bool,
+}
+
 /// What a run recorded.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Trace {
     pub hits: Vec<Hit>,
+    /// The primary's hitscan trigger pulls.
+    pub volleys: Vec<Volley>,
     /// Seconds simulated.
     pub secs: f32,
     /// Times the ability was used (a Limpet use = a full set of charges, detonated).
@@ -169,6 +206,30 @@ impl Trace {
             .filter(|h| h.time <= secs + 1e-4)
             .map(|h| h.dealt)
             .sum()
+    }
+
+    /// Fraction of the volleys' rays that landed (0 without volleys).
+    pub fn landed(&self) -> f32 {
+        let rays: u32 = self.volleys.iter().map(|v| v.rays).sum();
+        let landed: u32 = self.volleys.iter().map(|v| v.landed.min(v.rays)).sum();
+        landed as f32 / rays.max(1) as f32
+    }
+
+    /// Fraction of the volleys that landed at least half their rays.
+    pub fn mostly_landed(&self) -> f32 {
+        let n = self
+            .volleys
+            .iter()
+            .filter(|v| 2 * v.landed.min(v.rays) >= v.rays)
+            .count();
+        n as f32 / self.volleys.len().max(1) as f32
+    }
+
+    /// Fraction of the volleys that landed something and staggered the Mould.
+    pub fn stagger_rate(&self) -> f32 {
+        let connected: Vec<_> = self.volleys.iter().filter(|v| v.landed > 0).collect();
+        let n = connected.iter().filter(|v| v.staggered).count();
+        n as f32 / connected.len().max(1) as f32
     }
 }
 
@@ -215,6 +276,9 @@ impl Stop {
 
 struct Tracked {
     target: HitTarget,
+    /// Where it stood when placed (a strafe swings around it).
+    base: Vec3,
+    /// Where it is now.
     position: Vec3,
     yaw: f32,
     alive: bool,
@@ -245,6 +309,14 @@ pub struct Bench {
     /// HP the shooter was healed by (with `wounded`).
     pub healed: f32,
     run_tick: u32,
+    /// How the targets move (set with [`Bench::set_motion`]).
+    motion: Motion,
+    /// Seconds the crosshair trails the aim point (a human's tracking delay; 0: on it).
+    pub aim_lag: f32,
+    /// Recent aim points (newest last), for `aim_lag`.
+    aim_history: VecDeque<(Vec3, Vec3)>,
+    /// Ticks since the bench was built (the strafes' clock).
+    clock: u32,
 }
 
 /// 100 m square floor at y = 0 (small: every world builds a nav grid for its Moulds).
@@ -383,6 +455,18 @@ fn aim_angles(from: Vec3, to: Vec3, flight: Option<(f32, f32, f32)>) -> (f32, f3
     (yaw, pitch.clamp(-1.5, 1.5))
 }
 
+/// A strafe's sideways offset (m) and velocity (m/s) at `time`: from the centre at `speed`,
+/// turning back every `period` seconds, swinging `speed × period` wide around it.
+fn strafe_offset(time: f32, speed: f32, period: f32) -> (f32, f32) {
+    let leg = (speed * period).max(1e-3);
+    let s = (time * speed + leg * 0.5) % (2.0 * leg);
+    if s < leg {
+        (s - leg * 0.5, speed)
+    } else {
+        (1.5 * leg - s, -speed)
+    }
+}
+
 impl Bench {
     /// A world for `side` with the shooter at the origin looking down -Z, carrying `build`.
     pub fn new(base: &Tuning, side: Side, assume: Assume, build: WeaponBuild) -> Self {
@@ -422,6 +506,18 @@ impl Bench {
             wounded: None,
             healed: 0.0,
             run_tick: 0,
+            motion: Motion::Still,
+            aim_lag: 0.0,
+            aim_history: VecDeque::new(),
+            clock: 0,
+        }
+    }
+
+    /// How the targets move; [`Motion::Free`] makes the shooter a target the Moulds hunt.
+    pub fn set_motion(&mut self, motion: Motion) {
+        self.motion = motion;
+        if let Some(p) = self.world.players.get_mut(&self.shooter) {
+            p.notarget = motion != Motion::Free;
         }
     }
 
@@ -459,6 +555,7 @@ impl Bench {
             .expect("the Mould spawns");
         self.tracked.push(Tracked {
             target: HitTarget::Entity(id),
+            base: at,
             position: at,
             yaw,
             alive: true,
@@ -490,6 +587,7 @@ impl Bench {
         p.combat.damage = 0.0;
         self.tracked.push(Tracked {
             target: HitTarget::Player(id),
+            base: at,
             position: at,
             yaw: std::f32::consts::PI,
             alive: true,
@@ -521,21 +619,40 @@ impl Bench {
                 p.combat.hard = 0.0;
             }
         }
+        let time = self.clock as f32 * DT;
+        let shooter_at = self.shooter_at;
         for t in &mut self.tracked {
+            // Where the motion puts it now (`None`: wherever its physics took it).
+            let placed = match self.motion {
+                Motion::Still => Some((t.base, Vec3::ZERO)),
+                Motion::Strafe { speed, period } => {
+                    let to = Vec3::new(t.base.x - shooter_at.x, 0.0, t.base.z - shooter_at.z);
+                    let side = to.normalize_or(Vec3::NEG_Z).cross(Vec3::Y);
+                    let (offset, v) = strafe_offset(time, speed, period);
+                    Some((t.base + side * offset, side * v))
+                }
+                Motion::Free => None,
+            };
             match t.target {
                 HitTarget::Entity(id) => match self.world.enemies.get_mut(&id) {
                     Some(e) if e.is_alive() => {
-                        e.position = t.position;
-                        e.velocity = Vec3::ZERO;
-                        e.yaw = t.yaw;
+                        if let Some((at, v)) = placed {
+                            e.position = at;
+                            e.velocity = v;
+                            e.yaw = t.yaw;
+                        }
+                        t.position = e.position;
                     }
                     _ => t.alive = false,
                 },
                 HitTarget::Player(id) => {
                     if let Some(p) = self.world.players.get_mut(&id) {
-                        p.movement.position = t.position;
-                        p.movement.velocity = Vec3::ZERO;
-                        p.movement.on_ground = true;
+                        if let Some((at, v)) = placed {
+                            p.movement.position = at;
+                            p.movement.velocity = v;
+                            p.movement.on_ground = true;
+                        }
+                        t.position = p.movement.position;
                         p.movement.slow_time = 0.0;
                         p.combat.protection = 0;
                         if !self.real_health {
@@ -718,7 +835,8 @@ impl Bench {
         trace: &mut Trace,
     ) -> Option<bool> {
         self.restore();
-        let (point, feet) = self.aim_point(aim)?;
+        let aimed = self.aim_point(aim)?;
+        let (point, feet) = self.lagged(aimed);
         let eye = self.world.players[&self.shooter]
             .movement
             .eye_position(&self.tuning.movement);
@@ -767,8 +885,21 @@ impl Bench {
             }
         }
         self.run_tick += 1;
+        self.clock += 1;
+        let staggers = self.staggers();
         let events = self.world.step(&inputs, &self.tuning, None);
         let time = (self.world.tick - start - 1) as f32 * DT;
+        let primary = self.build.weapon.primary();
+        let mut volley = events.iter().find_map(|e| match e {
+            SimEvent::Shot(s) if s.shooter == self.shooter && s.attack == primary => Some(Volley {
+                time,
+                rays: s.ends.len() as u32,
+                landed: 0,
+                dealt: 0.0,
+                staggered: false,
+            }),
+            _ => None,
+        });
         for e in &events {
             if let SimEvent::Healed { player, amount, .. } = e
                 && *player == self.shooter
@@ -786,13 +917,49 @@ impl Bench {
                         weak: d.info.part != HitPart::Body,
                     });
                 }
+                if let Some(v) = volley.as_mut()
+                    && d.info.attack == primary
+                {
+                    v.landed += 1;
+                    v.dealt += d.dealt;
+                }
                 if d.killed {
                     trace.deaths.push(time);
                 }
             }
         }
+        if let Some(mut v) = volley {
+            // A stagger set this tick (the AI counted it down once after the shot).
+            v.staggered = self
+                .staggers()
+                .iter()
+                .zip(&staggers)
+                .any(|(now, before)| *now > before.saturating_sub(1));
+            trace.volleys.push(v);
+        }
         trace.secs = time + DT;
         Some(used)
+    }
+
+    /// The aim point `aim_lag` seconds ago (the newest while the run is younger than that).
+    fn lagged(&mut self, now: (Vec3, Vec3)) -> (Vec3, Vec3) {
+        let lag = (self.aim_lag * TICK_RATE as f32).round() as usize;
+        self.aim_history.push_back(now);
+        while self.aim_history.len() > lag + 1 {
+            self.aim_history.pop_front();
+        }
+        self.aim_history.front().copied().unwrap_or(now)
+    }
+
+    /// Stagger ticks of every tracked Mould (0 when gone).
+    fn staggers(&self) -> Vec<u16> {
+        self.tracked
+            .iter()
+            .map(|t| match t.target {
+                HitTarget::Entity(id) => self.world.enemies.get(&id).map_or(0, |e| e.stagger),
+                HitTarget::Player(_) => 0,
+            })
+            .collect()
     }
 
     /// Every tracked Mould has real health (a pack).
@@ -826,6 +993,115 @@ pub fn weak_of(name: &str, behind: bool) -> Aim {
     } else {
         Aim::Weak(0)
     }
+}
+
+/// How a play-like run moves and aims ([`in_play`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Play {
+    pub motion: Motion,
+    /// Seconds the crosshair trails the aim point.
+    pub aim_lag: f32,
+    /// Real health at this difficulty (index into `difficulty.health`; the Mould dies), or
+    /// `None`: endless.
+    pub difficulty: Option<usize>,
+}
+
+impl Play {
+    /// The harness's ceiling: still targets, the crosshair on the aim point, endless.
+    pub const STILL: Play = Play {
+        motion: Motion::Still,
+        aim_lag: 0.0,
+        difficulty: None,
+    };
+
+    /// A Mould juking across the line of fire: 5 m/s (a Censer's or Bellwether's walk, half
+    /// a Gnawer's run), turning back every 0.8 s, the crosshair 0.1 s behind (a good player
+    /// tracking it); endless.
+    pub const STRAFE: Play = Play {
+        motion: Motion::Strafe {
+            speed: 5.0,
+            period: 0.8,
+        },
+        aim_lag: 0.1,
+        difficulty: None,
+    };
+}
+
+/// `build`'s primary held on Mould `name` placed at `range`, moving and aimed at as `play`
+/// says, for at most `secs` (or until it dies).
+pub fn in_play(
+    base: &Tuning,
+    build: WeaponBuild,
+    name: &str,
+    range: f32,
+    aim: Aim,
+    play: Play,
+    secs: f32,
+) -> Trace {
+    let mut b = Bench::new(base, Side::Pve, Assume::default(), build);
+    b.set_motion(play.motion);
+    b.aim_lag = play.aim_lag;
+    let health = play.difficulty.map(|d| mould_health(base, name, d));
+    b.mould_at(name, range, false, health);
+    b.run(Trigger::Primary, aim, Stop::secs(secs))
+}
+
+/// What one blast did to a Mould running in at the shooter ([`blast_push`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Push {
+    /// How much further away the blast put it (m).
+    pub back: f32,
+    /// Seconds it was staggered.
+    pub staggered: f32,
+    /// Seconds until it ran at the shooter again (at half its speed).
+    pub recovered: f32,
+    /// What the volley landed.
+    pub volley: Volley,
+}
+
+/// Mould `name` (endless) hunting the shooter with its own AI, from `range` + 14 m; once it is
+/// within `range`, one pull of `weapon`'s primary at its body: see [`Push`] (`None`: it never
+/// came that close).
+pub fn blast_push(base: &Tuning, weapon: WeaponKind, name: &str, range: f32) -> Option<Push> {
+    let mut b = Bench::new(base, Side::Pve, Assume::default(), weapon.default_build());
+    b.set_motion(Motion::Free);
+    let id = b.mould_at(name, range + 14.0, false, None);
+    let dist = |b: &Bench| {
+        let p = b.world.enemies[&id].position;
+        Vec3::new(p.x, 0.0, p.z).length()
+    };
+    let mut waited = 0;
+    while dist(&b) > range {
+        if waited > 10 * TICK_RATE {
+            return None;
+        }
+        b.run_idle(DT, Aim::Body);
+        waited += 1;
+    }
+    let speed = b.world.enemies[&id].def.speed;
+    let before = dist(&b);
+    let volley = *b
+        .run(Trigger::Primary, Aim::Body, Stop::secs(DT))
+        .volleys
+        .first()?;
+    let (mut far, mut staggered, mut recovered) = (before, 0u32, None);
+    for tick in 1..=2 * TICK_RATE {
+        b.run_idle(DT, Aim::Body);
+        let e = &b.world.enemies[&id];
+        far = far.max(dist(&b));
+        staggered += (e.stagger > 0) as u32;
+        let flat = Vec3::new(e.position.x, 0.0, e.position.z).normalize_or_zero();
+        let closing = -e.velocity.dot(flat);
+        if recovered.is_none() && e.stagger == 0 && closing >= 0.5 * speed {
+            recovered = Some(tick);
+        }
+    }
+    Some(Push {
+        back: far - before,
+        staggered: staggered as f32 * DT,
+        recovered: recovered.unwrap_or(2 * TICK_RATE) as f32 * DT,
+        volley,
+    })
 }
 
 /// `trigger` with `build` on one endless Mould at `range` for `secs`.

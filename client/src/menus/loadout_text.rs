@@ -699,7 +699,7 @@ mod tests {
             }
         }
         let c = CombatTuning::default();
-        assert_eq!(damage_text(WeaponKind::Bellows, &c), "12X8");
+        assert_eq!(damage_text(WeaponKind::Bellows, &c), "12X11");
         assert_eq!(damage_text(WeaponKind::Longwick, &c), "22-105");
         // 0.09 s is five ticks at 60 Hz: twelve rivets a second.
         assert_eq!(rate_text(WeaponKind::Riveter, &c), "12/S");
