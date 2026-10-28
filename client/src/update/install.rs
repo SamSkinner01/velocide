@@ -54,9 +54,19 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Writes `reader` to `dest` while hashing it and checks the result: exactly `size` bytes,
-/// and the SHA-256 of `digest` when there is one. `progress(bytes so far)` is called after
-/// every chunk; it returns false to stop (cancelled). On any failure `dest` is removed.
+/// The SHA-256 a release states for an asset: required (a download that can't be checked isn't
+/// installed).
+fn required_sha256(digest: Option<&str>) -> anyhow::Result<[u8; 32]> {
+    match digest.map(parse_digest).transpose()?.flatten() {
+        Some(sha) => Ok(sha),
+        None => bail!("the release gives no SHA-256 checksum for the game: not installing it"),
+    }
+}
+
+/// Writes `reader` to `dest` while hashing it and checks the result: exactly `size` bytes with
+/// the SHA-256 of `digest` (required). `progress(bytes so far)` is called after every chunk;
+/// it returns false to stop (cancelled). `dest` is made new (an old one, or a link there, is
+/// removed first, never written through). On any failure `dest` is removed.
 pub fn write_verified(
     mut reader: impl Read,
     dest: &Path,
@@ -64,9 +74,18 @@ pub fn write_verified(
     digest: Option<&str>,
     mut progress: impl FnMut(u64) -> bool,
 ) -> anyhow::Result<()> {
-    let expected = digest.map(parse_digest).transpose()?.flatten();
+    let expected = required_sha256(digest)?;
     let result = (|| {
-        let mut file = File::create(dest)
+        match std::fs::remove_file(dest) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                return Err(anyhow!("can't replace {}: {e}", dest.display()));
+            }
+            _ => {}
+        }
+        let mut file = File::options()
+            .write(true)
+            .create_new(true)
+            .open(dest)
             .with_context(|| format!("can't write {}", folder_of(dest).display()))?;
         let mut hasher = Sha256::new();
         let mut buf = vec![0u8; 64 * 1024];
@@ -95,9 +114,7 @@ pub fn write_verified(
         file.sync_all()
             .with_context(|| format!("can't write {}", dest.display()))?;
         let actual: [u8; 32] = hasher.finalize().into();
-        if let Some(expected) = expected
-            && actual != expected
-        {
+        if actual != expected {
             log::warn!(
                 "{}: sha256:{}, the release says sha256:{}",
                 dest.display(),
@@ -114,16 +131,42 @@ pub fn write_verified(
     result
 }
 
+/// Checks the file at `path` again just before it is swapped in: `size` bytes with the SHA-256
+/// of `digest` (nothing changed it since the download).
+pub fn verify_file(path: &Path, size: u64, digest: Option<&str>) -> anyhow::Result<()> {
+    let expected = required_sha256(digest)?;
+    let mut file = File::open(path).with_context(|| format!("can't read {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut done = 0u64;
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(anyhow!("can't read {}: {e}", path.display())),
+        };
+        done += n as u64;
+        hasher.update(&buf[..n]);
+    }
+    let actual: [u8; 32] = hasher.finalize().into();
+    if done != size || actual != expected {
+        bail!("{} changed after the download", path.display());
+    }
+    Ok(())
+}
+
 /// Downloads `asset` to `dest` ([`write_verified`]). Redirects (GitHub serves release files
-/// from another host) are followed.
+/// from another host) are followed; `https_only`: never to plain HTTP.
 pub fn download(
     asset: &Asset,
     dest: &Path,
     version: &str,
+    https_only: bool,
     progress: impl FnMut(u64) -> bool,
 ) -> anyhow::Result<()> {
     // Half an hour for the whole file: tens of MB even on a slow line.
-    let agent = github::agent(version, Duration::from_secs(30 * 60));
+    let agent = github::agent(version, Duration::from_secs(30 * 60), https_only);
     let response = agent
         .get(&asset.browser_download_url)
         .header("Accept", "application/octet-stream")
@@ -305,8 +348,19 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), data);
         assert_eq!(seen.last(), Some(&(data.len() as u64)));
         assert!(seen.windows(2).all(|w| w[0] < w[1]), "progress only grows");
-        // No digest: the size alone.
-        write_verified(&data[..], &dest, data.len() as u64, None, |_| true).unwrap();
+        // No SHA-256: refused.
+        let err = write_verified(&data[..], &dest, data.len() as u64, None, |_| true).unwrap_err();
+        assert!(format!("{err:#}").contains("no SHA-256"), "{err:#}");
+        let other = "sha512:00ff";
+        assert!(
+            write_verified(&data[..], &dest, data.len() as u64, Some(other), |_| true).is_err()
+        );
+        // An existing file (or a link) there is replaced, not written through.
+        std::fs::write(&dest, b"stale").unwrap();
+        write_verified(&data[..], &dest, data.len() as u64, Some(&digest), |_| true).unwrap();
+        verify_file(&dest, data.len() as u64, Some(&digest)).unwrap();
+        std::fs::write(&dest, b"swapped meanwhile").unwrap();
+        assert!(verify_file(&dest, data.len() as u64, Some(&digest)).is_err());
     }
 
     #[test]
@@ -319,18 +373,19 @@ mod tests {
         let err = write_verified(&data[..], &dest, n, Some(&wrong), |_| true).unwrap_err();
         assert!(format!("{err:#}").contains("checksum mismatch"), "{err:#}");
         assert!(!dest.exists());
-        let err = write_verified(&data[..], &dest, n + 5, None, |_| true).unwrap_err();
+        let right = sha256(&data);
+        let err = write_verified(&data[..], &dest, n + 5, Some(&right), |_| true).unwrap_err();
         assert!(format!("{err:#}").contains("stopped at"), "{err:#}");
         assert!(!dest.exists());
-        let err = write_verified(&data[..], &dest, n - 1, None, |_| true).unwrap_err();
+        let err = write_verified(&data[..], &dest, n - 1, Some(&right), |_| true).unwrap_err();
         assert!(format!("{err:#}").contains("larger"), "{err:#}");
         assert!(!dest.exists());
-        let err = write_verified(&data[..], &dest, n, None, |_| false).unwrap_err();
+        let err = write_verified(&data[..], &dest, n, Some(&right), |_| false).unwrap_err();
         assert!(format!("{err:#}").contains("cancelled"), "{err:#}");
         assert!(!dest.exists());
         // A folder that doesn't exist (as good as read-only).
         let nowhere = dir.join("missing").join("velocide.new");
-        let err = write_verified(&data[..], &nowhere, n, None, |_| true).unwrap_err();
+        let err = write_verified(&data[..], &nowhere, n, Some(&right), |_| true).unwrap_err();
         assert!(format!("{err:#}").contains("can't write"), "{err:#}");
     }
 

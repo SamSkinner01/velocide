@@ -1,7 +1,8 @@
 //! Client transport: netcode over UDP with optional network simulation.
 //!
-//! [`ClientTransport`] is the seam for other transports (Steam networking, relays): a
-//! [`super::NetClient`] only calls these methods. [`NetcodeClientTransport`] mirrors
+//! [`ClientTransport`] is the seam for other transports (Steam networking; joining by code
+//! through the rendezvous service is `super::online`): a [`super::NetClient`] only calls these
+//! methods. [`NetcodeClientTransport`] mirrors
 //! `renet_netcode::NetcodeClientTransport` but sends/receives through a
 //! [`server::UdpLink`], which counts bytes and runs the network simulator.
 
@@ -29,6 +30,10 @@ pub trait ClientTransport: Send {
     fn is_connected(&self) -> bool;
     fn server_addr(&self) -> Option<SocketAddr>;
     fn stats(&self) -> TransportStats;
+    /// What it is doing while connecting, for the connecting screen (joining by code).
+    fn progress(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A player-facing reason for a netcode disconnect (shown after "Couldn't connect: " /

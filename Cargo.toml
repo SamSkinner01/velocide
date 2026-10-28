@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["engine", "shared", "server", "client"]
+members = ["engine", "shared", "server", "client", "rendezvous"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ license = "MIT"
 engine = { path = "engine", default-features = false }
 shared = { path = "shared" }
 server = { path = "server" }
+rendezvous = { path = "rendezvous" }
 
 glam = { version = "0.33", features = ["serde", "bytemuck"] }
 parry3d = "0.31"

@@ -5,12 +5,23 @@
 #   a push to main                                then the release build-<run number>
 #   a v* tag                                      then the release under that tag
 #
-# A release is made only when check and both builds pass. It carries the four standalone
+# A release is made only when check and both builds pass. It carries the five standalone
 # binaries and PLAY.txt, is marked latest (so .../releases/latest/download/<name> always fetches
 # it), and only the newest 10 build-* releases are kept.
 #
+# Then, once the repository variable DEPLOY_HOST is set (docs/rendezvous.md "Deploying"), the
+# deploy job has the VPS install that release of the online service (and of the dedicated
+# server, if it runs one). Until then it is skipped and nothing else depends on it.
+#
+# The repository variable VELOCIDE_RENDEZVOUS (host:port) is the online service built into the
+# game; unset, the builds have none (online play then needs one set in the game's settings).
+#
 # The compiling jobs install their packages and the Rust toolchain with scripts/ci/setup.sh and
 # build with scripts/build_dist.sh, the same scripts scripts/package.sh runs locally.
+#
+# Actions are pinned to full commit SHAs (the tag in the comment) and the build container to a
+# digest, so a moved tag upstream can't change what is built and shipped. Update them on
+# purpose: `git ls-remote https://github.com/<owner>/<action> refs/tags/<tag>`.
 name: release
 
 on:
@@ -51,11 +62,11 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "false"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh check
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
@@ -72,7 +83,8 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     # 20.04 keeps the binaries on glibc 2.31 (any distro from about 2020 on).
-    container: ubuntu:20.04
+    # By digest (ubuntu:20.04 as of 2026-10): what ships can't change under a moved tag.
+    container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
     timeout-minutes: 60
     concurrency:
       group: ${{ github.workflow }}-linux-${{ github.ref }}
@@ -84,22 +96,25 @@ jobs:
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             git ca-certificates zstd >/dev/null
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh linux
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
       - name: Build
+        env:
+          VELOCIDE_RENDEZVOUS: ${{ vars.VELOCIDE_RENDEZVOUS }}
         run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh linux
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux
           path: |
             dist/velocide-linux-x86_64
             dist/velocide-server-linux-x86_64
+            dist/velocide-rendezvous-linux-x86_64
             dist/PLAY.txt
           if-no-files-found: error
           retention-days: 14
@@ -112,17 +127,19 @@ jobs:
       group: ${{ github.workflow }}-windows-${{ github.ref }}
       cancel-in-progress: ${{ github.ref_type != 'tag' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Toolchain
         run: bash scripts/ci/setup.sh windows
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-bin: false
       - name: Build
+        env:
+          VELOCIDE_RENDEZVOUS: ${{ vars.VELOCIDE_RENDEZVOUS }}
         run: VELOCIDE_VERSION="$RELEASE" VELOCIDE_COMMIT="$GITHUB_SHA" bash scripts/build_dist.sh windows
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows
           path: |
@@ -144,8 +161,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist
           merge-multiple: true
@@ -153,3 +170,41 @@ jobs:
         run: bash scripts/ci/github_release.sh publish "$RELEASE" dist
       - name: Prune old builds
         run: bash scripts/ci/github_release.sh prune build- 10
+
+  # Has the VPS install the release just published (docs/rendezvous.md "Deploying"). The SSH
+  # key can do nothing else: its authorized_keys entry forces scripts/deploy/velocide-deploy,
+  # which downloads that release from GitHub itself, checks its digests, swaps the binaries
+  # and waits for the online service to answer with the new version. Skipped until the
+  # repository variable DEPLOY_HOST is set.
+  deploy:
+    needs: [release]
+    if: vars.DEPLOY_HOST != '' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Its secrets live in this environment, which can be limited to main and v* tags.
+    environment: production
+    concurrency:
+      group: ${{ github.workflow }}-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Install the release on the VPS
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'velocide-deploy' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "error: DEPLOY_HOST is set but the DEPLOY_SSH_KEY / DEPLOY_KNOWN_HOSTS secrets aren't" >&2
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=8 -- "$DEPLOY_USER@$DEPLOY_HOST" "deploy $RELEASE"
+      - name: Forget the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

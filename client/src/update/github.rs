@@ -142,9 +142,11 @@ pub fn describe(e: &ureq::Error) -> String {
 
 /// HTTP agent for the API and downloads: `User-Agent: velocide/<version>`, connect and
 /// response timeouts. `body_timeout` bounds reading a whole body (the game download is tens of
-/// MB on any connection).
-pub fn agent(version: &str, body_timeout: Duration) -> ureq::Agent {
+/// MB on any connection). `https_only`: no plain HTTP, not even through a redirect (always,
+/// against GitHub; tests run a local HTTP server).
+pub fn agent(version: &str, body_timeout: Duration, https_only: bool) -> ureq::Agent {
     ureq::Agent::config_builder()
+        .https_only(https_only)
         .user_agent(format!("velocide/{version}"))
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -165,7 +167,11 @@ pub struct Api {
 impl Api {
     pub fn new(base: &str, repo: &str, version: &str) -> Self {
         Self {
-            agent: agent(version, Duration::from_secs(60)),
+            agent: agent(
+                version,
+                Duration::from_secs(60),
+                base.starts_with("https://"),
+            ),
             base: base.trim_end_matches('/').to_string(),
             repo: repo.to_string(),
         }

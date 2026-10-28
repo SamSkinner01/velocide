@@ -16,6 +16,11 @@ GAME:
     --sp [LEVEL]                 single-player (in-process server) on LEVEL
     --host [PORT]                host a listen server and play (default port 47420)
     --connect <IP:PORT>          join a server
+    --join <CODE>                join the online game with this join code
+    --online <off|code|public>   hosting: list the game at the online service (default: the
+                                 host menu's last choice)
+    --relay-only                 online: go through the relay (hides your address)
+    --rendezvous <HOST:PORT>     the online service to use (default: settings, else built in)
     --level <NAME>               level for --sp / --host (alone: single-player)
     --name <NAME>                player name (not saved)
     --max-players <N>            player slots when hosting (default from settings)
@@ -54,6 +59,10 @@ pub enum StartMode {
     Join {
         address: String,
     },
+    /// An online game by join code (docs/rendezvous.md).
+    JoinCode {
+        code: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +88,12 @@ pub struct LaunchOptions {
     pub no_audio: bool,
     pub debug_overlay: bool,
     pub add_bots: u32,
+    /// Hosting: `--online` (else the host menu's last choice).
+    pub online: Option<crate::settings::HostOnline>,
+    /// `--relay-only`: online hosting or joining goes through the relay.
+    pub relay_only: bool,
+    /// `--rendezvous`: the online service for this launch.
+    pub rendezvous: Option<String>,
 }
 
 impl Default for LaunchOptions {
@@ -101,6 +116,9 @@ impl Default for LaunchOptions {
             no_audio: false,
             debug_overlay: false,
             add_bots: 0,
+            online: None,
+            relay_only: false,
+            rendezvous: None,
         }
     }
 }
@@ -173,6 +191,20 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
                     address: value("--connect")?,
                 }
             }
+            "--join" => {
+                o.start = StartMode::JoinCode {
+                    code: value("--join")?,
+                }
+            }
+            "--online" => {
+                let v = value("--online")?;
+                o.online = Some(
+                    crate::settings::HostOnline::parse(&v)
+                        .ok_or_else(|| format!("--online: '{v}' is not off, code or public"))?,
+                );
+            }
+            "--relay-only" => o.relay_only = true,
+            "--rendezvous" => o.rendezvous = Some(value("--rendezvous")?),
             "--level" => level = Some(value("--level")?),
             "--name" => o.name = Some(value("--name")?),
             "--max-players" => {
@@ -233,8 +265,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Cli, String> {
                 level.get_or_insert(l);
             }
             StartMode::Menu => o.start = StartMode::SinglePlayer { level: Some(l) },
-            StartMode::Join { .. } => {
-                return Err("--level can't be combined with --connect".into());
+            StartMode::Join { .. } | StartMode::JoinCode { .. } => {
+                return Err("--level can't be combined with --connect or --join".into());
             }
         }
     }

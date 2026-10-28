@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# The one thing VELOCIDE's deploy key can do (docs/rendezvous.md "Deploying"). Its line in
+# /var/lib/velocide-deploy/.ssh/authorized_keys is
+#
+#   restrict,command="/usr/local/bin/velocide-deploy" ssh-ed25519 AAAA... velocide-deploy
+#
+# so what CI asks for arrives in SSH_ORIGINAL_COMMAND, which is only compared with
+# "deploy <tag>", "deploy latest" and "probe", never run. A deploy installs the **newest**
+# release (GitHub's releases/latest, whatever tag was asked for: the key can't downgrade the
+# VPS): it downloads the Linux online service (and dedicated server, if this machine runs one)
+# from GitHub over HTTPS, checks them against the SHA-256 digests GitHub reports, puts them in
+# /opt/velocide/deploy/releases/<tag>/ and points /opt/velocide/deploy/current at it. The
+# services notice (--exit-when-replaced) and systemd starts the new binaries in their sandbox:
+# the online service at once (lobbies and relayed games carry on), the dedicated server when
+# nobody is connected. If the online service doesn't answer as the new version within a
+# minute, current goes back to the previous release.
+#
+# It never executes what it downloads (only systemd does, sandboxed): the health check is a
+# probe datagram sent from Python. It keeps going if the SSH connection drops, so a switch is
+# always followed by the check (and the rollback). Its log: /opt/velocide/deploy/deploy.log.
+#
+# Runs as velocide-deploy, which owns /opt/velocide/deploy and nothing else; no sudo.
+# setup-vps.sh runs it once by hand for the first install.
+set -euo pipefail
+umask 022
+# A dropped SSH connection must not stop it halfway (between the switch and the check).
+trap '' PIPE HUP
+export LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY \
+    CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR CURL_HOME PYTHONPATH PYTHONHOME
+
+REPO=SamSkinner01/velocide
+ROOT=/opt/velocide/deploy
+LOG=$ROOT/deploy.log
+SERVICE_PORT=47400
+KEEP=5
+# At most 22 characters: the service reports "<tag> (<commit>)" in 32.
+TAG_RE='^(build-[0-9]{1,9}|v[0-9][0-9A-Za-z.-]{0,20})$'
+
+say() {
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null || true
+    printf '%s\n' "$*" 2>/dev/null || true
+}
+
+die() {
+    say "error: $*"
+    exit 1
+}
+
+# Asks the online service on this machine its version (prints it). Exit 0 if it answers (as
+# $1, when given), 3 if as another version, 1 if not at all.
+probe() {
+    python3 -I - "$SERVICE_PORT" "${1:-}" <<'PY'
+import os, socket, sys
+
+port, expect = int(sys.argv[1]), sys.argv[2]
+head = bytes([0xFF, 0x56, 0x52, 0x5A, 1])
+nonce = os.urandom(8)
+request = head + bytes([0x03]) + nonce
+request += bytes(64 - len(request))
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(0.5)
+for _ in range(4):
+    s.sendto(request, ("127.0.0.1", port))
+    try:
+        while True:
+            data, addr = s.recvfrom(2048)
+            if addr != ("127.0.0.1", port) or len(data) < 15:
+                continue
+            if data[:6] != head + bytes([0x04]) or data[6:14] != nonce:
+                continue
+            n = data[14]
+            if len(data) != 15 + n:
+                continue
+            version = "".join(c if " " <= c <= "~" else "?" for c in data[15:].decode("ascii", "replace"))
+            print(version)
+            sys.exit(0 if not expect or version == expect or version.startswith(expect + " ") else 3)
+    except socket.timeout:
+        continue
+sys.exit(1)
+PY
+}
+
+# Over SSH the request is SSH_ORIGINAL_COMMAND; run by hand (setup-vps.sh) it is $1.
+request=${SSH_ORIGINAL_COMMAND:-}
+if [ -z "$request" ]; then
+    case "${1:-}" in
+    probe) request=probe ;;
+    *) request="deploy ${1:-}" ;;
+    esac
+fi
+case "$request" in
+"probe")
+    probe && exit 0
+    echo "the online service doesn't answer" >&2
+    exit 1
+    ;;
+"deploy latest") asked=latest ;;
+"deploy "*)
+    asked=${request#deploy }
+    [[ "$asked" =~ $TAG_RE ]] || {
+        echo "velocide-deploy: refused: '$asked' is not a release tag" >&2
+        exit 2
+    }
+    ;;
+*)
+    echo "velocide-deploy: refused: this key only runs 'deploy <tag>' and 'probe'" >&2
+    exit 2
+    ;;
+esac
+
+[ -d "$ROOT/releases" ] && [ ! -L "$ROOT/releases" ] || die "$ROOT/releases is missing (run setup-vps.sh first)"
+# Keep the log short.
+if [ -f "$LOG" ] && [ "$(stat -c %s "$LOG")" -gt 1000000 ]; then
+    tail -n 2000 "$LOG" >"$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG" || true
+fi
+exec 9>"$ROOT/.lock"
+flock -w 300 9 || die "another deploy is still running"
+
+work=$(mktemp -d "$ROOT/.incoming.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+
+fetch() {
+    curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+        --tlsv1.2 --max-time 300 --retry 3 "$@"
+}
+
+fetch -H 'Accept: application/vnd.github+json' -o "$work/release.json" \
+    "https://api.github.com/repos/$REPO/releases/latest" ||
+    die "can't read the newest release from GitHub"
+
+wanted=(velocide-rendezvous-linux-x86_64)
+if [ -e /etc/systemd/system/velocide.service ]; then
+    wanted+=(velocide-server-linux-x86_64)
+fi
+
+# The release's tag and, per wanted asset, its digest. Python only parses (isolated mode, the
+# JSON file as an argument).
+python3 -I - "$work/release.json" "$REPO" "${wanted[@]}" >"$work/plan" <<'PY' || die "the release isn't usable"
+import json, re, sys
+
+path, repo, *wanted = sys.argv[1:]
+with open(path, encoding="utf-8") as f:
+    release = json.load(f)
+tag = release.get("tag_name") or ""
+if not re.fullmatch(r"(build-[0-9]{1,9}|v[0-9][0-9A-Za-z.-]{0,20})", tag):
+    sys.exit(f"the release has an unexpected tag: {tag!r}")
+if release.get("draft") or release.get("prerelease"):
+    sys.exit(f"release {tag} is a draft or a prerelease")
+assets = {a.get("name"): a for a in release.get("assets") or []}
+print("tag", tag)
+for name in wanted:
+    asset = assets.get(name)
+    if asset is None:
+        sys.exit(f"release {tag} has no {name}")
+    expected = f"https://github.com/{repo}/releases/download/{tag}/{name}"
+    if asset.get("browser_download_url") != expected:
+        sys.exit(f"{name}: unexpected download URL {asset.get('browser_download_url')!r}")
+    digest = re.fullmatch(r"sha256:([0-9a-f]{64})", asset.get("digest") or "")
+    if not digest:
+        sys.exit(f"GitHub reports no SHA-256 digest for {name}")
+    print("asset", name, digest.group(1))
+PY
+
+tag=$(awk '$1 == "tag" { print $2 }' "$work/plan")
+[[ "$tag" =~ $TAG_RE ]] || die "bad tag '$tag'"
+if [ "$asked" != latest ] && [ "$asked" != "$tag" ]; then
+    say "asked for $asked; the newest release is $tag: installing that"
+fi
+dest="$ROOT/releases/$tag"
+
+complete() {
+    [ -f "$1/velocide-rendezvous" ] || return 1
+    if [ -e /etc/systemd/system/velocide.service ]; then
+        [ -f "$1/velocide-server" ] || return 1
+    fi
+}
+
+if [ ! -L "$dest" ] && complete "$dest"; then
+    say "release $tag is already here"
+else
+    mkdir "$work/$tag"
+    while read -r kind name sum; do
+        [ "$kind" = asset ] || continue
+        file="$work/$tag/$name"
+        say "downloading $name ($tag)"
+        fetch -o "$file" "https://github.com/$REPO/releases/download/$tag/$name" ||
+            die "can't download $name"
+        echo "$sum  $file" | sha256sum --check --status || die "$name doesn't match its digest"
+        chmod 755 "$file"
+    done <"$work/plan"
+    mv "$work/$tag/velocide-rendezvous-linux-x86_64" "$work/$tag/velocide-rendezvous"
+    if [ -e "$work/$tag/velocide-server-linux-x86_64" ]; then
+        mv "$work/$tag/velocide-server-linux-x86_64" "$work/$tag/velocide-server"
+    fi
+    rm -rf -- "$dest"
+    mv "$work/$tag" "$dest"
+fi
+
+previous=$(readlink "$ROOT/current" 2>/dev/null || true)
+switch_to() {
+    ln -sfn "$1" "$ROOT/current.new"
+    mv -T "$ROOT/current.new" "$ROOT/current"
+}
+if [ "$previous" = "releases/$tag" ]; then
+    say "already running $tag"
+else
+    switch_to "releases/$tag"
+    say "switched to $tag (was ${previous#releases/})"
+fi
+
+# The online service restarts by itself within ~5 s; wait for it to answer as the new version.
+wait_for() {
+    local _
+    for _ in $(seq 30); do
+        if version=$(probe "$1"); then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+if systemctl is-active --quiet velocide-rendezvous.service; then
+    if ! wait_for "$tag"; then
+        if [ -n "$previous" ] && [ "$previous" != "releases/$tag" ]; then
+            switch_to "$previous"
+            if wait_for "${previous#releases/}"; then
+                die "the online service didn't come back as $tag: back on $version"
+            fi
+            die "the online service didn't come back as $tag, nor as ${previous#releases/} after switching back: check journalctl -u velocide-rendezvous"
+        fi
+        die "the online service doesn't answer as $tag"
+    fi
+    say "online service: $version"
+else
+    say "warning: velocide-rendezvous.service isn't running; it starts on $tag when started"
+fi
+if [ -e /etc/systemd/system/velocide.service ]; then
+    say "dedicated server: switches to $tag once nobody is connected"
+fi
+
+# Keep the newest few releases (always the current and the previous one).
+current=$(readlink "$ROOT/current")
+find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' | sort -rn |
+    awk '{ print $2 }' | tail -n +$((KEEP + 1)) | while read -r old; do
+    [[ "$old" =~ $TAG_RE ]] || continue
+    [ "releases/$old" = "$current" ] || [ "releases/$old" = "$previous" ] && continue
+    rm -rf -- "${ROOT:?}/releases/$old"
+    say "removed old release $old"
+done
+say "deployed $tag"

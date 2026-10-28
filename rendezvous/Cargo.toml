@@ -1,0 +1,21 @@
+[package]
+name = "rendezvous"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VELOCIDE's online lobby service (introductions, hole punching, relay) and the game's side of it"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "velocide-rendezvous"
+path = "src/bin/velocide-rendezvous.rs"
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
+getrandom = "0.3"
+log.workspace = true
+env_logger.workspace = true

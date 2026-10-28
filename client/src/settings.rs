@@ -22,6 +22,43 @@ use crate::controls::Bindings;
 /// Crosshair styles offered in the menu.
 pub const CROSSHAIRS: [&str; 4] = ["CROSS + DOT", "CROSS", "DOT", "NONE"];
 
+/// Hosting online through the rendezvous service (docs/rendezvous.md).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostOnline {
+    /// LAN only, or the internet with a forwarded port.
+    Off,
+    /// Friends join with the code the lobby shows; nobody else finds the game.
+    #[default]
+    Code,
+    /// Also listed in the server browser.
+    Public,
+}
+
+impl HostOnline {
+    pub const ALL: [HostOnline; 3] = [HostOnline::Off, HostOnline::Code, HostOnline::Public];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            HostOnline::Off => "OFF",
+            HostOnline::Code => "JOIN CODE",
+            HostOnline::Public => "PUBLIC",
+        }
+    }
+
+    /// `off`, `code` or `public` (command line).
+    pub fn parse(s: &str) -> Option<HostOnline> {
+        match s.to_ascii_lowercase().as_str() {
+            "off" => Some(HostOnline::Off),
+            "code" => Some(HostOnline::Code),
+            "public" => Some(HostOnline::Public),
+            _ => None,
+        }
+    }
+}
+
+/// The longest online service address accepted in the settings.
+pub const MAX_SERVICE_LEN: usize = 255;
+
 /// When the extra non-colour cues (player marker shapes, the parry icon, health popups) show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CueMode {
@@ -292,6 +329,17 @@ pub struct Settings {
     pub grind_best: std::collections::BTreeMap<String, u32>,
     /// Ask GitHub for a newer release at launch (release builds only; `client::update`).
     pub check_for_updates: bool,
+    /// Hosting online (docs/rendezvous.md): off, join code only, or also in the browser.
+    pub host_online: HostOnline,
+    /// Hosting online: joiners go through the relay and never learn our address.
+    pub host_relay_only: bool,
+    /// Joining online: go through the relay, so the host never learns our address.
+    pub join_relay_only: bool,
+    /// Last join code typed in the join menu.
+    pub last_join_code: String,
+    /// The online service (`host:port`); empty: the one built into the game
+    /// (`rendezvous::BUILT_IN_SERVICE`).
+    pub online_service: String,
 }
 
 impl Default for Settings {
@@ -330,6 +378,11 @@ impl Default for Settings {
             difficulty: shared::lobby::Difficulty::Normal,
             grind_best: Default::default(),
             check_for_updates: true,
+            host_online: HostOnline::default(),
+            host_relay_only: false,
+            join_relay_only: false,
+            last_join_code: String::new(),
+            online_service: String::new(),
         }
     }
 }
@@ -342,6 +395,20 @@ fn finite_or(v: f32, default: f32) -> f32 {
 }
 
 impl Settings {
+    /// The online service to use: `launch` (`--rendezvous`), else the one set here, else the
+    /// one built into the game. `None`: this build has none and none is set.
+    pub fn online_service(&self, launch: Option<&str>) -> Option<String> {
+        [
+            launch.unwrap_or(""),
+            &self.online_service,
+            rendezvous::BUILT_IN_SERVICE,
+        ]
+        .into_iter()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(str::to_string)
+    }
+
     /// Where settings are stored (see the module docs).
     pub fn default_path() -> PathBuf {
         if let Some(p) = std::env::var_os("VELOCIDE_CONFIG").filter(|p| !p.is_empty()) {
@@ -431,6 +498,13 @@ impl Settings {
         }
         self.crosshair = self.crosshair.min(CROSSHAIRS.len() - 1);
         self.host_max_players = self.host_max_players.clamp(1, 8);
+        self.online_service = self.online_service.trim().to_string();
+        if self.online_service.len() > MAX_SERVICE_LEN || !self.online_service.is_ascii() {
+            self.online_service.clear();
+        }
+        if self.last_join_code.len() > 16 {
+            self.last_join_code.clear();
+        }
         self.player_name = shared::protocol::sanitize_name(&self.player_name);
         if self.player_name.trim().is_empty() {
             self.player_name = d.player_name;

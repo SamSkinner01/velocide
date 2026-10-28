@@ -118,7 +118,12 @@ impl NetClient {
 
     pub(super) fn on_lobby_update(&mut self, update: LobbyUpdate) {
         match update {
-            LobbyUpdate::State(state) => {
+            LobbyUpdate::State(mut state) => {
+                // Names as a well-behaved server sends them (a stranger's server may not).
+                state.players.truncate(256);
+                for p in &mut state.players {
+                    p.name = shared::protocol::sanitize_name(&p.name);
+                }
                 let previous = self.lobby_phase();
                 let phase = state.phase;
                 // The warm-up keeps its world (the hub arrived with `LoadLevel`).
@@ -129,8 +134,21 @@ impl NetClient {
                 self.events
                     .push_back(NetEvent::LobbyChanged { phase, previous });
             }
-            LobbyUpdate::Levels(levels) => self.levels = levels,
-            LobbyUpdate::Notice(text) => self.events.push_back(NetEvent::Notice { text }),
+            LobbyUpdate::Levels(mut levels) => {
+                levels.truncate(256);
+                for l in &mut levels {
+                    for s in [&mut l.name, &mut l.title] {
+                        let end = s.floor_char_boundary(64);
+                        s.truncate(end);
+                    }
+                }
+                self.levels = levels;
+            }
+            LobbyUpdate::Notice(text) => {
+                if let Some(text) = shared::protocol::sanitize_chat(&text) {
+                    self.events.push_back(NetEvent::Notice { text });
+                }
+            }
         }
     }
 

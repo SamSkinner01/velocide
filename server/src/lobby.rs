@@ -554,7 +554,10 @@ impl Server {
                 if target == player {
                     Err("You can't kick yourself".into())
                 } else {
-                    self.kick(target, "kicked by the host");
+                    // A listen server's host owns it (the host token); a dedicated server's
+                    // lobby host is whoever came first: kick, but no ban.
+                    let owner = self.flow.host_token.is_some();
+                    self.kick_player(target, "kicked by the host", owner);
                     Ok(())
                 }
             }

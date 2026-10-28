@@ -7,21 +7,29 @@
 //! through a [`UdpLink`], which counts bytes and can run every datagram through the network
 //! simulator ([`crate::netsim`]).
 //!
+//! **Online hosting** ([`OnlineConfig`], docs/rendezvous.md): the same transport also talks to
+//! the rendezvous service on its socket. A `rendezvous::HostAgent` sorts every datagram
+//! (service traffic, relayed netcode packets, netcode packets from introduced joiners, and
+//! refused ones), wraps netcode's packets to relayed peers for the relay, and decides which
+//! new connections are admitted.
+//!
 //! **Pluggable transports (Steam, relays):** the server only talks to the
-//! [`ServerTransport`] trait; a Steam networking or relay implementation would implement it
-//! (renet's `renet_steam` crate has exactly this shape) and be passed to
+//! [`ServerTransport`] trait; a Steam networking implementation would implement it (renet's
+//! `renet_steam` crate has exactly this shape) and be passed to
 //! [`crate::Server::with_transport`]. The client side mirrors this with
 //! `client::net::ClientTransport`.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use renet::{ChannelConfig, ClientId, ConnectionConfig, RenetServer, SendType};
 // Connection authentication/config types come from `renet_netcode` (which re-exports them from
 // `renetcode`); the netcode.io state machine itself is driven directly so the socket glue below
 // can insert the network simulator.
+use rendezvous::{HostAgent, HostConfig, HostInfo, HostStatus, Inbound, Outbound};
 use renet_netcode::{
     NETCODE_USER_DATA_BYTES, ServerAuthentication, ServerConfig as NetcodeServerConfig,
 };
@@ -33,6 +41,77 @@ use shared::protocol::{
 use crate::netsim::{NetSim, NetSimConfig};
 
 const _: () = assert!(CONNECT_USER_DATA_BYTES == NETCODE_USER_DATA_BYTES);
+
+/// The receive buffer: bigger than any datagram of ours (netcode's 1400 bytes, a relayed one's
+/// 1414), so a bigger one can't be mistaken for a shorter one; it is dropped.
+const RECEIVE_BUFFER_BYTES: usize = 2048;
+
+/// A netcode connection request: prefix byte 0, version (13), protocol id, token expiry (both
+/// u64), nonce (24), the encrypted private token (1024).
+const CONNECT_REQUEST_BYTES: usize = 1 + 13 + 8 + 8 + 24 + 1024;
+const CONNECT_REQUEST_EXPIRY_AT: usize = 1 + 13 + 8;
+/// Our clients' connect tokens expire 300 s after they are made (renetcode's unsecure client);
+/// two more minutes allow for clocks that differ.
+pub const MAX_CONNECT_TOKEN_SECS: u64 = 300 + 120;
+/// Connection handshakes under way per source IP, and in all.
+pub const MAX_HANDSHAKES_PER_IP: usize = 8;
+pub const MAX_HANDSHAKES: usize = 2048;
+/// A connected client that sends nothing for this long is dropped. (netcode itself uses the
+/// timeout the client wrote into its own token, and none at all if that is 0 or less.)
+pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Keeps strangers from filling netcode's table of handshakes under way.
+///
+/// In unsecure mode a client writes its own connect token, expiry included, and netcode keeps
+/// an entry per address that sent a request until that expiry, up to 4096, after which it
+/// refuses everyone. The guard lets a request through only if its token expires within
+/// [`MAX_CONNECT_TOKEN_SECS`], for at most [`MAX_HANDSHAKES_PER_IP`] addresses of one IP and
+/// [`MAX_HANDSHAKES`] in all at once; an address leaves the guard when its handshake completes
+/// or its token expires. (Spoofed sources can still use up the [`MAX_HANDSHAKES`] for as long as
+/// they keep at it on a server without the online gate; docs/rendezvous.md "Security".)
+#[derive(Default)]
+struct ConnectGuard {
+    /// Address → when its token expires (Unix seconds).
+    pending: HashMap<SocketAddr, u64>,
+    refused: u64,
+}
+
+impl ConnectGuard {
+    fn allow(&mut self, now_unix: u64, from: SocketAddr, data: &[u8]) -> bool {
+        // Only connection requests make netcode keep state for a stranger.
+        if data.first() != Some(&0) {
+            return true;
+        }
+        let expiry = data
+            .get(CONNECT_REQUEST_EXPIRY_AT..CONNECT_REQUEST_EXPIRY_AT + 8)
+            .and_then(|b| <[u8; 8]>::try_from(b).ok())
+            .map(u64::from_le_bytes);
+        let allowed = match expiry {
+            _ if data.len() != CONNECT_REQUEST_BYTES => false,
+            None => false,
+            Some(e) if e > now_unix.saturating_add(MAX_CONNECT_TOKEN_SECS) => false,
+            Some(_) if self.pending.contains_key(&from) || from.ip().is_loopback() => true,
+            Some(e) => {
+                self.pending.retain(|_, expiry| *expiry >= now_unix);
+                let same_ip = self.pending.keys().filter(|a| a.ip() == from.ip()).count();
+                let room = same_ip < MAX_HANDSHAKES_PER_IP && self.pending.len() < MAX_HANDSHAKES;
+                if room {
+                    self.pending.insert(from, e);
+                }
+                room
+            }
+        };
+        if !allowed {
+            self.refused += 1;
+        }
+        allowed
+    }
+
+    /// The handshake from `addr` is over (connected, or refused).
+    fn done(&mut self, addr: SocketAddr) {
+        self.pending.remove(&addr);
+    }
+}
 
 /// Datagrams [`UdpLink::receive`] reads per call (per server / client update); the rest wait
 /// in the socket buffer for the next update, so a packet flood can't stall the update loop
@@ -158,7 +237,7 @@ pub struct UdpLink {
     stats: TransportStats,
     sent_rate: RateMeter,
     recv_rate: RateMeter,
-    buffer: Box<[u8; NETCODE_MAX_PACKET_BYTES]>,
+    buffer: Box<[u8; RECEIVE_BUFFER_BYTES]>,
     /// The last receive stopped at its datagram limit.
     backlog: bool,
 }
@@ -189,7 +268,7 @@ impl UdpLink {
             stats: TransportStats::default(),
             sent_rate: RateMeter::default(),
             recv_rate: RateMeter::default(),
-            buffer: Box::new([0; NETCODE_MAX_PACKET_BYTES]),
+            buffer: Box::new([0; RECEIVE_BUFFER_BYTES]),
             backlog: false,
         })
     }
@@ -277,6 +356,10 @@ impl UdpLink {
             }
             read += 1;
             match self.socket.recv_from(&mut self.buffer[..]) {
+                Ok((len, _)) if len > NETCODE_MAX_PACKET_BYTES + 14 => {
+                    // Bigger than anything we send (and maybe cut to fit the buffer).
+                    self.stats.packets_received += 1;
+                }
                 Ok((len, addr)) => {
                     self.stats.bytes_received += len as u64;
                     self.stats.packets_received += 1;
@@ -290,7 +373,12 @@ impl UdpLink {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => break,
                 // Windows reports ICMP port unreachable from earlier sends this way.
                 Err(e) if e.kind() == io::ErrorKind::ConnectionReset => continue,
-                Err(e) => return Err(e),
+                // Errors about one datagram (Windows: one bigger than the buffer, WSAEMSGSIZE)
+                // drop that datagram, not the connection.
+                Err(e) => {
+                    log::debug!("UDP receive: {e}");
+                    continue;
+                }
             }
         }
         if let Some(sim) = &mut self.incoming {
@@ -341,13 +429,85 @@ pub trait ServerTransport: Send {
     fn has_pending(&self) -> bool {
         false
     }
+    /// The player behind `client_id` was kicked: keep them out of this game (online hosting
+    /// bans them at the rendezvous service and at the gate).
+    fn ban(&mut self, _client_id: ClientId) {}
+    /// What the server browser shows about this game (online hosting).
+    fn set_listing(&mut self, _info: HostInfo) {}
 }
 
-/// netcode (Unsecure) over UDP, with optional network simulation.
+/// Hosting online through the rendezvous service (docs/rendezvous.md).
+#[derive(Clone, Debug)]
+pub struct OnlineConfig {
+    /// `host:port` of the service.
+    pub service: String,
+    /// Listed in the server browser (otherwise only the join code finds the game).
+    pub public: bool,
+    /// Joiners never learn our address (nor we theirs): everyone goes through the relay.
+    pub relay_only: bool,
+    /// Admit only joiners the service introduced (plus loopback and, with `trust_lan`, the
+    /// LAN). Off for a dedicated server that should stay joinable by address too.
+    pub gate: bool,
+    pub trust_lan: bool,
+    pub trust_loopback: bool,
+    /// Kept up to date with the listing (the lobby screen shows the join code from it).
+    pub status: Arc<Mutex<HostStatus>>,
+}
+
+impl OnlineConfig {
+    /// A private (code-only), gated listing at `service`.
+    pub fn new(service: &str) -> Self {
+        Self {
+            service: service.to_string(),
+            public: false,
+            relay_only: false,
+            gate: true,
+            trust_lan: true,
+            trust_loopback: true,
+            status: Arc::new(Mutex::new(HostStatus::Connecting)),
+        }
+    }
+}
+
+/// The rendezvous side of an online [`NetcodeServerTransport`].
+struct Online {
+    agent: HostAgent,
+    /// The agent's clock: transport time since it started.
+    clock: Duration,
+    status: Arc<Mutex<HostStatus>>,
+    published: Option<HostStatus>,
+    out: Vec<(SocketAddr, Vec<u8>)>,
+}
+
+impl Online {
+    fn publish_status(&mut self) {
+        let status = self.agent.status();
+        if self.published.as_ref() != Some(status) {
+            log::info!("online: {status:?}");
+            if let Ok(mut shared) = self.status.lock() {
+                *shared = status.clone();
+            }
+            self.published = Some(status.clone());
+        }
+    }
+}
+
+/// Sends a netcode packet: straight to `addr`, or wrapped for the relay.
+fn send_netcode(link: &mut UdpLink, online: Option<&Online>, addr: SocketAddr, payload: &[u8]) {
+    match online.map(|o| o.agent.outbound(addr, payload)) {
+        None | Some(Outbound::Direct) => link.send(addr, payload),
+        Some(Outbound::Relay(service, bytes)) => link.send(service, &bytes),
+        Some(Outbound::Drop) => {}
+    }
+}
+
+/// netcode (Unsecure) over UDP, with optional network simulation and online hosting.
 pub struct NetcodeServerTransport {
     link: UdpLink,
     netcode: NetcodeServer,
     scratch: Vec<(SocketAddr, Vec<u8>)>,
+    online: Option<Online>,
+    guard: ConnectGuard,
 }
 
 impl NetcodeServerTransport {
@@ -370,14 +530,50 @@ impl NetcodeServerTransport {
             link,
             netcode,
             scratch: Vec::new(),
+            online: None,
+            guard: ConnectGuard::default(),
         })
+    }
+
+    /// Hosts online too: lists the game at the rendezvous service (`info`: what the browser
+    /// shows until [`ServerTransport::set_listing`]) and admits joiners it introduces.
+    pub fn with_online(mut self, config: &OnlineConfig, info: HostInfo) -> Self {
+        let lan = match (rendezvous::local_lan_ip(), self.link.local_addr()) {
+            (Some(ip), Ok(local)) => Some(SocketAddr::new(ip, local.port())),
+            _ => None,
+        };
+        let agent = HostAgent::new(HostConfig {
+            service: config.service.clone(),
+            info,
+            lan,
+            gate: config.gate,
+            trust_loopback: config.trust_loopback,
+            trust_lan: config.trust_lan,
+        });
+        self.online = Some(Online {
+            agent,
+            clock: Duration::ZERO,
+            status: config.status.clone(),
+            published: None,
+            out: Vec::new(),
+        });
+        self
     }
 }
 
-fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetServer) {
+fn handle_result(
+    result: ServerResult,
+    link: &mut UdpLink,
+    mut online: Option<&mut Online>,
+    server: &mut RenetServer,
+    guard: &mut ConnectGuard,
+    refused: &mut Vec<ClientId>,
+) {
     match result {
         ServerResult::None => {}
-        ServerResult::PacketToSend { payload, addr } => link.send(addr, payload),
+        ServerResult::PacketToSend { payload, addr } => {
+            send_netcode(link, online.as_deref(), addr, payload)
+        }
         ServerResult::Payload { client_id, payload } => {
             if let Err(e) = server.process_packet_from(payload, client_id) {
                 log::debug!("payload for unknown client {client_id}: {e}");
@@ -389,8 +585,20 @@ fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetSer
             payload,
             ..
         } => {
+            guard.done(addr);
+            if let Some(o) = online.as_deref_mut()
+                && !o.agent.admit(client_id, addr)
+            {
+                // Not introduced by the service (or its introduction is used up): netcode
+                // disconnects it right after this packet loop; the game never sees it.
+                log::info!(
+                    "refused a connection from {addr}: not introduced by the online service"
+                );
+                refused.push(client_id);
+                return;
+            }
             server.add_connection(client_id);
-            link.send(addr, payload);
+            send_netcode(link, online.as_deref(), addr, payload);
         }
         ServerResult::ClientDisconnected {
             client_id,
@@ -398,8 +606,11 @@ fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetSer
             payload,
         } => {
             server.remove_connection(client_id);
+            if let Some(o) = online.as_deref_mut() {
+                o.agent.disconnected(client_id);
+            }
             if let Some(payload) = payload {
-                link.send(addr, payload);
+                send_netcode(link, online.as_deref(), addr, payload);
             }
         }
     }
@@ -409,23 +620,84 @@ impl ServerTransport for NetcodeServerTransport {
     fn update(&mut self, dt: Duration, server: &mut RenetServer) -> anyhow::Result<()> {
         self.link.advance(dt);
         self.netcode.update(dt);
+        if let Some(o) = &mut self.online {
+            o.clock += dt;
+        }
 
         let mut packets = std::mem::take(&mut self.scratch);
+        let mut refused = Vec::new();
         let received = self.link.receive(&mut packets);
         for (addr, data) in packets.iter_mut() {
-            let result = self.netcode.process_packet(*addr, data);
-            handle_result(result, &mut self.link, server);
+            let from = match &mut self.online {
+                None => *addr,
+                Some(o) => match o.agent.on_receive(o.clock, *addr, data) {
+                    Inbound::Netcode(from) => from,
+                    Inbound::Relayed { from, payload } => {
+                        // netcode decrypts in place: give it its own copy.
+                        let payload = payload.to_vec();
+                        *data = payload;
+                        from
+                    }
+                    Inbound::Drop => continue,
+                },
+            };
+            if !self.guard.allow(netcode_time().as_secs(), from, data) {
+                continue;
+            }
+            let result = self.netcode.process_packet(from, data);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut self.guard,
+                &mut refused,
+            );
         }
         packets.clear();
         self.scratch = packets;
 
         for client_id in self.netcode.clients_id() {
+            if self
+                .netcode
+                .time_since_last_received_packet(client_id)
+                .is_some_and(|t| t > CLIENT_TIMEOUT)
+            {
+                log::info!("client {client_id} sent nothing for {CLIENT_TIMEOUT:?}: disconnecting");
+                refused.push(client_id);
+                continue;
+            }
             let result = self.netcode.update_client(client_id);
-            handle_result(result, &mut self.link, server);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut self.guard,
+                &mut refused,
+            );
         }
-        for client_id in server.disconnections_id() {
+        for client_id in server
+            .disconnections_id()
+            .into_iter()
+            .chain(refused.clone())
+        {
             let result = self.netcode.disconnect(client_id);
-            handle_result(result, &mut self.link, server);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut self.guard,
+                &mut refused,
+            );
+        }
+        if let Some(o) = &mut self.online {
+            o.agent.poll(o.clock, &mut o.out);
+            for (to, data) in o.out.drain(..) {
+                self.link.send(to, &data);
+            }
+            o.publish_status();
         }
         self.link.flush();
         received.map_err(|e| anyhow::anyhow!("UDP receive: {e}"))
@@ -438,7 +710,9 @@ impl ServerTransport for NetcodeServerTransport {
             };
             for packet in packets {
                 match self.netcode.generate_payload_packet(client_id, &packet) {
-                    Ok((addr, payload)) => self.link.send(addr, payload),
+                    Ok((addr, payload)) => {
+                        send_netcode(&mut self.link, self.online.as_ref(), addr, payload)
+                    }
                     Err(e) => {
                         log::warn!("failed to encrypt packet for client {client_id}: {e}");
                         continue 'clients;
@@ -459,8 +733,25 @@ impl ServerTransport for NetcodeServerTransport {
             {
                 server.remove_connection(client_id);
                 if let Some(payload) = payload {
-                    self.link.send_now(addr, payload);
+                    match self
+                        .online
+                        .as_ref()
+                        .map(|o| o.agent.outbound(addr, payload))
+                    {
+                        None | Some(Outbound::Direct) => self.link.send_now(addr, payload),
+                        Some(Outbound::Relay(service, bytes)) => {
+                            self.link.send_now(service, &bytes)
+                        }
+                        Some(Outbound::Drop) => {}
+                    }
                 }
+            }
+        }
+        if let Some(o) = &mut self.online {
+            // Take the listing down.
+            o.agent.shutdown(&mut o.out);
+            for (to, data) in o.out.drain(..) {
+                self.link.send_now(to, &data);
             }
         }
     }
@@ -480,11 +771,64 @@ impl ServerTransport for NetcodeServerTransport {
     fn has_pending(&self) -> bool {
         self.link.has_pending()
     }
+
+    fn ban(&mut self, client_id: ClientId) {
+        if let Some(o) = &mut self.online {
+            o.agent.ban(client_id);
+        }
+    }
+
+    fn set_listing(&mut self, info: HostInfo) {
+        if let Some(o) = &mut self.online {
+            o.agent.set_info(info);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A netcode connection request whose token expires at `expiry`.
+    fn connect_request(expiry: u64) -> Vec<u8> {
+        let mut data = vec![0u8; CONNECT_REQUEST_BYTES];
+        data[CONNECT_REQUEST_EXPIRY_AT..CONNECT_REQUEST_EXPIRY_AT + 8]
+            .copy_from_slice(&expiry.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn the_connect_guard_bounds_handshakes() {
+        let now = 1_900_000_000u64;
+        let mut g = ConnectGuard::default();
+        let a: SocketAddr = "198.51.100.1:5000".parse().unwrap();
+        // Other packets pass; malformed requests and far-future tokens don't.
+        assert!(g.allow(now, a, &[0x12, 1, 2, 3]));
+        assert!(!g.allow(now, a, &[0, 1, 2]));
+        assert!(!g.allow(now, a, &connect_request(now + 10 * 365 * 86_400)));
+        // Our own clients' tokens (300 s) do, and retries from one address are one handshake.
+        let ok = connect_request(now + 300);
+        assert!(g.allow(now, a, &ok));
+        assert!(g.allow(now, a, &ok));
+        // At most 8 addresses of one IP at once; another IP is unaffected.
+        for port in 1..MAX_HANDSHAKES_PER_IP as u16 {
+            assert!(g.allow(now, SocketAddr::new(a.ip(), 5000 + port), &ok));
+        }
+        assert!(!g.allow(now, SocketAddr::new(a.ip(), 6000), &ok));
+        assert!(g.allow(now, "198.51.100.2:5000".parse().unwrap(), &ok));
+        // A finished handshake makes room; so does an expired token.
+        g.done(a);
+        assert!(g.allow(now, SocketAddr::new(a.ip(), 6000), &ok));
+        assert!(g.allow(
+            now + 301,
+            SocketAddr::new(a.ip(), 6001),
+            &connect_request(now + 600)
+        ));
+        // Loopback (the host's own client) is never limited.
+        for port in 0..20 {
+            assert!(g.allow(now, SocketAddr::from(([127, 0, 0, 1], 7000 + port)), &ok));
+        }
+    }
 
     #[test]
     fn rate_meter_window() {
