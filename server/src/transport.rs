@@ -7,21 +7,29 @@
 //! through a [`UdpLink`], which counts bytes and can run every datagram through the network
 //! simulator ([`crate::netsim`]).
 //!
+//! **Online hosting** ([`OnlineConfig`], docs/rendezvous.md): the same transport also talks to
+//! the rendezvous service on its socket. A `rendezvous::HostAgent` sorts every datagram
+//! (service traffic, relayed netcode packets, netcode packets from introduced joiners, and
+//! refused ones), wraps netcode's packets to relayed peers for the relay, and decides which
+//! new connections are admitted.
+//!
 //! **Pluggable transports (Steam, relays):** the server only talks to the
-//! [`ServerTransport`] trait; a Steam networking or relay implementation would implement it
-//! (renet's `renet_steam` crate has exactly this shape) and be passed to
+//! [`ServerTransport`] trait; a Steam networking implementation would implement it (renet's
+//! `renet_steam` crate has exactly this shape) and be passed to
 //! [`crate::Server::with_transport`]. The client side mirrors this with
 //! `client::net::ClientTransport`.
 
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use renet::{ChannelConfig, ClientId, ConnectionConfig, RenetServer, SendType};
 // Connection authentication/config types come from `renet_netcode` (which re-exports them from
 // `renetcode`); the netcode.io state machine itself is driven directly so the socket glue below
 // can insert the network simulator.
+use rendezvous::{HostAgent, HostConfig, HostInfo, HostStatus, Inbound, Outbound};
 use renet_netcode::{
     NETCODE_USER_DATA_BYTES, ServerAuthentication, ServerConfig as NetcodeServerConfig,
 };
@@ -341,13 +349,84 @@ pub trait ServerTransport: Send {
     fn has_pending(&self) -> bool {
         false
     }
+    /// The player behind `client_id` was kicked: keep them out of this game (online hosting
+    /// bans them at the rendezvous service and at the gate).
+    fn ban(&mut self, _client_id: ClientId) {}
+    /// What the server browser shows about this game (online hosting).
+    fn set_listing(&mut self, _info: HostInfo) {}
 }
 
-/// netcode (Unsecure) over UDP, with optional network simulation.
+/// Hosting online through the rendezvous service (docs/rendezvous.md).
+#[derive(Clone, Debug)]
+pub struct OnlineConfig {
+    /// `host:port` of the service.
+    pub service: String,
+    /// Listed in the server browser (otherwise only the join code finds the game).
+    pub public: bool,
+    /// Joiners never learn our address (nor we theirs): everyone goes through the relay.
+    pub relay_only: bool,
+    /// Admit only joiners the service introduced (plus loopback and, with `trust_lan`, the
+    /// LAN). Off for a dedicated server that should stay joinable by address too.
+    pub gate: bool,
+    pub trust_lan: bool,
+    pub trust_loopback: bool,
+    /// Kept up to date with the listing (the lobby screen shows the join code from it).
+    pub status: Arc<Mutex<HostStatus>>,
+}
+
+impl OnlineConfig {
+    /// A private (code-only), gated listing at `service`.
+    pub fn new(service: &str) -> Self {
+        Self {
+            service: service.to_string(),
+            public: false,
+            relay_only: false,
+            gate: true,
+            trust_lan: true,
+            trust_loopback: true,
+            status: Arc::new(Mutex::new(HostStatus::Connecting)),
+        }
+    }
+}
+
+/// The rendezvous side of an online [`NetcodeServerTransport`].
+struct Online {
+    agent: HostAgent,
+    /// The agent's clock: transport time since it started.
+    clock: Duration,
+    status: Arc<Mutex<HostStatus>>,
+    published: Option<HostStatus>,
+    out: Vec<(SocketAddr, Vec<u8>)>,
+}
+
+impl Online {
+    fn publish_status(&mut self) {
+        let status = self.agent.status();
+        if self.published.as_ref() != Some(status) {
+            log::info!("online: {status:?}");
+            if let Ok(mut shared) = self.status.lock() {
+                *shared = status.clone();
+            }
+            self.published = Some(status.clone());
+        }
+    }
+}
+
+/// Sends a netcode packet: straight to `addr`, or wrapped for the relay.
+fn send_netcode(link: &mut UdpLink, online: Option<&Online>, addr: SocketAddr, payload: &[u8]) {
+    match online.map(|o| o.agent.outbound(addr, payload)) {
+        None | Some(Outbound::Direct) => link.send(addr, payload),
+        Some(Outbound::Relay(service, bytes)) => link.send(service, &bytes),
+        Some(Outbound::Drop) => {}
+    }
+}
+
+/// netcode (Unsecure) over UDP, with optional network simulation and online hosting.
 pub struct NetcodeServerTransport {
     link: UdpLink,
     netcode: NetcodeServer,
     scratch: Vec<(SocketAddr, Vec<u8>)>,
+    online: Option<Online>,
 }
 
 impl NetcodeServerTransport {
@@ -370,14 +449,48 @@ impl NetcodeServerTransport {
             link,
             netcode,
             scratch: Vec::new(),
+            online: None,
         })
+    }
+
+    /// Hosts online too: lists the game at the rendezvous service (`info`: what the browser
+    /// shows until [`ServerTransport::set_listing`]) and admits joiners it introduces.
+    pub fn with_online(mut self, config: &OnlineConfig, info: HostInfo) -> Self {
+        let lan = match (rendezvous::local_lan_ip(), self.link.local_addr()) {
+            (Some(ip), Ok(local)) => Some(SocketAddr::new(ip, local.port())),
+            _ => None,
+        };
+        let agent = HostAgent::new(HostConfig {
+            service: config.service.clone(),
+            info,
+            lan,
+            gate: config.gate,
+            trust_loopback: config.trust_loopback,
+            trust_lan: config.trust_lan,
+        });
+        self.online = Some(Online {
+            agent,
+            clock: Duration::ZERO,
+            status: config.status.clone(),
+            published: None,
+            out: Vec::new(),
+        });
+        self
     }
 }
 
-fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetServer) {
+fn handle_result(
+    result: ServerResult,
+    link: &mut UdpLink,
+    mut online: Option<&mut Online>,
+    server: &mut RenetServer,
+    refused: &mut Vec<ClientId>,
+) {
     match result {
         ServerResult::None => {}
-        ServerResult::PacketToSend { payload, addr } => link.send(addr, payload),
+        ServerResult::PacketToSend { payload, addr } => {
+            send_netcode(link, online.as_deref(), addr, payload)
+        }
         ServerResult::Payload { client_id, payload } => {
             if let Err(e) = server.process_packet_from(payload, client_id) {
                 log::debug!("payload for unknown client {client_id}: {e}");
@@ -389,8 +502,19 @@ fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetSer
             payload,
             ..
         } => {
+            if let Some(o) = online.as_deref_mut()
+                && !o.agent.admit(client_id, addr)
+            {
+                // Not introduced by the service (or its introduction is used up): netcode
+                // disconnects it right after this packet loop; the game never sees it.
+                log::info!(
+                    "refused a connection from {addr}: not introduced by the online service"
+                );
+                refused.push(client_id);
+                return;
+            }
             server.add_connection(client_id);
-            link.send(addr, payload);
+            send_netcode(link, online.as_deref(), addr, payload);
         }
         ServerResult::ClientDisconnected {
             client_id,
@@ -398,8 +522,11 @@ fn handle_result(result: ServerResult, link: &mut UdpLink, server: &mut RenetSer
             payload,
         } => {
             server.remove_connection(client_id);
+            if let Some(o) = online.as_deref_mut() {
+                o.agent.disconnected(client_id);
+            }
             if let Some(payload) = payload {
-                link.send(addr, payload);
+                send_netcode(link, online.as_deref(), addr, payload);
             }
         }
     }
@@ -409,23 +536,69 @@ impl ServerTransport for NetcodeServerTransport {
     fn update(&mut self, dt: Duration, server: &mut RenetServer) -> anyhow::Result<()> {
         self.link.advance(dt);
         self.netcode.update(dt);
+        if let Some(o) = &mut self.online {
+            o.clock += dt;
+        }
 
         let mut packets = std::mem::take(&mut self.scratch);
+        let mut refused = Vec::new();
         let received = self.link.receive(&mut packets);
         for (addr, data) in packets.iter_mut() {
-            let result = self.netcode.process_packet(*addr, data);
-            handle_result(result, &mut self.link, server);
+            let from = match &mut self.online {
+                None => *addr,
+                Some(o) => match o.agent.on_receive(o.clock, *addr, data) {
+                    Inbound::Netcode(from) => from,
+                    Inbound::Relayed { from, payload } => {
+                        // netcode decrypts in place: give it its own copy.
+                        let payload = payload.to_vec();
+                        *data = payload;
+                        from
+                    }
+                    Inbound::Drop => continue,
+                },
+            };
+            let result = self.netcode.process_packet(from, data);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut refused,
+            );
         }
         packets.clear();
         self.scratch = packets;
 
         for client_id in self.netcode.clients_id() {
             let result = self.netcode.update_client(client_id);
-            handle_result(result, &mut self.link, server);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut refused,
+            );
         }
-        for client_id in server.disconnections_id() {
+        for client_id in server
+            .disconnections_id()
+            .into_iter()
+            .chain(refused.clone())
+        {
             let result = self.netcode.disconnect(client_id);
-            handle_result(result, &mut self.link, server);
+            handle_result(
+                result,
+                &mut self.link,
+                self.online.as_mut(),
+                server,
+                &mut refused,
+            );
+        }
+        if let Some(o) = &mut self.online {
+            o.agent.poll(o.clock, &mut o.out);
+            for (to, data) in o.out.drain(..) {
+                self.link.send(to, &data);
+            }
+            o.publish_status();
         }
         self.link.flush();
         received.map_err(|e| anyhow::anyhow!("UDP receive: {e}"))
@@ -438,7 +611,9 @@ impl ServerTransport for NetcodeServerTransport {
             };
             for packet in packets {
                 match self.netcode.generate_payload_packet(client_id, &packet) {
-                    Ok((addr, payload)) => self.link.send(addr, payload),
+                    Ok((addr, payload)) => {
+                        send_netcode(&mut self.link, self.online.as_ref(), addr, payload)
+                    }
                     Err(e) => {
                         log::warn!("failed to encrypt packet for client {client_id}: {e}");
                         continue 'clients;
@@ -459,8 +634,25 @@ impl ServerTransport for NetcodeServerTransport {
             {
                 server.remove_connection(client_id);
                 if let Some(payload) = payload {
-                    self.link.send_now(addr, payload);
+                    match self
+                        .online
+                        .as_ref()
+                        .map(|o| o.agent.outbound(addr, payload))
+                    {
+                        None | Some(Outbound::Direct) => self.link.send_now(addr, payload),
+                        Some(Outbound::Relay(service, bytes)) => {
+                            self.link.send_now(service, &bytes)
+                        }
+                        Some(Outbound::Drop) => {}
+                    }
                 }
+            }
+        }
+        if let Some(o) = &mut self.online {
+            // Take the listing down.
+            o.agent.shutdown(&mut o.out);
+            for (to, data) in o.out.drain(..) {
+                self.link.send_now(to, &data);
             }
         }
     }
@@ -479,6 +671,18 @@ impl ServerTransport for NetcodeServerTransport {
 
     fn has_pending(&self) -> bool {
         self.link.has_pending()
+    }
+
+    fn ban(&mut self, client_id: ClientId) {
+        if let Some(o) = &mut self.online {
+            o.agent.ban(client_id);
+        }
+    }
+
+    fn set_listing(&mut self, info: HostInfo) {
+        if let Some(o) = &mut self.online {
+            o.agent.set_info(info);
+        }
     }
 }
 

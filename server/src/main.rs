@@ -7,6 +7,8 @@
 //!                 [--no-warmup]
 //!                 [--tick-rate 60] [--snapshot-rate 30] [--netsim 100,20,2] [--tuning PATH]
 //!                 [--no-watch] [--no-delta] [--name NAME] [--dev-commands]
+//!                 [--online] [--rendezvous HOST:PORT] [--private] [--relay-only] [--online-only]
+//!                 [--exit-when-replaced PATH]
 //! ```
 //!
 //! The server starts in the lobby (docs/lobby.md): the first player to join is the host and
@@ -18,11 +20,12 @@
 //! `--no-lobby`).
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use server::{LobbyConfig, NetSimConfig, Server, ServerConfig};
+use server::{LobbyConfig, NetSimConfig, OnlineConfig, Server, ServerConfig};
 use shared::lobby::{Difficulty, GameMode, LevelInfo, MatchSettings};
 
 const USAGE: &str = "\
@@ -55,9 +58,25 @@ OPTIONS:
     --name <NAME>            server name
     --dev-commands           allow dev chat commands (/god, /spawn, /tp...) for the lobby
                              host (for everyone with --no-lobby); off by default
+    --online                 list the game at the online service (the game's built-in one,
+                             or --rendezvous): players find it in the server browser and join
+                             without port forwarding (docs/rendezvous.md)
+    --rendezvous <HOST:PORT> the online service to use (implies --online)
+    --private                online, but not in the browser: only the join code finds it
+    --relay-only             online joiners always go through the relay (hides addresses)
+    --online-only            refuse joins by address from the internet: only joiners the
+                             online service introduces get in (the LAN still can)
+    --exit-when-replaced <PATH>
+                             exit once PATH points at another file and nobody is connected
+                             (a deploy swapped the binary; systemd starts the new one)
     -h, --help               print this help";
 
-fn parse_args() -> Result<ServerConfig, String> {
+struct Options {
+    config: ServerConfig,
+    exit_when_replaced: Option<PathBuf>,
+}
+
+fn parse_args() -> Result<Options, String> {
     let mut config = ServerConfig {
         lobby: LobbyConfig::enabled(),
         // Opt-in on dedicated servers (`--dev-commands`).
@@ -67,6 +86,10 @@ fn parse_args() -> Result<ServerConfig, String> {
     let mut mode: Option<GameMode> = None;
     let mut ip: IpAddr = config.bind.ip();
     let mut port = config.bind.port();
+    let mut online = false;
+    let mut service = rendezvous::BUILT_IN_SERVICE.to_string();
+    let (mut private, mut relay_only, mut online_only) = (false, false, false);
+    let mut exit_when_replaced = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
@@ -133,6 +156,17 @@ fn parse_args() -> Result<ServerConfig, String> {
             "--no-delta" => config.delta_compression = false,
             "--name" => config.server_name = value("--name")?,
             "--dev-commands" => config.dev_commands = true,
+            "--online" => online = true,
+            "--rendezvous" => {
+                service = value("--rendezvous")?;
+                online = true;
+            }
+            "--private" => private = true,
+            "--relay-only" => relay_only = true,
+            "--online-only" => online_only = true,
+            "--exit-when-replaced" => {
+                exit_when_replaced = Some(PathBuf::from(value("--exit-when-replaced")?))
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -145,7 +179,27 @@ fn parse_args() -> Result<ServerConfig, String> {
         .max_players
         .clamp(1, shared::lobby::MAX_PLAYERS as usize);
     check_match(&mut config, mode)?;
-    Ok(config)
+    if online {
+        rendezvous::parse_service(&service).map_err(|e| {
+            if service.is_empty() {
+                "--online: this build has no online service; give one with --rendezvous".into()
+            } else {
+                format!("--rendezvous: {e}")
+            }
+        })?;
+        config.online = Some(OnlineConfig {
+            public: !private,
+            relay_only,
+            gate: online_only,
+            ..OnlineConfig::new(&service)
+        });
+    } else if private || relay_only || online_only {
+        return Err("--private, --relay-only and --online-only need --online".into());
+    }
+    Ok(Options {
+        config,
+        exit_when_replaced,
+    })
 }
 
 /// Validates the first match: the level must exist and suit `--mode` (without `--mode`, the
@@ -171,8 +225,11 @@ fn check_match(config: &mut ServerConfig, mode: Option<GameMode>) -> Result<(), 
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let config = match parse_args() {
-        Ok(c) => c,
+    let Options {
+        config,
+        exit_when_replaced,
+    } = match parse_args() {
+        Ok(o) => o,
         Err(err) => {
             eprintln!("error: {err}\n\n{USAGE}");
             std::process::exit(2);
@@ -196,6 +253,7 @@ fn main() {
         );
     }
 
+    let online_status = config.online.as_ref().map(|o| o.status.clone());
     let mut server = match Server::new(config) {
         Ok(s) => s,
         Err(err) => {
@@ -212,12 +270,46 @@ fn main() {
         }
     }
 
+    // --exit-when-replaced: what the path points at now.
+    let watched = exit_when_replaced.map(|path| {
+        let target = std::fs::canonicalize(&path).ok();
+        (path, target)
+    });
     let mut last = Instant::now();
     let mut last_report = Instant::now();
+    let mut last_check = Instant::now();
+    let mut shown_status = None;
     while running.load(Ordering::SeqCst) {
         let now = Instant::now();
         server.update((now - last).min(Duration::from_millis(250)));
         last = now;
+        if let Some(status) = online_status
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|s| s.clone()))
+            && shown_status.as_ref() != Some(&status)
+        {
+            match &status {
+                rendezvous::HostStatus::Online { code } => {
+                    log::info!("online: join code {code}")
+                }
+                rendezvous::HostStatus::Connecting => log::info!("online: connecting"),
+                rendezvous::HostStatus::Unreachable(why) => log::warn!("online: {why}"),
+            }
+            shown_status = Some(status);
+        }
+        if let Some((path, target)) = &watched
+            && last_check.elapsed() >= Duration::from_secs(5)
+        {
+            last_check = Instant::now();
+            let current = std::fs::canonicalize(path).ok();
+            if current.is_some() && current != *target && server.stats().clients == 0 {
+                log::info!(
+                    "{} points at a new binary and nobody is connected: exiting",
+                    path.display()
+                );
+                break;
+            }
+        }
         if last_report.elapsed() >= Duration::from_secs(30) {
             last_report = Instant::now();
             let s = server.stats();

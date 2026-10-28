@@ -62,7 +62,8 @@ pub use lagcomp::{LagCompHistory, Rewound};
 pub use lobby::{LobbyCommand, LobbyConfig, WARMUP_LEVEL};
 pub use netsim::{NetSim, NetSimConfig};
 pub use transport::{
-    NetcodeServerTransport, RateMeter, ServerTransport, TransportStats, UdpLink, connection_config,
+    NetcodeServerTransport, OnlineConfig, RateMeter, ServerTransport, TransportStats, UdpLink,
+    connection_config,
 };
 
 /// Snapshots older than this many ticks are not used as delta baselines.
@@ -128,6 +129,9 @@ pub struct ServerConfig {
     /// Enemy definitions directory; `None` = `assets/enemies` (the embedded built-ins as
     /// fallback either way).
     pub enemies_dir: Option<PathBuf>,
+    /// Also host online through the rendezvous service: listed, joinable by code, no port
+    /// forwarding (docs/rendezvous.md).
+    pub online: Option<OnlineConfig>,
 }
 
 impl Default for ServerConfig {
@@ -146,6 +150,7 @@ impl Default for ServerConfig {
             lobby: LobbyConfig::default(),
             dev_commands: false,
             enemies_dir: None,
+            online: None,
         }
     }
 }
@@ -337,6 +342,8 @@ pub struct Server {
     prev_snapshot_tick: u32,
     /// Play of the game: the match's highlights (`highlights.rs`).
     highlights: highlights::Highlights,
+    /// When the online listing was last updated (`Server::time`).
+    last_listing: f64,
 }
 
 impl Server {
@@ -346,7 +353,11 @@ impl Server {
         // the lobby host raise the limit) instead of netcode silently refusing.
         let slots = config.max_players.max(shared::lobby::MAX_PLAYERS as usize)
             + lobby::SPARE_CONNECTION_SLOTS;
-        let transport = NetcodeServerTransport::new(config.bind, slots, config.netsim)?;
+        let mut transport = NetcodeServerTransport::new(config.bind, slots, config.netsim)?;
+        if let Some(online) = &config.online {
+            let info = listing_info(&config, online, &config.lobby.settings, 0, false);
+            transport = transport.with_online(online, info);
+        }
         Self::with_transport(config, Box::new(transport))
     }
 
@@ -413,6 +424,7 @@ impl Server {
             last_snapshot_tick: 0,
             prev_snapshot_tick: 0,
             highlights: highlights::Highlights::new(tick_rate),
+            last_listing: f64::NEG_INFINITY,
             config,
         };
         server.config.tick_rate = tick_rate;
@@ -614,6 +626,27 @@ impl Server {
         Some(id)
     }
 
+    /// What the server browser shows about this game, once a second (online hosting).
+    fn update_listing(&mut self) {
+        let Some(online) = &self.config.online else {
+            return;
+        };
+        if self.time - self.last_listing < 1.0 {
+            return;
+        }
+        self.last_listing = self.time;
+        let players = self.clients.values().filter(|c| c.player.is_some()).count();
+        let info = listing_info(
+            &self.config,
+            online,
+            &self.flow.settings,
+            players,
+            self.flow.phase.level_running(),
+        );
+        self.transport.set_listing(info);
+    }
+
+    /// Kicks a player (online: and bans them from coming back to this game).
     pub fn kick(&mut self, player: PlayerId, reason: &str) {
         if self.bots.remove(&player).is_some() {
             self.world.remove_player(player);
@@ -628,6 +661,7 @@ impl Server {
         else {
             return;
         };
+        self.transport.ban(id);
         self.reject(id, reason);
     }
 
@@ -729,6 +763,7 @@ impl Server {
         self.process_kicks();
         self.check_tuning_reload();
         self.update_lobby();
+        self.update_listing();
 
         let ticks = self.timestep.advance(real_dt.as_secs_f64());
         // A lobby without a warm-up world simulates nothing.
@@ -1374,6 +1409,37 @@ impl ServerHandle {
 impl Drop for ServerHandle {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+/// The server browser's line for this game.
+fn listing_info(
+    config: &ServerConfig,
+    online: &OnlineConfig,
+    settings: &shared::lobby::MatchSettings,
+    players: usize,
+    in_match: bool,
+) -> rendezvous::HostInfo {
+    let mode = shared::lobby::GameMode::ALL
+        .iter()
+        .position(|m| *m == settings.mode)
+        .unwrap_or(0);
+    let level = if settings.level.is_empty() {
+        &config.level
+    } else {
+        &settings.level
+    };
+    rendezvous::HostInfo {
+        name: config.server_name.clone(),
+        mode: mode as u8,
+        level: level.clone(),
+        players: players.min(u8::MAX as usize) as u8,
+        max_players: settings.max_players,
+        in_match,
+        protocol: PROTOCOL_VERSION,
+        build: shared::build_info::VERSION.to_string(),
+        public: online.public,
+        relay_only: online.relay_only,
     }
 }
 
