@@ -56,14 +56,8 @@ pub enum ProjectileKind {
     FlakShell,
     /// Limpet sticky charge.
     Limpet,
-    /// Mortar shell: lobbed high, wide blast on contact.
-    MortarShell,
-    /// Flare: lobbed, leaves a burning patch where it lands.
-    Flare,
     /// Longwick pinning arrow.
     PinArrow,
-    /// Longwick ember arrow: bursts into flame on impact.
-    EmberArrow,
     /// Longwick branding arrow (Brand on the bow).
     BrandArrow,
     // ---- refit (docs/arsenal.md): melee and knacks ----
@@ -73,10 +67,21 @@ pub enum ProjectileKind {
     Snare,
     /// Soot Pot (knack): thrown, bursts into a soot cloud.
     SootPot,
+    // ---- rework (docs/rework.md): the new abilities (`abilities/`) ----
+    /// Bolas: wax-weighted balls on a cord; binds what it touches (`bolas.rs`).
+    Bolas,
+    /// Ember kite: straight, steered by its owner, explodes on contact (`kite.rs`).
+    Kite,
+    /// Longwick blink arrow: its owner can step to it (`blink_arrow.rs`).
+    BlinkArrow,
+    /// Longwick beacon arrow: lights a beacon where it sticks (`beacon_arrow.rs`).
+    BeaconArrow,
+    /// A Lantern being tossed; it settles on the floor as a lantern (`lantern.rs`).
+    LanternToss,
 }
 
 impl ProjectileKind {
-    pub const ALL: [ProjectileKind; 18] = [
+    pub const ALL: [ProjectileKind; 20] = [
         ProjectileKind::Bomb,
         ProjectileKind::Gravewell,
         ProjectileKind::Wisp,
@@ -87,14 +92,16 @@ impl ProjectileKind {
         ProjectileKind::CinderRocket,
         ProjectileKind::FlakShell,
         ProjectileKind::Limpet,
-        ProjectileKind::MortarShell,
-        ProjectileKind::Flare,
         ProjectileKind::PinArrow,
-        ProjectileKind::EmberArrow,
         ProjectileKind::BrandArrow,
         ProjectileKind::Hurl,
         ProjectileKind::Snare,
         ProjectileKind::SootPot,
+        ProjectileKind::Bolas,
+        ProjectileKind::Kite,
+        ProjectileKind::BlinkArrow,
+        ProjectileKind::BeaconArrow,
+        ProjectileKind::LanternToss,
     ];
 
     pub fn net_kind(self) -> u16 {
@@ -109,14 +116,16 @@ impl ProjectileKind {
             ProjectileKind::CinderRocket => kind::CINDER_ROCKET,
             ProjectileKind::FlakShell => kind::FLAK_SHELL,
             ProjectileKind::Limpet => kind::LIMPET,
-            ProjectileKind::MortarShell => kind::MORTAR_SHELL,
-            ProjectileKind::Flare => kind::FLARE,
             ProjectileKind::PinArrow => kind::PIN_ARROW,
-            ProjectileKind::EmberArrow => kind::EMBER_ARROW,
             ProjectileKind::BrandArrow => kind::BRAND_ARROW,
             ProjectileKind::Hurl => kind::HURL,
             ProjectileKind::Snare => kind::SNARE,
             ProjectileKind::SootPot => kind::SOOT_POT,
+            ProjectileKind::Bolas => kind::BOLAS,
+            ProjectileKind::Kite => kind::KITE,
+            ProjectileKind::BlinkArrow => kind::BLINK_ARROW,
+            ProjectileKind::BeaconArrow => kind::BEACON_ARROW,
+            ProjectileKind::LanternToss => kind::LANTERN_TOSS,
         }
     }
 
@@ -126,8 +135,9 @@ impl ProjectileKind {
             self,
             ProjectileKind::Arrow
                 | ProjectileKind::PinArrow
-                | ProjectileKind::EmberArrow
                 | ProjectileKind::BrandArrow
+                | ProjectileKind::BlinkArrow
+                | ProjectileKind::BeaconArrow
         )
     }
 
@@ -146,11 +156,11 @@ impl ProjectileKind {
             k if k.is_arrow() => t.longwick.arrow_gravity,
             ProjectileKind::Rivet => t.riveter.rivet_gravity,
             ProjectileKind::Limpet => t.limpet.gravity,
-            ProjectileKind::MortarShell => t.mortar.gravity,
-            ProjectileKind::Flare => t.flare.gravity,
             ProjectileKind::Hurl => t.hurl.gravity,
             ProjectileKind::Snare => t.knacks.snare.gravity,
             ProjectileKind::SootPot => t.knacks.soot_pot.gravity,
+            ProjectileKind::Bolas => t.bolas.gravity,
+            ProjectileKind::LanternToss => t.lantern.gravity,
             _ => 0.0,
         }
     }
@@ -168,11 +178,13 @@ impl ProjectileKind {
             ProjectileKind::CinderRocket => t.cinderbox.rocket_radius,
             ProjectileKind::FlakShell => t.flak.shell_radius,
             ProjectileKind::Limpet => t.limpet.projectile_radius,
-            ProjectileKind::MortarShell => t.mortar.projectile_radius,
             ProjectileKind::Hurl => t.hurl.projectile_radius,
             ProjectileKind::Snare => t.knacks.snare.projectile_radius,
             ProjectileKind::SootPot => t.knacks.soot_pot.projectile_radius,
-            _ => t.flare.projectile_radius,
+            ProjectileKind::Bolas => t.bolas.projectile_radius,
+            ProjectileKind::Kite => t.kite.projectile_radius,
+            ProjectileKind::LanternToss => t.lantern.projectile_radius,
+            _ => 0.12,
         }
     }
 
@@ -190,12 +202,14 @@ impl ProjectileKind {
             // It bursts where its flight ends.
             ProjectileKind::FlakShell => t.flak.burst_distance / t.flak.shell_speed.max(1e-3),
             ProjectileKind::Limpet => t.limpet.fuse,
-            ProjectileKind::MortarShell => t.mortar.flight_time,
             ProjectileKind::Hurl => t.hurl.flight_time,
             // Thrown and lying on the floor: the trap's whole life.
             ProjectileKind::Snare => t.knacks.snare.lifetime,
             ProjectileKind::SootPot => t.knacks.soot_pot.flight_time,
-            _ => t.flare.flight_time,
+            ProjectileKind::Bolas => t.bolas.flight_time,
+            ProjectileKind::Kite => t.kite.flight_time,
+            ProjectileKind::LanternToss => 4.0,
+            _ => 4.0,
         }
     }
 
@@ -211,11 +225,14 @@ impl ProjectileKind {
     }
 
     /// Collides with hit shapes in flight (the Gravewell and the Wisp pass through targets, a
-    /// thrown Snare falls to the floor past them).
+    /// thrown Snare and a tossed Lantern fall to the floor past them).
     pub fn hits_targets(self) -> bool {
         !matches!(
             self,
-            ProjectileKind::Gravewell | ProjectileKind::Wisp | ProjectileKind::Snare
+            ProjectileKind::Gravewell
+                | ProjectileKind::Wisp
+                | ProjectileKind::Snare
+                | ProjectileKind::LanternToss
         )
     }
 
@@ -232,13 +249,15 @@ impl ProjectileKind {
             ProjectileKind::CinderRocket => Attack::Cinderbox,
             ProjectileKind::FlakShell => Attack::Flak,
             ProjectileKind::Limpet => Attack::Limpet,
-            ProjectileKind::MortarShell => Attack::Mortar,
-            ProjectileKind::Flare => Attack::Flare,
             ProjectileKind::PinArrow => Attack::PinningArrow,
-            ProjectileKind::EmberArrow => Attack::EmberArrow,
             ProjectileKind::BrandArrow => Attack::Brand,
             ProjectileKind::Hurl => Attack::Hurl,
             ProjectileKind::Snare => Attack::Snare,
+            ProjectileKind::Bolas => Attack::Bolas,
+            ProjectileKind::Kite => Attack::Kite,
+            ProjectileKind::BlinkArrow => Attack::BlinkArrow,
+            ProjectileKind::BeaconArrow => Attack::BeaconArrow,
+            ProjectileKind::LanternToss => Attack::Lantern,
             // It deals no damage.
             ProjectileKind::SootPot => Attack::World,
         }
@@ -278,16 +297,7 @@ impl ProjectileKind {
                 t.limpet.damage,
                 t.limpet.knockback,
             ),
-            ProjectileKind::MortarShell => (
-                t.mortar.explosion_radius,
-                t.mortar.damage,
-                t.mortar.knockback,
-            ),
-            ProjectileKind::EmberArrow => (
-                t.ember_arrow.explosion_radius,
-                t.ember_arrow.damage,
-                t.ember_arrow.knockback,
-            ),
+            ProjectileKind::Kite => (t.kite.explosion_radius, t.kite.damage, t.kite.knockback),
             _ => return None,
         };
         Some(Explosive {
@@ -364,6 +374,9 @@ pub struct Projectile {
     /// Per-target re-hit timers (target, tick it may be damaged again) for kinds that touch
     /// targets repeatedly; cleared by a deflection.
     pub contacts: Vec<(HitTarget, u32)>,
+    /// Replicated flags an ability sets on its projectile (`projectile_flags::GUIDED`,
+    /// `RETURNING`, `ORBITING`: `abilities/`).
+    pub ability_flags: u32,
     /// Thorns it was relayed off (`thorn.rs`): it flies straight, and its hits and blasts deal
     /// × `thorn.damage_multiplier` per relay and count as ricochets.
     pub ricochets: u8,
@@ -396,6 +409,7 @@ impl Projectile {
         if matches!(self.original_owner, Owner::Enemy(_)) {
             flags |= projectile_flags::ENEMY;
         }
+        flags |= self.ability_flags;
         if self.ricochets > 0 {
             flags |= projectile_flags::RELAYED;
         }
@@ -478,6 +492,7 @@ impl SimWorld {
             pending: None,
             trail: Trail::new(),
             contacts: Vec::new(),
+            ability_flags: 0,
             ricochets: 0,
         };
         self.projectiles.insert(id, p);
@@ -540,8 +555,10 @@ impl SimWorld {
             }
             return false;
         }
-        if p.kind == ProjectileKind::Wisp {
-            self.wisp_zap(t, p, boxes);
+        // What an ability's projectile does every tick (the Wisp zaps, the Kite steers, the
+        // Hurl turns back: `payload.rs`).
+        if !self.payload_tick(t, p, boxes) {
+            return false;
         }
 
         let dt = self.dt();
@@ -615,6 +632,12 @@ impl SimWorld {
         dir: Vec3,
     ) -> bool {
         let now = self.tick;
+        // A raised guard meets it first (`abilities/guard.rs`).
+        if self.can_hit(p.owner, target)
+            && let Some(keep) = self.guard_meets_projectile(t, p, target, dir)
+        {
+            return keep;
+        }
         if let HitTarget::Player(victim) = target
             && p.kind.parryable()
         {
@@ -801,7 +824,7 @@ impl SimWorld {
 
     /// Wisp: every `wisp_zap_interval` it zaps the nearest hostile within `wisp_zap_range`
     /// (hit assist, line of sight) for its damage. Emits [`SimEvent::WispZap`].
-    fn wisp_zap(&mut self, t: &Tuning, p: &Projectile, boxes: &[Hitbox]) {
+    pub(crate) fn wisp_zap(&mut self, t: &Tuning, p: &Projectile, boxes: &[Hitbox]) {
         let a = &t.combat.arclash;
         let interval = secs_to_ticks(a.wisp_zap_interval, self.tick_rate, 1) as u32;
         let age = self.tick.wrapping_sub(p.spawn_tick);
@@ -1041,8 +1064,8 @@ pub fn projectile_target_pad(t: &Tuning, owner: Owner) -> f32 {
 /// `time_ticks` (fractional server ticks, e.g. the render tick). Other kinds: `position`.
 ///
 /// `position`/`velocity` are the state at launch tick `aux`; gravity is the kind's (thorns:
-/// `thorn.gravity`), 0 for `PARRIED` and `RELAYED` projectiles; `STUCK`/`PENDING` projectiles
-/// and `PLANTED` thorns are at `position`.
+/// `thorn.gravity`), 0 for `PARRIED`, `GUIDED` and `RELAYED` projectiles;
+/// `STUCK`/`PENDING`/`ORBITING` projectiles and `PLANTED` thorns are at `position`.
 pub fn replicated_position(
     e: &EntityState,
     time_ticks: f64,
@@ -1055,10 +1078,14 @@ pub fn replicated_position(
         }
         t.thorn.gravity
     } else if let Some(k) = ProjectileKind::from_net_kind(e.kind) {
-        if e.flags & (projectile_flags::STUCK | projectile_flags::PENDING) != 0 {
+        let still =
+            projectile_flags::STUCK | projectile_flags::PENDING | projectile_flags::ORBITING;
+        if e.flags & still != 0 {
             return e.position;
         }
-        if e.flags & (projectile_flags::PARRIED | projectile_flags::RELAYED) != 0 {
+        let straight =
+            projectile_flags::PARRIED | projectile_flags::GUIDED | projectile_flags::RELAYED;
+        if e.flags & straight != 0 {
             0.0
         } else {
             k.gravity(t)

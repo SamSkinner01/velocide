@@ -72,6 +72,10 @@ pub fn weapon_role(w: WeaponKind) -> &'static str {
             "A slow, heavy hammer swing through everything in a wide arc, knocking it far \
              back. Melee has no weak points."
         }
+        WeaponKind::Lamplighter => {
+            "Hold to focus, release one exact hitscan beam: a full focus hits hardest and \
+             pierces a second target."
+        }
     }
 }
 
@@ -88,49 +92,49 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
             "Marks what it hits: it takes extra damage from everyone for a while, and Thorn \
              bounces and Arclash chains seek it first. One brand each."
         }
-        Ability::Splinter => {
-            "The shot bursts into shrapnel where it hits: past a target it sprays on behind \
-             it, off a wall it reflects, so it reaches round corners."
+        Ability::Wickline => {
+            "A burning thread: caught in the level, it zips you along it; on a light target it \
+             yanks it to you, a heavy one yanks you to it."
         }
-        Ability::Skewer => {
-            "Charge a hitscan shot that passes through several targets in a line, weaker \
-             after each. More charge, more damage."
+        Ability::Tally => {
+            "Hold and sweep your crosshair over targets to mark them; let go and every marked \
+             target still in sight takes a shot."
         }
-        Ability::Flurry => {
-            "A quick burst of the weapon's own shot in a tight group: finish a target or \
-             burst a weak point before it moves."
+        Ability::Waxwork => {
+            "Leaves a wax double of you where you stand: Moulds go for it instead of you. It \
+             bursts in hot wax when destroyed or spent."
         }
         Ability::Gust => {
             "A blast of air in front of you: shoves what it hits and turns hostile projectiles \
              around as your own. Gust the floor to jump."
         }
-        Ability::BothBarrels => {
-            "Both barrels at once: a dense, narrow blast that throws you backwards. Aim down \
-             to blast-jump. It is your next shot, not an extra one."
+        Ability::Bolas => {
+            "Weighted balls on a cord: the first hostile it touches is bound, and one close to \
+             it too, sharing the damage either takes."
         }
-        Ability::Slug => {
-            "One heavy, perfectly accurate slug in place of the pellets: the scattergun's \
-             long-range answer. It shoves, too."
+        Ability::Bulwark => {
+            "Hold up a slab of hardened wax: hits from the front are absorbed until it \
+             shatters. You move slower behind it."
         }
         Ability::Flak => {
             "A shell that bursts into a ring of pellets after a short flight, just short of a \
              target or off a wall: it reaches behind cover."
         }
         Ability::Wisp => {
-            "A slow ball of lightning that zaps the nearest hostile as it drifts, then pops on \
-             a wall or when it fades. Send it down a corridor."
+            "A ball of lightning orbits you, zapping the nearest hostile. Press again to fling \
+             it: it pops on the first thing it touches."
         }
         Ability::Discharge => {
             "Charge a shock nova around you that throws everything away. More charge, bigger \
              and harder. It never hurts you."
         }
-        Ability::Volley => {
-            "Dumps a burst of the weapon's own shots at once in a tight cone: rivets, chaining \
-             zaps or burning embers. It is your next shot, not an extra one."
+        Ability::Stoke => {
+            "Stoke the weapon: for a few seconds it fires faster and sets what it hits alight, \
+             then it overheats and can't fire for a moment."
         }
-        Ability::Flare => {
-            "Lobs a flare; where it lands, a patch of fire burns whatever stands in it. Deny a \
-             doorway, a choke point or a crowd."
+        Ability::Lantern => {
+            "Set down a lantern that shoots the nearest hostile with your weapon for a while. \
+             Moulds may attack it. One at a time."
         }
         Ability::Breach => {
             "A point-blank blast just in front of you. It throws you hard and hurts you a \
@@ -144,21 +148,21 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
             "Tap to throw a charge that sticks to walls and targets; hold to blow every charge \
              you have out at once."
         }
-        Ability::Mortar => {
-            "A heavy shell lobbed high, with a huge blast where it lands. Aim above the \
-             target, or drop it over cover."
+        Ability::Kite => {
+            "Launch an ember kite and steer it with your crosshair while you hold: it explodes \
+             on contact. Let go and it flies straight."
         }
-        Ability::TripleNock => {
-            "Your next release looses a fan of arrows at your draw: spread at range, all of \
-             them up close. Too weak a draw looses one arrow."
+        Ability::BlinkArrow => {
+            "Your next arrow can be stepped to: press again while it flies, or just after it \
+             sticks, and you are there."
         }
         Ability::PinningArrow => {
             "Your next arrow pins what it hits: a Mould is rooted to the spot (it still \
              attacks; heavies only briefly), a player is slowed."
         }
-        Ability::EmberArrow => {
-            "Your next arrow bursts into flame where it lands, on a target, the floor or the \
-             end of its flight, and sets everything near it alight."
+        Ability::BeaconArrow => {
+            "Your next arrow lights a beacon where it sticks: everything near it is revealed \
+             through walls and takes extra damage."
         }
         Ability::Lunge => {
             "A low leap along your aim: for a moment the first hostile your body reaches \
@@ -169,12 +173,12 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              back, and knocks it outward. Room to breathe when you're surrounded."
         }
         Ability::Hurl => {
-            "Throws a spinning blade or hammer-head that hits hard on contact and drops a \
-             little in flight: melee with reach."
+            "Throws a spinning blade or hammer-head that hits on the way out and on the way \
+             back. Catch it for part of the cooldown."
         }
-        Ability::Upswing => {
-            "A rising strike in place of your next swing: what it hits is launched into the \
-             air and you hop up with it. Follow it up in the air."
+        Ability::Riposte => {
+            "Hold to guard: blows and shots from the front are blocked. Let go to counter-swing, \
+             harder for every block."
         }
     }
 }
@@ -183,9 +187,9 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
 pub fn knack_text(k: Knack) -> &'static str {
     match k {
         Knack::Thorn => {
-            "A barbed glass spike that plants itself where it lands. Any attack that reaches a \
-             live Thorn shatters it and is relayed into the next target (another Thorn first), \
-             harder each bounce. Throw it at a Mould: it hurts and drops, still live."
+            "A barbed glass spike that plants itself where it lands. A shot or blow that reaches \
+             a live Thorn is relayed off it into the next target (another Thorn first), harder \
+             each bounce. Throw it at a Mould: it hurts and drops, still live."
         }
         Knack::KindleFlask => {
             "Drink a flask of kindling: for a few seconds you run, slide and dash faster and \
@@ -247,10 +251,13 @@ pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
         Knack::KindleFlask => {
             let f = &n.kindle_flask;
             vec![
-                ("HEALS", format!("{}/S", num(f.heal_rate, 1))),
+                (
+                    "HEALS",
+                    format!("{}/{}", num(f.haste_heal, 1), secs(f.haste_heal_interval)),
+                ),
                 (
                     "HASTE",
-                    format!("X{} {}", num(f.haste, 2), secs(f.duration)),
+                    format!("X{} {}", num(f.haste_scale, 2), secs(f.haste_time)),
                 ),
             ]
         }
@@ -292,8 +299,10 @@ pub fn ability_input(a: Ability, weapon: WeaponKind) -> &'static str {
     }
     match a.style() {
         AbilityStyle::Charge => "HOLD ALT FIRE; RELEASE FIRES",
-        AbilityStyle::Burst => "ALT FIRE: ONE BURST",
         AbilityStyle::Hold => "TAP: THROW   HOLD: DETONATE",
+        AbilityStyle::Channel => "HOLD ALT FIRE, LET GO",
+        AbilityStyle::Press if a.recasts() => "ALT FIRE; AGAIN: FLING",
+        AbilityStyle::Press => "ALT FIRE; HOLD TO STEER",
         AbilityStyle::Instant => "ALT FIRE (HOLD TO REPEAT)",
     }
 }
@@ -321,7 +330,9 @@ fn ticked(secs: f32) -> f32 {
 /// Seconds from one primary shot (salvo, release) to the next.
 fn cycle(w: WeaponKind, t: &CombatTuning) -> f32 {
     match w {
-        WeaponKind::Longwick => ticked(t.longwick.draw_time) + ticked(t.longwick.interval),
+        WeaponKind::Longwick | WeaponKind::Lamplighter => {
+            ticked(w.draw_time(t).unwrap_or(0.0)) + ticked(w.primary_interval(t))
+        }
         _ => ticked(w.primary_interval(t)),
     }
 }
@@ -334,6 +345,7 @@ fn trigger_damage(w: WeaponKind, t: &CombatTuning) -> f32 {
         WeaponKind::Thresher => d * t.thresher.pellets as f32,
         WeaponKind::Cinderbox => d * t.cinderbox.rockets as f32,
         WeaponKind::Longwick => t.longwick.max_damage,
+        WeaponKind::Lamplighter => t.lamplighter.max_damage,
         _ => d,
     }
 }
@@ -347,6 +359,7 @@ pub fn damage_text(w: WeaponKind, t: &CombatTuning) -> String {
         WeaponKind::Thresher => format!("{}X{d}", t.thresher.pellets),
         WeaponKind::Cinderbox => format!("{}X{d}", t.cinderbox.rockets),
         WeaponKind::Longwick => format!("{d}-{}", num(t.longwick.max_damage, 1)),
+        WeaponKind::Lamplighter => format!("{d}-{}", num(t.lamplighter.max_damage, 1)),
         WeaponKind::Kiln => format!("{d}+BURN"),
         _ => d,
     }
@@ -356,6 +369,9 @@ pub fn damage_text(w: WeaponKind, t: &CombatTuning) -> String {
 pub fn rate_text(w: WeaponKind, t: &CombatTuning) -> String {
     if w == WeaponKind::Longwick {
         return format!("DRAW {}", secs(t.longwick.draw_time));
+    }
+    if w == WeaponKind::Lamplighter {
+        return format!("FOC {}", secs(t.lamplighter.focus_time));
     }
     let interval = cycle(w, t).max(1e-3);
     if interval < 0.2 {
@@ -406,33 +422,25 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
             let mark = format!("X{} {}", num(q.brand_multiplier, 2), secs(q.brand_duration));
             [("DAMAGE", damage), ("MARK", mark)]
         }
-        Ability::Splinter => {
-            let q = &c.quill;
-            let shards = format!("{}X{}", q.splinter_count, num(q.splinter_shard_damage, 1));
-            [("DAMAGE", num(q.splinter_damage, 1)), ("SHRAPNEL", shards)]
-        }
-        Ability::Skewer => {
-            let k = &c.skewer;
+        Ability::Wickline => [
+            ("DAMAGE", num(c.wickline.damage, 1)),
+            ("RANGE", radius(c.wickline.range)),
+        ],
+        Ability::Tally => {
+            let k = &c.tally;
             [
-                (
-                    "DAMAGE",
-                    format!("{}-{}", num(k.min_damage, 1), num(k.max_damage, 1)),
-                ),
-                (
-                    "PIERCES",
-                    format!("{} X{}", k.pierce, num(k.pierce_falloff, 2)),
-                ),
+                ("DAMAGE", format!("{}X{}", k.max_targets, num(k.damage, 1))),
+                ("HOLD", secs(k.hold_time)),
             ]
         }
-        Ability::Flurry => {
-            let f = &c.flurry;
-            let each = weapon.primary_damage(c) * f.damage_scale;
+        Ability::Waxwork => {
+            let w = &c.waxwork;
             [
-                ("DAMAGE", format!("{}X{}", f.shots, num(each, 1))),
                 (
-                    "BURST",
-                    secs(ticked(f.gap) * f.shots.saturating_sub(1) as f32),
+                    "HEALTH",
+                    format!("{} {}", num(w.health, 1), secs(w.duration)),
                 ),
+                ("BURST", num(w.burst_damage, 1)),
             ]
         }
         Ability::Gust => {
@@ -445,20 +453,20 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
                 ),
             ]
         }
-        Ability::BothBarrels => {
-            let b = &c.bellows;
+        Ability::Bolas => {
+            let b = &c.bolas;
             [
+                ("SHARES", format!("{}%", num(b.link_share * 100.0, 0))),
                 (
-                    "DAMAGE",
-                    format!("{}X{}", b.both_pellets, num(b.both_pellet_damage, 1)),
+                    "LINK",
+                    format!("{} {}", radius(b.link_range), secs(b.link_time)),
                 ),
-                ("RECOIL", format!("{} M/S", num(b.both_recoil, 1))),
             ]
         }
-        Ability::Slug => [
-            ("DAMAGE", num(c.slug.damage, 1)),
-            ("SHOVE", format!("{} M/S", num(c.slug.knockback, 1))),
-        ],
+        Ability::Bulwark => {
+            let b = &c.bulwark;
+            [("ABSORBS", num(b.absorb, 1)), ("HOLD", secs(b.hold_time))]
+        }
         Ability::Flak => {
             let f = &c.flak;
             [
@@ -504,23 +512,18 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
                 ),
             ]
         }
-        Ability::Volley => {
-            let v = &c.volley;
-            let each = weapon.primary_damage(c) * v.damage_scale;
-            let burn = if weapon == WeaponKind::Kiln { "+B" } else { "" };
+        Ability::Stoke => {
+            let k = &c.stoke;
             [
-                ("DAMAGE", format!("{}X{}{burn}", v.shots, num(each, 1))),
-                ("CONE", format!("{} DEG", num(v.cone_degrees, 1))),
+                ("RATE", format!("X{} {}", num(k.rate, 2), secs(k.duration))),
+                ("OVERHEAT", secs(k.overheat)),
             ]
         }
-        Ability::Flare => {
-            let f = &c.flare;
+        Ability::Lantern => {
+            let l = &c.lantern;
             [
-                (
-                    "PATCH",
-                    format!("{} {}", radius(f.patch_radius), secs(f.patch_time)),
-                ),
-                ("BURN", format!("{}/S", num(f.burn_rate, 1))),
+                ("DAMAGE", format!("X{}", num(l.damage_scale, 2))),
+                ("LASTS", secs(l.duration)),
             ]
         }
         Ability::Breach => {
@@ -554,18 +557,18 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
                 ("AT ONCE", l.max_live.to_string()),
             ]
         }
-        Ability::Mortar => {
-            let m = &c.mortar;
+        Ability::Kite => {
+            let k = &c.kite;
             [
-                ("DAMAGE", num(m.damage, 1)),
-                ("RADIUS", radius(m.explosion_radius)),
+                ("DAMAGE", num(k.damage, 1)),
+                ("RADIUS", radius(k.explosion_radius)),
             ]
         }
-        Ability::TripleNock => {
-            let n = &c.triple_nock;
+        Ability::BlinkArrow => {
+            let b = &c.blink_arrow;
             [
-                ("DAMAGE", format!("{}X{}", n.arrows, arrow(n.damage_scale))),
-                ("MIN DRAW", format!("{}%", num(n.min_draw * 100.0, 0))),
+                ("DAMAGE", arrow(b.damage_scale)),
+                ("WINDOW", secs(b.window)),
             ]
         }
         Ability::PinningArrow => {
@@ -577,13 +580,13 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
             };
             [("DAMAGE", arrow(p.damage_scale)), ("PINS", pins)]
         }
-        Ability::EmberArrow => {
-            let e = &c.ember_arrow;
+        Ability::BeaconArrow => {
+            let b = &c.beacon_arrow;
             [
-                ("DAMAGE", arrow(e.damage_scale)),
+                ("DAMAGE", arrow(b.damage_scale)),
                 (
-                    "BURST",
-                    format!("{} +{} BURN", num(e.damage, 1), e.burn_stacks),
+                    "REVEALS",
+                    format!("{} {}", radius(b.radius), secs(b.duration)),
                 ),
             ]
         }
@@ -600,10 +603,20 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
             ("DAMAGE", num(primary * c.hurl.damage_scale, 1)),
             ("SPEED", format!("{} M/S", num(c.hurl.speed, 1))),
         ],
-        Ability::Upswing => [
-            ("DAMAGE", num(primary * c.upswing.damage_scale, 1)),
-            ("LAUNCH", format!("{} M/S", num(c.upswing.launch, 1))),
-        ],
+        Ability::Riposte => {
+            let r = &c.riposte;
+            [
+                (
+                    "COUNTER",
+                    format!(
+                        "{}-{}",
+                        num(primary * r.damage_scale, 0),
+                        num(primary * r.max_scale, 0)
+                    ),
+                ),
+                ("GUARD", secs(r.hold_time)),
+            ]
+        }
     };
     rows.extend(more);
     rows
@@ -713,16 +726,14 @@ mod tests {
     #[test]
     fn ability_numbers_follow_the_carrier() {
         let t = Tuning::default();
-        // Splinter's home is the Quill; the Lancet carries it at its ability power.
-        let home = ability_stats(Ability::Splinter, WeaponKind::Quill, &t, false);
-        let lancet = ability_stats(Ability::Splinter, WeaponKind::Lancet, &t, false);
-        assert_eq!(home[1].1, "20");
-        assert_eq!(lancet[1].1, "17");
-        // Flurry is made of the carrier's own shot.
-        let quill = ability_stats(Ability::Flurry, WeaponKind::Quill, &t, false);
+        // The Kite's home is the Cinderbox; the Tumbler carries it as listed, never more.
         let c = &t.combat;
-        let each = num(c.quill.damage * c.flurry.damage_scale, 1);
-        assert_eq!(quill[1].1, format!("3X{each}"));
+        let home = ability_stats(Ability::Kite, WeaponKind::Cinderbox, &t, false);
+        assert_eq!(home[1].1, num(c.kite.damage, 1));
+        // The Wickline's home is the Quill; the Lancet carries it at its ability power.
+        let lancet = ability_stats(Ability::Wickline, WeaponKind::Lancet, &t, false);
+        let power = c.lancet.ability_power / c.quill.ability_power;
+        assert_eq!(lancet[1].1, num(c.wickline.damage * power, 1));
         // The PvP column of the Pinning Arrow is the players' slow.
         let pvp = ability_stats(Ability::PinningArrow, WeaponKind::Longwick, &t, true);
         assert!(pvp[2].1.starts_with("SLOW"), "{:?}", pvp[2]);

@@ -1053,7 +1053,8 @@ impl KnackView {
                 kind::KINDLE_POOL | kind::SOOT_CLOUD => {
                     let radius = (e.state as f32 / 10.0).max(0.5);
                     let (full, first) = if e.kind == kind::KINDLE_POOL {
-                        (f.tuning.knacks.kindle_flask.duration, Thrown::Flask)
+                        // Retired: never sent any more (client-b drops the pool).
+                        (4.0, Thrown::Flask)
                     } else {
                         (f.tuning.knacks.soot_pot.duration, Thrown::SootPot)
                     };

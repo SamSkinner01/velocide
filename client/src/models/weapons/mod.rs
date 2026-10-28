@@ -79,6 +79,8 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Kiln => ModelId::Kiln,
             WeaponKind::Trimmer => ModelId::Trimmer,
             WeaponKind::Tamper => ModelId::Tamper,
+            // Placeholder until it has its own model (client-a): the Quill's.
+            WeaponKind::Lamplighter => ModelId::Quill,
         }
     }
 
@@ -96,11 +98,16 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Kiln => kiln::MUZZLE,
             WeaponKind::Trimmer => trimmer::MUZZLE,
             WeaponKind::Tamper => tamper::MUZZLE,
+            WeaponKind::Lamplighter => quill::MUZZLE,
         }
     }
 
     fn two_handed(self) -> bool {
-        !matches!(self, WeaponKind::Quill | WeaponKind::Lancet)
+        // (The Lamplighter borrows the one-handed Quill's model for now.)
+        !matches!(
+            self,
+            WeaponKind::Quill | WeaponKind::Lancet | WeaponKind::Lamplighter
+        )
     }
 
     fn glow_color(self, alt_mode: u8) -> Vec4 {
@@ -121,6 +128,7 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Kiln => Vec4::new(1.0, 0.5, 0.1, 1.0),
             WeaponKind::Trimmer => Vec4::new(1.0, 0.93, 0.8, 1.0),
             WeaponKind::Tamper => Vec4::new(1.0, 0.55, 0.2, 1.0),
+            WeaponKind::Lamplighter => Vec4::new(1.0, 0.86, 0.5, 1.0),
         }
     }
 }
@@ -130,37 +138,40 @@ impl WeaponLook for WeaponKind {
 ///
 /// | class | abilities |
 /// |---|---|
-/// | Precision | Brand crimson, Splinter ice, Skewer white-gold, Flurry mint |
-/// | Scatter | Gust sky, Both Barrels orange, Slug brass, Flak rose |
-/// | Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
-/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
-/// | Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
-/// | Melee | Lunge cyan, Whirl amber, Hurl violet, Upswing lime |
+/// | Precision | Brand crimson, Wickline ice, Tally white-gold, Waxwork mint |
+/// | Scatter | Gust sky, Bolas orange, Bulwark brass, Flak rose |
+/// | Rapid | Wisp violet, Discharge blue, Stoke amber, Lantern signal red |
+/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite lilac |
+/// | Draw | Brand crimson, Blink Arrow lime, Pinning Arrow steel blue, Beacon Arrow ember |
+/// | Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte lime |
+///
+/// (The rework's abilities took the colours of the ones they replaced; client-a / client-b
+/// may pick their own.)
 pub fn ability_color(a: Ability) -> Vec4 {
     let c = match a {
         Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
-        Ability::Splinter => Vec3::new(0.55, 0.95, 1.0),
+        Ability::Wickline => Vec3::new(0.55, 0.95, 1.0),
         Ability::Gust => Vec3::new(0.72, 0.9, 1.0),
-        Ability::BothBarrels => Vec3::new(1.0, 0.5, 0.15),
+        Ability::Bolas => Vec3::new(1.0, 0.5, 0.15),
         Ability::Wisp => Vec3::new(0.75, 0.5, 1.0),
         Ability::Discharge => Vec3::new(0.4, 0.8, 1.0),
         Ability::Breach => Vec3::new(1.0, 0.4, 0.1),
         Ability::Gravewell => Vec3::new(0.45, 1.0, 0.55),
-        Ability::Skewer => Vec3::new(1.0, 0.95, 0.55),
-        Ability::Flurry => Vec3::new(0.35, 1.0, 0.72),
-        Ability::Slug => Vec3::new(1.0, 0.82, 0.36),
+        Ability::Tally => Vec3::new(1.0, 0.95, 0.55),
+        Ability::Waxwork => Vec3::new(0.35, 1.0, 0.72),
+        Ability::Bulwark => Vec3::new(1.0, 0.82, 0.36),
         Ability::Flak => Vec3::new(1.0, 0.42, 0.68),
-        Ability::Volley => Vec3::new(1.0, 0.76, 0.2),
-        Ability::Flare => Vec3::new(1.0, 0.28, 0.2),
+        Ability::Stoke => Vec3::new(1.0, 0.76, 0.2),
+        Ability::Lantern => Vec3::new(1.0, 0.28, 0.2),
         Ability::Limpet => Vec3::new(0.95, 1.0, 0.3),
-        Ability::Mortar => Vec3::new(0.82, 0.6, 1.0),
-        Ability::TripleNock => Vec3::new(0.7, 1.0, 0.35),
+        Ability::Kite => Vec3::new(0.82, 0.6, 1.0),
+        Ability::BlinkArrow => Vec3::new(0.7, 1.0, 0.35),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
-        Ability::EmberArrow => Vec3::new(1.0, 0.55, 0.16),
+        Ability::BeaconArrow => Vec3::new(1.0, 0.55, 0.16),
         Ability::Lunge => Vec3::new(0.4, 0.95, 1.0),
         Ability::Whirl => Vec3::new(1.0, 0.72, 0.22),
         Ability::Hurl => Vec3::new(0.78, 0.5, 1.0),
-        Ability::Upswing => Vec3::new(0.72, 1.0, 0.35),
+        Ability::Riposte => Vec3::new(0.72, 1.0, 0.35),
     };
     c.extend(1.0)
 }
@@ -168,7 +179,7 @@ pub fn ability_color(a: Ability) -> Vec4 {
 /// Where the grip sits in view space (lower right of the screen).
 fn view_offset(w: WeaponKind) -> Vec3 {
     match w {
-        WeaponKind::Quill => Vec3::new(0.118, -0.112, -0.3),
+        WeaponKind::Quill | WeaponKind::Lamplighter => Vec3::new(0.118, -0.112, -0.3),
         WeaponKind::Bellows => Vec3::new(0.13, -0.13, -0.31),
         WeaponKind::Arclash => Vec3::new(0.13, -0.122, -0.31),
         WeaponKind::Tumbler => Vec3::new(0.14, -0.148, -0.32),
@@ -205,6 +216,7 @@ fn view_scale(w: WeaponKind) -> f32 {
 fn kick_amount(w: WeaponKind) -> (f32, f32) {
     match w {
         WeaponKind::Quill => (0.055, 0.26),
+        WeaponKind::Lamplighter => (0.075, 0.34),
         WeaponKind::Bellows => (0.085, 0.45),
         WeaponKind::Arclash => (0.016, 0.05),
         WeaponKind::Tumbler => (0.09, 0.32),
@@ -375,7 +387,8 @@ pub fn weapon_pose(h: &HeldWeapon) -> Pose {
     let mut glow = 0.9 * pulse + kick * 0.8;
     let mut color = base;
     let mut pose = match h.weapon {
-        WeaponKind::Quill => {
+        // (The Lamplighter is drawn with the Quill's model for now.)
+        WeaponKind::Quill | WeaponKind::Lamplighter => {
             let mut pose = Pose::rest(quill::JOINTS.len());
             // The crest folds flat front to back on the shot, then rises again.
             for i in 0..quill::CREST_COUNT {

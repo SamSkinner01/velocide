@@ -1142,7 +1142,11 @@ pub fn projectile_scale(k: u16) -> f32 {
     match k {
         kind::NEEDLE => 3.0,
         kind::RIVET => 3.2,
-        kind::ARROW | kind::PIN_ARROW | kind::EMBER_ARROW | kind::BRAND_ARROW => 2.2,
+        kind::ARROW
+        | kind::PIN_ARROW
+        | kind::BRAND_ARROW
+        | kind::BLINK_ARROW
+        | kind::BEACON_ARROW => 2.2,
         kind::FLAK_SHELL | kind::LIMPET => 2.4,
         _ => 2.0,
     }
@@ -1175,14 +1179,18 @@ pub fn projectile_look(k: u16, parried: bool) -> ProjectileLook {
         kind::NEEDLE => look(1.0, 0.35, 0.2, 1.0, 0.07),
         kind::ARROW => look(1.0, 0.8, 0.42, 0.9, 0.05),
         kind::PIN_ARROW => look(0.55, 0.75, 1.0, 0.9, 0.05),
-        kind::EMBER_ARROW => look(1.0, 0.55, 0.16, 1.1, 0.06),
+        kind::BLINK_ARROW => look(0.7, 1.0, 0.35, 0.9, 0.05),
+        kind::BEACON_ARROW => look(1.0, 0.55, 0.16, 1.1, 0.06),
         kind::BRAND_ARROW => look(1.0, 0.25, 0.45, 1.0, 0.05),
         kind::RIVET => look(1.0, 0.42, 0.18, 0.8, 0.035),
         kind::CINDER_ROCKET => look(1.0, 0.6, 0.25, 1.1, 0.06),
         kind::FLAK_SHELL => look(1.0, 0.42, 0.68, 1.0, 0.04),
         kind::LIMPET => look(0.95, 1.0, 0.3, 0.8, 0.03),
-        kind::MORTAR_SHELL => look(0.82, 0.6, 1.0, 1.3, 0.05),
-        kind::FLARE => look(1.0, 0.28, 0.2, 1.7, 0.05),
+        // The rework's (client-a / client-b give them their own looks): the colours of their
+        // abilities.
+        kind::KITE => look(0.82, 0.6, 1.0, 1.3, 0.05),
+        kind::BOLAS => look(1.0, 0.5, 0.15, 1.0, 0.04),
+        kind::LANTERN_TOSS => look(1.0, 0.28, 0.2, 1.2, 0.04),
         // Melee and knacks (melee.rs, knacks.rs draw the pieces): the Hurl in its violet, the
         // flask in kindling gold-green, the snare's amber lamp, the pot's spitting fuse.
         kind::HURL => look(0.78, 0.5, 1.0, 1.1, 0.06),

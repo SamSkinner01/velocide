@@ -36,7 +36,7 @@ use crate::Server;
 
 const HELP: &str = "/spawn <enemy> [count] [elite], /enemies, /killall, /melt, /god, /notarget, /give, /kill, /ff [on|off], /hurt <hp>, /needle [dist], /ember [dist], /encounter <n>, /encounters, /tp <x> <y> <z>, /goto <exit|start|checkpoint n|encounter n>, /loadout [weapon[:ability,ability] ...] [knack:<name>]";
 
-/// Lower-case letters and digits only ("Triple Nock" → "triplenock").
+/// Lower-case letters and digits only ("Blink Arrow" → "blinkarrow").
 fn squash(s: &str) -> String {
     s.chars()
         .filter(char::is_ascii_alphanumeric)
@@ -112,7 +112,7 @@ fn parse_loadout(args: &[&str], current: Loadout) -> Result<Loadout, String> {
     Ok(loadout.sanitized())
 }
 
-/// "1 LONGWICK (Triple Nock / Pinning Arrow)  2 KILN (...)  Q SNARE".
+/// "1 LONGWICK (Blink Arrow / Pinning Arrow)  2 KILN (...)  Q SNARE".
 fn describe_loadout(loadout: &Loadout) -> String {
     let builds: Vec<String> = loadout
         .slots
@@ -431,23 +431,23 @@ mod tests {
 
     #[test]
     fn loadout_arguments_parse() {
-        let l = parse(&["longwick:pinning,ember", "-", "Kiln", "quill:splinter"]).unwrap();
+        let l = parse(&["longwick:pinning,beacon", "-", "Kiln", "quill:wick"]).unwrap();
         assert_eq!(
             l.slot(0).map(|b| b.abilities),
-            Some([Ability::PinningArrow, Ability::EmberArrow])
+            Some([Ability::PinningArrow, Ability::BeaconArrow])
         );
         assert_eq!(l.slot(1), None);
         assert_eq!(l.slot(2), Some(&WeaponKind::Kiln.default_build()));
         // One ability given: it replaces A; B stays the default unless that repeats it.
         assert_eq!(
             l.slot(3).map(|b| b.abilities),
-            Some([Ability::Splinter, Ability::Brand])
+            Some([Ability::Wickline, Ability::Brand])
         );
         assert!(l.is_valid());
         assert_eq!(l.knack, Knack::Thorn, "the current knack");
         assert_eq!(
-            parse(&["triple nock"]).unwrap_err(),
-            "unknown weapon 'triple nock'"
+            parse(&["blink arrow"]).unwrap_err(),
+            "unknown weapon 'blink arrow'"
         );
         assert!(parse(&["quill:gust"]).is_err());
         assert!(parse(&["-"]).is_err());
@@ -455,14 +455,14 @@ mod tests {
         // The same weapon twice: the second is dropped.
         let l = parse(&["lancet", "lancet"]).unwrap();
         assert_eq!(l.slot(1), None);
-        assert!(describe_loadout(&l).starts_with("1 LANCET (Skewer / Flurry)"));
+        assert!(describe_loadout(&l).starts_with("1 LANCET (Tally / Waxwork)"));
         assert!(describe_loadout(&l).ends_with("Q THORN"));
         // Melee builds, and the knack by name prefix anywhere (not a slot).
-        let l = parse(&["knack:kindle", "trimmer:whirl,upswing", "tamper"]).unwrap();
+        let l = parse(&["knack:kindle", "trimmer:whirl,riposte", "tamper"]).unwrap();
         assert_eq!(l.knack, Knack::KindleFlask);
         assert_eq!(
             l.slot(0).map(|b| b.abilities),
-            Some([Ability::Whirl, Ability::Upswing])
+            Some([Ability::Whirl, Ability::Riposte])
         );
         assert_eq!(l.slot(1), Some(&WeaponKind::Tamper.default_build()));
         assert!(parse(&["quill", "knack:soot", "-", "-", "kiln"]).is_ok());

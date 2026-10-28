@@ -15,11 +15,11 @@
 //! In a PvP world a knack that isn't `Knack::pvp_allowed` is replaced by `Knack::PVP_FALLBACK`
 //! when the loadout applies (`SimWorld::fit_loadout`, `loadouts.rs`).
 //!
-//! * **Kindle Flask**: drinking it (instant, nothing thrown) hastes the drinker for `duration`
-//!   — `MoveState::haste_time` / `haste_scale`, next to the Pinned slow, so the owning client
-//!   predicts it like the rest of its movement (it learns of it through reconciliation, like
-//!   the slow) — and heals them `heal_rate` × `heal_interval` every `heal_interval` through
-//!   `PlayerCombat::heal` (the normal rules: never above the effective max, so hard damage
+//! * **Kindle Flask**: drinking it (instant, nothing thrown) hastes the drinker for
+//!   `haste_time` — `MoveState::haste_time` / `haste_scale`, next to the Pinned slow, so the
+//!   owning client predicts it like the rest of its movement (it learns of it through
+//!   reconciliation, like the slow) — and heals them `haste_heal` every `haste_heal_interval`
+//!   through `PlayerCombat::heal` (the normal rules: never above the effective max, so hard damage
 //!   still caps it), the first step one interval after drinking. Only the drinker, in every
 //!   mode. `SimEvent::Healed` with `HealSource::KindleFlask`. Death ends it.
 //! * **Snare**: it lies `STUCK` where it settled on the floor (`payload.rs`); `arm_time` after
@@ -236,14 +236,16 @@ impl SimWorld {
         let Some(p) = self.players.get_mut(&id) else {
             return;
         };
-        p.movement.haste_time = f.duration;
-        p.movement.haste_scale = f.haste;
-        let step = secs_to_ticks(f.heal_interval, rate, 1) as u32;
-        let steps = (f.duration / f.heal_interval.max(1e-3)).round().max(1.0) as u32;
+        p.movement.haste_time = f.haste_time;
+        p.movement.haste_scale = f.haste_scale;
+        let step = secs_to_ticks(f.haste_heal_interval, rate, 1) as u32;
+        let steps = (f.haste_time / f.haste_heal_interval.max(1e-3))
+            .round()
+            .max(1.0) as u32;
         self.knacks.kindle.insert(
             id,
             KindleDraught {
-                heal: f.heal_rate * step as f32 / rate as f32,
+                heal: f.haste_heal,
                 step,
                 next_heal: self.tick + step,
                 last_heal: self.tick + step * steps,

@@ -1,7 +1,8 @@
 //! Melee weapons (`WeaponClass::Melee`: the Trimmer and the Tamper) and their abilities
-//! (Lunge, Whirl, Hurl, Upswing), docs/arsenal.md "Melee".
+//! (Lunge, Whirl, Hurl; the Riposte is `abilities/riposte.rs`), docs/arsenal.md "Melee".
 //!
-//! **Swings** (the primaries, the Upswing) hit the hostiles inside an arc in front of the eye
+//! **Swings** (the primaries, the Riposte's counter) hit the hostiles inside an arc in front of
+//! the eye
 //! ([`in_arc`]: a (padded) shape whose surface is within `reach` of the eye and that the
 //! `arc_degrees` cone around the aim touches — so a low Mould right at your feet is in it even
 //! while you look ahead), as the swinger saw them (lag compensation, like hitscan), with hit
@@ -19,15 +20,15 @@
 //!   It tests the current hit shapes each tick (like projectiles: the body is really there).
 //! * **Whirl**: everything within `whirl.radius` of the body (lag-compensated), knocked
 //!   outward.
-//! * **Hurl**: a spinning blade / hammer-head projectile (`ProjectileKind::Hurl`).
-//! * **Upswing**: a swing in the carrier's arc that launches what it hits upward; the swinger
-//!   hops.
+//! * **Hurl**: a spinning blade / hammer-head projectile (`ProjectileKind::Hurl`) that comes
+//!   back (`abilities/hurl.rs`).
 //!
 //! A live thorn inside a swing's arc (or a Whirl's reach) is batted on at the hostile its relay
 //! picks, as a ray of the swing's damage (`thorn.rs`).
 //!
-//! Every swing, Whirl, Upswing and the start of a Lunge is a [`SimEvent::Swing`] (`Fx::Swing`
-//! for the other clients and the replay). All melee damage carries [`DamageFlags::MELEE`].
+//! Every swing, Whirl, Riposte counter and the start of a Lunge is a [`SimEvent::Swing`]
+//! (`Fx::Swing` for the other clients and the replay). All melee damage carries
+//! [`DamageFlags::MELEE`].
 
 use std::collections::BTreeMap;
 
@@ -126,7 +127,7 @@ pub fn in_arc(
 
 /// Melee damage by player `id`: `amount` as `attack`, struck at `point` along `dir` (on the
 /// body: no weak points), `MELEE`.
-fn melee_damage(
+pub(crate) fn melee_damage(
     id: PlayerId,
     (amount, attack): (f32, Attack),
     point: Vec3,
@@ -141,7 +142,7 @@ fn melee_damage(
 }
 
 /// Knockback of a swing along the aim: mostly horizontal, a little up.
-fn swing_knockback(aim: Vec3, speed: f32) -> Vec3 {
+pub(crate) fn swing_knockback(aim: Vec3, speed: f32) -> Vec3 {
     let flat = Vec3::new(aim.x, 0.0, aim.z).normalize_or(aim);
     (flat + Vec3::Y * 0.3).normalize_or(Vec3::Y) * speed
 }
@@ -149,7 +150,7 @@ fn swing_knockback(aim: Vec3, speed: f32) -> Vec3 {
 impl SimWorld {
     /// The hostiles inside player `id`'s arc as they saw them, nearest first: (distance,
     /// target, where it is struck).
-    fn arc_targets(
+    pub(crate) fn arc_targets(
         &self,
         t: &Tuning,
         history: Option<&dyn HitboxHistory>,
@@ -294,23 +295,6 @@ impl SimWorld {
                 // The thorns around are batted on (thorn.rs).
                 let damage = primary * w.damage_scale;
                 self.relay_nova(t, id, input, center, w.radius, damage, attack);
-                n
-            }
-            Ability::Upswing => {
-                let u = &c.upswing;
-                let targets = self.arc_targets(t, history, id, input, weapon.melee_arc(c));
-                let n = targets.len();
-                for (_, target, point) in targets {
-                    let launch = Vec3::Y * u.launch;
-                    let info =
-                        melee_damage(id, (primary * u.damage_scale, attack), point, aim, launch);
-                    self.apply_damage(t, target, info);
-                }
-                // The swinger rises with it (a hop, not stacked on a jump).
-                if let Some(p) = self.players.get_mut(&id) {
-                    let v = &mut p.movement.velocity;
-                    v.y = v.y.max(u.hop);
-                }
                 n
             }
             Ability::Hurl => {

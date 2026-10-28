@@ -60,20 +60,16 @@ pub enum Attack {
     /// Quill primary: precision hitscan quill.
     #[default]
     Quill,
-    /// Quill alt A: marking shot (brands what it hits).
+    /// Marking shot (brands what it hits).
     Brand,
-    /// Quill alt B: the main shot and each of the splinters it bursts into.
-    Splinter,
     /// Bellows primary (one pellet).
     Blast,
-    /// Bellows alt A: compressed-air cone (knockback, deflects projectiles). A projectile it
-    /// turned around deals its damage as `Gust` too.
+    /// Compressed-air cone (knockback, deflects projectiles). A projectile it turned around
+    /// deals its damage as `Gust` too.
     Gust,
-    /// Bellows alt B: both barrels at once (one pellet).
-    BothBarrels,
     /// Arclash primary: one zap (and each chain jump).
     Arc,
-    /// Arclash alt A: the ball of lightning's zaps and its pop.
+    /// The orbiting ball of lightning's zaps and the flung one's pop.
     Wisp,
     /// Arclash alt B: the charged nova.
     Discharge,
@@ -111,28 +107,12 @@ pub enum Attack {
     /// Kiln primary: the ember spray (and the Burn it sets).
     Kiln,
     // ---- expansion abilities ----
-    /// Charged piercing shot.
-    Skewer,
-    /// One shot of the three-shot burst.
-    Flurry,
-    /// The heavy slug.
-    Slug,
     /// The flak shell's burst pellets.
     Flak,
-    /// One shot of the volley.
-    Volley,
-    /// The flare and its burning patch.
-    Flare,
     /// A sticky charge's blast.
     Limpet,
-    /// The lobbed shell's blast.
-    Mortar,
-    /// One arrow of the fan.
-    TripleNock,
     /// The pinning arrow.
     PinningArrow,
-    /// The ember arrow's hit and flame burst.
-    EmberArrow,
 
     // ---- refit (docs/refit.md): melee primaries and abilities, knacks ----
     /// Trimmer primary: one slash.
@@ -143,12 +123,36 @@ pub enum Attack {
     Lunge,
     /// The Whirl's spin.
     Whirl,
-    /// The thrown blade / hammer-head.
+    /// The thrown blade / hammer-head (both legs).
     Hurl,
-    /// The rising strike.
-    Upswing,
     /// A sprung Snare (knack).
     Snare,
+
+    // ---- rework (docs/rework.md): the sniper, the new abilities ----
+    /// Lamplighter primary: the focused beam (and the one it pierces into).
+    Lamplighter,
+    /// The wick-thread's yank on a light target.
+    Wickline,
+    /// One shot of the tally's volley.
+    Tally,
+    /// The wax double's hot-wax burst (and its Burn).
+    Waxwork,
+    /// The bolas' hit and the cord's shared damage.
+    Bolas,
+    /// The wax slab (it deals no damage; its blocks are `Blocked::Guarded`).
+    Bulwark,
+    /// The Burn a stoked weapon's hits set.
+    Stoke,
+    /// A lantern's shots.
+    Lantern,
+    /// The ember kite's blast.
+    Kite,
+    /// The blink arrow's own hit.
+    BlinkArrow,
+    /// The beacon arrow's own hit.
+    BeaconArrow,
+    /// The counter-swing after a guard.
+    Riposte,
 }
 
 impl Attack {
@@ -167,6 +171,7 @@ impl Attack {
             WeaponKind::Kiln => Attack::Kiln,
             WeaponKind::Trimmer => Attack::Trimmer,
             WeaponKind::Tamper => Attack::Tamper,
+            WeaponKind::Lamplighter => Attack::Lamplighter,
         }
     }
 
@@ -174,28 +179,28 @@ impl Attack {
     pub fn ability(ability: Ability) -> Attack {
         match ability {
             Ability::Brand => Attack::Brand,
-            Ability::Splinter => Attack::Splinter,
+            Ability::Wickline => Attack::Wickline,
             Ability::Gust => Attack::Gust,
-            Ability::BothBarrels => Attack::BothBarrels,
+            Ability::Bolas => Attack::Bolas,
             Ability::Wisp => Attack::Wisp,
             Ability::Discharge => Attack::Discharge,
             Ability::Breach => Attack::Breach,
             Ability::Gravewell => Attack::Gravewell,
-            Ability::Skewer => Attack::Skewer,
-            Ability::Flurry => Attack::Flurry,
-            Ability::Slug => Attack::Slug,
+            Ability::Tally => Attack::Tally,
+            Ability::Waxwork => Attack::Waxwork,
+            Ability::Bulwark => Attack::Bulwark,
             Ability::Flak => Attack::Flak,
-            Ability::Volley => Attack::Volley,
-            Ability::Flare => Attack::Flare,
+            Ability::Stoke => Attack::Stoke,
+            Ability::Lantern => Attack::Lantern,
             Ability::Limpet => Attack::Limpet,
-            Ability::Mortar => Attack::Mortar,
-            Ability::TripleNock => Attack::TripleNock,
+            Ability::Kite => Attack::Kite,
+            Ability::BlinkArrow => Attack::BlinkArrow,
             Ability::PinningArrow => Attack::PinningArrow,
-            Ability::EmberArrow => Attack::EmberArrow,
+            Ability::BeaconArrow => Attack::BeaconArrow,
             Ability::Lunge => Attack::Lunge,
             Ability::Whirl => Attack::Whirl,
             Ability::Hurl => Attack::Hurl,
-            Ability::Upswing => Attack::Upswing,
+            Ability::Riposte => Attack::Riposte,
         }
     }
 
@@ -243,10 +248,8 @@ impl Attack {
         match self {
             Attack::Quill => "Quill",
             Attack::Brand => "Brand",
-            Attack::Splinter => "Splinter",
             Attack::Blast => "Bellows",
             Attack::Gust => "Gust",
-            Attack::BothBarrels => "Both Barrels",
             Attack::Arc => "Arclash",
             Attack::Wisp => "Wisp",
             Attack::Discharge => "Discharge",
@@ -265,24 +268,27 @@ impl Attack {
             Attack::Cinderbox => "Cinderbox",
             Attack::Longwick => "Longwick",
             Attack::Kiln => "Kiln",
-            Attack::Skewer => "Skewer",
-            Attack::Flurry => "Flurry",
-            Attack::Slug => "Slug",
             Attack::Flak => "Flak",
-            Attack::Volley => "Volley",
-            Attack::Flare => "Flare",
             Attack::Limpet => "Limpet",
-            Attack::Mortar => "Mortar",
-            Attack::TripleNock => "Triple Nock",
             Attack::PinningArrow => "Pinning Arrow",
-            Attack::EmberArrow => "Ember Arrow",
             Attack::Trimmer => "Trimmer",
             Attack::Tamper => "Tamper",
             Attack::Lunge => "Lunge",
             Attack::Whirl => "Whirl",
             Attack::Hurl => "Hurl",
-            Attack::Upswing => "Upswing",
             Attack::Snare => "Snare",
+            Attack::Lamplighter => "Lamplighter",
+            Attack::Wickline => "Wickline",
+            Attack::Tally => "Tally",
+            Attack::Waxwork => "Waxwork",
+            Attack::Bolas => "Bolas",
+            Attack::Bulwark => "Bulwark",
+            Attack::Stoke => "Stoke",
+            Attack::Lantern => "Lantern",
+            Attack::Kite => "Kite",
+            Attack::BlinkArrow => "Blink Arrow",
+            Attack::BeaconArrow => "Beacon Arrow",
+            Attack::Riposte => "Riposte",
         }
     }
 }
@@ -328,8 +334,12 @@ impl DamageFlags {
     pub const BRANDED: DamageFlags = DamageFlags(1 << 15);
     /// Burn damage over time (status effect, `status.rs`).
     pub const BURN: DamageFlags = DamageFlags(1 << 16);
-    /// A Skewer shot that passed through at least one target before this one.
+    /// A piercing shot (the Lamplighter's full focus) that passed through a target before
+    /// this one.
     pub const PIERCED: DamageFlags = DamageFlags(1 << 17);
+    /// The victim was revealed by a Beacon Arrow: the damage was multiplied by
+    /// `beacon_arrow.damage_multiplier` (`docs/rework.md`).
+    pub const REVEALED: DamageFlags = DamageFlags(1 << 18);
 
     pub fn contains(self, other: DamageFlags) -> bool {
         self.0 & other.0 == other.0 && other.0 != 0
@@ -424,6 +434,9 @@ pub enum Blocked {
     God,
     /// Non-explosive damage to oneself.
     SelfDamage,
+    /// Caught by the victim's guard (Bulwark, Riposte: `abilities::guard`): no damage, no
+    /// knockback.
+    Guarded,
 }
 
 /// Outcome of one damage instance ([`SimEvent::Damage`]).
@@ -507,6 +520,10 @@ pub struct PlayerCombat {
     pub last_attacker: Owner,
     /// With what.
     pub last_attack: Attack,
+    /// The targets a held Tally has marked so far, in tally order (players as
+    /// `NetId::player`): the server keeps the tally (`abilities/tally.rs`), the owner draws the
+    /// marks from this.
+    pub tallied: [Option<NetId>; super::abilities::tally::MAX_TALLY],
 }
 
 impl PlayerCombat {
@@ -624,6 +641,17 @@ impl SimWorld {
             info.amount *= t.combat.quill.brand_multiplier;
             info.flags.insert(DamageFlags::BRANDED);
         }
+        // A Beacon Arrow's light: more damage from every player (`abilities/beacon_arrow.rs`).
+        if info.source.player().is_some() && self.is_revealed(target) {
+            info.amount *= t.combat.beacon_arrow.damage_multiplier;
+            info.flags.insert(DamageFlags::REVEALED);
+        }
+        // A Waxwork's double stands in for its owner (`abilities/waxwork.rs`).
+        if let HitTarget::Player(id) = target
+            && let Some(event) = self.damage_waxwork(t, id, info)
+        {
+            return event;
+        }
         let event = match target {
             HitTarget::Player(id) => self.damage_player(t, id, info),
             HitTarget::Entity(id) => self.damage_enemy(t, id, info),
@@ -635,6 +663,10 @@ impl SimWorld {
             self.brands.remove(&target);
             self.on_killed(t, &event);
         }
+        if event.blocked.is_none() {
+            // The rework's abilities react (a Bolas cord shares it, a stoked hit burns).
+            self.abilities_after_damage(t, &event);
+        }
         event
     }
 
@@ -643,6 +675,9 @@ impl SimWorld {
         let friendly_fire = self.rules.friendly_fire;
         // Tallow Skin (knack): less damage, no knockback from anything but your own blasts.
         let tallow = self.has_tallow(id) && info.source != Owner::Player(id);
+        // A raised guard (Bulwark, Riposte) catches a hostile hit from inside its cone whole:
+        // no damage, no knockback (`abilities/guard.rs`).
+        let guarded = self.guard_covers(t, id, &info);
         let mut event = DamageEvent {
             target: HitTarget::Player(id),
             info,
@@ -693,18 +728,23 @@ impl SimWorld {
                 event.blocked = Some(Blocked::SpawnProtection);
             } else if p.movement.is_invulnerable() && info.attack != Attack::World {
                 event.blocked = Some(Blocked::Invulnerable);
+            } else if guarded {
+                event.blocked = Some(Blocked::Guarded);
             }
         }
         // Knockback: always for explosions (blast jumps, teammates' blasts, through
-        // i-frames); otherwise only when the hit counts.
+        // i-frames, not through a guard); otherwise only when the hit counts.
         let kb_applies = event.blocked.is_none()
-            || (explosive && event.blocked != Some(Blocked::God))
+            || (explosive && !matches!(event.blocked, Some(Blocked::God | Blocked::Guarded)))
             || event.blocked == Some(Blocked::God) && is_self;
         if kb_applies && !tallow && info.knockback.length_squared() > 0.0 {
             p.movement.velocity += info.knockback;
         }
         if event.blocked.is_some() {
             event.health_after = p.combat.health(c);
+            if event.blocked == Some(Blocked::Guarded) {
+                self.guard_absorbed(t, id, &event.info, amount);
+            }
             return event;
         }
         let health_before = p.combat.health(c);

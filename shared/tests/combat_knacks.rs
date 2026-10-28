@@ -177,7 +177,7 @@ fn the_kindle_flask_is_drunk_hastes_and_heals_over_time() {
     let f = a.tuning.combat.knacks.kindle_flask.clone();
     drink(&mut a, p);
     let m = a.world.players[&p].movement;
-    assert_eq!((m.haste_time, m.haste_scale), (f.duration, f.haste));
+    assert_eq!((m.haste_time, m.haste_scale), (f.haste_time, f.haste_scale));
     let e = entity(&a, NetId::player(p)).unwrap();
     assert!(e.flags & player_flags::HASTE != 0, "replicated");
     // A step of 8 HP every second, the first a second after drinking.
@@ -251,7 +251,7 @@ fn run(a: &mut Arena, p: PlayerId, ticks: u32, dash: bool) -> f32 {
 fn kindle_haste_speeds_up_running_and_the_dash() {
     let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
     let mv = a.tuning.movement.clone();
-    let haste = a.tuning.combat.knacks.kindle_flask.haste;
+    let haste = a.tuning.combat.knacks.kindle_flask.haste_scale;
     let plain = run(&mut a, p, 40, false);
     assert!((plain - mv.ground_speed).abs() < 0.5, "{plain}");
     a.ticks(30);
@@ -330,7 +330,8 @@ fn the_kindle_flask_is_allowed_in_pvp_and_heals_the_drinker_only() {
     a.ticks(310);
     let total: f32 = healed_by_flasks(&a.events, p).iter().sum();
     let f = &a.tuning.combat.knacks.kindle_flask;
-    assert!((total - f.heal_rate * f.duration).abs() < 1e-3, "{total}");
+    let steps = (f.haste_time / f.haste_heal_interval).round();
+    assert!((total - f.haste_heal * steps).abs() < 1e-3, "{total}");
     assert!(healed_by_flasks(&a.events, other).is_empty());
     assert_eq!(a.world.players[&other].movement.haste_time, 0.0);
 }

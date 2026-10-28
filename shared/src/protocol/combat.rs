@@ -5,7 +5,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-use crate::loadout::Knack;
+use crate::loadout::{Ability, Knack};
 use crate::sim::{Attack, Blocked, DamageFlags, HitTarget, Owner, PlayerId};
 
 use super::NetId;
@@ -143,13 +143,6 @@ pub enum Fx {
     ThornPlanted { position: QPos },
     /// A thorn expired (small glass crumble, `Sfx::ThornShatter`).
     ThornExpired { id: NetId },
-    /// A Splinter shot burst into secondary traces at `origin`: splinter tracers to each end,
-    /// `Sfx::SplinterBurst`. Sent to everyone (the shooter can't predict them).
-    Splinters {
-        shooter: u16,
-        origin: QPos,
-        ends: Vec<QPos>,
-    },
     /// A projectile burst into secondary rays at `origin` (the Flak ring, `attack` = `Flak`, or
     /// a Gust-deflected shell's `Gust`): a tracer to each end. Sent to everyone.
     Burst {
@@ -213,7 +206,7 @@ pub enum Fx {
         position: QPos,
     },
     // ---- refit (docs/arsenal.md, "Replication and wire ids"): melee and knacks ----
-    /// Another player swung a melee weapon: a Trimmer / Tamper primary, a Whirl, an Upswing or
+    /// Another player swung a melee weapon: a Trimmer / Tamper primary, a Whirl, a Riposte counter or
     /// the start of a Lunge (`attack`); `hits` = targets it struck. Remote swing animation,
     /// whoosh, hit sparks. Not sent to the swinger (it predicts its own).
     Swing {
@@ -229,6 +222,52 @@ pub enum Fx {
     Knack { player: PlayerId, knack: Knack },
     /// A Snare sprang on something at `position` (wax splash, snap). Sent to everyone.
     SnareSprung { position: QPos },
+    // ---- rework (docs/rework.md, docs/arsenal.md "Replication and wire ids") ----
+    /// A Wickline: the burning thread from `from` to `to` for `wickline.line_time`;
+    /// `anchored` = it caught the level (a zip), else a target (a yank) or nothing. Sent to
+    /// everyone (the caster can't predict where it lands).
+    Wickline {
+        player: PlayerId,
+        from: QPos,
+        to: QPos,
+        anchored: bool,
+    },
+    /// A Tally's release: one ray from `origin` to each end (the marked targets). Sent to
+    /// everyone.
+    TallyFired {
+        shooter: PlayerId,
+        origin: QPos,
+        ends: Vec<QPos>,
+    },
+    /// A Blink Arrow step: the player went from `from` to `to` (the owner's client snaps its
+    /// camera on the reconciliation). Sent to everyone.
+    Blink {
+        player: PlayerId,
+        from: QPos,
+        to: QPos,
+    },
+    /// A guard (Bulwark, Riposte) caught a hit at `position`: block sparks, a thud; `broke` =
+    /// the Bulwark shattered with it. Sent to everyone.
+    GuardBlock {
+        player: PlayerId,
+        ability: Ability,
+        position: QPos,
+        broke: bool,
+    },
+    /// A Bolas bound its targets: the cord between `positions` (one or two). Sent to
+    /// everyone.
+    BolasBound { positions: Vec<QPos> },
+    /// A Lantern fired the carrier's primary from `origin`: a tracer / zap / ember cone to each
+    /// end (`attack` = `Lantern`; the lantern's `state` says which weapon it copies). Sent to
+    /// everyone.
+    LanternShot {
+        lantern: NetId,
+        origin: QPos,
+        ends: Vec<QPos>,
+    },
+    /// A thrown Hurl came back to its thrower's hand (catch sound, part of the cooldown back).
+    /// Sent to everyone.
+    HurlCaught { player: PlayerId },
 }
 
 impl Fx {
@@ -238,7 +277,6 @@ impl Fx {
             self,
             Fx::Explosion { .. }
                 | Fx::Ricochet { .. }
-                | Fx::Splinters { .. }
                 | Fx::Burst { .. }
                 | Fx::ArcChain { .. }
                 | Fx::Branded { .. }
@@ -250,6 +288,11 @@ impl Fx {
                 | Fx::EnemySpawned { .. }
                 | Fx::LungeStruck { .. }
                 | Fx::SnareSprung { .. }
+                | Fx::Wickline { .. }
+                | Fx::TallyFired { .. }
+                | Fx::Blink { .. }
+                | Fx::GuardBlock { .. }
+                | Fx::BolasBound { .. }
         )
     }
 }

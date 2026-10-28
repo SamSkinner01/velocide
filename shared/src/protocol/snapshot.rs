@@ -83,8 +83,9 @@ pub mod kind {
     /// (bits 4–8) | charge / draw level (bits 9–15), packed and read only through
     /// [`super::pack_player_weapon`] / [`super::pack_player_unarmed`] /
     /// [`super::player_weapon`] / [`super::player_armed`]; `health` = health; `aux` = hard damage (bits 0–7) | knack
-    /// charges (8–11) | (12–15 unused) | wall-cling normal as a quantised yaw (16–31, while
-    /// `WALL_CLING`). See `docs/combat.md`, `docs/arsenal.md`.
+    /// charges (8–11) | a raised guard's strength left in sixteenths (12–15, while `GUARDING`:
+    /// the Bulwark's cracks; 15 = whole, a Riposte always 15) | wall-cling normal as a
+    /// quantised yaw (16–31, while `WALL_CLING`). See `docs/combat.md`, `docs/arsenal.md`.
     pub const PLAYER: u16 = 0;
     /// A level door (`aux` = door id, `flags` bit 0 = open).
     pub const DOOR: u16 = 1;
@@ -114,11 +115,12 @@ pub mod kind {
     pub const EFFIGY: u16 = 28;
 
     // 64..128: projectiles, replicated by trajectory: `position`/`velocity` at launch tick
-    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–71 and 75–79 are
-    // the expansion arsenal's (docs/arsenal.md; the first arsenal's 64–71 retired with v7).
+    // `aux`; `owner` = player id / OWNER_ENEMY; `state` = bounces left. 64–71, 75–79 and
+    // 96–103 are the arsenal's (docs/arsenal.md; the first arsenal's 64–71 retired with v7,
+    // the rework's retired abilities freed 69, 70 and 75 with v11 and reused them).
     pub const PROJECTILE_FIRST: u16 = 64;
     pub const PROJECTILE_LAST: u16 = 127;
-    /// Longwick arrow (plain; Triple Nock's too): ballistic (`longwick.arrow_gravity`).
+    /// Longwick arrow (plain): ballistic (`longwick.arrow_gravity`).
     pub const ARROW: u16 = 64;
     /// Riveter hot rivet: fast, light gravity.
     pub const RIVET: u16 = 65;
@@ -128,19 +130,24 @@ pub mod kind {
     pub const FLAK_SHELL: u16 = 67;
     /// Limpet sticky charge (`STUCK` once attached; `owner` = thrower).
     pub const LIMPET: u16 = 68;
-    /// Mortar shell: lobbed, explodes on contact.
-    pub const MORTAR_SHELL: u16 = 69;
-    /// Flare: lobbed; leaves a `BURNING_PATCH` where it lands.
-    pub const FLARE: u16 = 70;
+    /// Bolas (rework): two wax-weighted balls on a cord, gravity `bolas.gravity`, passes
+    /// nothing; gone once it binds (the bind is the `BOUND` flag on its targets).
+    pub const BOLAS: u16 = 69;
+    /// Ember kite (rework): straight (no gravity), steered by its owner's crosshair: while
+    /// [`super::projectile_flags::GUIDED`] the server re-launches it every tick it turns.
+    pub const KITE: u16 = 70;
     /// Pinning arrow (the Longwick's Pinning Arrow).
     pub const PIN_ARROW: u16 = 71;
-    /// Ember arrow (the Longwick's Ember Arrow): bursts into flame on impact.
-    pub const EMBER_ARROW: u16 = 75;
+    /// Blink arrow (rework, the Longwick's Blink Arrow): arrow gravity; `STUCK` once it sticks
+    /// in the level (`position` current) — its owner can step to it until it is removed.
+    pub const BLINK_ARROW: u16 = 75;
     /// Branding arrow (Brand on the Longwick).
     pub const BRAND_ARROW: u16 = 76;
-    // 77..=79 and 96..=103: the refit's melee and knacks (docs/arsenal.md).
+    // 77..=79 and 96..=103: the refit's melee and knacks (docs/arsenal.md), the rework's.
     /// Hurl (melee ability): the thrown blade / hammer-head, gravity `hurl.gravity`; `state` =
-    /// the carrier's `WeaponKind` id (Trimmer: a blade, Tamper: a hammer-head).
+    /// the carrier's `WeaponKind` id (Trimmer: a blade, Tamper: a hammer-head). On the way back
+    /// it is [`super::projectile_flags::GUIDED`] (homing on the thrower's chest, no gravity)
+    /// and [`super::projectile_flags::RETURNING`].
     pub const HURL: u16 = 77;
     /// Retired (the Kindle Flask is drunk now, docs/rework.md §3): never sent. The id is free
     /// once nothing draws it any more.
@@ -151,7 +158,14 @@ pub mod kind {
     pub const SNARE: u16 = 79;
     /// Soot Pot (knack): thrown (`knacks.soot_pot.gravity`); bursts into a `SOOT_CLOUD`.
     pub const SOOT_POT: u16 = 96;
-    // 97..=103: reserved for the arsenal.
+    /// Beacon arrow (rework, the Longwick's Beacon Arrow): arrow gravity; where it sticks it
+    /// stays `STUCK` (`position` current; in a target it rides along) and lights the beacon
+    /// for `beacon_arrow.duration`: hostiles within `beacon_arrow.radius` are `REVEALED`.
+    pub const BEACON_ARROW: u16 = 97;
+    /// A Lantern being tossed (rework): gravity `lantern.gravity`; where it settles it becomes
+    /// a `LANTERN` (a projectile that hits the level and vanishes).
+    pub const LANTERN_TOSS: u16 = 98;
+    // 99..=103: reserved for the arsenal.
     /// Tumbler bomb (`state` = world bounces left before it explodes).
     pub const BOMB: u16 = 72;
     /// Tumbler Gravewell canister (`STUCK` while it pulls).
@@ -163,21 +177,33 @@ pub mod kind {
     pub const EMBER_BOMB: u16 = 80;
     /// The Heron's needle (fast, straight, parryable).
     pub const NEEDLE: u16 = 81;
+    // The Wisp (74) orbits its owner while [`super::projectile_flags::ORBITING`]; flung, it
+    // flies straight like before.
 
     // 128..160: pickups / ember bursts / hazards.
     /// Ember burst (heal pool): `health` = pool left, `state` = radius (dm), `aux` = spawn tick.
     pub const EMBER_BURST: u16 = 128;
-    // 136..=139: hazards of the arsenal (docs/arsenal.md); 140..=143: enemies' hazards.
-    /// A burning patch (Flare): `position` = centre on the ground, `owner` = player,
-    /// `state` = radius (dm), `aux` = tick it burns out. Burns hostiles inside.
-    pub const BURNING_PATCH: u16 = 136;
+    // 136..=139, 144..=151: things the arsenal leaves in the world (docs/arsenal.md);
+    // 140..=143: enemies' hazards.
+    /// A Waxwork (rework): its owner's wax double, standing still. `position` = feet,
+    /// `yaw` / `pitch` = the look it was cast with, `owner` = the player it copies (draw their
+    /// Shrike, cosmetics and name: in PvP it passes for them), `state` = the held weapon and
+    /// ability as the player entity packs them ([`super::pack_player_weapon`]), `flags` = the
+    /// pose's [`super::player_flags`] (`LOW_PROFILE`, `ON_GROUND`...) plus
+    /// [`super::waxwork_flags`], `health` = health, `aux` = the tick it slumps. (136 was the
+    /// Flare's burning patch, retired with v11.)
+    pub const WAXWORK: u16 = 136;
     /// Retired (the Kindle Flask's pool is gone, docs/rework.md §3): never sent. The id is
     /// free once nothing draws it any more.
     pub const KINDLE_POOL: u16 = 137;
     /// A Soot Pot's cloud: `position` = centre, `owner` = thrower, `state` = radius (dm), `aux`
     /// = tick it clears. Moulds can't see into, out of or through it; draw it dense.
     pub const SOOT_CLOUD: u16 = 138;
-    // 139: reserved for the arsenal.
+    /// A Lantern (rework) set down on the floor: `position` = its foot, `owner` = the player,
+    /// `state` = the carrier's `WeaponKind` id (what it shoots: Arclash zaps, Riveter rivets,
+    /// Kiln embers), `health` = health, `aux` = the tick it goes out, `yaw` = where it last
+    /// aimed.
+    pub const LANTERN: u16 = 139;
     // 140..=143: enemy hazards (enemies area, docs/enemies.md).
     /// The Smelter's slag line on the ground: `position` = start, `velocity` = end − start
     /// (it follows the floor between them), `flags` = [`super::slag_flags`], `state` = width
@@ -202,6 +228,12 @@ pub mod kind {
     /// Hazards left by enemies (140..=143).
     pub fn is_enemy_hazard(kind: u16) -> bool {
         (140..=143).contains(&kind)
+    }
+
+    /// Things the arsenal's abilities leave in the world (the Waxwork, pools, clouds, the
+    /// Lantern: 136..=139, 144..=151).
+    pub fn is_arsenal_thing(kind: u16) -> bool {
+        (136..=139).contains(&kind) || (144..=151).contains(&kind)
     }
 }
 
@@ -251,12 +283,27 @@ pub mod player_flags {
     pub const DRAWING: u32 = 1 << 14;
     /// Branded by a Brand shot: takes extra damage, draws a sigil (weapons area).
     pub const BRANDED: u32 = 1 << 15;
-    // Bits 16, 17: the knacks (arsenal, docs/arsenal.md).
+    // Bit 16: the refit's knacks (arsenal, docs/arsenal.md).
     /// Tallow Skin (knack) active: half damage, no knockback (a waxy sheen).
     pub const TALLOW: u32 = 1 << 16;
-    /// Hasted by a Kindle Flask (knack): faster, healing over time (embers off the wick, a
-    /// speed trail). The drinker's own `MoveState::haste_time` says how long.
+    // Bits 17–23: the rework (docs/rework.md).
+    /// Hasted by a drunk Kindle Flask (knack): faster, healing over time (embers streaming off
+    /// the wick, a speed trail). The drinker's own `MoveState::haste_time` says how long.
     pub const HASTE: u32 = 1 << 17;
+    /// Revealed by a Beacon Arrow: the shooter's side draws a silhouette through walls; takes
+    /// more damage from players.
+    pub const REVEALED: u32 = 1 << 18;
+    /// A guard is up (the held ability, `state` bits 4–8, says which: Bulwark's slab, the
+    /// Riposte's guard pose); `aux` bits 12–15 = its strength left.
+    pub const GUARDING: u32 = 1 << 19;
+    /// The held weapon is stoked (Stoke: faster fire that burns; a glow ramp).
+    pub const STOKED: u32 = 1 << 20;
+    /// The held weapon overheated after a Stoke (no primary; venting).
+    pub const OVERHEATED: u32 = 1 << 21;
+    /// Bound by a Bolas cord (slowed; linked to another bound hostile).
+    pub const BOUND: u32 = 1 << 22;
+    /// Holding a Tally (sweeping the crosshair over targets).
+    pub const TALLYING: u32 = 1 << 23;
 }
 
 /// Flag bits of enemy entities.
@@ -293,6 +340,14 @@ pub mod enemy_flags {
     /// Branded by a Quill Brand shot: takes extra damage, draws a sigil (weapons area; the
     /// brand lives in a `SimWorld` side table and is OR-ed in by `SimWorld::replicate`).
     pub const BRANDED: u32 = 1 << 15;
+    // Bits 16–19: the rework (arsenal, docs/rework.md).
+    /// Revealed by a Beacon Arrow: drawn as a silhouette through walls for the shooter's side;
+    /// takes more damage from players.
+    pub const REVEALED: u32 = 1 << 16;
+    /// Bound by a Bolas (pinned; its cord may link it to another bound hostile).
+    pub const BOUND: u32 = 1 << 17;
+    /// Lured by a Waxwork: its target is the wax double (`owner` = the double's owner).
+    pub const LURED: u32 = 1 << 18;
 }
 
 /// Weapon id (bits 0–3 of a player entity's `state`) of a player carrying no weapon (fists
@@ -321,8 +376,9 @@ pub fn pack_player_weapon(
 }
 
 /// Decodes a player entity's `state` ([`pack_player_weapon`]): held weapon, selected ability,
-/// charge / draw level 0..=255 (the Discharge / Skewer charge while `CHARGING`, the bow's draw
-/// while `DRAWING`). Unknown ids decode as the defaults (Quill, Brand).
+/// charge / draw level 0..=255 (the Discharge charge while `CHARGING`, how long a held ability
+/// has been up while `GUARDING` / `TALLYING`, the bow's draw or the Lamplighter's focus while
+/// `DRAWING`). Unknown ids decode as the defaults (Quill, Brand).
 pub fn player_weapon(state: u16) -> (crate::loadout::WeaponKind, crate::loadout::Ability, u8) {
     let weapon = crate::loadout::WeaponKind::from_id((state & 0xF) as u8).unwrap_or_default();
     let ability = crate::loadout::Ability::from_id(((state >> 4) & 0x1F) as u8).unwrap_or_default();
@@ -343,9 +399,25 @@ pub mod projectile_flags {
     pub const ENEMY: u32 = 1 << 3;
     /// A Snare lying on the floor has armed: the next hostile close by springs it.
     pub const ARMED: u32 = 1 << 4;
+    // Bits 5–8: the rework (docs/rework.md).
+    /// Steered or homing (the Kite under its owner's crosshair, the Hurl on its way back):
+    /// no gravity; the server re-launches the trajectory every tick it turns.
+    pub const GUIDED: u32 = 1 << 5;
+    /// The Hurl's return leg.
+    pub const RETURNING: u32 = 1 << 6;
+    /// The Wisp orbiting its owner (`wisp_orbit_*`): `position` is current (the client may
+    /// draw it on its orbit round the owner's chest instead), `aux` = the tick the orbit
+    /// started.
+    pub const ORBITING: u32 = 1 << 7;
     /// Turned at a thorn (a relay, `sim::thorn`): flies straight (no gravity) at what the
     /// thorn picked.
-    pub const RELAYED: u32 = 1 << 5;
+    pub const RELAYED: u32 = 1 << 8;
+}
+
+/// Flag bits of `kind::WAXWORK` (above the player flags of the pose it copies).
+pub mod waxwork_flags {
+    /// Slumping and about to burst (the last moments, or destroyed: the burst follows).
+    pub const SLUMPING: u32 = 1 << 24;
 }
 
 /// Flag bits of ember bursts.
