@@ -1244,8 +1244,10 @@ impl SimWorld {
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
-        // The thorns it reached fling on (thorn.rs).
+        // The thorns it reached fling on (thorn.rs); hostile lanterns in it are hurt
+        // (abilities/lantern.rs).
         self.relay_blast(t, owner, attack, center, spec.radius);
+        self.blast_lanterns(t, owner, center, spec);
         reached
     }
 

@@ -59,6 +59,7 @@ impl SimWorld {
                 Some(false)
             }
             ProjectileKind::Bolas => self.bolas_hit_target(t, p, target, part, dir),
+            ProjectileKind::LanternToss => self.lantern_hit_target(t, p, target),
             ProjectileKind::BlinkArrow => self.blink_arrow_hit_target(t, p, target, part, dir),
             ProjectileKind::BeaconArrow => self.beacon_arrow_hit_target(t, p, target, part, dir),
             ProjectileKind::SootPot => {
@@ -138,6 +139,7 @@ impl SimWorld {
                 self.knack_lands(t, p, p.position);
                 true
             }
+            ProjectileKind::LanternToss => self.lantern_expired(t, p),
             _ => false,
         }
     }

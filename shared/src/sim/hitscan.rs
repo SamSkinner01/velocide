@@ -388,6 +388,19 @@ impl SimWorld {
         let hit =
             self.first_target_on_ray(t, shooter, hitboxes, origin, dir, world_t, spec.exclude);
         let block_t = hit.map_or(world_t, |h| h.0);
+        // A hostile Bulwark's slab in front of that stops it (abilities/bulwark.rs).
+        if let Some((slab_t, holder)) = self.slab_on_ray(t, shooter, origin, dir, block_t) {
+            let point = origin + dir * slab_t;
+            let mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+            let info = DamageInfo::new(spec.damage * mult, shooter, spec.attack)
+                .at(point, dir)
+                .flags(Self::hitscan_flags(spec.attack));
+            self.slab_absorbs(t, holder, &info);
+            return TraceResult {
+                end: point,
+                ..Default::default()
+            };
+        }
         // Thorns are the players' (PvE): only their rays relay.
         let thorn = if spec.ricochet && matches!(shooter, Owner::Player(_)) {
             self.thorn_on_ray(t, origin, dir, block_t, thorn_time)
