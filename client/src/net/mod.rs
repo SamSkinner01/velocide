@@ -819,12 +819,13 @@ impl NetClient {
             }
             ServerMessage::PlayerList(list) => {
                 self.players.clear();
-                for info in list {
+                for info in list.into_iter().take(256).map(clean_info) {
                     self.players.insert(info.id, info.clone());
                     self.events.push_back(NetEvent::PlayerJoined(info));
                 }
             }
             ServerMessage::PlayerJoined(info) => {
+                let info = clean_info(info);
                 self.players.insert(info.id, info.clone());
                 self.events.push_back(NetEvent::PlayerJoined(info));
             }
@@ -833,10 +834,15 @@ impl NetClient {
                 self.events.push_back(NetEvent::PlayerLeft { id, name });
             }
             ServerMessage::PlayerUpdated(info) => {
+                let info = clean_info(info);
                 self.players.insert(info.id, info.clone());
                 self.events.push_back(NetEvent::PlayerUpdated(info));
             }
             ServerMessage::Chat { from, text } => {
+                // As the server should have: a stranger's server could send megabytes.
+                let Some(text) = protocol::sanitize_chat(&text) else {
+                    return;
+                };
                 let name = match from {
                     Some(id) => self.player_name(id).unwrap_or("?").to_string(),
                     None => "server".to_string(),
@@ -1069,6 +1075,13 @@ impl Drop for NetClient {
             self.transport.disconnect();
         }
     }
+}
+
+/// A player as a well-behaved server sends it: a malicious host's names could be megabytes
+/// long (the client draws them every frame).
+fn clean_info(mut info: PlayerInfo) -> PlayerInfo {
+    info.name = protocol::sanitize_name(&info.name);
+    info
 }
 
 /// Random 64-bit id for netcode's unsecure mode (must be unique per connection; from the OS

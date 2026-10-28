@@ -185,7 +185,9 @@ fn players_find_the_game_and_join_by_code_directly_and_through_the_relay() {
     assert!(stranger.lobby().is_none(), "the gate let a stranger in");
     assert!(server.stats().clients <= 2, "{:?}", server.stats());
 
-    // Kicked = banned: the same address can't get back in by code.
+    // Kicked = banned: the same address can't get back in by code. (It shares the host's public
+    // IP here, so the ban stays at the host rather than the service: the service's side is in
+    // rendezvous/tests/nat.rs.)
     let player = direct.local_player_id().unwrap();
     server.send(ServerCommand::Kick {
         player,
@@ -193,12 +195,12 @@ fn players_find_the_game_and_join_by_code_directly_and_through_the_relay() {
     });
     assert!(pump(&mut [&mut direct, &mut relayed], 5.0, |c| c[0]
         .is_disconnected()));
-    std::thread::sleep(Duration::from_millis(1500)); // the ban reaches the service
     let mut again =
         NetClient::connect_online(&svc, code, false, ClientConfig::new("Again")).unwrap();
-    assert!(pump(&mut [&mut again], 10.0, |c| c[0].is_disconnected()));
+    assert!(pump(&mut [&mut again], 25.0, |c| c[0].is_disconnected()));
+    assert!(again.lobby().is_none(), "the kicked player got back in");
     let reason = again.disconnect_reason().unwrap_or_default().to_string();
-    assert!(reason.contains("doesn't let you join"), "{reason}");
+    assert!(reason.contains("couldn't reach the host"), "{reason}");
     // The relayed player is still there.
     assert!(relayed.in_lobby());
     drop(server);
