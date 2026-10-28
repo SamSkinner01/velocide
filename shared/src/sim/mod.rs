@@ -322,25 +322,31 @@ impl SimPlayer {
     /// Body capsule (feet to shoulders) + head sphere at the eyes. The body stops below the
     /// head so the head is exposed from every side (headshots).
     pub fn hitbox(&self, t: &MovementTuning) -> Hitbox {
-        let (center, half_height, radius) = self.movement.capsule(t);
-        let head = self.movement.eye_position(t);
-        let head_radius = radius * 0.6;
-        let bottom = center - Vec3::Y * half_height;
-        let top_y = (center.y + half_height)
-            .min(head.y - head_radius - radius * 0.875)
-            .max(bottom.y);
-        Hitbox {
-            target: HitTarget::Player(self.id),
-            shapes: vec![
-                HitShape::capsule(
-                    HitPart::Body,
-                    bottom,
-                    Vec3::new(center.x, top_y, center.z),
-                    radius,
-                ),
-                HitShape::sphere(HitPart::Head, head, head_radius),
-            ],
-        }
+        player_hitbox(HitTarget::Player(self.id), &self.movement, t)
+    }
+}
+
+/// A player's hit shapes for a body in `movement`'s stance (players, and the Waxwork's double
+/// standing in for one): body capsule (feet to shoulders) + head sphere at the eyes.
+pub(crate) fn player_hitbox(target: HitTarget, movement: &MoveState, t: &MovementTuning) -> Hitbox {
+    let (center, half_height, radius) = movement.capsule(t);
+    let head = movement.eye_position(t);
+    let head_radius = radius * 0.6;
+    let bottom = center - Vec3::Y * half_height;
+    let top_y = (center.y + half_height)
+        .min(head.y - head_radius - radius * 0.875)
+        .max(bottom.y);
+    Hitbox {
+        target,
+        shapes: vec![
+            HitShape::capsule(
+                HitPart::Body,
+                bottom,
+                Vec3::new(center.x, top_y, center.z),
+                radius,
+            ),
+            HitShape::sphere(HitPart::Head, head, head_radius),
+        ],
     }
 }
 
@@ -1249,6 +1255,8 @@ impl SimWorld {
         for e in self.enemies.values().filter(|e| e.is_alive()) {
             out.push(e.hitbox());
         }
+        // Waxworks' doubles stand in for their owners (`abilities/waxwork.rs`).
+        self.waxwork_hitboxes(tuning, out);
     }
 }
 

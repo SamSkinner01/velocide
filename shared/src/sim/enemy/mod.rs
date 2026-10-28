@@ -20,6 +20,7 @@ mod hazard;
 mod special;
 mod steer;
 
+pub(crate) use ai::PlayerView;
 pub use ai::{is_targetable, lob_velocity};
 pub use def::*;
 pub use hazard::{SlagLine, trace_floor};

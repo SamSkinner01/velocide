@@ -27,9 +27,14 @@ pub struct WeaponPredictor {
     applied_seq: u32,
     /// (tick, seq) of the authoritative state we last re-based on.
     based_on: Option<(u32, u32)>,
-    /// Re-bases whose replay disagreed with what we had predicted (should stay 0: nothing
-    /// server-side changes the weapon state).
+    /// Re-bases whose replay disagreed with what we had predicted (should stay 0: nothing but
+    /// the cooldowns below is changed server-side).
     pub mismatches: u64,
+    /// Re-bases that only moved a cooldown, a live ability or a held one (`charge`): the
+    /// server-side outcomes of the rework's abilities (a Wickline that missed, a Tally with
+    /// nothing tallied, a caught Hurl, a shattered Bulwark, a Waxwork destroyed early, a Blink
+    /// Arrow that stuck: docs/rework.md).
+    pub server_cooldowns: u64,
     /// What [`Self::lookahead`] already played for the next tick.
     preplayed: Option<Vec<FireIntent>>,
 }
@@ -81,7 +86,17 @@ impl WeaponPredictor {
             last = input.seq;
         }
         if !first && state != self.state {
-            self.mismatches += 1;
+            let cooldowns_only = WeaponState {
+                alt_cooldown: state.alt_cooldown,
+                live: state.live,
+                charge: state.charge,
+                ..self.state
+            } == state;
+            if cooldowns_only {
+                self.server_cooldowns += 1;
+            } else {
+                self.mismatches += 1;
+            }
         }
         self.state = state;
         if first {

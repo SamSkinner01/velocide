@@ -16,7 +16,7 @@ use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::protocol::{NetFrame, NetId, kind};
 use shared::sim::{
     Attack, DamageFlags, HitPart, HitTarget, Owner, ParryTarget, PlayerId, ProjectileKind,
-    SimEvent, step_weapons,
+    SimEvent, WeaponState, step_weapons,
 };
 use shared::tuning::{CombatTuning, Tuning};
 use weapon_support::*;
@@ -436,7 +436,8 @@ fn hurl_throws_a_blade_or_a_hammer_head() {
         assert_eq!(e.kind, kind::HURL);
         assert_eq!(e.state, weapon.id() as u16);
         assert_eq!(proj.attack, Attack::Hurl);
-        let ev = a.ticks(40);
+        // Once on the way out (the way back: `combat_rework.rs`).
+        let ev = a.ticks(25);
         let hits = hits_on(&ev, HitTarget::Entity(d));
         assert_eq!(hits.len(), 1, "{weapon:?}");
         assert!(
@@ -451,7 +452,7 @@ fn hurl_throws_a_blade_or_a_hammer_head() {
         let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, TOUGH);
         a.ticks(2);
         a.aim(p, dummy_head(&a, d));
-        let ev = a.tap(p, Buttons::ALT_FIRE, 40);
+        let ev = a.tap(p, Buttons::ALT_FIRE, 25);
         let hits = hits_on(&ev, HitTarget::Entity(d));
         assert_eq!(hits.len(), 1, "{weapon:?} at the head");
         assert_eq!(hits[0].info.part, HitPart::Body);
@@ -520,6 +521,7 @@ fn melee_and_knack_prediction_stays_exact() {
     }
     let t = a.tuning.clone();
     let mut predicted = a.world.players[&p].combat.weapons;
+    let mut rebases = 0;
     for i in 0..1500u32 {
         let phase = i / 60;
         let input = a.held.get_mut(&p).unwrap();
@@ -535,8 +537,22 @@ fn melee_and_knack_prediction_stays_exact() {
         let sent: PlayerInput = *input;
         a.tick();
         step_weapons(&mut predicted, &sent, true, &t.combat, 60);
-        assert_eq!(a.world.players[&p].combat.weapons, predicted, "input {i}");
+        let server = a.world.players[&p].combat.weapons;
+        // A server-side outcome may change a cooldown (a Tally with nothing tallied, a caught
+        // Hurl, a Wickline that missed: docs/rework.md); the client re-bases on those like on
+        // any reconciliation (`WeaponPredictor::sync`). Everything else is predicted exactly.
+        let rest = WeaponState {
+            alt_cooldown: server.alt_cooldown,
+            live: server.live,
+            ..predicted
+        };
+        assert_eq!(server, rest, "input {i}");
+        if (server.alt_cooldown, server.live) != (predicted.alt_cooldown, predicted.live) {
+            rebases += 1;
+        }
+        predicted = server;
     }
+    assert!(rebases < 30, "{rebases} cooldown re-bases");
     let swung: Vec<Attack> = swings(&a.events).into_iter().map(|s| s.0).collect();
     for attack in [
         Attack::Trimmer,
