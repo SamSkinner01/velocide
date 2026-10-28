@@ -197,6 +197,22 @@ fn main() -> anyhow::Result<()> {
         &[&[Escape], &[Down; 4], &[Right], &[Down], &[Enter], &[]],
     );
     h.shot("menu_loadout_hunter");
+    // The HUNTER's third slot (the Thresher): its Scatter pool (the rework's Bolas and
+    // Bulwark).
+    h.menu(
+        &mut menu,
+        &[
+            &[Escape],
+            &[Enter],
+            &[],
+            &[Down],
+            &[Down],
+            &[Right],
+            &[Down],
+            &[Enter],
+        ],
+    );
+    h.shot("menu_loadout_ability_scatter");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("settings_video");
     for (i, name) in [
