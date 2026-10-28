@@ -247,7 +247,7 @@ impl Recorder {
             .fx
             .iter()
             .map(|e| match &e.fx {
-                Fx::Shot { ends, .. } | Fx::Splinters { ends, .. } => {
+                Fx::Shot { ends, .. } | Fx::TallyFired { ends, .. } => {
                     std::mem::size_of::<FxEvent>() + ends.len() * 12
                 }
                 Fx::Ricochet { points, .. } | Fx::ArcChain { points, .. } => {
@@ -741,6 +741,10 @@ impl InGame {
         for shot in shots {
             let tick = tick_of(shot.input.seq);
             for intent in &shot.intents {
+                // Held abilities' presses and releases, recasts: nothing a shot would show.
+                if !super::combat::plays_as_shot(intent) {
+                    continue;
+                }
                 let fx = match *intent {
                     FireIntent::Punch => Fx::Punch {
                         player: me,
@@ -1939,8 +1943,8 @@ mod tests {
             "LONGWICK"
         );
         assert_eq!(
-            weapon_attack_label(WeaponKind::Riveter, Attack::Volley),
-            "RIVETER VOLLEY"
+            weapon_attack_label(WeaponKind::Riveter, Attack::Stoke),
+            "RIVETER STOKE"
         );
         assert_eq!(
             weapon_attack_label(WeaponKind::Longwick, Attack::Brand),

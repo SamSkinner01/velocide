@@ -1,7 +1,8 @@
-//! The expansion arsenal in a live world (docs/arsenal.md): every new primary and ability, the
-//! Burn and Pinned status effects (enemies and PvP players), burning patches, abilities on a
+//! The expansion arsenal in a live world (docs/arsenal.md): the expansion's primaries and its
+//! kept abilities, the Burn and Pinned status effects (enemies and PvP players), abilities on a
 //! lesser weapon of their class, and the PvP profile's one-shot rules and times to kill (from
-//! the numbers, and measured in play with the balance harness).
+//! the numbers, and measured in play with the balance harness). The rework's abilities and the
+//! Lamplighter have their own tests (`combat_rework.rs`).
 
 mod balance_support;
 mod combat_support;
@@ -16,7 +17,7 @@ use glam::Vec3;
 use shared::input::Buttons;
 use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
 use shared::lobby::GameMode;
-use shared::protocol::{NetFrame, NetId, enemy_flags, kind, player_flags};
+use shared::protocol::{NetFrame, NetId, enemy_flags, player_flags};
 use shared::sim::combat::secs_to_ticks;
 use shared::sim::style::is_longshot;
 use shared::sim::{
@@ -97,7 +98,7 @@ const BIG: f32 = 1.0e5;
 
 #[test]
 fn lancet_fires_needles_that_bloom() {
-    let (mut a, p) = armed(WeaponKind::Lancet, [Ability::Skewer, Ability::Flurry]);
+    let (mut a, p) = armed(WeaponKind::Lancet, [Ability::Tally, Ability::Waxwork]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -15.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -114,21 +115,21 @@ fn lancet_fires_needles_that_bloom() {
 
 #[test]
 fn thresher_is_an_automatic_scattergun() {
-    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Slug, Ability::Flak]);
+    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Bolas, Ability::Flak]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -4.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
-    // Held 0.9 s: blasts at 0, 0.42 and 0.84 s, 7 pellets each, all landing at 4 m.
+    // Held 0.9 s: blasts at 0, 0.42 and 0.84 s, every pellet landing at 4 m.
     let ev = hold(&mut a, p, Buttons::FIRE, 54, 2);
     let hits = hits_on(&ev, d, Attack::Thresher);
-    assert_eq!(hits.len(), 21);
-    let pellet = Tuning::default().combat.thresher.pellet_damage;
-    assert!(hits.iter().all(|h| h.info.amount == pellet));
+    let th = Tuning::default().combat.thresher;
+    assert_eq!(hits.len(), 3 * th.pellets as usize);
+    assert!(hits.iter().all(|h| h.info.amount == th.pellet_damage));
 }
 
 #[test]
 fn riveter_rivets_fly_then_hit() {
-    let (mut a, p) = armed(WeaponKind::Riveter, [Ability::Volley, Ability::Wisp]);
+    let (mut a, p) = armed(WeaponKind::Riveter, [Ability::Stoke, Ability::Lantern]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -27.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -151,7 +152,7 @@ fn riveter_rivets_fly_then_hit() {
 
 #[test]
 fn cinderbox_fires_a_three_rocket_salvo() {
-    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Mortar]);
+    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Kite]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -171,7 +172,7 @@ fn cinderbox_fires_a_three_rocket_salvo() {
 fn longwick_draw_sets_speed_and_damage() {
     let t = Tuning::default().combat.longwick;
     // A full draw at 20 m.
-    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::TripleNock, Ability::Brand]);
+    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::BlinkArrow, Ability::Brand]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -20.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -180,7 +181,7 @@ fn longwick_draw_sets_speed_and_damage() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].info.amount, t.max_damage);
     // A tap: a weak, slow arrow (close by: it drops).
-    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::TripleNock, Ability::Brand]);
+    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::BlinkArrow, Ability::Brand]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -6.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -192,7 +193,7 @@ fn longwick_draw_sets_speed_and_damage() {
 
 #[test]
 fn kiln_sets_targets_alight_and_the_burn_outlasts_the_spray() {
-    let (mut a, p) = armed(WeaponKind::Kiln, [Ability::Flare, Ability::Discharge]);
+    let (mut a, p) = armed(WeaponKind::Kiln, [Ability::Lantern, Ability::Discharge]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -6.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -252,66 +253,6 @@ fn burn_stacks_cap_refresh_and_credit_the_source() {
 
 // ---- abilities --------------------------------------------------------------------------------
 
-#[test]
-fn skewer_pierces_three_targets_with_falloff() {
-    let (mut a, p) = armed(WeaponKind::Lancet, [Ability::Skewer, Ability::Flurry]);
-    let line: Vec<NetId> = [10.0f32, 14.0, 18.0, 22.0]
-        .iter()
-        .map(|z| dummy(&mut a, Vec3::new(0.0, 0.0, -z), 0.0, BIG))
-        .collect();
-    // Along the line, between head and body height of the far ones.
-    let aim = a.eye(p) + Vec3::new(0.0, -0.45, -22.0);
-    a.aim(p, aim);
-    let full = secs_to_ticks(a.tuning.combat.skewer.charge_time, 60, 1) as u32 + 5;
-    let ev = hold(&mut a, p, Buttons::ALT_FIRE, full, 2);
-    let amounts: Vec<f32> = line
-        .iter()
-        .map(|d| {
-            hits_on(&ev, *d, Attack::Skewer)
-                .first()
-                .map_or(0.0, |h| h.info.amount)
-        })
-        .collect();
-    assert_eq!(amounts[0], 90.0);
-    assert!((amounts[1] - 72.0).abs() < 1e-3, "{amounts:?}");
-    assert!((amounts[2] - 57.6).abs() < 1e-3, "{amounts:?}");
-    assert_eq!(amounts[3], 0.0, "three targets at most");
-    let second = hits_on(&ev, line[1], Attack::Skewer)[0];
-    assert!(second.info.flags.contains(DamageFlags::PIERCED));
-}
-
-#[test]
-fn flurry_fires_three_quick_shots() {
-    let (mut a, p) = armed(WeaponKind::Lancet, [Ability::Flurry, Ability::Skewer]);
-    let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, BIG);
-    let body = dummy_body(&a, d);
-    a.aim(p, body);
-    let mut ticks = Vec::new();
-    a.set_buttons(p, Buttons::ALT_FIRE);
-    for i in 0..20 {
-        let ev = a.tick();
-        a.set_buttons(p, Buttons::NONE);
-        for h in hits_on(&ev, d, Attack::Flurry) {
-            let c = Tuning::default().combat;
-            assert!((h.info.amount - c.lancet.damage * c.flurry.damage_scale).abs() < 1e-4);
-            ticks.push(i);
-        }
-    }
-    assert_eq!(ticks, vec![0, 4, 8]);
-}
-
-#[test]
-fn slug_is_one_heavy_exact_shot() {
-    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Slug, Ability::Flak]);
-    let d = dummy(&mut a, Vec3::new(0.0, 0.0, -40.0), 0.0, BIG);
-    let body = dummy_body(&a, d);
-    a.aim(p, body);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 2);
-    let hits = hits_on(&ev, d, Attack::Slug);
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].info.amount, 55.0);
-}
-
 fn bursts(events: &[SimEvent]) -> Vec<(Vec3, usize)> {
     events
         .iter()
@@ -324,7 +265,7 @@ fn bursts(events: &[SimEvent]) -> Vec<(Vec3, usize)> {
 
 #[test]
 fn flak_airbursts_into_a_ring_at_range() {
-    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Flak, Ability::Slug]);
+    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Flak, Ability::Bolas]);
     let eye = a.eye(p);
     // Off the line of flight, where the first pellet of the ring (towards +x, 25° off the
     // axis) passes 6 m beyond the burst.
@@ -348,7 +289,7 @@ fn flak_airbursts_into_a_ring_at_range() {
 
 #[test]
 fn flak_bursts_on_contact_too() {
-    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Flak, Ability::Slug]);
+    let (mut a, p) = armed(WeaponKind::Thresher, [Ability::Flak, Ability::Bolas]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -6.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -359,50 +300,8 @@ fn flak_bursts_on_contact_too() {
 }
 
 #[test]
-fn volley_dumps_ten_of_the_weapons_shots_at_once() {
-    let (mut a, p) = armed(WeaponKind::Riveter, [Ability::Volley, Ability::Wisp]);
-    a.tap(p, Buttons::ALT_FIRE, 0);
-    let rivets = a.world.projectiles.values();
-    let volley: Vec<_> = rivets.filter(|r| r.attack == Attack::Volley).collect();
-    assert_eq!(volley.len(), 10);
-    assert!(volley.iter().all(|r| r.kind == ProjectileKind::Rivet));
-    // Arclash: ten zaps (one shot event with ten rays).
-    let (mut a, p) = armed(WeaponKind::Arclash, [Ability::Volley, Ability::Wisp]);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    let rays = ev.iter().find_map(|e| match e {
-        SimEvent::Shot(s) if s.attack == Attack::Volley => Some(s.ends.len()),
-        _ => None,
-    });
-    assert_eq!(rays, Some(10));
-}
-
-#[test]
-fn flare_leaves_a_burning_patch_that_burns_what_stands_in_it() {
-    let (mut a, p) = armed(WeaponKind::Kiln, [Ability::Flare, Ability::Discharge]);
-    let d = dummy(&mut a, Vec3::new(0.0, 0.0, -6.0), 0.0, BIG);
-    let body = dummy_body(&a, d);
-    a.aim(p, body);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 60);
-    assert_eq!(a.world.fire_patches.len(), 1);
-    let patch = *a.world.fire_patches.values().next().unwrap();
-    assert!(patch.position.distance(Vec3::new(0.0, 0.0, -6.0)) < 1.5);
-    assert!(patch.position.y.abs() < 0.1, "on the floor");
-    assert!(a.world.is_burning(HitTarget::Entity(d)));
-    assert!(!hits_on(&ev, d, Attack::Flare).is_empty());
-    assert!(!a.world.is_burning(HitTarget::Player(p)), "not its owner");
-    let mut frame = NetFrame::new();
-    a.world.replicate(&a.tuning, &mut frame);
-    let e = frame.get(patch.id).expect("replicated");
-    assert_eq!(e.kind, kind::BURNING_PATCH);
-    assert_eq!((e.state, e.aux), (30, patch.expire_tick));
-    // It burns out after `flare.patch_time`.
-    a.ticks(secs_to_ticks(a.tuning.combat.flare.patch_time, 60, 1) as u32);
-    assert!(a.world.fire_patches.is_empty());
-}
-
-#[test]
 fn limpets_stick_and_a_hold_detonates_them_all() {
-    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Mortar]);
+    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Kite]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -5.0), 0.0, BIG);
     let head = dummy_head(&a, d);
     a.aim(p, head);
@@ -444,7 +343,7 @@ fn limpets_stick_and_a_hold_detonates_them_all() {
 
 #[test]
 fn a_limpet_rides_along_on_a_moving_target() {
-    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Mortar]);
+    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Limpet, Ability::Kite]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -5.0), 0.0, BIG);
     let head = dummy_head(&a, d);
     a.aim(p, head);
@@ -461,52 +360,6 @@ fn a_limpet_rides_along_on_a_moving_target() {
     assert!((e.position - limpet).length() < 0.01);
 }
 
-#[test]
-fn mortar_lobs_a_wide_heavy_blast() {
-    let (mut a, p) = armed(WeaponKind::Cinderbox, [Ability::Mortar, Ability::Limpet]);
-    let eye = a.eye(p);
-    let row: Vec<NetId> = [26.0f32, 30.0, 34.0, 38.0, 42.0]
-        .iter()
-        .map(|z| dummy(&mut a, Vec3::new(0.0, 0.0, -z), 0.0, BIG))
-        .collect();
-    a.aim(p, eye + Vec3::NEG_Z);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 150);
-    let blasts = explosions(&ev, Attack::Mortar);
-    assert_eq!(blasts.len(), 1);
-    assert_eq!(blasts[0].1, 6.0);
-    let hurt = row
-        .iter()
-        .filter(|d| damage_to(&ev, HitTarget::Entity(**d)) > 0.0)
-        .count();
-    assert!(hurt >= 2, "a wide blast");
-}
-
-#[test]
-fn triple_nock_looses_three_arrows_in_a_fan() {
-    let (mut a, p) = armed(
-        WeaponKind::Longwick,
-        [Ability::TripleNock, Ability::PinningArrow],
-    );
-    bow_shot(&mut a, p, 0, 50, 1);
-    let arrows: Vec<Vec3> = a
-        .world
-        .projectiles
-        .values()
-        .filter(|r| r.attack == Attack::TripleNock && r.kind == ProjectileKind::Arrow)
-        .map(|r| r.velocity)
-        .collect();
-    assert_eq!(arrows.len(), 3);
-    let widest = arrows
-        .iter()
-        .flat_map(|x| arrows.iter().map(move |y| x.angle_between(*y)))
-        .fold(0.0f32, f32::max);
-    assert!(
-        (widest.to_degrees() - 7.0).abs() < 0.2,
-        "{}",
-        widest.to_degrees()
-    );
-}
-
 fn replicated(a: &Arena, id: NetId) -> shared::protocol::EntityState {
     let mut frame = NetFrame::new();
     a.world.replicate(&a.tuning, &mut frame);
@@ -517,7 +370,7 @@ fn replicated(a: &Arena, id: NetId) -> shared::protocol::EntityState {
 fn pinning_arrow_roots_enemies() {
     let (mut a, p) = armed(
         WeaponKind::Longwick,
-        [Ability::TripleNock, Ability::PinningArrow],
+        [Ability::BlinkArrow, Ability::PinningArrow],
     );
     let h = a.husk(Vec3::new(0.0, 0.0, -6.0), 0.0);
     let body = a.husk_body(h);
@@ -567,7 +420,7 @@ fn pinning_arrow_slows_pvp_players_and_the_slow_is_predicted() {
         &mut a,
         p,
         WeaponKind::Longwick,
-        [Ability::PinningArrow, Ability::EmberArrow],
+        [Ability::PinningArrow, Ability::BeaconArrow],
     );
     let v = a.player(1, Vec3::new(0.0, 0.0, -10.0), 0.0);
     a.ticks(2);
@@ -594,38 +447,8 @@ fn pinning_arrow_slows_pvp_players_and_the_slow_is_predicted() {
 }
 
 #[test]
-fn ember_arrow_hits_bursts_and_burns() {
-    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::EmberArrow, Ability::Brand]);
-    let d = dummy(&mut a, Vec3::new(0.0, 0.0, -15.0), 0.0, BIG);
-    let near = dummy(&mut a, Vec3::new(1.5, 0.0, -15.0), 0.0, BIG);
-    let body = dummy_body(&a, d);
-    a.aim(p, body);
-    let ev = bow_shot(&mut a, p, 0, 50, 20);
-    let hits = hits_on(&ev, d, Attack::EmberArrow);
-    let arrow = hits
-        .iter()
-        .find(|h| h.info.flags.contains(DamageFlags::PROJECTILE))
-        .expect("the arrow's own hit");
-    let c = &a.tuning.combat;
-    assert_eq!(
-        arrow.info.amount,
-        c.longwick.max_damage * c.ember_arrow.damage_scale
-    );
-    assert_eq!(explosions(&ev, Attack::EmberArrow).len(), 1);
-    assert!(
-        hits.iter()
-            .any(|h| h.info.flags.contains(DamageFlags::EXPLOSIVE))
-    );
-    for target in [d, near] {
-        let burn = a.world.statuses[&HitTarget::Entity(target)].burn.unwrap();
-        assert_eq!(burn.stacks as u32, c.ember_arrow.burn_stacks);
-        assert_eq!(burn.attack, Attack::EmberArrow);
-    }
-}
-
-#[test]
 fn brand_on_the_bow_brands_what_the_arrow_hits() {
-    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::Brand, Ability::TripleNock]);
+    let (mut a, p) = armed(WeaponKind::Longwick, [Ability::Brand, Ability::BlinkArrow]);
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -12.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
@@ -664,18 +487,18 @@ fn burn_hurts_pvp_players_but_never_teammates() {
 
 #[test]
 fn abilities_on_a_lesser_weapon_of_their_class_hit_softer() {
-    let splinter = |weapon| {
-        let (mut a, p) = armed(weapon, [Ability::Splinter, Ability::Brand]);
+    let brand = |weapon| {
+        let (mut a, p) = armed(weapon, [Ability::Brand, Ability::Wickline]);
         let d = dummy(&mut a, Vec3::new(0.0, 0.0, -10.0), 0.0, BIG);
         let body = dummy_body(&a, d);
         a.aim(p, body);
         let ev = a.tap(p, Buttons::ALT_FIRE, 2);
-        hits_on(&ev, d, Attack::Splinter)[0].info.amount
+        hits_on(&ev, d, Attack::Brand)[0].info.amount
     };
     let c = Tuning::default().combat;
-    assert_eq!(splinter(WeaponKind::Quill), c.quill.splinter_damage);
-    let lancet = c.quill.splinter_damage * c.lancet.ability_power / c.quill.ability_power;
-    assert!((splinter(WeaponKind::Lancet) - lancet).abs() < 1e-3);
+    assert_eq!(brand(WeaponKind::Quill), c.quill.brand_damage);
+    let lancet = c.quill.brand_damage * c.lancet.ability_power / c.quill.ability_power;
+    assert!((brand(WeaponKind::Lancet) - lancet).abs() < 1e-3);
 }
 
 // ---- the PvP profile --------------------------------------------------------------------------
@@ -711,66 +534,66 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
             pvp.cinderbox.rockets as f32 * pvp.cinderbox.damage,
         ),
         ("longwick", pvp.longwick.max_damage),
-        ("skewer", pvp.skewer.max_damage),
-        ("slug", pvp.slug.damage),
-        (
-            "both barrels",
-            pvp.bellows.both_pellets as f32 * pvp.bellows.both_pellet_damage,
-        ),
+        ("lamplighter", pvp.lamplighter.max_damage),
         (
             "flak ring",
             pvp.flak.pellets as f32 * pvp.flak.pellet_damage,
         ),
-        (
-            "flurry on the quill",
-            pvp.flurry.shots as f32 * pvp.quill.damage * pvp.flurry.damage_scale,
-        ),
-        (
-            "volley of rivets",
-            pvp.volley.shots as f32 * pvp.riveter.damage * pvp.volley.damage_scale,
-        ),
         ("breach", pvp.tumbler.breach_damage),
         ("gravewell", pvp.tumbler.gravewell_damage),
         ("discharge", pvp.arclash.discharge_max_damage),
-        ("mortar", pvp.mortar.damage),
         (
             "three limpets",
             pvp.limpet.max_live as f32 * pvp.limpet.damage,
         ),
+        ("kite", pvp.kite.damage),
+        ("tally (a shot each)", pvp.tally.damage),
+        ("waxwork burst", pvp.waxwork.burst_damage),
+        ("wickline", pvp.wickline.damage),
         (
-            "triple nock",
-            pvp.triple_nock.arrows as f32 * pvp.longwick.max_damage * pvp.triple_nock.damage_scale,
+            "riposte on the tamper",
+            pvp.tamper.damage * pvp.riposte.max_scale,
         ),
         (
-            "ember arrow",
-            pvp.longwick.max_damage * pvp.ember_arrow.damage_scale + pvp.ember_arrow.damage,
+            "blink arrow",
+            pvp.longwick.max_damage * pvp.blink_arrow.damage_scale,
+        ),
+        (
+            "beacon arrow",
+            pvp.longwick.max_damage * pvp.beacon_arrow.damage_scale,
         ),
     ];
     for (name, damage) in body_max {
         assert!(!one_shot(damage), "{name}: {damage}");
     }
+    // The stated exception: a full Bellows blast at point blank kills a body; the Thresher's
+    // takes three blasts on the body, two on the head.
+    let bellows = pvp.bellows.pellets as f32 * pvp.bellows.pellet_damage;
+    assert!(one_shot(bellows * pvp.bellows.point_blank_multiplier));
+    let thresher = pvp.thresher.pellets as f32 * pvp.thresher.pellet_damage;
+    assert!(!one_shot(2.0 * thresher) && one_shot(3.0 * thresher));
+    assert!(!one_shot(
+        thresher * pvp.thresher.point_blank_multiplier * head
+    ));
+    assert!(one_shot(2.0 * thresher * head));
 
-    // Headshot one-shots: a full-draw arrow, the Slug, a full-charge Skewer — and not a bow
-    // or a Skewer short of full.
+    // Headshot one-shots: a full-draw arrow, a full-focus Lamplighter beam — and not a bow
+    // short of full (a Lamplighter focused past ~60 % still does: the balance area's call,
+    // docs/rework.md).
     let arrow = |draw: f32| {
         let l = &pvp.longwick;
         l.min_damage + (l.max_damage - l.min_damage) * draw
     };
-    let skewer = |charge: f32| {
-        let k = &pvp.skewer;
-        k.min_damage + (k.max_damage - k.min_damage) * charge
-    };
     assert!(one_shot(arrow(1.0) * head));
     assert!(!one_shot(arrow(0.9) * head));
-    assert!(one_shot(pvp.slug.damage * head));
-    assert!(one_shot(skewer(1.0) * head));
-    assert!(!one_shot(skewer(0.9) * head));
+    assert!(one_shot(pvp.lamplighter.max_damage * head));
+    assert!(!one_shot(pvp.lamplighter.min_damage * head), "a tap");
     // Nothing else one-shots a head.
     for (name, damage) in [
         ("quill", pvp.quill.damage),
         ("lancet", pvp.lancet.damage),
         ("brand", pvp.quill.brand_damage),
-        ("splinter", pvp.quill.splinter_damage),
+        ("tally", pvp.tally.damage),
     ] {
         assert!(!one_shot(damage * head), "{name}");
     }
@@ -813,6 +636,10 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
             ),
         ),
         ("longwick", 2.0 * draw + pvp.longwick.interval),
+        (
+            "lamplighter",
+            2.0 * pvp.lamplighter.focus_time + pvp.lamplighter.interval,
+        ),
         ("kiln", 1.0 / kiln),
     ];
     for (name, secs) in band {
@@ -825,12 +652,12 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
 
 /// The PvP rules measured in play (`balance_support`, docs/balance.md): every trigger pull and
 /// every ability use on every carrier, at 3, 5 and 10 m, aimed at the body and at the head.
-/// Body: never 100. Head: only a full-draw arrow (plain or special), the Slug and a full-charge
-/// Skewer — and a Bellows blast inside 5 m, the scattergun's point-blank reward (at 0.7 its
-/// pellets one-shot a head at 5 m too). At a 90 % draw no arrow kills, special ones included
-/// (Triple Nock's three heads and the Ember Arrow's burst + burn did). Both buttons at once
-/// never stack a blast and Both Barrels (or a shot and a Volley) on one tick. Every primary's
-/// all-body time to kill at its range stays inside 0.8–1.8 s.
+/// Body: never 100 — except a full Bellows blast at point blank (3 m, the stated exception: it
+/// must kill there, and not from 5 m). Head: only a full-draw arrow (plain or special) and a
+/// focused Lamplighter beam — and a Bellows blast inside 5 m, the scattergun's point-blank
+/// reward (at 0.7 its pellets one-shot a head at 5 m too). At a 90 % draw no arrow kills,
+/// special ones included. Both buttons at once never stack a swing and a Whirl on one tick.
+/// Every primary's all-body time to kill at its range stays inside 0.8–1.8 s.
 #[test]
 fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     let base = Tuning::default();
@@ -838,11 +665,16 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     let kills = |damage: f32| damage >= 100.0;
     for w in balance_support::weapons() {
         let bow = w == WeaponKind::Longwick;
+        let sniper = w == WeaponKind::Lamplighter;
         for range in [3.0, 5.0, 10.0] {
             let body = per_trigger(&base, Side::Pvp, w, range, Aim::Body, 1.0);
-            assert!(!kills(body), "{w:?} body at {range} m: {body}");
+            let point_blank = w == WeaponKind::Bellows && range < 5.0;
+            assert!(
+                kills(body) == point_blank,
+                "{w:?} body at {range} m: {body}"
+            );
             let head = per_trigger(&base, Side::Pvp, w, range, Aim::Weak(0), 1.0);
-            let allowed = bow || (w == WeaponKind::Bellows && range < 5.0);
+            let allowed = bow || sniper || (w == WeaponKind::Bellows && range < 5.0);
             assert!(allowed || !kills(head), "{w:?} head at {range} m: {head}");
         }
         if bow {
@@ -853,7 +685,7 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     for w in balance_support::weapons() {
         for &ability in w.abilities() {
             let bow = w == WeaponKind::Longwick;
-            let allowed = bow || matches!(ability, Ability::Slug | Ability::Skewer);
+            let allowed = bow;
             for range in [3.0, 5.0] {
                 let body = per_use(&base, Side::Pvp, w, ability, range, Aim::Body, 1.0);
                 assert!(
@@ -877,12 +709,8 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     }
     // Both buttons on the first tick: the shot is either the primary's or the ability's.
     for (w, ability) in [
-        (WeaponKind::Bellows, Ability::BothBarrels),
-        (WeaponKind::Thresher, Ability::BothBarrels),
-        (WeaponKind::Riveter, Ability::Volley),
-        (WeaponKind::Arclash, Ability::Volley),
         (WeaponKind::Tamper, Ability::Whirl),
-        (WeaponKind::Tamper, Ability::Upswing),
+        (WeaponKind::Trimmer, Ability::Whirl),
     ] {
         let t = on_player(
             &base,

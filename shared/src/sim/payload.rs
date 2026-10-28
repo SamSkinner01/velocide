@@ -1,9 +1,10 @@
-//! What the expansion arsenal's projectiles do when they land (`docs/arsenal.md`): the Flak
-//! shell's airburst ring, Limpets sticking and detonating, the Flare's burning patch, the
-//! Longwick's special arrows (pinning, ember, branding) and the refit's thrown knacks (the
-//! Kindle Flask's pool, the Soot Pot's cloud, the Snare settling on the floor).
-//! `projectiles.rs` calls the three hooks below on a target hit, a world hit and the end of a
-//! flight; everything else (the Hurl too) follows the generic projectile rules there.
+//! What the arsenal's projectiles do when they land (`docs/arsenal.md`): the Flak shell's
+//! airburst ring, Limpets sticking and detonating, the Longwick's special arrows (pinning,
+//! branding), the refit's thrown knacks (the Kindle Flask's pool, the Soot Pot's cloud, the
+//! Snare settling on the floor) and the rework's (the Bolas, the Lantern's toss, the Blink and
+//! Beacon arrows: their own files in `abilities/`). `projectiles.rs` calls the hooks below on a
+//! target hit, a world hit, the end of a flight and every tick of flight; everything else
+//! follows the generic projectile rules there.
 
 use engine::physics::SweepHit;
 use glam::Vec3;
@@ -12,7 +13,7 @@ use super::combat::{Attack, Owner};
 use super::hitscan::ShotSpec;
 use super::projectiles::{Projectile, ProjectileKind, Stuck};
 use super::weapons::aim_basis;
-use super::{HitPart, HitTarget, PlayerId, SimEvent, SimWorld};
+use super::{HitPart, HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
 use crate::tuning::Tuning;
 
 impl SimWorld {
@@ -45,11 +46,6 @@ impl SimWorld {
                 self.flak_burst(t, p, at, dir);
                 Some(false)
             }
-            ProjectileKind::Flare => {
-                let feet = self.target_origin(target).unwrap_or(p.position);
-                self.light_patch(t, p, feet);
-                Some(false)
-            }
             ProjectileKind::PinArrow => {
                 self.projectile_direct_damage(t, p, target, part, dir);
                 self.apply_pin(t, p.owner, target);
@@ -62,11 +58,9 @@ impl SimWorld {
                 }
                 Some(false)
             }
-            ProjectileKind::EmberArrow => {
-                self.projectile_direct_damage(t, p, target, part, dir);
-                self.ember_burst(t, p, Some(target));
-                Some(false)
-            }
+            ProjectileKind::Bolas => self.bolas_hit_target(t, p, target, part, dir),
+            ProjectileKind::BlinkArrow => self.blink_arrow_hit_target(t, p, target, part, dir),
+            ProjectileKind::BeaconArrow => self.beacon_arrow_hit_target(t, p, target, part, dir),
             ProjectileKind::KindleFlask => {
                 // Breaks on whoever it hit: the pool at their feet.
                 let feet = self.target_origin(target).unwrap_or(p.position);
@@ -108,16 +102,10 @@ impl SimWorld {
                 self.flak_burst(t, p, at, axis);
                 Some(false)
             }
-            ProjectileKind::Flare => {
-                let at = p.position + hit.normal * 0.05;
-                self.light_patch(t, p, at);
-                Some(false)
-            }
-            ProjectileKind::EmberArrow => {
-                p.position += hit.normal * 0.1;
-                self.ember_burst(t, p, None);
-                Some(false)
-            }
+            ProjectileKind::Bolas => self.bolas_hit_world(t, p, hit),
+            ProjectileKind::LanternToss => self.lantern_hit_world(t, p, hit),
+            ProjectileKind::BlinkArrow => self.blink_arrow_hit_world(t, p, hit),
+            ProjectileKind::BeaconArrow => self.beacon_arrow_hit_world(t, p, hit),
             ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
                 let at = p.position + hit.normal * 0.05;
                 self.knack_lands(t, p, at);
@@ -152,19 +140,27 @@ impl SimWorld {
                 self.flak_burst(t, p, p.position, axis);
                 true
             }
-            ProjectileKind::Flare => {
-                self.light_patch(t, p, p.position);
-                true
-            }
-            ProjectileKind::EmberArrow => {
-                self.ember_burst(t, p, None);
-                true
-            }
             ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
                 self.knack_lands(t, p, p.position);
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Every tick of flight, before a projectile moves (the Wisp zaps and orbits, the Kite is
+    /// steered, the Hurl turns back). `false`: it is gone.
+    pub(crate) fn payload_tick(
+        &mut self,
+        t: &Tuning,
+        p: &mut Projectile,
+        boxes: &[Hitbox],
+    ) -> bool {
+        match p.kind {
+            ProjectileKind::Wisp => self.wisp_tick(t, p, boxes),
+            ProjectileKind::Kite => self.kite_tick(t, p, boxes),
+            ProjectileKind::Hurl => self.hurl_tick(t, p, boxes),
+            _ => true,
         }
     }
 
@@ -209,28 +205,6 @@ impl SimWorld {
             origin,
             ends,
         });
-    }
-
-    /// The Flare's burning patch on the floor at / below `at` (none over a pit).
-    fn light_patch(&mut self, t: &Tuning, p: &Projectile, at: Vec3) {
-        if let Some(floor) = self.floor_below(at, 50.0) {
-            self.spawn_fire_patch(t, p.owner, p.attack, floor);
-        }
-        self.events.push(SimEvent::ProjectileImpact {
-            id: p.id,
-            kind: p.kind,
-            position: at,
-            normal: Vec3::Y,
-        });
-    }
-
-    /// The Ember Arrow's flame burst: its explosion, and Burn on everything it reached.
-    fn ember_burst(&mut self, t: &Tuning, p: &Projectile, direct: Option<HitTarget>) {
-        let reached = self.explode_projectile(t, p, direct);
-        let stacks = t.combat.ember_arrow.burn_stacks;
-        for target in reached {
-            self.apply_burn(t, p.owner, p.attack, target, stacks);
-        }
     }
 
     /// Player `id`'s Limpet charges (in flight or stuck).

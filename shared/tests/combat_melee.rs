@@ -1,6 +1,6 @@
 //! Melee weapons and abilities in the world (docs/arsenal.md, "Melee"): the Trimmer's slashes
 //! (three targets, nearest first) and deflects, the Tamper's heavy arc, reach / arc / line of
-//! sight / lag compensation, no weak points, Lunge, Whirl, Hurl, Upswing, kill credit, the
+//! sight / lag compensation, no weak points, Lunge, Whirl, Hurl, kill credit, the
 //! melee embers, and the owner's prediction staying exact.
 
 mod combat_support;
@@ -460,27 +460,6 @@ fn hurl_throws_a_blade_or_a_hammer_head() {
 }
 
 #[test]
-fn upswing_launches_what_it_hits_and_hops_the_swinger() {
-    let (mut a, p) = holding(tamper());
-    let d = dummy(&mut a, Vec3::new(0.0, 0.0, -2.0), 0.0, TOUGH);
-    a.ticks(2);
-    a.select(p, 0, 1);
-    a.tick();
-    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    assert_eq!(swings(&ev), vec![(Attack::Upswing, 1)]);
-    let hits = hits_on(&ev, HitTarget::Entity(d));
-    assert_eq!(hits.len(), 1);
-    assert_eq!(
-        hits[0].dealt,
-        c().tamper.damage * c().upswing.damage_scale,
-        "1.4 x the Tamper's swing"
-    );
-    assert_eq!(hits[0].info.knockback, Vec3::Y * 14.0);
-    let vy = a.world.players[&p].movement.velocity.y;
-    assert!(vy >= 5.0 - 1e-3, "the hop: {vy}");
-}
-
-#[test]
 fn melee_kills_name_the_weapon_and_heal_at_the_melee_rate() {
     // A Whirl kill on the Tamper (both melee weapons can carry it): the Tamper fired it.
     let (mut a, p) = holding(tamper());
@@ -564,7 +543,6 @@ fn melee_and_knack_prediction_stays_exact() {
         Attack::Tamper,
         Attack::Lunge,
         Attack::Whirl,
-        Attack::Upswing,
     ] {
         assert!(swung.contains(&attack), "{attack:?}");
     }
@@ -591,7 +569,7 @@ fn melee_pvp_numbers_keep_the_one_shot_rules_and_the_time_to_kill_band() {
             ("lunge", primary * pvp.lunge.damage_scale),
             ("whirl", primary * pvp.whirl.damage_scale),
             ("hurl", primary * pvp.hurl.damage_scale),
-            ("upswing", primary * pvp.upswing.damage_scale),
+            ("riposte at its most", primary * pvp.riposte.max_scale),
         ] {
             assert!(damage < 100.0, "{weapon:?} {name}: {damage}");
         }

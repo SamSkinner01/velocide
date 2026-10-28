@@ -1,4 +1,4 @@
-//! Hitscan: lag-compensated rays, thorn ricochets, Splinter bursts and Arclash chains.
+//! Hitscan: lag-compensated rays, thorn ricochets, piercing beams and Arclash chains.
 //!
 //! A shot from an input is tested against the hitboxes **as the shooter saw them**: the
 //! server's [`HitboxHistory`] rewinds every player and enemy hitbox to the input's
@@ -19,9 +19,8 @@
 //! in line of sight, weak point / head if visible, else the body. Bounce legs are traced
 //! against current (not rewound) hitboxes since they auto-aim at current positions.
 //!
-//! **Splinter**: where the last leg of a Splinter shot ends on a target or a wall it bursts
-//! into `quill.splinter_count` secondary traces inside a cone: along the shot from a target
-//! (the target hit directly is excluded), reflected about the surface from a wall.
+//! **Pierce** (the Lamplighter's full focus): the ray passes through targets, nearest first,
+//! losing damage for each one.
 //!
 //! **Arc chain**: an Arclash zap that hits jumps to the nearest other hostile within
 //! `arclash.chain_range` of it (line of sight from the target, branded targets first),
@@ -31,7 +30,6 @@ use engine::physics::MASK_SHOTS;
 use glam::Vec3;
 
 use super::combat::{Attack, DamageFlags, DamageInfo, Owner};
-use super::weapons::{SpreadRng, spread_dir};
 use super::{
     HitPads, HitPart, HitTarget, Hitbox, HitboxHistory, PlayerId, ShotEvent, SimEvent, SimWorld,
 };
@@ -51,8 +49,33 @@ pub struct ShotSpec {
     pub knockback: f32,
     /// Can ricochet off thorns.
     pub ricochet: bool,
-    /// A target this ray passes through (a splinter leaving the target the shot hit).
+    /// A target this ray passes through (it starts inside it).
     pub exclude: Option<HitTarget>,
+    /// Harder hits up close (the scatterguns' pellets); not on ricochet legs.
+    pub point_blank: Option<PointBlank>,
+}
+
+/// A ray that hits within `range` m of where it left deals × `multiplier`, easing back to × 1
+/// at `end` m (a scattergun's point-blank blast).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointBlank {
+    pub range: f32,
+    pub end: f32,
+    pub multiplier: f32,
+}
+
+impl PointBlank {
+    /// The damage multiplier for a hit `distance` m along the ray.
+    pub fn at(&self, distance: f32) -> f32 {
+        let k = if distance <= self.range {
+            1.0
+        } else if self.end > self.range {
+            ((self.end - distance) / (self.end - self.range)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        1.0 + (self.multiplier - 1.0) * k
+    }
 }
 
 impl ShotSpec {
@@ -66,6 +89,7 @@ impl ShotSpec {
             knockback: 0.0,
             ricochet: false,
             exclude: None,
+            point_blank: None,
         }
     }
 
@@ -83,6 +107,11 @@ impl ShotSpec {
         self.exclude = target;
         self
     }
+
+    pub fn point_blank(mut self, point_blank: PointBlank) -> Self {
+        self.point_blank = Some(point_blank);
+        self
+    }
 }
 
 /// The world as a shooter saw it: lag-compensated hitboxes and the (clamped) view time.
@@ -92,7 +121,7 @@ pub struct ShotView {
     pub hitboxes: Vec<Hitbox>,
 }
 
-/// Where the last leg of a shot ended on something (Brand, Splinter and Arc react to it).
+/// Where the last leg of a shot ended on something (Brand and Arc react to it).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Impact {
     pub point: Vec3,
@@ -230,7 +259,7 @@ impl SimWorld {
         (view, results)
     }
 
-    /// A piercing shot (Skewer): passes through up to `pierce` targets along the ray (before
+    /// A piercing shot (the Lamplighter): passes through up to `pierce` targets along the ray (before
     /// the level stops it), nearest first, the damage × `falloff` for each one passed
     /// ([`DamageFlags::PIERCED`] after the first). Lag-compensated like every shot; no thorn
     /// ricochet. Emits one [`SimEvent::Shot`] ending where it stopped.
@@ -349,7 +378,10 @@ impl SimWorld {
         let Some((thorn_id, thorn_t, thorn_pos)) = thorn else {
             if let Some((d, target, part)) = hit {
                 let point = origin + dir * d;
-                let mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+                let mut mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+                if let Some(pb) = spec.point_blank {
+                    mult *= pb.at(d);
+                }
                 let mut flags = Self::hitscan_flags(spec.attack);
                 if ricochets > 0 {
                     flags.insert(DamageFlags::RICOCHET);
@@ -396,6 +428,7 @@ impl SimWorld {
             dir: next_dir,
             range,
             exclude: None,
+            point_blank: None,
             ..*spec
         };
         let current = self.current_hitboxes(t);
@@ -500,50 +533,6 @@ impl SimWorld {
             }
         }
         best.map(|(_, _, aim)| aim)
-    }
-
-    /// Splinter burst at the end of a Splinter shot: secondary traces from `impact` inside
-    /// the splinter cone (along the shot from a target, reflected from a wall), against
-    /// `view_hitboxes` (what the shooter saw). Emits [`SimEvent::Splinters`].
-    pub(crate) fn splinter_burst(
-        &mut self,
-        t: &Tuning,
-        id: PlayerId,
-        view_hitboxes: &[Hitbox],
-        impact: Impact,
-        rng: &mut SpreadRng,
-    ) {
-        let q = &t.combat.quill;
-        let (dir, origin) = match impact.normal {
-            Some(n) if impact.target.is_none() => {
-                let d = impact.dir - n * (2.0 * impact.dir.dot(n));
-                (d.normalize_or(n), impact.point + n * 0.05)
-            }
-            _ => (impact.dir, impact.point),
-        };
-        let exclude = impact.target.map(|(target, _)| target);
-        let shooter = Owner::Player(id);
-        let mut ends = Vec::with_capacity(q.splinter_count as usize);
-        for _ in 0..q.splinter_count {
-            let d = spread_dir(dir, q.splinter_cone_degrees, rng);
-            let spec = ShotSpec::new(
-                origin,
-                d,
-                q.splinter_range,
-                q.splinter_shard_damage,
-                Attack::Splinter,
-            )
-            .exclude(exclude);
-            let r = self.trace_shot(t, shooter, view_hitboxes, None, &spec, 0);
-            ends.push(r.end);
-        }
-        if !ends.is_empty() {
-            self.events.push(SimEvent::Splinters {
-                shooter: id,
-                origin,
-                ends,
-            });
-        }
     }
 
     /// Arclash chain from `first` (already hit at `point` for `damage`): jumps to the nearest

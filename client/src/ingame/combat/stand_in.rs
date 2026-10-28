@@ -12,8 +12,9 @@
 //! server tick `τ` it is where it is `τ − view` ticks into its flight, among the targets as
 //! they were at `τ`. So it is drawn at the **render tick**, like every remote entity, and its
 //! stand-in runs on the same clock from the shot's view time: what touches a target on screen
-//! is what touches it on the server. Projectiles that aren't flown that way (deflected ones)
-//! are drawn at own-time (the present, `combat::own_projectiles`), their stand-ins too.
+//! is what touches it on the server. Projectiles that aren't flown that way (deflected ones;
+//! the orbiting Wisp, the steered Kite and the returning Hurl, driven from the present) are
+//! drawn at own-time (the present, `own_projectiles`), their stand-ins too.
 //!
 //! When the server's projectile turns up among our own (render-clock ones: at the render tick,
 //! so where the stand-in already is), the closest unclaimed stand-in of its kind **hands over**
@@ -37,7 +38,7 @@ use shared::protocol::{EntityState, NetId, kind, projectile_flags};
 use shared::sim::hitscan::assist_pads;
 use shared::sim::projectiles::{ProjectileKind, projectile_target_pad, replicated_position};
 use shared::sim::weapons::aim_basis;
-use shared::sim::{FireIntent, Hitbox, Owner, PlayerId, replicated_hitbox};
+use shared::sim::{AbilityPhase, FireIntent, Hitbox, Owner, PlayerId, replicated_hitbox};
 use shared::tuning::CombatTuning;
 
 use super::Rng;
@@ -66,7 +67,7 @@ pub fn render_clock_kind(kind: u16) -> bool {
 }
 
 /// Is the local player's projectile `e` drawn at the render tick (see the module docs)? A
-/// deflected one isn't (its flight restarted in the present).
+/// deflected one isn't (its flight restarted in the present), nor the kinds driven from it.
 pub fn on_render_clock(e: &EntityState) -> bool {
     e.flags & projectile_flags::PARRIED == 0 && render_clock_kind(e.kind)
 }
@@ -260,37 +261,23 @@ pub fn launches(
             WeaponKind::Longwick => vec![arrow(kind::ARROW, aim, charge)],
             _ => Vec::new(),
         },
+        // Only a use launches anything (a held ability's release, a recast: nothing new here).
+        FireIntent::Ability { phase, .. } if phase != AbilityPhase::Use => Vec::new(),
         FireIntent::Ability {
             weapon,
             ability,
             charge,
+            ..
         } => {
             if weapon.class() == WeaponClass::Draw {
                 let kind = match ability {
                     Ability::PinningArrow => kind::PIN_ARROW,
-                    Ability::EmberArrow => kind::EMBER_ARROW,
                     Ability::Brand => kind::BRAND_ARROW,
+                    Ability::BlinkArrow => kind::BLINK_ARROW,
+                    Ability::BeaconArrow => kind::BEACON_ARROW,
                     _ => kind::ARROW,
                 };
-                if ability != Ability::TripleNock {
-                    return vec![arrow(kind, aim, charge)];
-                }
-                let tn = &c.triple_nock;
-                let n = tn.arrows.max(1);
-                let (right, _) = aim_basis(aim);
-                let up = right.cross(aim).normalize_or(Vec3::Y);
-                return (0..n)
-                    .map(|i| {
-                        let f = if n == 1 {
-                            0.0
-                        } else {
-                            i as f32 / (n - 1) as f32 - 0.5
-                        };
-                        let dir =
-                            Quat::from_axis_angle(up, (tn.fan_degrees * f).to_radians()) * aim;
-                        arrow(kind, dir, charge)
-                    })
-                    .collect();
+                return vec![arrow(kind, aim, charge)];
             }
             match ability {
                 Ability::Flak => one(
@@ -303,22 +290,8 @@ pub fn launches(
                     safe(eye + aim * 0.6),
                     aim * c.arclash.wisp_speed,
                 ),
-                Ability::Volley if weapon == WeaponKind::Riveter => {
-                    let start = safe(eye + aim * 0.4);
-                    (0..c.volley.shots.max(1))
-                        .map(|_| Launch {
-                            kind: kind::RIVET,
-                            start,
-                            velocity: spread(aim, c.volley.cone_degrees, rng)
-                                * c.riveter.rivet_speed,
-                        })
-                        .collect()
-                }
-                Ability::Flare => one(
-                    kind::FLARE,
-                    safe(eye + aim * 0.5),
-                    lob_dir(aim, c.flare.angle_degrees) * c.flare.speed,
-                ),
+                Ability::Bolas => one(kind::BOLAS, safe(eye + aim * 0.5), aim * c.bolas.speed),
+                Ability::Kite => one(kind::KITE, safe(eye + aim * 0.6), aim * c.kite.speed),
                 Ability::Gravewell => one(
                     kind::GRAVEWELL,
                     eye,
@@ -327,11 +300,6 @@ pub fn launches(
                 Ability::Limpet if charge < 1.0 && live_limpets < c.limpet.max_live.max(1) => {
                     one(kind::LIMPET, safe(eye + aim * 0.5), aim * c.limpet.speed)
                 }
-                Ability::Mortar => one(
-                    kind::MORTAR_SHELL,
-                    eye,
-                    lob_dir(aim, c.mortar.angle_degrees) * c.mortar.speed,
-                ),
                 // The melee Hurl's blade / head (drawn by melee.rs).
                 Ability::Hurl => one(kind::HURL, safe(eye + aim * 0.5), aim * c.hurl.speed),
                 _ => Vec::new(),
@@ -372,6 +340,8 @@ fn on_world(k: u16) -> OnWorld {
             | ProjectileKind::Arrow
             | ProjectileKind::PinArrow
             | ProjectileKind::BrandArrow
+            | ProjectileKind::BlinkArrow
+            | ProjectileKind::BeaconArrow
             | ProjectileKind::Limpet
             | ProjectileKind::Snare,
         ) => OnWorld::Stick,
@@ -917,24 +887,27 @@ mod tests {
             (
                 FireIntent::Ability {
                     weapon: WeaponKind::Longwick,
-                    ability: Ability::TripleNock,
+                    ability: Ability::BeaconArrow,
                     charge: 1.0,
+                    phase: AbilityPhase::Use,
                 },
-                t.triple_nock.arrows as usize,
+                1,
             ),
             (
                 FireIntent::Ability {
-                    weapon: WeaponKind::Riveter,
-                    ability: Ability::Volley,
+                    weapon: WeaponKind::Longwick,
+                    ability: Ability::BlinkArrow,
                     charge: 0.0,
+                    phase: AbilityPhase::Recast,
                 },
-                t.volley.shots as usize,
+                0,
             ),
             (
                 FireIntent::Ability {
                     weapon: WeaponKind::Cinderbox,
                     ability: Ability::Limpet,
                     charge: 1.0,
+                    phase: AbilityPhase::Use,
                 },
                 0,
             ),
@@ -954,18 +927,20 @@ mod tests {
         assert!((a.velocity.length() - t.longwick.max_speed).abs() < 1e-3);
         assert!(a.start.distance(eye + aim * 0.4) < 1e-4);
         // Lobs go up, never below the aim.
-        let mortar = FireIntent::Ability {
-            weapon: WeaponKind::Cinderbox,
-            ability: Ability::Mortar,
+        let gravewell = FireIntent::Ability {
+            weapon: WeaponKind::Tumbler,
+            ability: Ability::Gravewell,
             charge: 0.0,
+            phase: AbilityPhase::Use,
         };
-        let m = launches(&mortar, aim, eye, &t, None, 0, &mut rng)[0];
+        let m = launches(&gravewell, aim, eye, &t, None, 0, &mut rng)[0];
         assert!(m.velocity.y > 0.0);
         // The fourth limpet detonates instead of throwing.
         let limpet = FireIntent::Ability {
             weapon: WeaponKind::Cinderbox,
             ability: Ability::Limpet,
             charge: 0.0,
+            phase: AbilityPhase::Use,
         };
         assert_eq!(launches(&limpet, aim, eye, &t, None, 0, &mut rng).len(), 1);
         let max = t.limpet.max_live;

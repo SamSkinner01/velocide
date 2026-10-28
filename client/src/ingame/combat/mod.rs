@@ -99,6 +99,8 @@ pub struct AttackStyle {
     pub sfx: Sfx,
     /// Viewmodel kick 0..1.
     pub kick: f32,
+    /// View punch 0..2 (`CameraRig::punch`): the kick squared, more for the scatterguns' blasts.
+    pub punch: f32,
     /// Tracer width (m) and colour (hitscan); 0 = no tracer.
     pub beam_width: f32,
     pub beam_color: Vec4,
@@ -117,9 +119,10 @@ fn glow(c: Vec4, k: f32, a: f32) -> Vec4 {
 }
 
 pub fn attack_style(a: Attack) -> AttackStyle {
-    let s = |sfx, kick, w, c: Vec4, life, shake| AttackStyle {
+    let s = |sfx, kick: f32, w, c: Vec4, life, shake| AttackStyle {
         sfx,
         kick,
+        punch: kick * kick,
         beam_width: w,
         beam_color: c,
         beam_life: life,
@@ -146,31 +149,36 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.42,
             0.07,
         ),
-        Attack::Splinter => s(
-            Sfx::SplinterFire,
-            0.75,
-            0.08,
-            glow(quill.glow_color(1), 1.9, 0.95),
-            0.3,
+        // The rework's sniper: the Quill's look and sound until it has its own.
+        Attack::Lamplighter => s(
+            Sfx::QuillFire,
+            0.9,
+            0.07,
+            glow(WeaponKind::Lamplighter.primary_color(), 2.0, 0.95),
+            0.35,
             0.12,
         ),
-        Attack::Blast => s(
-            Sfx::BellowsBlast,
-            1.0,
-            0.036,
-            glow(bellows.primary_color(), 1.7, 0.8),
-            0.13,
-            0.22,
+        Attack::Tally => s(
+            Sfx::QuillFire,
+            0.6,
+            0.055,
+            glow(ability_color(Ability::Tally), 1.9, 0.95),
+            0.25,
+            0.06,
         ),
+        // The scatterguns kick harder than their viewmodel's full kick (docs/balance.md).
+        Attack::Blast => AttackStyle {
+            punch: 2.0,
+            ..s(
+                Sfx::BellowsBlast,
+                1.0,
+                0.036,
+                glow(bellows.primary_color(), 1.7, 0.8),
+                0.13,
+                0.3,
+            )
+        },
         Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
-        Attack::BothBarrels => s(
-            Sfx::BothBarrels,
-            1.0,
-            0.04,
-            glow(bellows.glow_color(1), 1.8, 0.85),
-            0.16,
-            0.42,
-        ),
         Attack::Arc => AttackStyle {
             jagged: true,
             flash: 0.0,
@@ -198,14 +206,17 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.13,
             0.03,
         ),
-        Attack::Thresher => s(
-            Sfx::ThresherFire,
-            0.9,
-            0.034,
-            glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
-            0.12,
-            0.18,
-        ),
+        Attack::Thresher => AttackStyle {
+            punch: 1.3,
+            ..s(
+                Sfx::ThresherFire,
+                1.0,
+                0.034,
+                glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
+                0.12,
+                0.22,
+            )
+        },
         Attack::Riveter => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.02),
         Attack::Cinderbox => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
         Attack::Longwick => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.05),
@@ -213,52 +224,24 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             flash: 0.0,
             ..s(Sfx::KilnRoar, 0.25, 0.0, Vec4::ONE, 0.0, 0.01)
         },
-        Attack::Skewer => s(
-            Sfx::SkewerFire,
-            0.9,
-            0.09,
-            glow(ability_color(Ability::Skewer), 2.0, 0.95),
-            0.45,
-            0.15,
-        ),
-        Attack::Flurry => s(
-            Sfx::FlurryFire,
-            0.4,
-            0.045,
-            glow(ability_color(Ability::Flurry), 1.8, 0.9),
-            0.15,
-            0.04,
-        ),
-        Attack::Slug => s(
-            Sfx::SlugFire,
-            1.0,
-            0.1,
-            glow(ability_color(Ability::Slug), 1.9, 0.95),
-            0.36,
-            0.35,
-        ),
         Attack::Flak => s(Sfx::FlakFire, 0.8, 0.0, Vec4::ONE, 0.0, 0.15),
-        Attack::Volley => s(
-            Sfx::VolleyFire,
-            1.0,
-            0.038,
-            glow(ability_color(Ability::Volley), 1.7, 0.85),
-            0.14,
-            0.3,
-        ),
-        Attack::Flare => s(Sfx::FlareLaunch, 0.5, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::Limpet => s(Sfx::LimpetThrow, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
-        Attack::Mortar => s(Sfx::MortarLaunch, 1.0, 0.0, Vec4::ONE, 0.0, 0.3),
-        Attack::TripleNock => s(Sfx::TripleNock, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         Attack::PinningArrow => s(Sfx::PinningRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
-        Attack::EmberArrow => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
+        // The rework's abilities: placeholder sounds until client-a / client-b give them
+        // their own.
+        Attack::Bolas => s(Sfx::FlakFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.06),
+        Attack::Kite => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
+        Attack::Lantern | Attack::Waxwork => s(Sfx::LimpetThrow, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
+        Attack::BlinkArrow | Attack::BeaconArrow => {
+            s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06)
+        }
         // Melee (melee.rs draws the swings): no flash, no tracer.
         Attack::Trimmer
         | Attack::Tamper
         | Attack::Lunge
         | Attack::Whirl
         | Attack::Hurl
-        | Attack::Upswing => {
+        | Attack::Riposte => {
             let (weapon, kind) = match attack_melee(a) {
                 Some(m) => m,
                 None => (melee::MeleeWeapon::Trimmer, melee::SwingKind::Slash),
@@ -279,6 +262,27 @@ pub fn attack_style(a: Attack) -> AttackStyle {
     }
 }
 
+/// Whether a predicted intent plays as a shot (sound, kick, flash, tracers, stand-ins): every
+/// primary and every ability's use, except the rework's that fire nothing on the press (the
+/// held ones, the Stoke, the Waxwork, the Wickline whose line the server sends).
+pub(crate) fn plays_as_shot(intent: &FireIntent) -> bool {
+    match *intent {
+        FireIntent::Ability { ability, phase, .. } => {
+            phase == shared::sim::AbilityPhase::Use
+                && !matches!(
+                    ability,
+                    Ability::Tally
+                        | Ability::Bulwark
+                        | Ability::Riposte
+                        | Ability::Stoke
+                        | Ability::Waxwork
+                        | Ability::Wickline
+                )
+        }
+        _ => true,
+    }
+}
+
 /// The melee weapon and move of a melee attack.
 fn attack_melee(a: Attack) -> Option<(melee::MeleeWeapon, melee::SwingKind)> {
     melee::weapon_of_attack(a, None).zip(melee::swing_kind(a))
@@ -287,7 +291,9 @@ fn attack_melee(a: Attack) -> Option<(melee::MeleeWeapon, melee::SwingKind)> {
 /// Range of a hitscan attack's rays (client tracers).
 pub(crate) fn hitscan_range(attack: Attack, t: &shared::tuning::CombatTuning) -> f32 {
     match attack {
-        Attack::Blast | Attack::BothBarrels => t.bellows.pellet_range,
+        Attack::Blast => t.bellows.pellet_range,
+        Attack::Wickline => t.wickline.range,
+        Attack::Tally => t.tally.range,
         Attack::Thresher => t.thresher.pellet_range,
         Attack::Arc => t.arclash.zap_range,
         _ => t.hitscan_range,
@@ -473,7 +479,7 @@ pub(crate) fn kill_line(net: &NetClient, k: &KillInfo) -> String {
 }
 
 /// The bracket of a weapon's kill: its name for the primary ("RIVETER"), weapon and ability
-/// for an ability (several weapons share one: "RIVETER VOLLEY", "LONGWICK BRAND").
+/// for an ability (several weapons share one: "RIVETER STOKE", "LONGWICK BRAND").
 pub fn weapon_attack_label(weapon: shared::loadout::WeaponKind, attack: Attack) -> String {
     if Attack::primary(weapon) == attack {
         weapon.name().to_uppercase()
@@ -648,7 +654,16 @@ impl InGame {
                 } else {
                     MarkerKind::Body
                 };
-                self.combat.hud.hit_marker(kind, now);
+                // A scattergun blast that landed most of its pellets on one target (merged
+                // into this one confirm) draws a bigger marker.
+                let c = &net.tuning().combat;
+                let pellets = match h.attack {
+                    Attack::Blast => Some(c.bellows.pellets),
+                    Attack::Thresher => Some(c.thresher.pellets),
+                    _ => None,
+                };
+                let scale = pellets.map_or(1.0, |n| hud::blast_marker_scale(h.hits, n));
+                self.combat.hud.hit_marker_scaled(kind, scale, now);
                 let color = match kind {
                     MarkerKind::Head | MarkerKind::Kill => theme.crimson_bright,
                     MarkerKind::Armour => theme.ash,
@@ -851,6 +866,10 @@ impl InGame {
             let eye = shot.eye.unwrap_or(cam.position);
             for intent in &shot.intents {
                 match intent {
+                    // A held ability's press / release, a recast, an ability that isn't a
+                    // shot: none of a shot's flash, kick and tracer (their own presentation
+                    // is client-a's / client-b's).
+                    FireIntent::Ability { .. } if !plays_as_shot(intent) => {}
                     FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
@@ -890,7 +909,7 @@ impl InGame {
                             );
                         }
                         viewmodel.fire(style.kick);
-                        camera.punch(style.kick * style.kick);
+                        camera.punch(style.punch);
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
@@ -1369,7 +1388,7 @@ impl InGame {
         };
         combat.knacks.update(&mut ctx);
 
-        // Viewmodel: charge glow + whine (Discharge, Skewer), the bow's draw and its sounds;
+        // Viewmodel: charge glow + whine (Discharge), the bow's draw and its sounds;
         // the bow zooms in a little as it is drawn and flashes at full draw (docs/feel.md).
         let (draw, full_now) = combat.arsenal.local_feel(
             combat.predictor.state(),

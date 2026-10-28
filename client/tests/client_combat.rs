@@ -184,16 +184,19 @@ fn melee_and_knack_prediction_matches_the_server() {
     run(&mut s, &mut cs, 1.0, &|_, _| Some(PlayerInput::default()));
     let settled = cs[0].predictor.mismatches;
     cs[0].intents.clear();
-    run(&mut s, &mut cs, 6.0, &|_, t| {
+    run(&mut s, &mut cs, 12.0, &|_, t| {
         let mut inp = PlayerInput {
             yaw: t as f32 * 0.01,
             pitch: -0.3,
             weapon: ((t / 80) % 2) as u8,
-            weapon_mode: ((t / 160) % 2) as u8,
+            // Each mode for two windows of each weapon: the build's two abilities share one
+            // cooldown, and the Riposte's (4 s from its release) would block a Whirl in the
+            // very next window.
+            weapon_mode: ((t / 320) % 2) as u8,
             ..Default::default()
         };
-        // Swing early in each weapon's window, the ability in its second half: Whirl and
-        // Upswing take the next swing (like Both Barrels the next shot), so they need one ready.
+        // Swing early in each weapon's window, the ability in its second half: the Whirl
+        // takes the next swing, so it needs one ready; the Riposte is held, then let go.
         inp.buttons.set(Buttons::FIRE, t % 80 < 20);
         inp.buttons.set(Buttons::ALT_FIRE, t % 80 >= 40);
         inp.buttons.set(Buttons::THROW, t % 120 == 7);
@@ -220,7 +223,7 @@ fn melee_and_knack_prediction_matches_the_server() {
         Ability::Lunge,
         Ability::Hurl,
         Ability::Whirl,
-        Ability::Upswing,
+        Ability::Riposte,
     ] {
         assert!(
             fired(&|i| matches!(i, FireIntent::Ability { ability: a, .. } if *a == ability)),

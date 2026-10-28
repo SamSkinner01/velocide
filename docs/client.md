@@ -454,6 +454,8 @@ cargo test -p client                                   # unit + integration test
 cargo run -p client --release --example client_shots -- out/   # headless PNGs of every screen
 cargo run -p client --release --example lobby_shots -- out/    # lobby (host / guest), countdown, match, results
 cargo run -p client --release --example a11y_shots -- out/     # every colour-vision mode + "as that viewer sees it" strips
+cargo run -p client --release --example readme_shots -- out/   # README's in-game shots: a fight, co-op, PvP, colour vision
+scripts/readme_shots.sh                                        # re-renders docs/images/ (README) from three examples
 cargo run -p client --release --example playthrough -- out/    # every player-facing flow end to end, PASS/FAIL
 PLAYTHROUGH=sp,coop cargo run -p client --release --example playthrough   # only some: sp coop dm robust settings perf window
 scripts/local_test.sh --release --level movement_test --netsim 100,20,2 --bot --debug \
