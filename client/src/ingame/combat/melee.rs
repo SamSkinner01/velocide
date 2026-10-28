@@ -19,7 +19,7 @@ use engine::audio::{Audio, PlayParams, Sfx};
 use engine::gfx::{DrawItem, PointLight};
 use glam::{Quat, Vec2, Vec3, Vec4};
 use shared::loadout::{Ability, WeaponKind};
-use shared::protocol::{EntityState, NetId, kind, player_weapon};
+use shared::protocol::{EntityState, NetId, kind, player_weapon, projectile_flags};
 use shared::sim::{Attack, FireIntent, PlayerId};
 use shared::tuning::CombatTuning;
 
@@ -286,8 +286,11 @@ pub struct MeleeView {
     pub next_left: bool,
     /// Your Lunge's rush (seconds left, total): the HUD's speed lines.
     rush: (f32, f32),
-    /// Replicated hurled pieces drawn last frame (id, piece, position, velocity, owner code).
-    hurled: Vec<(NetId, MeleeWeapon, Vec3, Vec3, u16)>,
+    /// Replicated hurled pieces drawn last frame.
+    hurled: Vec<Hurled>,
+    /// Catches shown lately (thrower's owner code, when): a catch shows once, whichever of
+    /// `Fx::HurlCaught` and the piece vanishing at the hand comes first.
+    catches: Vec<(u16, f64)>,
     /// Your own hurled piece came back to your hand (`take_caught`).
     caught: bool,
     time: f64,
@@ -295,6 +298,22 @@ pub struct MeleeView {
 
 /// Most trails alive at once (oldest dropped).
 const MAX_TRAILS: usize = 16;
+
+/// A replicated hurled piece as drawn last frame.
+#[derive(Clone, Copy, Debug)]
+struct Hurled {
+    id: NetId,
+    weapon: MeleeWeapon,
+    at: Vec3,
+    velocity: Vec3,
+    /// Its thrower's owner code.
+    owner: u16,
+    /// On its way back (`projectile_flags::RETURNING`).
+    returning: bool,
+}
+
+/// How long a shown catch stands for the other half of it (the Fx or the vanishing).
+const CATCH_MEMORY: f64 = 0.6;
 
 impl MeleeView {
     pub fn new() -> Self {
@@ -857,50 +876,96 @@ impl MeleeView {
             if age > 0.06 {
                 hurled_sparks(ctx.effects, ctx.rng, weapon, at, dt);
             }
-            // It turned (the far end of its flight, or what it struck): coming back now.
+            // It turned (the far end of its flight, the level, the Tamper's first victim):
+            // coming back now.
+            let returning = e.flags & projectile_flags::RETURNING != 0;
             let turned = self
                 .hurled
                 .iter()
-                .find(|h| h.0 == e.id)
-                .is_some_and(|h| h.3.dot(e.velocity) < 0.0);
+                .find(|h| h.id == e.id)
+                .is_some_and(|h| returning && !h.returning);
             if turned {
                 ctx.audio.play(Sfx::HurlReturn, PlayParams::at(at));
             }
-            seen.push((e.id, weapon, at, e.velocity, e.owner));
+            seen.push(Hurled {
+                id: e.id,
+                weapon,
+                at,
+                velocity: e.velocity,
+                owner: e.owner,
+                returning,
+            });
         }
-        // Gone since last frame: it struck something where it was last drawn, or (the Hurl
-        // comes back, docs/rework.md) it reached its thrower's hand.
-        for (id, weapon, at, vel, owner) in &self.hurled {
-            if seen.iter().any(|s| s.0 == *id) {
+        // Gone since last frame: on its way back near its thrower it was caught (docs/rework.md;
+        // unless `Fx::HurlCaught` showed that already); otherwise it struck something where it
+        // was last drawn (a returning piece the level stopped).
+        let now = self.time;
+        self.catches.retain(|c| now - c.1 < CATCH_MEMORY);
+        for h in &self.hurled {
+            if seen.iter().any(|s| s.id == h.id) {
                 continue;
             }
-            let own = f.local_owner == Some(*owner);
+            let own = f.local_owner == Some(h.owner);
             let chest = if own {
                 Some(f.camera - Vec3::Y * 0.5)
             } else {
-                f.entities
-                    .iter()
-                    .find(|e| {
-                        e.kind == kind::PLAYER
-                            && e.id.as_player().map(|p| p.0 as u16) == Some(*owner)
-                    })
-                    .map(|e| e.position + Vec3::Y * 1.1)
+                thrower_chest(f.entities, h.owner)
             };
-            if chest.is_some_and(|c| c.distance(*at) < CATCH_REACH) {
-                hurl_catch(ctx.effects, ctx.audio, ctx.rng, *at, own);
-                self.caught |= own;
+            let at_hand = h.returning && chest.is_some_and(|c| c.distance(h.at) < CATCH_REACH);
+            if at_hand {
+                if !self.catches.iter().any(|c| c.0 == h.owner) {
+                    hurl_catch(ctx.effects, ctx.audio, ctx.rng, h.at, own);
+                    self.caught |= own;
+                    self.catches.push((h.owner, now));
+                }
             } else {
                 hurl_impact(
                     ctx.effects,
                     ctx.audio,
                     ctx.rng,
-                    *weapon,
-                    *at,
-                    vel.normalize_or(Vec3::NEG_Z),
+                    h.weapon,
+                    h.at,
+                    h.velocity.normalize_or(Vec3::NEG_Z),
                 );
             }
         }
         self.hurled = seen;
+    }
+
+    /// `Fx::HurlCaught`: `owner`'s Hurl came back to their hand (`own`: yours, at `chest`).
+    /// Shown here unless its piece already vanished at the hand (`update_replicated`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn hurl_caught(
+        &mut self,
+        effects: &mut Effects,
+        audio: &mut Audio,
+        rng: &mut Rng,
+        entities: &[EntityState],
+        owner: u16,
+        own: bool,
+        chest: Option<Vec3>,
+    ) {
+        let now = self.time;
+        if self
+            .catches
+            .iter()
+            .any(|c| c.0 == owner && now - c.1 < CATCH_MEMORY)
+        {
+            return;
+        }
+        let at = if own {
+            chest
+        } else {
+            thrower_chest(entities, owner)
+        };
+        let Some(at) = at else {
+            return;
+        };
+        hurl_catch(effects, audio, rng, at, own);
+        self.caught |= own;
+        self.catches.push((owner, now));
+        // Its piece (if still drawn this frame) is in hand now, not striking anything.
+        self.hurled.retain(|h| h.owner != owner || !h.returning);
     }
 
     /// Whether your own hurled piece came back to your hand since the last call (the
@@ -1289,6 +1354,14 @@ pub fn hurl_impact(
 
 /// How close to its thrower's chest a returning piece vanishes to count as caught.
 const CATCH_REACH: f32 = 1.8;
+
+/// The chest of the player with owner code `owner` among `entities`.
+fn thrower_chest(entities: &[EntityState], owner: u16) -> Option<Vec3> {
+    entities
+        .iter()
+        .find(|e| e.kind == kind::PLAYER && e.id.as_player().map(|p| p.0 as u16) == Some(owner))
+        .map(|e| e.position + Vec3::Y * 1.1)
+}
 
 /// A hurled piece back in its thrower's hand (docs/rework.md: the Hurl returns): a slap and a
 /// short ring, a few sparks off the catch (`own`: your hand, the sound in your head).

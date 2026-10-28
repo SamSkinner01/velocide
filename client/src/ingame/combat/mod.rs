@@ -1424,6 +1424,21 @@ impl InGame {
             for ev in &due {
                 combat.tricks.fx(&mut ctx, ev);
             }
+            // A Hurl back in its thrower's hand (once: the piece may have vanished there first).
+            for ev in &due {
+                if let shared::protocol::Fx::HurlCaught { player } = ev.fx {
+                    let own = Some(player) == local;
+                    combat.melee.hurl_caught(
+                        ctx.effects,
+                        ctx.audio,
+                        ctx.rng,
+                        ctx.entities,
+                        player.0 as u16,
+                        own,
+                        ctx.local_chest,
+                    );
+                }
+            }
         }
         combat.beams.update(vdt);
         // Brand sigils (drawn this frame only, after the update).

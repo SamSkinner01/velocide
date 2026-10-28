@@ -1082,10 +1082,12 @@ fn rework_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 30, still);
 }
 
-/// The rework for real (`rework_play_*.png`): `/loadout` hands out the Lamplighter, the Longwick
-/// with the Blink and Beacon arrows and the Trimmer with the Riposte; the script focuses and
-/// fires at the Moulds (scope at half and full focus, the beam), raises the guard, looses a
-/// beacon arrow.
+/// The rework for real (`rework_play_*.png`): `/loadout` hands out the Lamplighter, the Lancet
+/// with the Tally, the Longwick with the Blink and Beacon arrows and the Trimmer with the
+/// Riposte; the script focuses and fires at the Moulds (scope at half and full focus, the beam),
+/// throws a Wickline, pours a Waxwork and looks back at it, tallies a pack, lights a beacon by
+/// it, steps to a Blink arrow and raises the guard. (Commands cost a chat token, one a second:
+/// `cmd` waits for the next.)
 fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
     let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
     let aimed = |g: &mut InGame, buttons: Buttons| {
@@ -1094,16 +1096,30 @@ fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
         }
         hold(g, buttons);
     };
-    game.send_chat("/killall");
-    game.controls.yaw = 0.0;
-    game.controls.pitch = 0.0;
-    h.frames(game, 10, still);
-    spawn(game, 3);
-    h.frames(game, 60, still);
-    game.send_chat(
-        "/loadout lamplighter:wickline,waxwork longwick:blink,beacon trimmer:riposte,hurl quill",
+    let cmd = |h: &mut Harness, g: &mut InGame, text: &str| {
+        g.send_chat(text);
+        h.frames(g, 70, |g, _| hold(g, Buttons::NONE));
+    };
+    let press = |h: &mut Harness, g: &mut InGame, buttons: Buttons| {
+        h.frames(g, 2, |g, i| {
+            aimed(g, if i == 0 { buttons } else { Buttons::NONE })
+        });
+    };
+    let face_north = |h: &mut Harness, g: &mut InGame| {
+        g.controls.yaw = 0.0;
+        g.controls.pitch = 0.0;
+        h.frames(g, 10, |g, _| hold(g, Buttons::NONE));
+    };
+    h.frames(game, 200, still);
+    cmd(h, game, "/killall");
+    cmd(h, game, "/tp 0 0.1 6");
+    face_north(h, game);
+    cmd(h, game, &format!("/spawn {TARGET} 3"));
+    cmd(
+        h,
+        game,
+        "/loadout lamplighter:wickline,waxwork lancet:tally,brand longwick:blink,beacon trimmer:riposte,hurl",
     );
-    h.frames(game, 20, still);
 
     // The Lamplighter: at rest, focusing (half, full), the beam.
     select(game, 0, 0);
@@ -1115,10 +1131,79 @@ fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
     h.shot("rework_play_focus_full");
     h.frames(game, 2, |g, _| aimed(g, Buttons::NONE));
     h.shot("rework_play_beam");
+    h.frames(game, 40, still);
+
+    // The Wickline at a Mould (a light one: yanked in).
+    press(h, game, Buttons::ALT_FIRE);
+    h.frames(game, 4, still);
+    h.shot("rework_play_wickline");
+    h.frames(game, 60, still);
+
+    // The Waxwork: poured where we stand (the pack gone, so it lasts), then stepped away from
+    // and looked back at; at its end it slumps and bursts.
+    // (The weapon's two abilities share its cooldown: the Wickline's 4 s run out first.)
+    cmd(h, game, "/killall");
+    select(game, 0, 1);
+    h.frames(game, 150, still);
+    press(h, game, Buttons::ALT_FIRE);
+    h.frames(game, 10, still);
+    if let Some(e) = eye(game) {
+        let back = e + Vec3::new(2.5, -1.6, 3.0);
+        cmd(
+            h,
+            game,
+            &format!("/tp {} {} {}", back.x, back.y + 0.1, back.z),
+        );
+        h.frames(game, 6, |g, _| {
+            aim_at(g, e - Vec3::Y * 0.7);
+            hold(g, Buttons::NONE)
+        });
+        h.shot("rework_play_waxwork");
+        h.frames(game, 195, |g, _| {
+            aim_at(g, e - Vec3::Y * 0.7);
+            hold(g, Buttons::NONE)
+        });
+        h.shot("rework_play_waxwork_slump");
+        h.frames(game, 30, |g, _| {
+            aim_at(g, e - Vec3::Y * 0.7);
+            hold(g, Buttons::NONE)
+        });
+        h.shot("rework_play_waxwork_burst");
+    }
     h.frames(game, 30, still);
 
-    // The Longwick's Beacon Arrow: armed, drawn, loosed into the floor by the pack.
-    select(game, 1, 1);
+    // The Lancet's Tally: held while the aim sweeps a new pack, then let go.
+    cmd(h, game, "/tp 0 0.1 6");
+    face_north(h, game);
+    cmd(h, game, &format!("/spawn {TARGET} 3"));
+    select(game, 1, 0);
+    h.frames(game, 30, still);
+    let pack: Vec<Vec3> = game
+        .net()
+        .map(|n| {
+            n.remote_entities()
+                .iter()
+                .filter(|e| kind::is_enemy(e.kind))
+                .map(|e| e.position + Vec3::Y * 1.0)
+                .collect()
+        })
+        .unwrap_or_default();
+    for (i, m) in pack.iter().enumerate() {
+        h.frames(game, 8, |g, _| {
+            aim_at(g, *m);
+            hold(g, Buttons::ALT_FIRE)
+        });
+        if i + 1 == pack.len().min(2) {
+            h.shot("rework_play_tally");
+        }
+    }
+    h.frames(game, 3, |g, _| hold(g, Buttons::NONE));
+    h.shot("rework_play_tally_shots");
+    h.frames(game, 40, still);
+
+    // The Longwick: a Beacon arrow into the floor by the pack (what's left of it).
+    cmd(h, game, &format!("/spawn {TARGET} 2"));
+    select(game, 2, 1);
     h.frames(game, 20, still);
     let floor = |g: &mut InGame, buttons: Buttons| {
         if let Some(t) = nearest_enemy(g, false) {
@@ -1141,15 +1226,50 @@ fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 40, still);
     h.shot("rework_play_beacon");
 
-    // The Trimmer's Riposte: the guard held.
+    // A Blink arrow into the floor ahead and the step to it.
+    cmd(h, game, "/killall");
     select(game, 2, 0);
+    h.frames(game, 20, still);
+    let ahead = |g: &mut InGame, buttons: Buttons| {
+        g.controls.yaw = 0.6;
+        g.controls.pitch = -0.2;
+        hold(g, buttons);
+    };
+    h.frames(game, 2, |g, i| {
+        ahead(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 40, |g, _| ahead(g, Buttons::FIRE));
+    h.frames(game, 20, |g, _| ahead(g, Buttons::NONE));
+    h.shot("rework_play_blink_arrow");
+    h.frames(game, 2, |g, i| {
+        ahead(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 4, still);
+    h.shot("rework_play_blink");
+    h.frames(game, 40, still);
+
+    // The Trimmer's Riposte: the guard held.
+    select(game, 3, 0);
     h.frames(game, 20, still);
     h.frames(game, 20, |g, _| aimed(g, Buttons::ALT_FIRE));
     h.shot("rework_play_riposte_guard");
     h.frames(game, 40, still);
-    game.send_chat("/loadout quill bellows arclash tumbler");
-    game.send_chat("/killall");
-    h.frames(game, 30, still);
+    cmd(h, game, "/loadout quill bellows arclash tumbler");
+    cmd(h, game, "/killall");
 }
 
 fn main() -> anyhow::Result<()> {

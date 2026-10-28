@@ -63,7 +63,7 @@ use engine::ui::{Rect, TextStyle, Ui, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use server::{ServerCommand, ServerConfig};
 use shared::movement::MoveEvents;
-use shared::protocol::{GameEvent, NetId};
+use shared::protocol::{GameEvent, NetId, PlayerId, kind, waxwork_flags};
 
 use crate::app::Common;
 use crate::bot::Bot;
@@ -974,7 +974,7 @@ impl InGame {
                 let world = net.world().map(|w| &w.collision.world);
                 let cam = self.last_camera;
                 let hidden = self.spectate.hidden_player();
-                let tags: Vec<NameTag> = net
+                let mut tags: Vec<NameTag> = net
                     .remote_players()
                     .filter_map(|e| {
                         let id = e.id.as_player().filter(|id| Some(*id) != hidden)?;
@@ -990,6 +990,31 @@ impl InGame {
                         })
                     })
                     .collect();
+                // Someone else's Waxwork wears their name too (it is meant to pass for them),
+                // until it slumps.
+                let local = net.local_player_id();
+                tags.extend(
+                    net.remote_entities()
+                        .iter()
+                        .filter(|e| {
+                            e.kind == kind::WAXWORK
+                                && e.flags & waxwork_flags::SLUMPING == 0
+                                && Some(PlayerId(e.owner as u8)) != local
+                        })
+                        .map(|e| {
+                            let id = PlayerId(e.owner as u8);
+                            let pos = remote_players::name_tag_anchor(e);
+                            NameTag {
+                                position: pos,
+                                name: net.player_name(id).unwrap_or("?"),
+                                color: player_color(id),
+                                marker: palette::shape_cues()
+                                    .then(|| palette::marker_shape(id.0 as usize)),
+                                occluded: world
+                                    .is_some_and(|w| w.line_blocked(cam.position, pos, MASK_SHOTS)),
+                            }
+                        }),
+                );
                 hud::draw_name_tags(list, &common.theme, &self.last_camera, &tags);
                 // Accessibility: a parry icon over enemies in their parryable window.
                 if palette::shape_cues() {
