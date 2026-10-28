@@ -346,6 +346,53 @@ fn a_relayed_bomb_keeps_its_blast_and_an_arrow_its_draw() {
 }
 
 #[test]
+fn a_hurled_blade_turns_at_a_thorn_on_its_way_out() {
+    let (mut a, p) = setup();
+    let d = dummy(&mut a, Vec3::new(9.0, 0.0, -6.0), -PI / 2.0, BIG);
+    let at = Vec3::new(0.0, 1.6, -6.0);
+    arm_default(&mut a, p, WeaponKind::Trimmer);
+    let thorn = thorn_at(&mut a, p, at);
+    a.ticks(5);
+    a.aim(p, at);
+    a.select(p, 0, 1);
+    let ev = a.tap(p, Buttons::ALT_FIRE, 60);
+    assert!(!a.world.thorns.contains_key(&thorn));
+    let turned = relays(&ev);
+    assert_eq!(turned.len(), 1);
+    assert_eq!(turned[0].0, Attack::Hurl);
+    assert!(turned[0].2.is_some(), "the blade turned");
+    let hits = ricochet_hits(&ev, HitTarget::Entity(d));
+    assert!(!hits.is_empty());
+    let c = &a.tuning.combat;
+    let want =
+        WeaponKind::Trimmer.primary_damage(c) * c.hurl.damage_scale * c.thorn.damage_multiplier;
+    assert!((hits[0].amount - want).abs() < 1e-3, "{}", hits[0].amount);
+    assert_eq!(hits[0].ricochets, 1);
+}
+
+#[test]
+fn a_lagging_shooters_projectile_relays_in_its_made_up_flight() {
+    // 12 ticks behind: the rivet makes up ~18 m of flight on its first step, through the thorn
+    // 6 m out and on to the dummy it turns at.
+    let (mut a, p) = setup();
+    let d = dummy(&mut a, Vec3::new(9.0, 0.0, -6.0), -PI / 2.0, BIG);
+    let at = Vec3::new(0.0, 1.6, -6.0);
+    arm_default(&mut a, p, WeaponKind::Riveter);
+    let thorn = thorn_at(&mut a, p, at);
+    a.ticks(20);
+    a.view_lag.insert(p, 12.0);
+    a.aim(p, at);
+    let ev = a.tap(p, Buttons::FIRE, 0);
+    assert!(
+        !a.world.thorns.contains_key(&thorn),
+        "relayed on its first step"
+    );
+    assert_eq!(relays(&ev).len(), 1);
+    let ev: Vec<SimEvent> = ev.into_iter().chain(a.ticks(10)).collect();
+    assert_eq!(ricochet_hits(&ev, HitTarget::Entity(d)).len(), 1);
+}
+
+#[test]
 fn a_target_before_the_thorn_takes_the_projectile() {
     let (mut a, p) = setup();
     let front = dummy(&mut a, Vec3::new(0.0, 0.0, -5.0), 0.0, BIG);
