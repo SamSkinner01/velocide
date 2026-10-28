@@ -245,6 +245,9 @@ pub struct NetClient {
     next_seq: u32,
     clock: ClockSync,
     render_tick: Option<f64>,
+    /// The render tick of a press frame since the last tick ([`NetClient::latch_view`]): the
+    /// next input's view time.
+    latched_view: Option<f64>,
     interp_delay_ticks: Option<f64>,
     remote: Vec<EntityState>,
     sample_info: SampleInfo,
@@ -330,6 +333,7 @@ impl NetClient {
             next_seq: 1,
             clock: ClockSync::new(shared::sim::DEFAULT_TICK_RATE),
             render_tick: None,
+            latched_view: None,
             interp_delay_ticks: None,
             remote: Vec::new(),
             sample_info: SampleInfo::default(),
@@ -536,6 +540,20 @@ impl NetClient {
 
     // ---- sending ------------------------------------------------------------------------------
 
+    /// The next input's view time is the render tick now, not the one at its tick: a fire
+    /// button was pressed or released on this frame between ticks, and the shot goes where the
+    /// crosshair was on it (`Controls::press_aim`), at what the screen showed then (lag
+    /// compensation, docs/feel.md "Hit registration"). The first call before a tick counts.
+    pub fn latch_view(&mut self) {
+        let Some(render) = self.render_tick else {
+            return;
+        };
+        // A latch no tick took (paused) is forgotten.
+        if self.latched_view.is_none_or(|v| render - v > 2.0) {
+            self.latched_view = Some(render);
+        }
+    }
+
     /// One fixed tick of the local player: assigns `seq` and the view time (for lag
     /// compensation), predicts it immediately and sends it (with redundancy). Returns the
     /// predicted movement events, or `None` while not in game.
@@ -549,7 +567,12 @@ impl NetClient {
         input.seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
         protocol::sanitize_input(&mut input);
-        let view = self.render_tick.unwrap_or(0.0).max(0.0);
+        let view = self
+            .latched_view
+            .take()
+            .or(self.render_tick)
+            .unwrap_or(0.0)
+            .max(0.0);
         input.view_tick = view.floor().min(u32::MAX as f64) as u32;
         input.view_frac = ((view - view.floor()) * 256.0).floor().clamp(0.0, 255.0) as u8;
         // A dead body is simulated with a neutral input on the server: predict (and send)

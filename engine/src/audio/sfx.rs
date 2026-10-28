@@ -624,7 +624,7 @@ impl Sfx {
             Branded => info(-15.0, 4, 0.03, 0.05),
             SplinterFire => info(-13.0, 3, 0.04, 0.0),
             SplinterBurst => info(-16.0, 4, 0.06, 0.03),
-            BellowsBlast => info(-11.0, 4, 0.04, 0.0),
+            BellowsBlast => info(-10.0, 4, 0.04, 0.0),
             BellowsGust => info(-13.0, 3, 0.04, 0.0),
             BothBarrels => info(-10.0, 3, 0.03, 0.0),
             Deflect => info(-14.0, 4, 0.04, 0.03),
@@ -707,7 +707,7 @@ impl Sfx {
 
             // arsenal-client
             LancetFire => info(-15.0, 6, 0.06, 0.0),
-            ThresherFire => info(-12.0, 4, 0.04, 0.0),
+            ThresherFire => info(-11.0, 4, 0.04, 0.0),
             RiveterFire => info(-17.0, 8, 0.06, 0.02),
             RivetImpact => variants(info(-19.0, 6, 0.1, 0.02), 2),
             CinderboxFire => info(-15.0, 6, 0.05, 0.02),
@@ -1614,12 +1614,18 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             b
         }
         BellowsBlast => {
-            let mut b = bellows_core(r, 1.0);
+            // Heavier since the shotguns pass (docs/balance.md): a deeper core, the pellets
+            // crunching out of the barrels, and a clean sub boom under the distortion.
+            let core = bellows_core(r, 1.15);
+            let crunch = noise(r, 0.2, Pass::Band, 1400.0, 600.0, 1.0, 0.0005, 0.045);
+            let mut b = layer(&[(&core, 1.0, 0.0), (&crunch, 0.5, 0.0)]);
             drive(&mut b, 2.6);
             crush(&mut b, 11, 1.5);
-            reverb(&mut b, 0.25, 0.6, 0.1, 0.25);
+            let sub = thump(0.7, 90.0, 30.0, 0.045, 0.16);
+            mix_at(&mut b, &sub, 0.5, 0.0);
+            reverb(&mut b, 0.3, 0.6, 0.12, 0.3);
             let wheeze = bellows_wheeze(r, 0.32);
-            mix_at(&mut b, &wheeze, 0.2, 0.2);
+            mix_at(&mut b, &wheeze, 0.2, 0.22);
             b
         }
         BellowsGust => {
@@ -2882,7 +2888,7 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
         ThresherFire => {
             // Shorter and rougher than the Bellows: a chunky blast, pellets rattling in the
             // duckbill, then the drum ratcheting round one shell.
-            let core = bellows_core(r, 0.8);
+            let core = bellows_core(r, 0.95);
             let crack = noise(r, 0.05, Pass::Band, 4200.0, 2000.0, 1.1, 0.0002, 0.01);
             let rattle = envelope(crackle(r, 0.12, 900.0, 0.05), 0.001, 0.04);
             let ratchet = metal(0.05, 1800.0, &[(1.0, 1.0, 0.01), (2.3, 0.5, 0.006)]);
@@ -2897,6 +2903,10 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             ]);
             drive(&mut b, 2.0);
             crush(&mut b, 10, 1.5);
+            // A short clean sub under it (the shotguns pass): heavier, still quick enough to
+            // repeat every 0.42 s.
+            let sub = thump(0.35, 110.0, 40.0, 0.03, 0.08);
+            mix_at(&mut b, &sub, 0.4, 0.0);
             b
         }
         RiveterFire => {

@@ -231,6 +231,10 @@ impl Bindings {
         self.get(action).iter().any(|&b| input.pressed(b))
     }
 
+    pub fn released(&self, input: &InputState, action: Action) -> bool {
+        self.get(action).iter().any(|&b| input.released(b))
+    }
+
     /// Binds `binding` to `action`, replacing the action's binding of the same device class
     /// (keyboard/mouse vs gamepad) and removing it from every other action.
     pub fn bind(&mut self, action: Action, binding: Binding) {
@@ -424,10 +428,11 @@ pub struct Controls {
     pub weapons: WeaponSelect,
     /// Buttons pressed (even briefly) since the last tick.
     latched: Buttons,
-    /// The view when a fire / punch button was first pressed since the last tick: the next
+    /// The view when a fire / punch button was first pressed (or a fire button released: a
+    /// drawn bow, a focus or a charge looses on the release) since the last tick: the next
     /// tick's input aims there, so the shot goes where the crosshair was on the click's frame
     /// (where its press-frame feedback was drawn, docs/feel.md), not where it drifted by the
-    /// tick.
+    /// tick. The game latches that frame's view time with it (`NetClient::latch_view`).
     press_aim: Option<(f32, f32)>,
     /// Movement axes / buttons injected by the autopilot (`--bot`), replacing the devices.
     pub override_move: Option<(f32, f32, Buttons)>,
@@ -483,6 +488,10 @@ impl Controls {
                     self.press_aim.get_or_insert((self.yaw, self.pitch));
                 }
             }
+            if matches!(action, Action::Fire | Action::AltFire) && bindings.released(input, action)
+            {
+                self.press_aim.get_or_insert((self.yaw, self.pitch));
+            }
         }
         let mut change = WeaponChange::None;
         for action in [
@@ -510,6 +519,11 @@ impl Controls {
             change = WeaponChange::Mode;
         }
         change
+    }
+
+    /// A press or release since the last tick fixed the next input's aim (`press_aim`).
+    pub fn aim_latched(&self) -> bool {
+        self.press_aim.is_some()
     }
 
     /// Forget latched presses (e.g. when gameplay input is suppressed by chat or a menu).

@@ -108,11 +108,12 @@ impl CameraRig {
         }
     }
 
-    /// A shot's view punch: `amount` 0..1 (the shot's kick). The view jumps up a fraction of a
-    /// degree and springs back; the aim (and so the shot) is unaffected.
+    /// A shot's view punch: `amount` 0..2 (the shot's kick squared; a scattergun's blast more).
+    /// The view jumps up a fraction of a degree (1: ~0.7°) and springs back; the aim (and so the
+    /// shot) is unaffected.
     pub fn punch(&mut self, amount: f32) {
         if amount.is_finite() && amount > 0.0 {
-            self.punch_velocity += amount.min(1.0) * 0.012 * PUNCH_OMEGA * std::f32::consts::E;
+            self.punch_velocity += amount.min(2.0) * 0.012 * PUNCH_OMEGA * std::f32::consts::E;
         }
     }
 
@@ -295,6 +296,18 @@ mod tests {
             rig.update(&frame(&state, &tuning, &settings));
             assert!(rig.view_punch() <= MAX_PUNCH);
         }
+        // A blast (2) punches about twice as far as a full kick, inside the cap.
+        let mut rig = CameraRig::new();
+        rig.punch(2.0);
+        let mut heavy = 0.0f32;
+        for _ in 0..8 {
+            rig.update(&frame(&state, &tuning, &settings));
+            heavy = heavy.max(rig.view_punch());
+        }
+        assert!(
+            heavy > 1.8 * peak && heavy <= MAX_PUNCH,
+            "{heavy} vs {peak}"
+        );
     }
 
     #[test]

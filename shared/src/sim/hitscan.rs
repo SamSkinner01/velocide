@@ -35,7 +35,7 @@ use super::{
 };
 use crate::input::PlayerInput;
 use crate::protocol::NetId;
-use crate::tuning::Tuning;
+use crate::tuning::{CombatTuning, Tuning};
 
 /// One ray to trace.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +51,31 @@ pub struct ShotSpec {
     pub ricochet: bool,
     /// A target this ray passes through (it starts inside it).
     pub exclude: Option<HitTarget>,
+    /// Harder hits up close (the scatterguns' pellets); not on ricochet legs.
+    pub point_blank: Option<PointBlank>,
+}
+
+/// A ray that hits within `range` m of where it left deals × `multiplier`, easing back to × 1
+/// at `end` m (a scattergun's point-blank blast).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointBlank {
+    pub range: f32,
+    pub end: f32,
+    pub multiplier: f32,
+}
+
+impl PointBlank {
+    /// The damage multiplier for a hit `distance` m along the ray.
+    pub fn at(&self, distance: f32) -> f32 {
+        let k = if distance <= self.range {
+            1.0
+        } else if self.end > self.range {
+            ((self.end - distance) / (self.end - self.range)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        1.0 + (self.multiplier - 1.0) * k
+    }
 }
 
 impl ShotSpec {
@@ -64,6 +89,7 @@ impl ShotSpec {
             knockback: 0.0,
             ricochet: false,
             exclude: None,
+            point_blank: None,
         }
     }
 
@@ -79,6 +105,11 @@ impl ShotSpec {
 
     pub fn exclude(mut self, target: Option<HitTarget>) -> Self {
         self.exclude = target;
+        self
+    }
+
+    pub fn point_blank(mut self, point_blank: PointBlank) -> Self {
+        self.point_blank = Some(point_blank);
         self
     }
 }
@@ -113,6 +144,24 @@ pub struct TraceResult {
     pub ricochet: Vec<Vec3>,
     /// What the last leg hit (`None`: it ran out of range).
     pub impact: Option<Impact>,
+}
+
+/// Hit assist for an attack by `attacker` on `target` ([`SimWorld::hit_pads`]; clients
+/// testing what their own attacks touch use it too): player-owned attacks get the
+/// `combat.hit_assist` pads (enemies' or other players' sizes); everything else none.
+pub fn assist_pads(t: &CombatTuning, attacker: Owner, target: HitTarget) -> HitPads {
+    let a = &t.hit_assist;
+    match (attacker, target) {
+        (Owner::Player(_), HitTarget::Entity(_)) => HitPads {
+            body: a.enemy_body_pad,
+            weak: a.enemy_weak_pad,
+        },
+        (Owner::Player(_), HitTarget::Player(_)) => HitPads {
+            body: a.player_body_pad,
+            weak: a.player_head_pad,
+        },
+        _ => HitPads::NONE,
+    }
 }
 
 impl SimWorld {
@@ -171,18 +220,7 @@ impl SimWorld {
     /// Hit assist for an attack by `attacker` on `target`: player-owned attacks get the
     /// `combat.hit_assist` pads (enemies' or other players' sizes); everything else none.
     pub fn hit_pads(&self, t: &Tuning, attacker: Owner, target: HitTarget) -> HitPads {
-        let a = &t.combat.hit_assist;
-        match (attacker, target) {
-            (Owner::Player(_), HitTarget::Entity(_)) => HitPads {
-                body: a.enemy_body_pad,
-                weak: a.enemy_weak_pad,
-            },
-            (Owner::Player(_), HitTarget::Player(_)) => HitPads {
-                body: a.player_body_pad,
-                weak: a.player_head_pad,
-            },
-            _ => HitPads::NONE,
-        }
+        assist_pads(&t.combat, attacker, target)
     }
 
     /// Fires a group of rays from one input (one shot, a pellet spread) against the
@@ -340,7 +378,10 @@ impl SimWorld {
         let Some((thorn_id, thorn_t, thorn_pos)) = thorn else {
             if let Some((d, target, part)) = hit {
                 let point = origin + dir * d;
-                let mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+                let mut mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+                if let Some(pb) = spec.point_blank {
+                    mult *= pb.at(d);
+                }
                 let mut flags = Self::hitscan_flags(spec.attack);
                 if ricochets > 0 {
                     flags.insert(DamageFlags::RICOCHET);
@@ -387,6 +428,7 @@ impl SimWorld {
             dir: next_dir,
             range,
             exclude: None,
+            point_blank: None,
             ..*spec
         };
         let current = self.current_hitboxes(t);
