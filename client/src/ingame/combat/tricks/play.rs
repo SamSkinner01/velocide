@@ -25,7 +25,7 @@ use super::super::super::effects::Effects;
 use super::super::super::remote_players::{PlayerVisual, player_anim, player_color};
 use super::super::Rng;
 use super::super::entities::enemy_size;
-use super::super::fx::{Beams, FxCtx};
+use super::super::fx::{Beams, FxCtx, shake_at};
 use super::{TrickFrame, Tricks, beacon, blink, lamplighter, riposte, tally, waxwork, wickline};
 use crate::models::weapons::melee::SwingKind;
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
@@ -34,6 +34,9 @@ use crate::models::{ModelLibrary, PlayerAnim, Tint};
 const BEACON_HUM_EVERY: f64 = 1.05;
 /// A tally's shots: this far apart in the sound.
 const TALLY_SHOT_GAP: f32 = 0.045;
+
+/// How long a double's burst stands for the other half of it (seconds).
+const BURST_MEMORY: f64 = 0.6;
 
 /// A wax double seen in the world.
 #[derive(Clone, Copy, Debug)]
@@ -160,7 +163,14 @@ impl Tricks {
         for d in self.doubles.values_mut() {
             d.seen = false;
         }
-        for e in f.entities.iter().filter(|e| e.kind == kind::WAXWORK) {
+        // Doubles whose burst already played (`Fx::Explosion`) until their entity goes.
+        self.burst_doubles
+            .retain(|id| f.entities.iter().any(|e| e.id == *id));
+        for e in f
+            .entities
+            .iter()
+            .filter(|e| e.kind == kind::WAXWORK && !self.burst_doubles.contains(&e.id))
+        {
             let owner = PlayerId(e.owner as u8);
             let time = self.time;
             let d = self.doubles.entry(e.id).or_insert_with(|| {
@@ -193,10 +203,15 @@ impl Tricks {
                 d.slump_since.get_or_insert(time);
             }
         }
-        let radius = f.tuning.waxwork.burst_radius;
+        let (radius, time) = (f.tuning.waxwork.burst_radius, self.time);
         let gone: Vec<Double> = self.doubles.values().filter(|d| !d.seen).copied().collect();
         self.doubles.retain(|_, d| d.seen);
+        self.bursts.retain(|b| time - b.1 < BURST_MEMORY);
         for d in gone {
+            if self.burst_lately(d.feet) {
+                continue;
+            }
+            self.bursts.push((d.feet, time));
             waxwork::burst(effects, beams, rng, d.feet, radius);
             audio.play(Sfx::WaxworkBurst, PlayParams::at(d.feet + Vec3::Y));
         }
@@ -630,8 +645,53 @@ impl Tricks {
                 );
                 ctx.audio.play(Sfx::RiposteBlock, PlayParams::at(at));
             }
+            // A Waxwork's burst (its slump's end, or destroyed): the hot wax where its double
+            // stood, and the double gone at once (its entity may linger a frame or two: the
+            // explosion of your own double plays as it arrives).
+            Fx::Explosion {
+                position,
+                radius_dm,
+                attack: Attack::Waxwork,
+                ..
+            } => {
+                let at = q(*position);
+                let near = self
+                    .doubles
+                    .iter()
+                    .filter(|(_, d)| (d.feet + Vec3::Y * 0.9).distance(at) < 2.5)
+                    .min_by(|a, b| {
+                        let d = |x: &Double| (x.feet + Vec3::Y * 0.9).distance(at);
+                        d(a.1).total_cmp(&d(b.1))
+                    })
+                    .map(|(id, d)| (*id, d.feet));
+                let feet = match near {
+                    Some((id, feet)) => {
+                        self.doubles.remove(&id);
+                        self.burst_doubles.insert(id);
+                        feet
+                    }
+                    // Its double already went (and burst) this frame.
+                    None if self.burst_lately(at - Vec3::Y * 0.9) => return,
+                    None => at - Vec3::Y * 0.9,
+                };
+                self.bursts.push((feet, self.time));
+                let radius = *radius_dm as f32 / 10.0;
+                waxwork::burst(ctx.effects, ctx.beams, ctx.rng, feet, radius);
+                ctx.audio
+                    .play(Sfx::WaxworkBurst, PlayParams::at(feet + Vec3::Y));
+                let d = at.distance(ctx.listener);
+                ctx.feedback.shake(shake_at(d, radius * 3.0, 0.25));
+            }
             _ => {}
         }
+    }
+
+    /// Whether a double's burst played near `feet` a moment ago (a burst shows once, whichever
+    /// of its `Fx::Explosion` and its entity going comes first).
+    fn burst_lately(&self, feet: Vec3) -> bool {
+        self.bursts
+            .iter()
+            .any(|b| b.0.distance(feet) < 1.5 && self.time - b.1 < BURST_MEMORY)
     }
 
     /// One crack per shot of a tally, a few hundredths of a second apart.

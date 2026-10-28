@@ -148,7 +148,7 @@ tallow with its shading kept and its colours gone (`ingame::combat::tricks::waxw
 | `weapon`, `ability` | the held `WeaponKind` and its selected `Ability`; the weapon's `Glow` parts take the ability's colour (`weapons::ability_color`, one per ability; see below); `WeaponLook::primary_color` is each gun's primary-fire colour for tracers / beams |
 | `fire_kick` | 1 on fire, decay (~0.3 s); also drives the mechanisms: the Quill's crest folds flat front to back and rises again, the Bellows pumps (board swings shut half way through the decay, pleats squash, then refill), the Lancet's feed sleeve snaps back, the Riveter's nose hammers back and one air pulse runs down its hose (`riveter::pulse_position`: the kick falls 0.3 between rivets, which carries the pulse from the tank to the tool), the Longwick's string snaps and quivers and its arrow is gone until the kick fades below 0.35 (the next one nocked) |
 | `alt_charge` | 0..1 alt charge (Discharge, Skewer): any gun's glow brightens towards white; the Arclash's capacitor light speeds up and arcs jump between its prongs (flickering); the gun shakes above 0.6 |
-| `draw` | 0..1 Longwick draw: the nock and the arrow come back by up to `longwick::DRAW_LENGTH` (0.3 m), the limbs flex, the wick string and the arrow's flame heat up and strobe white at full draw, the left fist pinches the nock (`longwick::draw_hand`), the bow trembles past 85 % |
+| `draw` | 0..1 Longwick draw: the nock and the arrow come back by up to `longwick::DRAW_LENGTH` (0.3 m), the limbs flex, the wick string and the arrow's flame heat up and strobe white at full draw, the left fist pinches the nock (`longwick::draw_hand`), the bow trembles past 85 %. The Lamplighter's focus: the focus ring turns, the sleeve runs out by `lamplighter::FOCUS_TRAVEL`, the wick grows and whitens and strobes at full focus; the gun comes in towards the eye (`FOCUS_SHIFT`) and turns along the aim (`view_rotation`), the bob fading |
 | `salvo` | seconds since a Cinderbox salvo started (`None` = no salvo): the tubes fire top, left, right 0.08 s apart (`cinderbox::SALVO_GAP`), each mouth flares (`tube_flash`), the box kicks once per rocket (`salvo_kick`), the back face's three "loaded" lamps go dark as their tubes fire and relight at `RELOAD` (0.9 s) |
 | `spray` | 0..1 Kiln spray (smoothed while it fires): the firebox coals roar, the chimney's damper rattles, the gun shakes |
 | `unarmed` | no weapon at all (the client sets it when the carried loadout is empty): the right hand (the arm's closed glove) raised and the left fist up in a guard, punching as usual |
@@ -157,6 +157,7 @@ tallow with its shading kept and its colours gone (`ingame::combat::tricks::waxw
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
 | `throw` | throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles (or the knack's pot cupped on the fist, the snare's disc edge-on), flicks it at ~0.5 |
+| `hurled` | your Hurl's blade / head is out (it comes back): the hand holds no blade / the haft no head until it is caught (`melee::hide_hurled`; `PlayerAnim::hurled` the same for others) |
 | `drink` | Kindle Flask drink progress 0..1 (`weapons::drink`, `DRINK_TIME` 0.75 s): the left fist brings the flask up from below the screen into the lower middle (placed in view space beside the fist, `drink::flask`), its stopper pulled (hidden) as it comes up, tips it back about the view's X until the neck points at the mouth while the kindling flares and drains (`flask_glow`), then drops away to the lower left; the gun dips like a punch's (`drink::lowering`); a melee weapon's left half is put away |
 | `bob_phase`, `bob_amount` | walk bob (advance phase by ~speed × 1.2 rad/s; amount = ground speed / run speed) |
 | `sway` | smoothed look velocity (rad/s); the weapon lags |
@@ -178,19 +179,24 @@ players until the replicated state carries their ability and draw).
 
 | class | ability colours (`ability_color`) |
 |---|---|
-| Precision | Brand crimson, Splinter ice, Skewer white-gold, Flurry mint |
+| Precision | Brand crimson, Wickline flame orange, Tally chalk ice, Waxwork tallow |
 | Scatter | Gust sky, Bolas cord orange, Bulwark pale honey, Flak rose (`gear::BOLAS_COLOR`, `BULWARK_COLOR`) |
 | Rapid | Wisp violet, Discharge blue, Stoke forge red, Lantern lamplight gold (`gear::STOKE_COLOR`, `LANTERN_COLOR`) |
 | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite rose (`gear::KITE_COLOR`) |
-| Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
-| Melee | Lunge cyan, Whirl amber, Hurl violet, Upswing lime |
+| Draw | Brand crimson, Blink Arrow mint (`tricks::BLINK_MINT`), Pinning Arrow steel blue, Beacon Arrow gold (`tricks::BEACON_GOLD`) |
+| Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte steel white |
 
 ### Melee (`weapons::melee`, docs/refit.md)
 
 The Trimmer and the Tamper are held and swung, not aimed: `melee::of(WeaponKind)` /
 `of_id(id)` → `MeleeWeapon`. A swing is `Swing { kind: SwingKind::{Slash, Lunge, Whirl, Hurl,
-Upswing}, progress 0..1 (0 = idle), left }` (`advance(weapon, dt)`, `flare(weapon)` for the
-glow; `duration` / `impact` per move). Every move reaches its blow early (the hit is on the
+Upswing, Guard, Riposte}, progress 0..1 (0 = idle), left }` (`advance(weapon, dt)`,
+`flare(weapon)` for the glow; `duration` / `impact` per move). The Riposte's **guard** is a
+held pose: `Guard` rises to the Trimmer's blades crossed in front of the face (the left one
+mirrored across it) or the Tamper's haft held across, and stays there while it is up
+(`Viewmodel::hold_guard`; `GUARD_DROP` past which `Swing::drop_guard` lowers it); its
+**counter** (`Riposte`) is a wide flat sweep out of the guard. (`Upswing` is the
+retired ability's, kept for its preview.) Every move reaches its blow early (the hit is on the
 click's tick: the Trimmer's slash at 0.09 s of 0.3 s, the Tamper's slam at 0.1 s of 0.78 s)
 and spends the rest recovering.
 
@@ -349,12 +355,15 @@ Thresher drum turning, Riveter hose pulse at the tank and at the tool, Cinderbox
 tube, Longwick rest / half / full draw / release, Kiln rest / spraying / Discharge),
 `weapons_x` / `weapons_x34` and `projectiles_x` (the arsenal at real scale), `melee_vm_00..16`
 (the Trimmer and Tamper in first person: rest, the slashes' wind / mid / impact, the left
-blade, the slam's wind / fall / impact / recovery, Lunge, Whirl, Hurl, Upswing),
+blade, the slam's wind / fall / impact / recovery, Lunge, Whirl, Hurl, Upswing; `17..20` the
+Riposte's guard and counter on both),
 `melee_weapons` / `melee_weapons_34` (real scale), `melee_hurled`, `melee_3p_trimmer` /
-`melee_3p_tamper` (third person through the swings), `knack_props` (flask, pot, snare
+`melee_3p_tamper` (third person through the swings), `melee_3p_riposte_trimmer` /
+`melee_3p_riposte_tamper` (the guard and the counter), `knack_props` (flask, pot, snare
 arming / armed / sprung), `lamp_side` / `lamp_34` / `lamp_close` (the Lamplighter at real
 scale through its focus: rest, half, full, the shot; the lantern chamber at rest and at full
-focus), `lamp_vm_0..3` (first person: rest, half focus, full focus, the shot),
+focus), `lamp_vm_0..3` (first person through `draw_viewmodel`: rest, half focus, full focus, the
+shot), `lamp_3p` (Shrikes holding it: rest, half, full, the shot),
 `rework_arrows` (the Blink and Beacon arrows beside the plain and the pinning arrow),
 `gear_models` (the rework's gear at real scale), `gear_bulwark` /
 `gear_bulwark_back` / `gear_bulwark_close` (the slab's crack stages front and back, a blow

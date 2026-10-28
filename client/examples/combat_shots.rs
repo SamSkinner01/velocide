@@ -1154,12 +1154,12 @@ fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
             hold(g, Buttons::NONE)
         });
         h.shot("rework_play_waxwork");
-        h.frames(game, 195, |g, _| {
+        h.frames(game, 202, |g, _| {
             aim_at(g, e - Vec3::Y * 0.7);
             hold(g, Buttons::NONE)
         });
         h.shot("rework_play_waxwork_slump");
-        h.frames(game, 30, |g, _| {
+        h.frames(game, 18, |g, _| {
             aim_at(g, e - Vec3::Y * 0.7);
             hold(g, Buttons::NONE)
         });
@@ -1221,10 +1221,11 @@ fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 40, still);
     h.shot("rework_play_beacon");
 
-    // A Blink arrow into the floor ahead and the step to it.
+    // A Blink arrow into the floor ahead and the step to it (once the Beacon's 8 s cooldown,
+    // the bow's, is over).
     cmd(h, game, "/killall");
     select(game, 2, 0);
-    h.frames(game, 20, still);
+    h.frames(game, 380, still);
     let ahead = |g: &mut InGame, buttons: Buttons| {
         g.controls.yaw = 0.6;
         g.controls.pitch = -0.2;

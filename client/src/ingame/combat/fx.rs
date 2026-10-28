@@ -460,7 +460,8 @@ pub fn explosion(ctx: &mut FxCtx, position: Vec3, radius: f32, attack: Attack, o
         Attack::Cinderbox => arsenal::blast(ctx, Blast::Cinder, position, radius),
         Attack::Limpet => arsenal::blast(ctx, Blast::Limpet, position, radius),
         Attack::Kite => arsenal::blast(ctx, Blast::Kite, position, radius),
-        Attack::Waxwork => arsenal::blast(ctx, Blast::Waxwork, position, radius),
+        // A Waxwork's burst is hot wax where its double stood (`tricks`, which knows it).
+        Attack::Waxwork => {}
         Attack::Flak => {
             // The ring flies out across the line of sight (no flight direction in the Fx).
             let across = (position - ctx.listener).normalize_or(Vec3::NEG_Z);

@@ -299,6 +299,7 @@ UI theme. `player_color(id)` returns `palette().team(id)`.
 | `hostile_projectile` | enemy projectiles | #FF8C26 | #BF59FF | #BF59FF | #40BFFF |
 | `deflected` | your parried projectile | #FFF7E6 | #FFF7E6 | #FFF7E6 | #FFF7E6 |
 | `brand` | Quill brand sigil | #FF4CD9 | #CCFF33 | #CCFF33 | #FF4CD9 |
+| `revealed` | hostiles a Beacon Arrow reveals, drawn through walls (`tricks::beacon`) | #FFDB61 | #8CFFF2 | #8CFFF2 | #99FF80 |
 | `friendly` / `hostile` | team-mode markers | #61C7FF / #ED262B | #4CA6FF / #FF8C0D | #4CA6FF / #FF8C0D | #33D999 / #ED262B |
 | `heal` / `damage` | kindling, `+N` / `-N` popups | #FF9E38 / #EE262C | #FFCC33 / #FF6E28 | #FFD940 / #F03C1E | #FFCC73 / #FF2828 |
 | `flash_damage` | hit flash | #E60D0A | #FF4C00 | #F23300 | #E60D0A |
@@ -450,7 +451,14 @@ Limpet in hand LIMPETS pips (live / most). The slot keys and the wheel skip empt
 (`ingame::combat::hud`) adds the charge / draw gauge beside the crosshair (blue for charges, wick
 gold for the bow's draw, FULL and the armed ability at full draw), BURNING (flickering ember
 screen edges) and PINNED (steel-blue edge bars) on you, and hides the THORN pips when the
-tuning has no thorns (PvP).
+tuning has no thorns (PvP). The rework's (`ingame::combat::tricks`, `docs/arsenal.md` "Client:
+the Lamplighter..."): the Lamplighter's scope (a lens vignette with a brass rim and stadia
+lines, under the rest of the HUD) and its **focus ring** round the crosshair (the focus meter:
+a dotted circle closing in, the focused part gold from the top clockwise, burning white at full
+focus); the Tally's assist circle, count and time while held and a chalk bracket with tally
+strokes on each tallied target; BLINK and a closing mint ring while a Blink Arrow can be
+stepped to; the Riposte's steel arc above the crosshair (the guarded front, closing as the hold
+runs out) with a pip per block.
 
 ## CPU rasteriser
 

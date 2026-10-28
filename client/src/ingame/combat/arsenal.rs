@@ -786,8 +786,6 @@ pub enum Blast {
     Limpet,
     /// The ember kite bursting (the biggest): a rose shock ring and scraps of burning paper.
     Kite,
-    /// A Waxwork bursting in hot wax (the retired Ember Arrow's flame burst for now).
-    Waxwork,
 }
 
 impl Blast {
@@ -796,7 +794,6 @@ impl Blast {
             Blast::Cinder => Sfx::CinderBlast,
             Blast::Limpet => Sfx::LimpetDetonate,
             Blast::Kite => Sfx::MortarBlast,
-            Blast::Waxwork => Sfx::EmberArrowBurst,
         }
     }
 
@@ -806,14 +803,12 @@ impl Blast {
             Blast::Cinder => Vec4::new(1.0, 0.5, 0.18, 1.0),
             Blast::Limpet => Vec4::new(1.0, 0.85, 0.35, 1.0),
             Blast::Kite => Vec4::new(1.0, 0.65, 0.4, 1.0),
-            Blast::Waxwork => Vec4::new(1.0, 0.45, 0.1, 1.0),
         }
     }
 }
 
 /// A blast of radius `radius` at `position`: flash, fireball, smoke, sparks, ring, light,
-/// scorch, shake and sound. The Kite adds a rose shock ring and burning paper; the Waxwork a
-/// fountain of embers that settle and keep glowing.
+/// scorch, shake and sound. The Kite adds a rose shock ring and burning paper.
 pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     let r = radius.max(0.8);
     let hot = kind.color();
@@ -856,25 +851,6 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     e.shockwave(position, r);
     match kind {
         Blast::Kite => super::kite::burst_scraps(ctx, position, r),
-        Blast::Waxwork => {
-            for _ in 0..22 {
-                let v = ctx.rng.dir() * ctx.rng.range(2.0, 7.0) + Vec3::Y * 4.0;
-                ctx.effects.spawn(Particle {
-                    position,
-                    velocity: v,
-                    gravity: 9.0,
-                    drag: 1.0,
-                    max_life: ctx.rng.range(0.8, 1.8),
-                    size: Vec2::splat(0.1),
-                    color: Vec4::new(1.0, 0.55, 0.15, 1.0),
-                    end_alpha: 0.3,
-                    texture: FxTex::Spark,
-                    additive: true,
-                    collide: Some(OnHit::Bounce(0.1)),
-                    ..Default::default()
-                });
-            }
-        }
         Blast::Limpet => {
             let lamp = ability_color(Ability::Limpet);
             ctx.beams.ring(

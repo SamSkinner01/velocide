@@ -152,7 +152,10 @@ Kill hitstop 0.045 → 0.06 s.
 * **Full-draw cue**: `BowFullDraw` plus `FullDrawGlint`, a warm flash (0.14), a gold and white
   ring bursting from the crosshair, the existing FULL label.
 * **Zoom**: the view narrows as the bow is drawn, eased, to tan(fov/2) × 0.9 at full draw
-  (`CameraRig::set_zoom`, smoothed at 10/s).
+  (`CameraRig::set_zoom`, smoothed at 10/s). The Lamplighter's scope uses the same zoom, eased
+  with its focus to tan(fov/2) × 0.4 (the rig allows down to `MAX_ZOOM` 0.3), and only there is
+  the look scaled with it (`CameraRig::zoom_scale`, `Controls::look_zoomed`): the crosshair
+  crosses the zoomed view as fast as the plain one (`docs/arsenal.md`, client-a).
 * **Arrows**: ×2.2, gold halos and streaks (pinning steel blue, ember orange, brand crimson).
 * **Handling** (`combat.longwick`, owned by feel; damage stays balance's): draw 0.75 → **0.62 s**,
   arrows 45–120 → **55–135 m/s**, gravity 14 → **10**. A tap no longer dribbles out; a full

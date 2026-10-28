@@ -649,6 +649,75 @@ TIER (TRIMMER)"), the tier block shows the weapon and "A KILL TO WIN", the resul
 "FINAL TRIMMER". **Controls**: the Q / gamepad North action is **KNACK** (`Action::Knack`;
 settings files that call it `ThrowThorn` or `ThrowPrism` still load).
 
+## Client: the Lamplighter, the Precision / Draw / Melee abilities (rework, area client-a)
+
+What you see and hear of `docs/rework.md`'s §2 (the Lamplighter) and of the Wickline, Tally,
+Waxwork, Blink Arrow, Beacon Arrow, the Hurl's return and the Riposte. One file per thing under
+`client/src/ingame/combat/tricks/` (`lamplighter`, `wickline`, `tally`, `waxwork`, `blink`,
+`beacon`, `riposte`) and `tricks/play.rs`, which turns the replicated world, the own state and
+the server's effects into them (`Tricks::update` / `draw` / `scope` / `hud`, called like the
+other views). Models in `client/src/models/weapons/lamplighter.rs`, `models/tricks.rs` and the
+melee rig's guard (`docs/models.md`), sounds in the `client-a: the rework` block of `Sfx`
+(`docs/audio.md`).
+
+**The Lamplighter** (weapon 12, `PrimaryStyle::Focus`). A lamplighter's pole turned rifle:
+brass tube, wooden stock, a glass lantern chamber round a lit wick, a focus ring and a sleeve
+that runs out with the lens at the muzzle. The focus is the weapon state's draw
+(`WeaponState::draw_fraction`; others': the replicated `DRAWING` + level), so it poses through
+`HeldWeapon::draw` like the bow: the ring turns, the sleeve runs out, the wick grows and
+whitens and, at full focus, strobes. First person (`lamplighter::VIEW_OFFSET`, `FOCUS_SHIFT`,
+`view_rotation`) it comes in towards the eye and turns along the aim as it focuses, the bob
+fading. **The scope** (`CameraRig::set_zoom`, eased like the bow): the view narrows to
+tan(fov/2) × 0.4 at full focus (`FULL_ZOOM`; `MAX_ZOOM` 0.3 is the rig's limit), mouse and stick
+look scaled by `CameraRig::zoom_scale` (`Controls::look_zoomed`) so the crosshair crosses the
+zoomed view as fast as the plain one; the lens vignette (the screen dark outside a round
+aperture with a soft edge, a thin brass rim and four stadia lines, a faint warm wash inside)
+fades in and closes with the zoom (drawn under the HUD: `Tricks::scope`), and the **focus
+ring** is the HUD's focus meter: a dim dotted circle closing in on the crosshair as the lens
+focuses, the focused part (from the top, clockwise) bright in the wick's gold with four notches
+closing in with it, the whole ring burning white and pulsing at full focus.
+`LamplighterFocus` runs while you focus (stopped on the release), `LamplighterFull` as it comes
+true. **The shot**: `LamplighterFire` (quieter and higher for a tap), a kick and shake scaled
+with the focus, and a **beam** from the muzzle (`lamplighter::beam`): a white-hot core in a gold
+glow, thicker and longer-lived the more it was focused, a wake of embers along it, a light at
+the lens; where it ends (`beam_ends`: the first body or the level; a full focus goes on through
+one body into a second, like the server's pierce) a flash. No ordinary tracer or muzzle flash
+(`attack_style`). Others' shots are `Fx::Shot` with `Attack::Lamplighter`, the beam drawn at
+the focus they had. **The tell**: every other player focusing a Lamplighter shows a thin glint
+line along their aim to what it would hit (90 m when nothing) and a lens flare at their
+muzzle (a glow and a short horizontal streak) that grows with the focus and is brightest looking
+down the barrel (the colour-vision palettes draw it in the aim laser's colour), and
+`LamplighterTell` at them every 0.55 s while they focus (louder with the focus). Spectating a
+Lamplighter zooms with its focus. Third person it is held two-handed, focusing as the bow
+draws.
+
+| ability | colour | in the world | you | sounds |
+|---|---|---|---|---|
+| Wickline (`wickline.rs`) | flame orange | a burning wick-thread from the shooter's muzzle to its anchor for 0.35 s: a ripple running out, a gold core in an orange glow, embers falling, the wick burning down from the shooter's end after a third of its life; on the level a burn flash and sparks where it bites; on a hostile it follows the chest as it is yanked in; a miss flies its full length and droops | your own throw at once (the cord from your viewmodel's muzzle), a zip's rush as you are yanked | `WicklineFire`, `WicklineZip` (a zip or a yank) |
+| Tally (`tally.rs`) | chalk ice | the release: thin chalk-white tracers from the muzzle to each mark, a few hundredths of a second apart, sparks where they land | while held: the assist circle round the crosshair, the count against the limit and the hold's time closing round it; on every tallied target (`PlayerCombat::tallied`) a chalk bracket with its tally strokes (the order of the shots), a new one scratching in | `TallyMark`, `TallyShot` (one per shot) |
+| Waxwork (`waxwork.rs`) | tallow | `kind::WAXWORK` drawn as its owner's Shrike, cosmetics and weapon frozen in the pose caught on the frame it appears (`waxwork::frozen`); for its side (and always for its caster) as wax: every paint pale tallow through `Tint::flat`, a soft glisten; in PvP its owner's opponents see the player, name tag and all; `SLUMPING`: it sags and spreads over 0.45 s; its burst (the `Fx::Explosion` of `Attack::Waxwork`, or its entity going, whichever comes first: once, and the double gone with it): hot wax (spray, lumps, a ring out to `burst_radius`, floor splats, a heat flash, a little shake) | | `WaxworkCast`, `WaxworkBurst` |
+| Blink Arrow (`blink.rs`) | mint | `ModelId::BlinkArrow` (a cold mint flame in a glass bead) flying and sticking like the other arrows, its flame pulsing while it can be stepped to; the step (`Fx::Blink`): a mint flash and a fading afterimage where the Shrike was, a streak of light to the arrow, a pop and a ring where it arrives | "BLINK" and a mint ring closing round the crosshair while the window is open; the step snaps your camera to the new place at once (`NetClient::snap_view`, no correction smoothing), speed lines for a moment | `Blink` |
+| Beacon Arrow (`beacon.rs`) | gold | `ModelId::BeaconArrow` (a brass lantern behind its spike); stuck (`STUCK`): the beacon catches (a flash, a gold column of light, a warm light, motes) and burns for its 6 s; hostiles it **reveals** to your side (`REVEALED`, within reach of one of your side's lit beacons) that the level hides are drawn through the walls as flat silhouettes in the palette's `revealed` colour (gold; cyan / green under the colour-vision palettes), in plain sight a small beacon mark over the head | | `BeaconLight`, `BeaconHum` (while it burns) |
+| Hurl (twist, `melee.rs`) | violet | the thrown piece as before; turning back (`RETURNING`) a whirr; reaching its thrower's chest (or `Fx::HurlCaught`, whichever comes first: once) a catch flash and slap, never the impact; a returning piece the level stops strikes as before | your viewmodel's hand empty (`ViewmodelAnim::hurled`) while the piece is out, a catch snapping it back; others' Shrikes hold nothing meanwhile (`PlayerAnim::hurled`) | `HurlReturn`, `HurlCatch` |
+| Riposte (`riposte.rs`, `models::weapons::melee`) | steel white | the guard pose while `GUARDING` (the Trimmer's blades crossed in front, the Tamper's haft across), first and third person; a block (`Fx::GuardBlock { ability: Riposte }`): a fan of white-hot sparks back the way the blow came, a flash, a ring, a light (and a tiny hitstop for you); the counter: `SwingKind::Riposte`, a wide sweep and a bright crescent, wider for every block | a steel arc above the crosshair spanning the guarded front, closing as the hold runs out, a pip per block | `RiposteGuard`, `RiposteBlock`, `RiposteCounter` |
+
+**From the wire.** Your own effects (`Wickline`, `TallyFired`, `Blink`, `GuardBlock`) play when
+they arrive (`Tricks::own_fx`, at the drain: the step must snap the view on the frame its
+correction lands); everyone else's at the render tick (`Tricks::fx`). Ability presses that
+aren't shots (`plays_as_shot`) go to `Tricks::local_intent` for their sound and first-person
+move. Doubles, beacons and tells are kept per id across frames (a double's pose, a beacon's
+lighting, a remote Lamplighter's focus for its beam); a double's or beacon's end is its entity
+going. The Beacon's side is its `owner` (PvE: everyone's; PvP: yours). The Riposte's arc
+counts the hold from the predicted `WeaponState::charge` (its guard has no strength limit;
+`aux` bits 12–15 are the Bulwark's to read). Enemies `LURED` by a double carry its decoy id as
+`owner`, so none of the "targeting you" cues fire for them.
+
+`InGame::preview_tricks(TrickPreview)` stages any of it client-side for tools; `combat_shots`
+shoots them (`rework_*`) and the real thing after `/loadout ...` (`rework_play_*`;
+`COMBAT_SHOTS=tricks` stops after client-a's, `rework` after the whole rework);
+`models_view` the models (`lamp_*`, `rework_arrows`, `melee_vm_17..20`,
+`melee_3p_riposte_*`).
+
 ## Client: the Kindle draught, Thorn relays, the Scatter / Rapid / Explosive abilities (rework, area client-b)
 
 What you see and hear of `docs/rework.md`'s §3 (the Kindle Flask drunk), §4 (Thorns relaying

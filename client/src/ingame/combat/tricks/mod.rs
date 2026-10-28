@@ -27,7 +27,7 @@ pub mod tally;
 pub mod waxwork;
 pub mod wickline;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use engine::audio::{Audio, Sfx};
 use engine::gfx::{Camera, DrawItem, PointLight, UiDrawList};
@@ -142,6 +142,10 @@ pub struct Tricks {
     rush: (f32, f32),
     /// Wax doubles and beacon arrows in the world, and the beacons' lights this frame.
     doubles: HashMap<NetId, play::Double>,
+    /// Doubles burst by their `Fx::Explosion` whose entities are still in the frame.
+    burst_doubles: HashSet<NetId>,
+    /// Where and when doubles burst lately.
+    bursts: Vec<(Vec3, f64)>,
     beacons: HashMap<NetId, play::BeaconSeen>,
     beacon_lights: Vec<PointLight>,
     /// The tally's marks (who, since when).
@@ -169,6 +173,8 @@ impl Tricks {
         self.staged.clear();
         self.pending.clear();
         self.doubles.clear();
+        self.burst_doubles.clear();
+        self.bursts.clear();
         self.beacons.clear();
         self.beacon_lights.clear();
         self.marks.clear();
