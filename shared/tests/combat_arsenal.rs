@@ -9,8 +9,8 @@ mod combat_support;
 mod weapon_support;
 
 use balance_support::{
-    Aim, Assume, Side, Stop, Trigger, build_with, duel, on_player, per_trigger, per_use,
-    weapon_range,
+    Aim, Assume, Side, Stop, Trigger, build_with, duel, knack_run, on_player, per_trigger,
+    per_use_burst, weapon_range,
 };
 use combat_support::*;
 use glam::Vec3;
@@ -577,16 +577,24 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
     ));
     assert!(one_shot(2.0 * thresher * head));
 
-    // Headshot one-shots: a full-draw arrow, a full-focus Lamplighter beam — and not a bow
-    // short of full (a Lamplighter focused past ~60 % still does: the balance area's call,
-    // docs/rework.md).
+    // Headshot one-shots: a full-draw arrow, a full-focus Lamplighter beam — and neither short
+    // of full (at 0.54 a beam focused past 61 % killed a head: 0.4 keeps it to the full focus).
     let arrow = |draw: f32| {
         let l = &pvp.longwick;
         l.min_damage + (l.max_damage - l.min_damage) * draw
     };
+    let beam = |focus: f32| {
+        let l = &pvp.lamplighter;
+        l.min_damage + (l.max_damage - l.min_damage) * focus
+    };
     assert!(one_shot(arrow(1.0) * head));
     assert!(!one_shot(arrow(0.9) * head));
-    assert!(one_shot(pvp.lamplighter.max_damage * head));
+    assert!(one_shot(beam(1.0) * head));
+    assert!(
+        !one_shot(beam(0.9) * head),
+        "a 90 % focus: {}",
+        beam(0.9) * head
+    );
     assert!(!one_shot(pvp.lamplighter.min_damage * head), "a tap");
     // Nothing else one-shots a head.
     for (name, damage) in [
@@ -677,29 +685,34 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
             let allowed = bow || sniper || (w == WeaponKind::Bellows && range < 5.0);
             assert!(allowed || !kills(head), "{w:?} head at {range} m: {head}");
         }
-        if bow {
+        if bow || sniper {
             let head = per_trigger(&base, Side::Pvp, w, 5.0, Aim::Weak(0), 0.9);
-            assert!(!kills(head), "a 90 % draw to the head: {head}");
+            assert!(
+                !kills(head),
+                "{w:?}: a 90 % draw / focus to the head: {head}"
+            );
         }
     }
+    // Abilities: what one use lands within 1 s (a Lantern or an orbiting Wisp deals more over
+    // its whole life: that is not a one-shot).
     for w in balance_support::weapons() {
         for &ability in w.abilities() {
             let bow = w == WeaponKind::Longwick;
             let allowed = bow;
             for range in [3.0, 5.0] {
-                let body = per_use(&base, Side::Pvp, w, ability, range, Aim::Body, 1.0);
+                let body = per_use_burst(&base, Side::Pvp, w, ability, range, Aim::Body, 1.0);
                 assert!(
                     !kills(body),
                     "{ability:?} on the {w:?}, body at {range} m: {body}"
                 );
-                let head = per_use(&base, Side::Pvp, w, ability, range, Aim::Weak(0), 1.0);
+                let head = per_use_burst(&base, Side::Pvp, w, ability, range, Aim::Weak(0), 1.0);
                 assert!(
                     allowed || !kills(head),
                     "{ability:?} on the {w:?}, head at {range} m: {head}"
                 );
             }
             if bow {
-                let head = per_use(&base, Side::Pvp, w, ability, 5.0, Aim::Weak(0), 0.9);
+                let head = per_use_burst(&base, Side::Pvp, w, ability, 5.0, Aim::Weak(0), 0.9);
                 assert!(
                     !kills(head),
                     "{ability:?} at a 90 % draw to the head: {head}"
@@ -750,11 +763,15 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
 /// held at the opponent's body at its range, the opponent's knack used just before). Tallow
 /// Skin at half damage for 3 s won every even duel (on average 1.9x every time to kill); at
 /// 0.7 for 2 s (the PvP override) it's a strong defensive pick, at most 1.6x on average. The
-/// Kindle Flask's pool matters against the steady, slower killers (a bow's second draw).
+/// drunk Kindle Flask's 40 HP matter against the two-hit killers (a bow's or a Lamplighter's
+/// second shot) but slow the average duel far less than Tallow Skin, and its haste (PvP x1.15)
+/// carries you about as far as Surge's two charges: at x1.3 it out-ran them by three times
+/// (19 m to 6 in 4 s) on top of the heal.
 #[test]
 fn pvp_knacks_are_choices_not_a_must_pick() {
     let base = Tuning::default();
     let mut slowdowns = Vec::new();
+    let mut flask_slowdowns = Vec::new();
     let mut flask_helps = false;
     for w in balance_support::weapons() {
         let b = w.default_build();
@@ -764,12 +781,25 @@ fn pvp_knacks_are_choices_not_a_must_pick() {
         let flask = duel(&base, b, Some(Knack::KindleFlask), r).expect("a kill with a flask");
         assert!(tallow >= plain && flask >= plain, "{w:?}");
         slowdowns.push(tallow / plain);
+        flask_slowdowns.push(flask / plain);
         flask_helps |= flask > plain + 0.1;
     }
-    let mean = slowdowns.iter().sum::<f32>() / slowdowns.len() as f32;
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
     assert!(
-        mean <= 1.6,
-        "Tallow Skin: {mean:.2}x on average ({slowdowns:?})"
+        mean(&slowdowns) <= 1.6,
+        "Tallow Skin: {:.2}x on average ({slowdowns:?})",
+        mean(&slowdowns)
     );
     assert!(flask_helps, "the Kindle Flask never changed a duel");
+    assert!(
+        mean(&flask_slowdowns) < mean(&slowdowns),
+        "the Kindle Flask out-defends Tallow Skin: {flask_slowdowns:?}"
+    );
+    let none = knack_run(&base, None, 4.0);
+    let surge = knack_run(&base, Some(Knack::Surge), 4.0) - none;
+    let flask = knack_run(&base, Some(Knack::KindleFlask), 4.0) - none;
+    assert!(
+        surge > 3.0 && flask > 3.0 && flask <= 2.0 * surge,
+        "4 s of running: Surge +{surge:.1} m, the Kindle Flask +{flask:.1} m"
+    );
 }

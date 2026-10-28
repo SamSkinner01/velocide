@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run -p shared --release --example balance_report               # everything
 //! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots
-//!     abilities knacks healing shotguns
+//!     abilities fights knacks healing shotguns
 //! cargo run -p shared --release --example balance_report -- --tuning path/to/tuning.ron
 //! ```
 
@@ -274,16 +274,27 @@ fn pvp(base: &Tuning, assume: Assume) {
 fn oneshots(base: &Tuning) {
     println!("## PvP one-shots: one trigger pull / one ability use (body / head)\n");
     println!(
-        "Bold = kills from full health. The bow at a full draw and at 90 %. Allowed: a \
-         full-draw bow headshot, a full-focus Lamplighter headshot.\n"
+        "Bold = kills from full health. The bow and the Lamplighter at a full draw / focus \
+         and at 90 %. Allowed: a full-draw bow headshot, a full-focus Lamplighter headshot, a \
+         Bellows blast to the head inside 5 m and a full one to the body at point blank.\n"
     );
-    header(&["attack", "carrier", "3 m", "5 m", "10 m", "5 m, 90 % draw"]);
+    header(&[
+        "attack",
+        "carrier",
+        "3 m",
+        "5 m",
+        "10 m",
+        "5 m, 90 % draw / focus",
+    ]);
     let cell = |f: &dyn Fn(f32, Aim) -> f32, r: f32| {
         format!("{} / {}", kill(f(r, Aim::Body)), kill(f(r, Aim::Weak(0))))
     };
     for w in weapons() {
         let f = |r: f32, aim: Aim| per_trigger(base, Side::Pvp, w, r, aim, 1.0);
-        let bow = w.primary_style() == shared::sim::weapons::PrimaryStyle::Draw;
+        let bow = matches!(
+            w.primary_style(),
+            shared::sim::weapons::PrimaryStyle::Draw | shared::sim::weapons::PrimaryStyle::Focus
+        );
         let partial = if bow {
             let g = |r: f32, aim: Aim| per_trigger(base, Side::Pvp, w, r, aim, 0.9);
             cell(&g, 5.0)
@@ -305,9 +316,9 @@ fn oneshots(base: &Tuning) {
                 if w.class() != class {
                     continue;
                 }
-                let f = |r: f32, aim: Aim| per_use(base, Side::Pvp, w, a, r, aim, 1.0);
+                let f = |r: f32, aim: Aim| per_use_burst(base, Side::Pvp, w, a, r, aim, 1.0);
                 let partial = if class == WeaponClass::Draw {
-                    let g = |r: f32, aim: Aim| per_use(base, Side::Pvp, w, a, r, aim, 0.9);
+                    let g = |r: f32, aim: Aim| per_use_burst(base, Side::Pvp, w, a, r, aim, 0.9);
                     cell(&g, 5.0)
                 } else {
                     String::new()
@@ -370,14 +381,15 @@ fn abilities(base: &Tuning, assume: Assume) {
                     )
                 };
                 let pack = |trigger, stop| on_endless_pack(base, assume, b, trigger, r, stop);
-                let one = single(Trigger::Ability(0), Stop::one_use(4.0));
+                let settle = settle_of(&c, a);
+                let one = single(Trigger::Ability(0), Stop::one_use(settle));
                 let spam = single(Trigger::Ability(0), Stop::secs(12.0));
                 row(&[
                     a.name().to_string(),
                     w.name().to_string(),
                     format!("{:.2} ({:.2})", a.cooldown(&c), a.cooldown(&p)),
                     num(one.total()),
-                    num(pack(Trigger::Ability(0), Stop::one_use(4.0)).total()),
+                    num(pack(Trigger::Ability(0), Stop::one_use(settle)).total()),
                     num(spam.dps()),
                     num(build_gain(base, assume, b, false)),
                     num(build_gain(base, assume, b, true)),
@@ -411,6 +423,25 @@ fn knacks(base: &Tuning) {
             cells.push(secs(duel(base, b, k, r)));
         }
         row(&cells);
+    }
+    println!();
+    println!(
+        "Running from a standstill in PvP, the knack used at once (Surge: both charges, 0.4 s \
+         apart): metres in 4 s.\n"
+    );
+    header(&["knack", "metres in 4 s", "more than none"]);
+    let none = knack_run(base, None, 4.0);
+    for (name, k) in [
+        ("none", None),
+        ("Surge", Some(Knack::Surge)),
+        ("Kindle Flask", Some(Knack::KindleFlask)),
+    ] {
+        let m = knack_run(base, k, 4.0);
+        row(&[
+            name.to_string(),
+            format!("{m:.1}"),
+            format!("{:.1}", m - none),
+        ]);
     }
     println!();
 }
@@ -447,6 +478,69 @@ fn ranged() -> Vec<WeaponKind> {
 
 fn scatter() -> [WeaponKind; 2] {
     [WeaponKind::Bellows, WeaponKind::Thresher]
+}
+
+fn fights(base: &Tuning) {
+    println!("## Abilities in a fight\n");
+    println!(
+        "Moulds hunting the shooter (their own AI, endless) while it strafes (5 m/s, turning \
+         every 1.2 s) holding the primary at the nearest; it takes their hits on endless health. \
+         Rush: three Gnawers from 12 m. Volley: two Censers at 18 m and a Heron at 30 m. Each \
+         cell: DPS dealt more / % of the damage taken spared / % more of the foes' time held \
+         (pinned, staggered, stunned) (DPS its guard caught) against the primary alone, the ability used as a good player would (a guard raised while a blow \
+         winds up or a shot flies at you, point-blank ones with something in reach, the Tally \
+         swept over every target, the Wisp flung when it has nothing to zap); 20 s, averaged \
+         over three layouts. Moved: how far one use carries you (m, within 1.5 s).\n"
+    );
+    let plain: Vec<String> = Foes::ALL
+        .iter()
+        .map(|f| {
+            let t = fight(
+                base,
+                WeaponKind::Quill.default_build(),
+                Trigger::Primary,
+                *f,
+                20.0,
+            );
+            format!("{} {:.1}", f.name(), t.taken / t.secs.max(DT))
+        })
+        .collect();
+    println!(
+        "Taken with the Quill's primary alone (DPS): {}.\n",
+        plain.join(", ")
+    );
+    header(&["ability", "job", "carrier", "rush", "volley", "moved m"]);
+    for class in classes() {
+        for &a in class.abilities() {
+            for w in carriers(a) {
+                if w.class() != class {
+                    continue;
+                }
+                let b = build_with(w, a);
+                let mut cells = vec![
+                    a.name().to_string(),
+                    job(a).name().to_string(),
+                    w.name().to_string(),
+                ];
+                for foes in Foes::ALL {
+                    let g = fight_gain(base, b, foes);
+                    let mut cell = format!(
+                        "{} / {:.0} % / {:.0} %",
+                        num(g.dealt),
+                        100.0 * g.spared_share(),
+                        100.0 * g.held
+                    );
+                    if g.caught > 0.05 {
+                        cell.push_str(&format!(" ({})", num(g.caught)));
+                    }
+                    cells.push(cell);
+                }
+                cells.push(num(moved(base, b)));
+                row(&cells);
+            }
+        }
+    }
+    println!();
 }
 
 fn shotguns(base: &Tuning) {
@@ -643,6 +737,9 @@ fn main() {
     }
     if want("healing") {
         healing(&base);
+    }
+    if want("fights") {
+        fights(&base);
     }
     if want("shotguns") {
         shotguns(&base);

@@ -15,6 +15,12 @@
 //! trails the aim point by a human's tracking delay. Every hitscan trigger pull is recorded as
 //! a [`Volley`]: rays fired, rays landed, whether it staggered the Mould.
 //!
+//! Fights ([`fight`]) put the shooter in harm's way: Moulds hunting it with their own AI, the
+//! shooter taking their hits on endless health (`Trace::taken`, `Trace::blocked`). The ability
+//! policies are a good player's: a guard (Bulwark, Riposte) raised while a blow winds up or a
+//! shot flies at you, dropped when it has passed; the Tally swept over every target; the Wisp
+//! flung when it has nothing to zap or its orbit is ending.
+//!
 //! Shared by `examples/balance_report.rs` (the tables) and `tests/combat_balance.rs` (the
 //! bands), through `#[path]`.
 
@@ -29,8 +35,11 @@ use shared::level::{Brush, LevelDef, LevelKind, SpawnPoint};
 use shared::loadout::{Ability, Loadout, WeaponBuild, WeaponClass, WeaponKind};
 use shared::lobby::GameMode;
 use shared::protocol::NetId;
+use shared::sim::enemy::AiState;
 use shared::sim::weapons::{AbilityStyle, FireIntent, PrimaryStyle, WeaponState, step_weapons};
-use shared::sim::{HitPart, HitTarget, PlayerId, SimEvent, SimWorld, SpawnOptions, TickInputs};
+use shared::sim::{
+    Blocked, HitPart, HitTarget, Owner, PlayerId, SimEvent, SimWorld, SpawnOptions, TickInputs,
+};
 use shared::tuning::{CombatTuning, Tuning};
 
 pub const TICK_RATE: u32 = 60;
@@ -171,6 +180,12 @@ pub struct Trace {
     pub uses: u32,
     /// Seconds at which each tracked target with real health died.
     pub deaths: Vec<f32>,
+    /// Damage the shooter took (a fight: `Bench::fighting`).
+    pub taken: f32,
+    /// Damage its guard caught (Bulwark, Riposte).
+    pub blocked: f32,
+    /// Foe-seconds the tracked Moulds spent held: pinned, staggered or stunned.
+    pub held: f32,
 }
 
 impl Trace {
@@ -206,6 +221,21 @@ impl Trace {
             .filter(|h| h.time <= secs + 1e-4)
             .map(|h| h.dealt)
             .sum()
+    }
+
+    /// The most damage that landed within any `window` seconds (a burst: what kills before
+    /// the victim can react, rather than a turret's or an orbit's whole life).
+    pub fn burst(&self, window: f32) -> f32 {
+        self.hits
+            .iter()
+            .map(|h| {
+                self.hits
+                    .iter()
+                    .filter(|o| o.time >= h.time && o.time <= h.time + window + 1e-4)
+                    .map(|o| o.dealt)
+                    .sum::<f32>()
+            })
+            .fold(0.0, f32::max)
     }
 
     /// Fraction of the volleys' rays that landed (0 without volleys).
@@ -317,6 +347,102 @@ pub struct Bench {
     aim_history: VecDeque<(Vec3, Vec3)>,
     /// Ticks since the bench was built (the strafes' clock).
     clock: u32,
+    /// Where the shooter stands (it strafes around it in a fight).
+    shooter_base: Vec3,
+    /// In a fight ([`Bench::fighting`]): the shooter strafes and takes hits.
+    fighting: bool,
+    /// The shooter's position and velocity are its own (an ability moving it is measured).
+    pub free_shooter: bool,
+    /// The shooter looks straight down (a Gust- or Breach-jump).
+    pub look_down: bool,
+    /// The shooter runs forward (along its look).
+    pub forward: bool,
+    /// Run ticks on which the shooter presses its knack.
+    pub knack_at: Vec<u32>,
+}
+
+/// What an ability is for in its pool (`docs/rework.md` §1), so how its worth is judged:
+/// damage and set-up tools by the damage they add, defend and control tools by the damage
+/// they spare you in a fight, move tools by the speed they give you.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Job {
+    Move,
+    Control,
+    Defend,
+    SetUp,
+    Damage,
+}
+
+impl Job {
+    pub fn name(self) -> &'static str {
+        match self {
+            Job::Move => "move",
+            Job::Control => "control",
+            Job::Defend => "defend",
+            Job::SetUp => "set up",
+            Job::Damage => "damage",
+        }
+    }
+}
+
+/// `ability`'s job. The Breach (a point-blank blast-jump) is the Explosive pool's move; the
+/// Gust, whose jump is small next to its push, is judged as control; the Brand is the
+/// Precision and Draw pools' class-flavoured damage (everything hits a branded target harder).
+pub fn job(ability: Ability) -> Job {
+    match ability {
+        Ability::Wickline | Ability::BlinkArrow | Ability::Lunge | Ability::Breach => Job::Move,
+        Ability::Waxwork | Ability::Bulwark | Ability::Riposte => Job::Defend,
+        Ability::Gust
+        | Ability::Bolas
+        | Ability::Gravewell
+        | Ability::PinningArrow
+        | Ability::Whirl
+        | Ability::Discharge => Job::Control,
+        Ability::Tally
+        | Ability::Wisp
+        | Ability::Lantern
+        | Ability::Limpet
+        | Ability::BeaconArrow => Job::SetUp,
+        Ability::Brand | Ability::Flak | Ability::Stoke | Ability::Kite | Ability::Hurl => {
+            Job::Damage
+        }
+    }
+}
+
+/// The foes of a [`fight`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Foes {
+    /// Three Gnawers running in from 12 m: blows up close.
+    Rush,
+    /// Two Censers at 18 m and a Heron at 30 m: shots from afar.
+    Volley,
+}
+
+impl Foes {
+    pub const ALL: [Foes; 2] = [Foes::Rush, Foes::Volley];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Foes::Rush => "rush",
+            Foes::Volley => "volley",
+        }
+    }
+
+    /// (Mould, feet position).
+    fn placed(self) -> Vec<(&'static str, Vec3)> {
+        match self {
+            Foes::Rush => vec![
+                ("gnawer", Vec3::new(-2.0, 0.0, -12.0)),
+                ("gnawer", Vec3::new(0.0, 0.0, -13.0)),
+                ("gnawer", Vec3::new(2.0, 0.0, -12.0)),
+            ],
+            Foes::Volley => vec![
+                ("censer", Vec3::new(-3.0, 0.0, -18.0)),
+                ("censer", Vec3::new(3.0, 0.0, -18.0)),
+                ("heron", Vec3::new(0.0, 0.0, -30.0)),
+            ],
+        }
+    }
 }
 
 /// 100 m square floor at y = 0 (small: every world builds a nav grid for its Moulds).
@@ -453,6 +579,20 @@ fn aim_angles(from: Vec3, to: Vec3, flight: Option<(f32, f32, f32)>) -> (f32, f3
     (yaw, pitch.clamp(-1.5, 1.5))
 }
 
+/// How far the nearest target must be for an ability to be worth using (m, feet to feet):
+/// within reach of the point-blank ones (the Gust, the Breach, the Whirl, the Discharge), not on
+/// top of you for the Gravewell.
+fn reach(c: &CombatTuning, ability: Ability) -> Option<(f32, f32)> {
+    match ability {
+        Ability::Gust => Some((0.0, c.bellows.gust_range)),
+        Ability::Breach => Some((0.0, c.tumbler.breach_reach + c.tumbler.breach_radius)),
+        Ability::Whirl => Some((0.0, c.whirl.radius + 1.0)),
+        Ability::Discharge => Some((0.0, c.arclash.discharge_max_radius)),
+        Ability::Gravewell => Some((6.0, f32::INFINITY)),
+        _ => None,
+    }
+}
+
 /// A strafe's sideways offset (m) and velocity (m/s) at `time`: from the centre at `speed`,
 /// turning back every `period` seconds, swinging `speed × period` wide around it.
 fn strafe_offset(time: f32, speed: f32, period: f32) -> (f32, f32) {
@@ -508,6 +648,12 @@ impl Bench {
             aim_lag: 0.0,
             aim_history: VecDeque::new(),
             clock: 0,
+            shooter_base: Vec3::ZERO,
+            fighting: false,
+            free_shooter: false,
+            look_down: false,
+            forward: false,
+            knack_at: Vec::new(),
         }
     }
 
@@ -517,6 +663,42 @@ impl Bench {
         if let Some(p) = self.world.players.get_mut(&self.shooter) {
             p.notarget = motion != Motion::Free;
         }
+    }
+
+    /// In harm's way: the tracked Moulds hunt the shooter with their own AI and it takes their
+    /// hits (no god mode; its health is endless, `Trace::taken` counts them).
+    /// The shooter strafes across the line of fire (5 m/s, turning every 1.2 s), as a player
+    /// in a fight does: a Waxwork left behind is left behind.
+    pub fn fighting(&mut self) {
+        self.set_motion(Motion::Free);
+        self.fighting = true;
+        if let Some(p) = self.world.players.get_mut(&self.shooter) {
+            p.combat.god = false;
+        }
+    }
+
+    /// A blow winding up or landing, or a hostile projectile flying at the shooter within 12 m:
+    /// when a good player raises a guard.
+    fn threatened(&self) -> bool {
+        let at = self.shooter_at + Vec3::Y;
+        let blows = self.tracked.iter().any(|t| match t.target {
+            HitTarget::Entity(id) => self.world.enemies.get(&id).is_some_and(|e| {
+                e.is_alive() && matches!(e.state, AiState::Windup | AiState::Strike)
+            }),
+            HitTarget::Player(_) => false,
+        });
+        let shots = self.world.projectiles.values().any(|p| {
+            let to = at - p.position;
+            matches!(p.owner, Owner::Enemy(_)) && to.length() < 12.0 && p.velocity.dot(to) > 0.0
+        });
+        blows || shots
+    }
+
+    /// One of the shooter's kites is in the air.
+    fn kite_flying(&self) -> bool {
+        self.world.projectiles.values().any(|p| {
+            p.kind == shared::sim::ProjectileKind::Kite && p.owner == Owner::Player(self.shooter)
+        })
     }
 
     /// A PvP duel: players take real damage and die (the opponent's death ends a run).
@@ -606,10 +788,21 @@ impl Bench {
 
     fn restore(&mut self) {
         let lunging = self.world.melee.lunges.contains_key(&self.shooter);
+        let mut walk = Vec3::ZERO;
+        if self.fighting {
+            let (offset, v) = strafe_offset(self.clock as f32 * DT, 5.0, 1.2);
+            self.shooter_at = self.shooter_base + Vec3::X * offset;
+            walk = Vec3::X * v;
+        }
+        if self.free_shooter
+            && let Some(p) = self.world.players.get(&self.shooter)
+        {
+            self.shooter_at = p.movement.position;
+        }
         if let Some(p) = self.world.players.get_mut(&self.shooter) {
-            if !lunging {
+            if !lunging && !self.free_shooter {
                 p.movement.position = self.shooter_at;
-                p.movement.velocity = Vec3::ZERO;
+                p.movement.velocity = walk;
                 p.movement.on_ground = true;
             }
             if let Some(missing) = self.wounded {
@@ -664,6 +857,45 @@ impl Bench {
         }
     }
 
+    /// A Tally being held: the crosshair swept over the living targets, nearest first, one
+    /// after the other across the hold (`None` otherwise).
+    fn swept(&self, aim: Aim, mode: u8) -> Option<(Vec3, Vec3)> {
+        let s = self.world.players[&self.shooter].combat.weapons;
+        if self.build.ability(mode) != Ability::Tally || s.charge == 0 {
+            return None;
+        }
+        let mut alive: Vec<&Tracked> = self.tracked.iter().filter(|t| t.alive).collect();
+        alive.sort_by(|a, b| {
+            let da = a.position.distance(self.shooter_at);
+            let db = b.position.distance(self.shooter_at);
+            da.total_cmp(&db)
+        });
+        let n = alive
+            .len()
+            .min(self.tuning.combat.tally.max_targets.max(1) as usize);
+        if n == 0 {
+            return None;
+        }
+        let hold = s.charge_ticks(&self.tuning.combat, TICK_RATE).max(1) as usize;
+        let i = (s.charge as usize * n / hold).min(n - 1);
+        self.point_on(alive[i], aim)
+    }
+
+    /// The point to aim at on `t`, and the feet under it.
+    fn point_on(&self, t: &Tracked, aim: Aim) -> Option<(Vec3, Vec3)> {
+        let boxes = self.world.current_hitboxes(&self.tuning);
+        let hb = boxes.iter().find(|h| h.target == t.target)?;
+        let body = hb.center()?;
+        let point = match (aim, t.target) {
+            (Aim::Body, _) => body,
+            (Aim::Weak(_), HitTarget::Player(_)) => hb.part_center(HitPart::Head).unwrap_or(body),
+            (Aim::Weak(i), HitTarget::Entity(_)) => hb
+                .part_center(HitPart::Weak(i.min(u8::MAX as usize) as u8))
+                .unwrap_or(body),
+        };
+        Some((point, t.position))
+    }
+
     /// The point to aim at on the nearest living target, and the feet under it.
     fn aim_point(&self, aim: Aim) -> Option<(Vec3, Vec3)> {
         let boxes = self.world.current_hitboxes(&self.tuning);
@@ -709,21 +941,70 @@ impl Bench {
         let ability = self.build.ability(mode);
         let ready = s.alt_cooldown[s.slot as usize] == 0 && s.live[s.slot as usize] == 0;
         let was = self.prev.contains(Buttons::ALT_FIRE);
+        let slot = s.slot as usize;
         if bow {
-            if ready && s.armed == 0 && !was {
+            // The Blink Arrow, once its arrow has landed (its life cut to the window): step.
+            let landed = s.live[slot] > 0
+                && (s.live[slot] as f32) * DT <= c.blink_arrow.window + DT
+                && ability == Ability::BlinkArrow;
+            if (landed || (ready && s.armed == 0)) && !was {
                 b = b | Buttons::ALT_FIRE;
             }
             return b;
         }
+        // Point-blank abilities wait for something within their reach (unless they are being
+        // used to move); the Gravewell for nothing too close (it would pull them onto you).
+        if let Some((near, far)) = reach(c, ability).filter(|_| !self.free_shooter) {
+            let nearest = self
+                .tracked
+                .iter()
+                .filter(|t| t.alive)
+                .map(|t| t.position.distance(self.shooter_at))
+                .fold(f32::INFINITY, f32::min);
+            if !(near..=far).contains(&nearest) && s.charge == 0 {
+                return b;
+            }
+        }
         match ability.style() {
             AbilityStyle::Instant => b = b | Buttons::ALT_FIRE,
+            // The Wisp, live: flung (a second press) once nothing is within its zaps' reach or
+            // its orbit is about to end.
+            AbilityStyle::Press if s.live[slot] > 0 && ability.recasts() => {
+                let reach = c.arclash.wisp_zap_range + c.arclash.wisp_orbit_radius + 1.0;
+                let near = self
+                    .tracked
+                    .iter()
+                    .any(|t| t.alive && t.position.distance(self.shooter_at) <= reach);
+                let ending = (s.live[slot] as f32) * DT <= 0.5;
+                if !was && (!near || ending) {
+                    b = b | Buttons::ALT_FIRE;
+                }
+            }
+            // The Kite: held while it flies, steering it onto the crosshair.
+            AbilityStyle::Press if ability == Ability::Kite && self.kite_flying() => {
+                b = b | Buttons::ALT_FIRE;
+            }
             // A fresh press whenever it is ready.
             AbilityStyle::Press => {
                 if ready && !was {
                     b = b | Buttons::ALT_FIRE;
                 }
             }
-            // Pressed when ready, held to its limit (the Tally sweeps the target meanwhile).
+            // The Riposte: up while a blow or a shot is coming, dropped (the counter) once it has
+            // passed.
+            AbilityStyle::Channel if ability == Ability::Riposte => {
+                if self.threatened() && (s.charge > 0 || (ready && !was)) {
+                    b = b | Buttons::ALT_FIRE;
+                }
+            }
+            // The Bulwark: raised when something is coming, held through the volley (its
+            // limit, or until it shatters).
+            AbilityStyle::Channel if ability == Ability::Bulwark => {
+                if s.charge > 0 || (ready && !was && self.threatened()) {
+                    b = b | Buttons::ALT_FIRE;
+                }
+            }
+            // Pressed when ready, held to its limit (the Tally sweeps the targets meanwhile).
             AbilityStyle::Channel => {
                 if s.charge > 0 || (ready && !was) {
                     b = b | Buttons::ALT_FIRE;
@@ -845,7 +1126,7 @@ impl Bench {
         trace: &mut Trace,
     ) -> Option<bool> {
         self.restore();
-        let aimed = self.aim_point(aim)?;
+        let aimed = self.swept(aim, mode).or_else(|| self.aim_point(aim))?;
         let (point, feet) = self.lagged(aimed);
         let eye = self.world.players[&self.shooter]
             .movement
@@ -860,6 +1141,15 @@ impl Bench {
             ..Default::default()
         };
         (input.yaw, input.pitch) = aim_angles(eye, point, None);
+        if self.look_down {
+            input.pitch = -1.5;
+        }
+        if self.forward {
+            input.forward = 127;
+        }
+        if self.knack_at.contains(&self.run_tick) {
+            input.buttons = input.buttons | Buttons::THROW;
+        }
         // Lead what is about to fire (the weapons are deterministic: step a copy). A use starts
         // the cooldown, or a live ability's life (its cooldown waits for its end).
         let mut probe = self.world.players[&self.shooter].combat.weapons;
@@ -896,6 +1186,10 @@ impl Bench {
                 }
             }
         }
+        // A Waxwork left behind: the shooter walks off to the other side of the fight.
+        if used && self.fighting && self.build.ability(mode) == Ability::Waxwork {
+            self.shooter_base.x = if self.shooter_base.x > 0.0 { -4.0 } else { 4.0 };
+        }
         self.run_tick += 1;
         self.clock += 1;
         let staggers = self.staggers();
@@ -918,8 +1212,20 @@ impl Bench {
             {
                 self.healed += amount;
             }
+            // What the Moulds dealt the shooter (its own blasts' splash aside).
+            if let SimEvent::Damage(d) = e
+                && d.target == HitTarget::Player(self.shooter)
+                && d.info.source != Owner::Player(self.shooter)
+            {
+                trace.taken += d.dealt;
+                if d.blocked == Some(Blocked::Guarded) {
+                    trace.blocked += d.info.amount;
+                }
+            }
+            // What the shooter dealt (a Mould knocked off the floor dies to the world: not its).
             if let SimEvent::Damage(d) = e
                 && self.tracked.iter().any(|t| t.target == d.target)
+                && d.info.source == Owner::Player(self.shooter)
             {
                 if d.dealt > 0.0 {
                     trace.hits.push(Hit {
@@ -938,6 +1244,15 @@ impl Bench {
                 if d.killed {
                     trace.deaths.push(time);
                 }
+            }
+        }
+        for t in &self.tracked {
+            if let HitTarget::Entity(id) = t.target
+                && let Some(e) = self.world.enemies.get(&id)
+                && e.is_alive()
+                && (e.stagger > 0 || e.state == AiState::Stunned || self.world.is_pinned(t.target))
+            {
+                trace.held += DT;
             }
         }
         if let Some(mut v) = volley {
@@ -1273,6 +1588,33 @@ pub fn per_use(
     aim: Aim,
     draw: f32,
 ) -> f32 {
+    use_trace(base, side, weapon, ability, range, aim, draw).total()
+}
+
+/// The burst of one use of `ability` (as [`per_use`]): the most it lands within 1 s, what the
+/// one-shot rule judges (a Lantern or an orbiting Wisp deals more over its whole life).
+#[allow(clippy::too_many_arguments)]
+pub fn per_use_burst(
+    base: &Tuning,
+    side: Side,
+    weapon: WeaponKind,
+    ability: Ability,
+    range: f32,
+    aim: Aim,
+    draw: f32,
+) -> f32 {
+    use_trace(base, side, weapon, ability, range, aim, draw).burst(1.0)
+}
+
+fn use_trace(
+    base: &Tuning,
+    side: Side,
+    weapon: WeaponKind,
+    ability: Ability,
+    range: f32,
+    aim: Aim,
+    draw: f32,
+) -> Trace {
     let mut b = Bench::new(base, side, Assume::default(), build_with(weapon, ability));
     b.draw = draw;
     match side {
@@ -1283,7 +1625,124 @@ pub fn per_use(
             b.opponent(range);
         }
     }
-    b.run(Trigger::Ability(0), aim, Stop::one_use(4.0)).total()
+    let settle = settle_of(&b.tuning.combat, ability);
+    b.run(Trigger::Ability(0), aim, Stop::one_use(settle))
+}
+
+/// Seconds a use takes to land everything after it: 4, or what it leaves behind lasts (the
+/// Waxwork's burst at its end, the Lantern's shots, the Wisp's orbit and flight, the Bolas'
+/// link) and a little.
+pub fn settle_of(c: &CombatTuning, ability: Ability) -> f32 {
+    let lasts = match ability {
+        Ability::Lantern => c.lantern.duration,
+        Ability::Bolas => c.bolas.flight_time + c.bolas.link_time,
+        Ability::Wisp => c.arclash.wisp_orbit_time + c.arclash.wisp_lifetime,
+        Ability::Kite => c.kite.steer_time + 1.0,
+        _ => ability.live_time(c),
+    };
+    (lasts + 1.0).max(4.0)
+}
+
+/// `trigger` with `build` in a fight with `foes` (endless, hunting the shooter, which takes
+/// their hits) for `secs`, aimed at the nearest body: what it dealt and took.
+pub fn fight(base: &Tuning, build: WeaponBuild, trigger: Trigger, foes: Foes, secs: f32) -> Trace {
+    fight_turned(base, build, trigger, foes, secs, 0.0)
+}
+
+/// [`fight`] with the foes' formation turned `degrees` about the shooter.
+fn fight_turned(
+    base: &Tuning,
+    build: WeaponBuild,
+    trigger: Trigger,
+    foes: Foes,
+    secs: f32,
+    degrees: f32,
+) -> Trace {
+    let mut b = Bench::new(base, Side::Pve, Assume::default(), build);
+    let turn = glam::Quat::from_rotation_y(degrees.to_radians());
+    for (name, at) in foes.placed() {
+        b.mould(name, turn * at, false, None);
+    }
+    b.fighting();
+    b.run(trigger, Aim::Body, Stop::secs(secs))
+}
+
+/// The turns of the formation a fight's numbers are averaged over (a fight is chaotic: one
+/// layout's numbers swing with where the first blow lands).
+const LAYOUTS: [f32; 3] = [-20.0, 0.0, 20.0];
+
+/// What using ability A of `build` as a good player would changes in a fight with `foes` (20 s,
+/// averaged over three layouts): (DPS dealt more, DPS taken less, DPS its guard caught),
+/// against the primary alone; and the DPS taken with the primary alone.
+pub fn fight_gain(base: &Tuning, build: WeaponBuild, foes: Foes) -> FightGain {
+    let secs = 20.0;
+    let mut g = FightGain::default();
+    for turn in LAYOUTS {
+        let with = fight_turned(base, build, Trigger::Both(0), foes, secs, turn);
+        let without = fight_turned(base, build, Trigger::Primary, foes, secs, turn);
+        let s = with.secs.max(DT);
+        g.dealt += with.dps() - without.dps();
+        g.spared += (without.taken - with.taken) / s;
+        g.caught += with.blocked / s;
+        g.taken += without.taken / s;
+        g.held += (with.held - without.held) / (s * foes.placed().len() as f32);
+    }
+    let n = LAYOUTS.len() as f32;
+    FightGain {
+        dealt: g.dealt / n,
+        spared: g.spared / n,
+        caught: g.caught / n,
+        taken: g.taken / n,
+        held: g.held / n,
+    }
+}
+
+/// What an ability changed in a fight ([`fight_gain`]), DPS.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FightGain {
+    /// Dealt more than the primary alone.
+    pub dealt: f32,
+    /// Taken less.
+    pub spared: f32,
+    /// What its guard caught.
+    pub caught: f32,
+    /// Taken with the primary alone.
+    pub taken: f32,
+    /// The share of the foes' time it held them more (pinned, staggered, stunned; 0..1).
+    pub held: f32,
+}
+
+impl FightGain {
+    /// The share of the damage it spared (0..1).
+    pub fn spared_share(&self) -> f32 {
+        self.spared / self.taken.max(1e-3)
+    }
+}
+
+/// How far one use of ability A of `build` moves the shooter (m, the farthest from where it
+/// stood within 1.5 s of the use): its own position free, a Smelter (heavy: a Wickline yanks
+/// you to it) 12 m ahead, aimed at its body — the Gust and the Breach aimed at your feet (a
+/// jump).
+pub fn moved(base: &Tuning, build: WeaponBuild) -> f32 {
+    let mut b = Bench::new(base, Side::Pve, Assume::default(), build);
+    b.mould_at("smelter", 12.0, false, None);
+    b.free_shooter = true;
+    b.look_down = matches!(build.ability(0), Ability::Gust | Ability::Breach);
+    let start = b.world.players[&b.shooter].movement.position;
+    let mut far = 0.0f32;
+    let mut used_at = None;
+    for tick in 0..6 * TICK_RATE {
+        let t = b.run(Trigger::Ability(0), Aim::Body, Stop::secs(DT));
+        if used_at.is_none() && t.uses > 0 {
+            used_at = Some(tick);
+        }
+        let at = b.world.players[&b.shooter].movement.position;
+        far = far.max(at.distance(start));
+        if used_at.is_some_and(|u| tick > u + (1.5 * TICK_RATE as f32) as u32) {
+            break;
+        }
+    }
+    far
 }
 
 /// What using ability A of `build` whenever it is ready adds to holding the primary: DPS over
@@ -1342,6 +1801,30 @@ pub fn duel(
     }
     let t = b.run(Trigger::Primary, Aim::Body, Stop::secs(10.0));
     t.deaths.first().copied()
+}
+
+/// How far a PvP player runs in `secs` from a standstill using `knack` (`None`: no knack) at
+/// once, a second charge (Surge) as soon as the first impulse has passed (0.4 s), m.
+pub fn knack_run(base: &Tuning, knack: Option<shared::loadout::Knack>, secs: f32) -> f32 {
+    let quill = WeaponKind::Quill.default_build();
+    let mut b = Bench::new(base, Side::Pvp, Assume::default(), quill);
+    let start = Vec3::new(0.0, 0.0, 45.0);
+    if let Some(p) = b.world.players.get_mut(&b.shooter) {
+        p.movement.position = start;
+    }
+    if let Some(k) = knack {
+        b.world
+            .force_loadout(b.shooter, Some(Loadout::single(quill).with_knack(k)));
+        let second = (0.4 * TICK_RATE as f32) as u32;
+        b.knack_at = vec![0, second];
+    }
+    // Something to look at, straight ahead down the floor.
+    b.opponent(48.0);
+    b.free_shooter = true;
+    b.forward = true;
+    b.run(Trigger::Primary, Aim::Body, Stop::secs(secs));
+    let at = b.world.players[&b.shooter].movement.position;
+    Vec3::new(at.x - start.x, 0.0, at.z - start.z).length()
 }
 
 /// HP per second the shooter is healed by (embers drawn in), held 40 HP down, holding

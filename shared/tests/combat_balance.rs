@@ -224,43 +224,29 @@ fn every_mould_dies_to_every_weapon_in_a_sane_time() {
     }
 }
 
-/// Abilities whose job isn't damage (docs/rework.md: every class has a move, a control or
-/// defend and a set-up ability): the Gust (knockback, deflection, the gust-jump), the Pinning
-/// Arrow and the Bolas (the bind), the Wickline and the Blink Arrow (movement), the Bulwark,
-/// the Waxwork and the Riposte (defence), the Beacon Arrow (a reveal).
-fn utility(a: Ability) -> bool {
-    matches!(
-        a,
-        Ability::Gust
-            | Ability::PinningArrow
-            | Ability::Bolas
-            | Ability::Wickline
-            | Ability::BlinkArrow
-            | Ability::Bulwark
-            | Ability::Waxwork
-            | Ability::Riposte
-            | Ability::BeaconArrow
-    )
-}
-
-/// On every weapon, what each ability of its class adds to the primary (used whenever ready,
-/// one Gnawer at the ability's range): the best adds at most 1.5 × the second best (a build's
-/// two abilities share one cooldown, so this is the choice). Before the balance pass Both
-/// Barrels added 92 / 129 DPS to the Bellows / Thresher against Flak's 52, the Limpet 85 to the
-/// explosives against the Breach's 54 and Triple Nock 105 to the bow against the Brand's 34.
-/// On six Gnawers no ability adds more than 300 DPS (the Limpet added 380), and every
-/// damage ability adds at least 10 DPS (alone or on the pack) on some weapon.
+/// The rework's pools give every class four jobs (docs/rework.md §1: a move, a control or
+/// defend, a set-up and a class-flavoured damage tool; `balance_support::job`), and each
+/// ability is judged by its job on every weapon that carries it.
 ///
-/// Ignored while the rework (docs/rework.md) lands: its abilities are being built in other
-/// areas, and the balance area's second phase re-runs this band once they have merged.
+/// None is dead weight: a damage or set-up tool adds at least 10 DPS somewhere (one Gnawer, six,
+/// or a fight); a control tool adds 10 DPS, or spares 10 % of the damage or holds the foes 10 %
+/// longer (pinned, staggered, stunned) in a fight; a defend tool spares 10 % of a fight's
+/// damage; a move tool carries you at least 4 m.
+///
+/// None dominates: among a weapon's damage and set-up tools (the choice a build makes for its
+/// damage) the best adds at most 1.5 x the second best; no move, control or defend tool
+/// out-damages its weapon's damage tool by more than 2 x; on six Gnawers nothing adds more than
+/// 300 DPS. Before the rework's balance pass the Tally added 5 DPS (13.5 in a fight) to the
+/// Brand's 35, the Kite 18 to the Limpet's 39 and the Breach's 56, the Beacon Arrow 5 to the
+/// bow's Brand at 40, the Hurl 85 to the Tamper; the Bolas' cord 101 on a pack.
 #[test]
-#[ignore = "the rework's abilities: re-enabled by the balance pass (docs/rework.md)"]
 fn no_ability_dominates_its_class_and_none_is_dead_weight() {
     let base = Tuning::default();
     let a = Assume::default();
-    let mut best_anywhere: Vec<(Ability, f32)> = Vec::new();
     for w in weapons() {
-        let mut gains: Vec<(Ability, f32)> = Vec::new();
+        let mut damage: Vec<(Ability, f32)> = Vec::new();
+        let mut tool = None;
+        let mut utility: Vec<(Ability, f32)> = Vec::new();
         for &ability in w.abilities() {
             let build = build_with(w, ability);
             let single = build_gain(&base, a, build, false);
@@ -269,26 +255,72 @@ fn no_ability_dominates_its_class_and_none_is_dead_weight() {
                 pack <= 300.0,
                 "{ability:?} on the {w:?}: {pack:.0} DPS on a pack"
             );
-            gains.push((ability, single));
-            match best_anywhere.iter_mut().find(|(b, _)| *b == ability) {
-                Some((_, g)) => *g = g.max(single).max(pack),
-                None => best_anywhere.push((ability, single.max(pack))),
+            let fights: Vec<FightGain> = Foes::ALL
+                .iter()
+                .map(|f| fight_gain(&base, build, *f))
+                .collect();
+            // What it adds in damage the way its use pays: the better of one Gnawer and a
+            // fight (the mean of the rush and the volley).
+            let in_fights = fights.iter().map(|g| g.dealt).sum::<f32>() / fights.len() as f32;
+            let worth = single.max(in_fights);
+            let best_fight = |f: &dyn Fn(&FightGain) -> f32| {
+                fights.iter().map(f).fold(f32::NEG_INFINITY, f32::max)
+            };
+            match job(ability) {
+                Job::Damage | Job::SetUp => {
+                    let most = single.max(pack).max(best_fight(&|g| g.dealt));
+                    assert!(
+                        most >= 10.0,
+                        "{ability:?} on the {w:?} adds {most:.1} DPS at best"
+                    );
+                    damage.push((ability, worth));
+                    if job(ability) == Job::Damage {
+                        tool = Some(worth);
+                    }
+                }
+                Job::Control => {
+                    let dealt = best_fight(&|g| g.dealt);
+                    let spared = best_fight(&|g| g.spared_share());
+                    let held = best_fight(&|g| g.held);
+                    assert!(
+                        dealt >= 10.0 || spared >= 0.1 || held >= 0.1,
+                        "{ability:?} on the {w:?}: {dealt:.1} DPS, spares {spared:.2}, holds \
+                         {held:.2} ({fights:?})"
+                    );
+                    utility.push((ability, worth));
+                }
+                Job::Defend => {
+                    let spared = best_fight(&|g| g.spared_share());
+                    assert!(
+                        spared >= 0.1,
+                        "{ability:?} on the {w:?} spares {spared:.2} ({fights:?})"
+                    );
+                    utility.push((ability, worth));
+                }
+                Job::Move => {
+                    let m = moved(&base, build);
+                    assert!(m >= 4.0, "{ability:?} on the {w:?} moves you {m:.1} m");
+                    utility.push((ability, worth));
+                }
             }
         }
-        gains.sort_by(|x, y| y.1.total_cmp(&x.1));
-        let (top, second) = (gains[0], gains[1]);
-        assert!(
-            top.1 <= 1.5 * second.1,
-            "{:?} on the {w:?} adds {:.1} DPS, the next best ({:?}) {:.1}: {gains:?}",
-            top.0,
-            top.1,
-            second.0,
-            second.1
-        );
-    }
-    for (ability, gain) in best_anywhere {
-        if !utility(ability) {
-            assert!(gain >= 10.0, "{ability:?} adds {gain:.1} DPS at best");
+        damage.sort_by(|x, y| y.1.total_cmp(&x.1));
+        if let [top, second, ..] = damage[..] {
+            assert!(
+                top.1 <= 1.5 * second.1,
+                "{:?} on the {w:?} adds {:.1} DPS, the next damage pick ({:?}) {:.1}: {damage:?}",
+                top.0,
+                top.1,
+                second.0,
+                second.1
+            );
+        }
+        let tool = tool.expect("every pool has a damage tool");
+        for (ability, worth) in utility {
+            assert!(
+                worth <= 2.0 * tool.max(1.0),
+                "{ability:?} on the {w:?} adds {worth:.1} DPS, its damage tool {tool:.1}"
+            );
         }
     }
     // Every class's pool was looked at.

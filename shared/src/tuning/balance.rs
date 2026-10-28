@@ -150,13 +150,13 @@ impl Default for BalanceTuning {
             (WeaponKind::Trimmer, scale(0.84)),
             // Its abilities hit for a multiple of the swing: 59.5 keeps them under a one-shot.
             (WeaponKind::Tamper, scale(0.7)),
-            // A full focus: 70 to the body, 140 to the head (the allowed one-shot); two body
-            // shots in 1.6 s.
+            // A full focus: 52 to the body, 104 to the head (the allowed one-shot; 96 at 90 %:
+            // at 0.54 a headshot past 61 % killed); two body shots in 1.6 s.
             (
                 WeaponKind::Lamplighter,
                 BalanceScale {
                     interval: 0.75,
-                    ..scale(0.54)
+                    ..scale(0.4)
                 },
             ),
         ]);
@@ -169,6 +169,8 @@ impl Default for BalanceTuning {
             (Ability::Limpet, scale(0.75)),
             // The counter is 2-3x the swing: on the Tamper (59.5) at most 98.
             (Ability::Riposte, scale(0.55)),
+            // 71.5 a direct hit, as before the PvE raise (110 a kite).
+            (Ability::Kite, scale(0.65)),
         ]);
         let overrides = BTreeMap::from([
             ("quill.brand_multiplier".to_string(), 1.25),
@@ -180,6 +182,10 @@ impl Default for BalanceTuning {
             ("thresher.pellet_knockback".to_string(), 1.5),
             // Three marks in PvP (docs/rework.md).
             ("tally.max_targets".to_string(), 3.0),
+            // Revealed players take x1.15 (PvE: x1.35 for everything near the beacon).
+            ("beacon_arrow.damage_multiplier".to_string(), 1.15),
+            // Haste x1.3 out-ran two Surges by three times on top of its 40 HP.
+            ("knacks.kindle_flask.haste_scale".to_string(), 1.15),
             // Half damage for 3 s won every even duel.
             ("knacks.tallow_skin.damage_scale".to_string(), 0.7),
             ("knacks.tallow_skin.duration".to_string(), 2.0),

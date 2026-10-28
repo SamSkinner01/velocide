@@ -1312,8 +1312,8 @@ impl Default for HurlTuning {
             cooldown: 2.5,
             max_distance: 14.0,
             return_speed: 30.0,
-            return_damage_scale: 1.0,
-            catch_refund: 0.4,
+            return_damage_scale: 0.5,
+            catch_refund: 0.25,
         }
     }
 }
@@ -1575,8 +1575,8 @@ impl Default for TallyTuning {
             range: 45.0,
             assist_degrees: 1.5,
             max_targets: 4,
-            damage: 30.0,
-            cooldown: 6.0,
+            damage: 40.0,
+            cooldown: 4.0,
             empty_cooldown: 0.25,
         }
     }
@@ -1643,7 +1643,7 @@ impl Default for BolasTuning {
             damage: 0.0,
             link_range: 6.0,
             link_time: 4.0,
-            link_share: 0.6,
+            link_share: 0.4,
             cooldown: 5.0,
         }
     }
@@ -1780,9 +1780,9 @@ impl Default for KiteTuning {
             flight_time: 7.0,
             projectile_radius: 0.3,
             explosion_radius: 4.5,
-            damage: 75.0,
+            damage: 110.0,
             knockback: 18.0,
-            cooldown: 5.0,
+            cooldown: 3.5,
         }
     }
 }
@@ -1828,10 +1828,10 @@ pub struct BeaconArrowTuning {
 impl Default for BeaconArrowTuning {
     fn default() -> Self {
         Self {
-            damage_scale: 0.6,
+            damage_scale: 1.0,
             duration: 6.0,
             radius: 16.0,
-            damage_multiplier: 1.15,
+            damage_multiplier: 1.35,
             cooldown: 8.0,
         }
     }

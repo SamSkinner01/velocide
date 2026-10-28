@@ -428,8 +428,8 @@
             cooldown: 2.5,
             max_distance: 14.0,    // it turns back this far out (or at the level) ...
             return_speed: 30.0,    // ... homing on the thrower's chest ...
-            return_damage_scale: 1.0, // ... hitting each hostile once more for this
-            catch_refund: 0.4,     // caught: this much of the cooldown back
+            return_damage_scale: 0.5, // ... hitting each hostile once more for this (at 1.0 /
+            catch_refund: 0.25,    // caught: this much back (0.4) it doubled the Lunge
         ),
         // The knacks on Q (shared/src/sim/knacks.rs); the Thorn keeps `thorn` above.
         knacks: (
@@ -505,8 +505,8 @@
             range: 45.0,
             assist_degrees: 1.5,   // ... marking what the crosshair passes over ...
             max_targets: 4,        // ... up to this many (PvP 3) ...
-            damage: 30.0,          // ... released: a shot at each one still in sight
-            cooldown: 6.0,
+            damage: 40.0,          // ... released: a shot at each one still in sight
+            cooldown: 4.0,         // 30 every 6 s: 5 DPS, 13.5 sweeping a rush (docs/balance.md)
             empty_cooldown: 0.25,  // nothing tallied: a quarter of the cooldown
         ),
         waxwork: (
@@ -527,7 +527,8 @@
             damage: 0.0,           // the bind is the point: Pinned (the Pinning Arrow's times)
             link_range: 6.0,       // a second hostile this close to the first is bound too ...
             link_time: 4.0,        // ... and for this long ...
-            link_share: 0.6,       // ... this much of the damage either takes hits the other
+            link_share: 0.4,       // ... this much of the damage either takes hits the other
+                                   // (0.6: 100 DPS on a pack, more than the Flak in a fight)
             cooldown: 5.0,
         ),
         bulwark: (
@@ -569,9 +570,9 @@
             flight_time: 7.0,
             projectile_radius: 0.3,
             explosion_radius: 4.5,
-            damage: 75.0,
+            damage: 110.0,         // 75 every 5 s: 18 DPS, the Explosive pool's weakest damage
             knockback: 18.0,
-            cooldown: 5.0,
+            cooldown: 3.5,
         ),
         blink_arrow: (
             window: 1.5,           // ALT while it flies or this long after it sticks: step to it
@@ -580,10 +581,11 @@
             cooldown: 6.0,         // from the blink (or when the window passes)
         ),
         beacon_arrow: (
-            damage_scale: 0.6,
+            damage_scale: 1.0,     // 0.6 x 1.15: 5 DPS to the Brand's 40 (docs/balance.md)
             duration: 6.0,
             radius: 16.0,          // hostiles this close to it are revealed ...
-            damage_multiplier: 1.15, // ... and take this much more from every player
+            damage_multiplier: 1.35, // ... and take this much more from every player (a Brand
+                                   // on everything near it, 6 s of every 8)
             cooldown: 8.0,
         ),
         riposte: (
@@ -759,7 +761,8 @@
                 Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise
                 Trimmer: (damage: 0.84),      // 30 a slash: four, 0.95 s, as before the PvE raise
                 Tamper: (damage: 0.7),        // 59.5 a swing; its abilities are multiples of it
-                Lamplighter: (damage: 0.54, interval: 0.75), // full focus: 70 body, 140 head; 2 body shots in 1.6 s
+                // Full focus: 52 body, 104 head (the one-shot); 90 %: 96. Two body shots in 1.6 s.
+                Lamplighter: (damage: 0.4, interval: 0.75),
             },
             abilities: {
                 Wisp: (damage: 0.5),
@@ -769,6 +772,7 @@
                 Flak: (damage: 0.8),
                 Limpet: (damage: 0.75),       // 30 a charge, as before the PvE cut
                 Riposte: (damage: 0.55),      // 2-3x the swing: on the Tamper at most 98
+                Kite: (damage: 0.65),         // 71.5 a direct hit, as before the PvE raise
             },
             overrides: {
                 "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
@@ -779,6 +783,11 @@
                 "bellows.pellet_knockback": 2.0,
                 "thresher.pellet_knockback": 1.5,
                 "tally.max_targets": 3,
+                // Revealed players take x1.15 (PvE: x1.35 for everything near the beacon).
+                "beacon_arrow.damage_multiplier": 1.15,
+                // Haste x1.3 out-ran two Surges by three times (19 m to 6 in 4 s) on top of its
+                // 40 HP: x1.15 makes it the healing pick, Surge the mobile one.
+                "knacks.kindle_flask.haste_scale": 1.15,
                 // Half damage for 3 s won every even duel (twice every time to kill).
                 "knacks.tallow_skin.damage_scale": 0.7,
                 "knacks.tallow_skin.duration": 2.0,
