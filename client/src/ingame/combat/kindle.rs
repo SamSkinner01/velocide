@@ -226,8 +226,10 @@ pub fn haste_hud(list: &mut UiDrawList, c: Rect, strength: f32, rush: f32, now: 
     }
 }
 
-/// Another player drank (`Fx::Knack`): the swig at them and their wick flaring.
+/// Another player drank (`Fx::Knack`): their Shrike's drink, the swig at them and their wick
+/// flaring.
 pub fn remote_drink(ctx: &mut FxCtx, e: &EntityState) {
+    ctx.remote.visual_mut(e.id).drinking = 1e-3;
     let wick = wick_position(e);
     ctx.audio.play(Sfx::KindleDrink, PlayParams::at(wick));
     ctx.effects

@@ -783,6 +783,10 @@ pub struct PlayerAnim {
     pub firing: f32,
     /// Punch progress 0..1 (0 = not punching).
     pub punching: f32,
+    /// Kindle Flask drink progress 0..1 (0 = not drinking, `weapons::drink`): the left hand
+    /// brings the flask to the mask and the head tips back; `ModelLibrary::draw_shrike`
+    /// draws the flask in it.
+    pub drinking: f32,
     pub downed: bool,
     pub dead: bool,
     /// Seconds (any monotonically increasing clock).
@@ -1106,12 +1110,15 @@ pub fn pose_full(a: &PlayerAnim) -> (Pose, Drape) {
     // Torso counter-rotates so the upper body keeps facing the aim; pitch follows the aim a bit.
     let aim_torso = a.pitch.clamp(-1.2, 1.2) * 0.35;
     let punch = punch_extension(a.punching);
+    // The drink: raised to the mask (0..1) and tipped back (0..1) (`weapons::drink`).
+    let (raise, tip) = super::weapons::drink::third_person(a.drinking);
     let torso_yaw = -hip_yaw - 0.4 * punch;
     let torso_rot = Quat::from_rotation_y(torso_yaw) * rx(torso_pitch + aim_torso - lean * 0.35);
     pose.rotate(TORSO, torso_rot);
     pose.rotate(
         HEAD,
-        Quat::from_rotation_y(0.4 * punch) * rx(a.pitch.clamp(-1.2, 1.2) * 0.5 + lean * 0.4),
+        Quat::from_rotation_y(0.4 * punch)
+            * rx(a.pitch.clamp(-1.2, 1.2) * 0.5 + lean * 0.4 - 0.45 * tip),
     );
 
     for (thigh, shin, foot, leg) in [
@@ -1163,6 +1170,13 @@ pub fn pose_full(a: &PlayerAnim) -> (Pose, Drape) {
     // Left arm: punch, support the weapon, or swing.
     if melee.is_some_and(|m| punch <= 0.0 && two_handed_or_blade(m, two_handed)) {
         // Posed with the melee weapon above.
+    } else if raise > 0.0 && punch <= 0.0 {
+        // Drinking: the upper arm forward, the forearm folded up to the mask, swung in.
+        let up = arm_l.upper + (1.25 - 0.5 * chain - arm_l.upper) * raise;
+        let lo = arm_l.lower + (1.75 + 0.25 * tip - arm_l.lower) * raise;
+        pose.rotate(UPPER_ARM_L, Quat::from_rotation_y(-0.65 * raise) * rx(up));
+        pose.rotate(FOREARM_L, rx(lo));
+        pose.rotate(HAND_L, rx(0.3 * tip));
     } else if punch > 0.0 {
         let target = std::f32::consts::FRAC_PI_2 + a.pitch.clamp(-1.0, 1.0) * 0.6 - chain;
         let up = arm_l.upper + (target - 0.05 - arm_l.upper) * punch;

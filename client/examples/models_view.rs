@@ -1536,6 +1536,34 @@ fn gear_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     }
     shots.push(("gear_closeup".into(), "BOLAS, KITE".into(), shot));
 
+    // The Kindle Flask drunk in third person (three-quarter front).
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.6, 1.7, 4.6),
+        Vec3::new(0.0, 1.15, 0.0),
+        60.0,
+    ));
+    for (p, x) in [0.0f32, 0.15, 0.4, 0.62, 0.85]
+        .into_iter()
+        .zip([-3.0f32, -1.5, 0.0, 1.5, 3.0])
+    {
+        lib.draw_player(
+            &PlayerAnim {
+                yaw: FACE_CAMERA + 0.5,
+                weapon: WeaponKind::Arclash.id(),
+                drinking: p,
+                ..player(t)
+            },
+            Vec3::new(x, 0.0, 0.0),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    shots.push((
+        "gear_drink_3p".into(),
+        "KINDLE FLASK DRINK (3RD PERSON): REST, .15, .4, .62, .85".into(),
+        shot,
+    ));
+
     // The Kindle Flask drunk in first person.
     for (k, (p, weapon)) in [
         (0.12, WeaponKind::Quill),

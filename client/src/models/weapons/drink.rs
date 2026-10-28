@@ -112,6 +112,28 @@ pub fn flask_glow(p: f32) -> f32 {
     (1.3 + 2.4 * pour) * (1.0 - 0.8 * drained) + 0.15
 }
 
+/// The third-person drink at `p`: how far the left hand is raised to the mask and how far
+/// the flask (and the head) are tipped back (both 0..1).
+pub fn third_person(p: f32) -> (f32, f32) {
+    if drinking(p) {
+        (raise(p) * (1.0 - away(p)), tip(p))
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+/// The flask in a third-person Shrike's left hand (hand space: in the palm, its neck up
+/// along the raised forearm), or `None` once it is drunk.
+pub fn third_person_flask(p: f32) -> Option<Mat4> {
+    (drinking(p) && p < 0.88).then(|| {
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(0.8),
+            Quat::from_rotation_x(std::f32::consts::PI + 0.3),
+            Vec3::new(0.0, -0.1, -0.03),
+        )
+    })
+}
+
 /// How far the gun dips out of the way of the drink (0..1, like a punch's extension).
 pub fn lowering(p: f32) -> f32 {
     if drinking(p) {

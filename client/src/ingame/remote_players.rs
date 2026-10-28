@@ -53,6 +53,8 @@ pub struct PlayerVisual {
     pub firing: f32,
     /// Punch progress 0..1 (combat starts it at a small value; advances here).
     pub punching: f32,
+    /// Kindle Flask drink progress 0..1 (combat starts it; advances here).
+    pub drinking: f32,
     /// A melee swing (combat starts it with `melee::Swing::start`; advances here).
     pub swing: Swing,
     pub downed: bool,
@@ -80,6 +82,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
             .then(|| look_dir(dequantize_yaw((e.aux >> 16) as u16), 0.0)),
         firing: v.firing,
         punching: v.punching,
+        drinking: v.drinking,
         downed: v.downed,
         dead: v.dead,
         time,
@@ -155,6 +158,12 @@ impl RemotePlayers {
                 v.punching += dt / 0.35;
                 if v.punching >= 1.0 {
                     v.punching = 0.0;
+                }
+            }
+            if v.drinking > 0.0 {
+                v.drinking += dt / crate::models::weapons::drink::DRINK_TIME;
+                if v.drinking >= 1.0 {
+                    v.drinking = 0.0;
                 }
             }
             match melee::of_id(player_weapon(e.state).0.id()) {

@@ -243,6 +243,17 @@ impl ModelLibrary {
             ..Default::default()
         });
         let head = world[shrike::HEAD];
+        // The Kindle Flask in the left hand while it is drunk (`weapons::drink`).
+        if let Some(local) = weapons::drink::third_person_flask(anim.drinking) {
+            let mut flask = self.get(ModelId::KindleFlask).rest_pose();
+            let g = weapons::drink::flask_glow(anim.drinking);
+            flask.glow = Vec4::new(g, g, g, 1.0);
+            if weapons::drink::unstoppered(anim.drinking) {
+                flask.hide(super::knacks::FLASK_STOPPER);
+            }
+            self.get(ModelId::KindleFlask)
+                .draw(&flask, world[shrike::HAND_L] * local, tint, out);
+        }
         // Melee: the Trimmer's halves in both hands, the Tamper; the muzzle is the striking
         // edge / foot (`weapons::melee`).
         if let Some(m) = weapons::melee::of_id(anim.weapon).filter(|_| !anim.unarmed) {

@@ -25,8 +25,8 @@ pub type Stat = (&'static str, String);
 pub fn weapon_role(w: WeaponKind) -> &'static str {
     match w {
         WeaponKind::Quill => {
-            "Exact hitscan spikes for careful aim. A shot passing a Thorn ricochets into the \
-             next target, harder each bounce."
+            "Exact hitscan spikes for careful aim: they land at any range and reward a hit on \
+             a weak point."
         }
         WeaponKind::Lancet => {
             "Fast hitscan needles. The first shot is exact; holding the trigger heats it and \
@@ -183,14 +183,14 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
 pub fn knack_text(k: Knack) -> &'static str {
     match k {
         Knack::Thorn => {
-            "A barbed glass spike that plants itself where it lands. A Quill shot passing a live \
-             Thorn ricochets off it into the next target (another Thorn first), harder each \
-             bounce. Throw it at a Mould: it hurts and drops, still live."
+            "A barbed glass spike that plants itself where it lands. Any shot, blow or blast \
+             that reaches a live Thorn shatters it and is relayed at the next target (another \
+             Thorn first), harder each time. Throw it at a Mould: it hurts and drops."
         }
         Knack::KindleFlask => {
-            "Lob a flask of kindling: where it breaks, a pool heals the Shrikes standing in it \
-             for a few seconds (in PvP only you). Throw it where your team holds, or at your \
-             own feet."
+            "Drink the kindling: for a few seconds you run, fly, slide and dash faster and \
+             heal a little every second. It's yours only; drink it to chase, to get away, or \
+             to stay in a fight."
         }
         Knack::Snare => {
             "Throw a wax trap to the floor. Once armed, the first hostile that comes close is \
@@ -216,7 +216,7 @@ pub fn knack_text(k: Knack) -> &'static str {
 pub fn knack_input(k: Knack) -> &'static str {
     match k {
         Knack::Thorn | Knack::SootPot => "KNACK: THROWS IT ALONG YOUR AIM",
-        Knack::KindleFlask => "KNACK: LOBS IT A LITTLE HIGH",
+        Knack::KindleFlask => "KNACK: DRINK IT AT ONCE",
         Knack::Snare => "KNACK: THROWS IT TO THE FLOOR",
         Knack::TallowSkin => "KNACK: AT ONCE, ON YOU",
         Knack::Surge => "KNACK: AT ONCE, ALONG YOUR LOOK",

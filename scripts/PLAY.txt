@@ -50,8 +50,9 @@ TIPS
   Every hit sheds embers. Stay close and your wick draws them in: that is how you heal.
   Punch an incoming projectile just before it hits you: it flies back at double damage and
   your wick flares back to full.
-  Knack Thorn (solo / co-op): throw it, then shoot it with the Quill: the shot ricochets to
-  the nearest enemy. Other knacks heal, trap, blind Moulds, toughen you or speed you up.
+  Knack Thorn (solo / co-op): throw it, then shoot, swing or blast it with anything: the
+  attack is relayed to the nearest enemy. Other knacks haste and heal you (the Kindle Flask:
+  drink it), trap, blind Moulds, toughen you or speed you up.
   Down in co-op? Watch a teammate: Fire / Alt fire switch, Jump for the chase camera.
   Grind: endless waves until your whole team is down. Gun game: every kill with your current
   weapon moves you up the ladder; the final tier is the Trimmer, and a kill with it wins.
