@@ -350,6 +350,22 @@ pub fn hurl_hidden(swing: &Swing) -> bool {
     swing.active() && swing.kind == SwingKind::Hurl && (0.3..0.62).contains(&swing.progress)
 }
 
+/// Hides what a Hurl throws from `pose` (a melee weapon's): the Trimmer's right blade, the
+/// Tamper's head glow (its head stays on the haft, dark).
+pub fn hide_hurled(weapon: MeleeWeapon, pose: &mut Pose) {
+    match weapon {
+        MeleeWeapon::Trimmer => {
+            pose.hide(trimmer::BLADE_R);
+            pose.hide(trimmer::EDGE_R);
+            pose.hide(trimmer::WICK);
+        }
+        MeleeWeapon::Tamper => {
+            pose.hide(tamper::BAND);
+            pose.hide(tamper::VENT);
+        }
+    }
+}
+
 /// What the left hand is doing while a melee weapon is held.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LeftHand {
@@ -364,6 +380,8 @@ pub enum LeftHand {
 
 /// Draws the melee viewmodel: the weapon(s) with the right arm (the Trimmer's left blade in
 /// the left fist), returning the view-space strike point and the direction of the blow.
+/// `hurled`: the Hurl's piece is still out (it comes back, docs/rework.md): the hand stays
+/// empty of it until it is caught.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_view(
     lib: &ModelLibrary,
@@ -372,13 +390,14 @@ pub fn draw_view(
     pose: &Pose,
     extra: Vec3,
     left_hand: LeftHand,
+    hurled: bool,
     tint: &Tint,
     out: &mut Vec<DrawItem>,
 ) -> (Vec3, Vec3) {
     let right = view_right(weapon, swing, extra);
     let mut pose = pose.clone();
     let model = model(weapon);
-    let hidden = hurl_hidden(swing);
+    let hidden = hurled || hurl_hidden(swing);
     match weapon {
         MeleeWeapon::Trimmer => {
             let left = match left_hand {
@@ -394,9 +413,7 @@ pub fn draw_view(
                 Mat4::from_translation(-pivot) * right.inverse() * left,
             );
             if hidden {
-                pose.hide(trimmer::BLADE_R);
-                pose.hide(trimmer::EDGE_R);
-                pose.hide(trimmer::WICK);
+                hide_hurled(weapon, &mut pose);
             }
             if left_hand == LeftHand::Busy {
                 pose.hide(trimmer::BLADE_L);
@@ -416,8 +433,7 @@ pub fn draw_view(
         }
         MeleeWeapon::Tamper => {
             if hidden {
-                pose.hide(tamper::BAND);
-                pose.hide(tamper::VENT);
+                hide_hurled(weapon, &mut pose);
             }
             lib.get(model).draw(&pose, right, tint, out);
             // Both hands on the haft, the left one higher up; for the overhead slam it slides

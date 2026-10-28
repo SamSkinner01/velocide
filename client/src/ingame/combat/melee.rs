@@ -279,8 +279,10 @@ pub struct MeleeView {
     pub next_left: bool,
     /// Your Lunge's rush (seconds left, total): the HUD's speed lines.
     rush: (f32, f32),
-    /// Replicated hurled pieces drawn last frame (id, piece, position, velocity).
-    hurled: Vec<(NetId, MeleeWeapon, Vec3, Vec3)>,
+    /// Replicated hurled pieces drawn last frame (id, piece, position, velocity, owner code).
+    hurled: Vec<(NetId, MeleeWeapon, Vec3, Vec3, u16)>,
+    /// Your own hurled piece came back to your hand (`take_caught`).
+    caught: bool,
     time: f64,
 }
 
@@ -848,11 +850,30 @@ impl MeleeView {
             if age > 0.06 {
                 hurled_sparks(ctx.effects, ctx.rng, weapon, at, dt);
             }
-            seen.push((e.id, weapon, at, e.velocity));
+            seen.push((e.id, weapon, at, e.velocity, e.owner));
         }
-        // Gone since last frame: it struck something where it was last drawn.
-        for (id, weapon, at, vel) in &self.hurled {
-            if !seen.iter().any(|s| s.0 == *id) {
+        // Gone since last frame: it struck something where it was last drawn, or (the Hurl
+        // comes back, docs/rework.md) it reached its thrower's hand.
+        for (id, weapon, at, vel, owner) in &self.hurled {
+            if seen.iter().any(|s| s.0 == *id) {
+                continue;
+            }
+            let own = f.local_owner == Some(*owner);
+            let chest = if own {
+                Some(f.camera - Vec3::Y * 0.5)
+            } else {
+                f.entities
+                    .iter()
+                    .find(|e| {
+                        e.kind == kind::PLAYER
+                            && e.id.as_player().map(|p| p.0 as u16) == Some(*owner)
+                    })
+                    .map(|e| e.position + Vec3::Y * 1.1)
+            };
+            if chest.is_some_and(|c| c.distance(*at) < CATCH_REACH) {
+                hurl_catch(ctx.effects, ctx.audio, ctx.rng, *at, own);
+                self.caught |= own;
+            } else {
                 hurl_impact(
                     ctx.effects,
                     ctx.audio,
@@ -864,6 +885,12 @@ impl MeleeView {
             }
         }
         self.hurled = seen;
+    }
+
+    /// Whether your own hurled piece came back to your hand since the last call (the
+    /// viewmodel's catch).
+    pub fn take_caught(&mut self) -> bool {
+        std::mem::take(&mut self.caught)
     }
 
     /// Draws the replicated hurled pieces at the time the entity frame shows them.
@@ -1242,6 +1269,21 @@ pub fn hurl_impact(
     effects.glow(at, hot(ability_color(SwingKind::Hurl), 1.2, 0.8), 0.9, 0.15);
     let _ = rng;
     audio.play(Sfx::HurlHit, PlayParams::at(at));
+}
+
+/// How close to its thrower's chest a returning piece vanishes to count as caught.
+const CATCH_REACH: f32 = 1.8;
+
+/// A hurled piece back in its thrower's hand (docs/rework.md: the Hurl returns): a slap and a
+/// short ring, a few sparks off the catch (`own`: your hand, the sound in your head).
+pub fn hurl_catch(effects: &mut Effects, audio: &mut Audio, rng: &mut Rng, at: Vec3, own: bool) {
+    if !own {
+        effects.sparks(at, rng.dir(), 5);
+        effects.glow(at, hot(ability_color(SwingKind::Hurl), 0.9, 0.6), 0.5, 0.1);
+        audio.play(Sfx::HurlCatch, PlayParams::at(at));
+    } else {
+        audio.play_2d(Sfx::HurlCatch);
+    }
 }
 
 #[cfg(test)]

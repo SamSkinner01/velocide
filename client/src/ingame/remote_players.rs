@@ -55,6 +55,8 @@ pub struct PlayerVisual {
     pub punching: f32,
     /// A melee swing (combat starts it with `melee::Swing::start`; advances here).
     pub swing: Swing,
+    /// Their Hurl's piece is out (combat sets it from the `HURL` entities they own).
+    pub hurled: bool,
     pub downed: bool,
     pub dead: bool,
     /// World-space head of the last drawn pose (name tags).
@@ -99,6 +101,7 @@ pub fn player_anim(e: &EntityState, v: &PlayerVisual, time: f64, look: Cosmetics
         cosmetics: look,
         unarmed: !player_armed(e.state),
         swing: v.swing,
+        hurled: v.hurled,
     }
 }
 

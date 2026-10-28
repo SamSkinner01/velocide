@@ -1189,6 +1189,11 @@ impl InGame {
         for e in entities.iter().filter(|e| e.kind == kind::PLAYER) {
             let vis = remote.visual_mut(e.id);
             vis.dead = e.flags & player_flags::DEAD != 0;
+            // Their Hurl's piece in the air (it comes back to their hand).
+            let code = e.id.as_player().map(|p| p.0 as u16);
+            vis.hurled = entities
+                .iter()
+                .any(|h| h.kind == kind::HURL && Some(h.owner) == code);
             let (_, ability, level) = player_weapon(e.state);
             if e.flags & player_flags::CHARGING != 0
                 && ability == shared::sim::Ability::Discharge
@@ -1276,6 +1281,11 @@ impl InGame {
             };
             let held = melee::held(combat.predictor.state());
             combat.melee.update_replicated(&frame, held, &mut ctx);
+            // Your Hurl's piece is out until it comes back to your hand (docs/rework.md).
+            viewmodel.set_hurled(own.iter().any(|e| e.kind == kind::HURL));
+            if combat.melee.take_caught() {
+                viewmodel.catch();
+            }
             let mut ctx = knacks::UpdateCtx {
                 effects,
                 beams: &mut combat.beams,

@@ -127,6 +127,17 @@ impl Viewmodel {
         self.anim.salvo = Some(0.0);
     }
 
+    /// Your Hurl's piece is out (`true`) or back in the hand.
+    pub fn set_hurled(&mut self, out: bool) {
+        self.anim.hurled = out;
+    }
+
+    /// The Hurl's piece caught: the weapon snaps back into the hand (a short dip and rise).
+    pub fn catch(&mut self) {
+        self.anim.hurled = false;
+        self.anim.switch = self.anim.switch.min(0.55);
+    }
+
     /// No weapon at all (gun game's Fist tier): fists only.
     pub fn set_unarmed(&mut self, unarmed: bool) {
         self.anim.unarmed = unarmed;

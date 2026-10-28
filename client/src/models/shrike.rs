@@ -799,6 +799,8 @@ pub struct PlayerAnim {
     pub unarmed: bool,
     /// A melee swing in progress (the Trimmer's slashes alternate hands; the abilities' moves).
     pub swing: super::weapons::melee::Swing,
+    /// Its Hurl's blade / head is out (it comes back, docs/rework.md): not in the hand.
+    pub hurled: bool,
     /// Locomotion phase in cycles (keep it per player with [`PlayerAnim::advance_cycle`]).
     pub cycle: f32,
     /// How this Shrike looks (mask, crest, cloak, emblem, paints: `models::cosmetics`).

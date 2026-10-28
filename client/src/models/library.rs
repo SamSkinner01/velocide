@@ -258,6 +258,10 @@ impl ModelLibrary {
                     weapons::melee::left_blade_local(gun_root, left),
                 );
             }
+            // The hurled piece is in the air (it comes back): the hand is empty of it.
+            if anim.hurled || weapons::melee::hurl_hidden(&anim.swing) {
+                weapons::melee::hide_hurled(m, &mut pose);
+            }
             if !anim.dead {
                 self.get(weapons::melee::model(m))
                     .draw(&pose, gun_root, tint, out);

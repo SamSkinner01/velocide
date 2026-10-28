@@ -268,6 +268,9 @@ pub struct ViewmodelAnim {
     pub swing: melee::Swing,
     /// What the left hand throws (`throw`): a knack's model; `None` = a Thorn.
     pub throw_item: Option<ModelId>,
+    /// Your Hurl's blade / head is out (it comes back, docs/rework.md): not in the hand until
+    /// it is caught.
+    pub hurled: bool,
 }
 
 impl ViewmodelAnim {
@@ -691,6 +694,7 @@ pub(crate) fn draw_viewmodel(
             &pose,
             melee_extra(anim),
             left,
+            anim.hurled,
             tint,
             out,
         );
