@@ -1,9 +1,9 @@
-//! Runtime model library: loads `assets/models/*.gltf`, falls back to in-memory generation,
-//! uploads meshes / textures and offers one-call draw helpers for the client.
+//! Runtime model library: loads `assets/models/*.gltf` (on disk, else embedded in the game),
+//! falls back to in-memory generation, uploads meshes / textures and offers one-call draw
+//! helpers for the client.
 
 use std::collections::HashMap;
 use std::hash::{Hash as _, Hasher as _};
-use std::path::Path;
 
 use engine::assets::gltf::ModelPart;
 use engine::gfx::{DrawItem, MeshData, TextureData, TextureId};
@@ -19,7 +19,8 @@ pub struct ModelLibrary {
     rigs: Vec<Rig>,
     /// Model-space bounds of each model in its rest pose (min, max): menu previews frame it.
     bounds: Vec<(Vec3, Vec3)>,
-    /// Models that could not be loaded from disk and were generated in memory instead.
+    /// Models that could not be loaded (from disk or embedded) and were generated in memory
+    /// instead.
     pub regenerated: Vec<ModelId>,
 }
 
@@ -106,23 +107,19 @@ fn texture_key(t: &TextureData) -> u64 {
 }
 
 impl ModelLibrary {
-    /// Loads every model from `engine::assets_dir()/models`.
+    /// Loads every model from `models/` in the assets folder (`engine::asset_files`: the file
+    /// on disk if there is one, else the copy embedded in the game); models whose file is
+    /// missing or broken are generated in memory instead (logged as a warning).
     pub fn load(renderer: &mut Renderer) -> anyhow::Result<ModelLibrary> {
-        Self::load_from(renderer, &engine::assets_dir().join("models"))
-    }
-
-    /// Loads every model from `dir`; models whose file is missing or broken are generated in
-    /// memory instead (logged as a warning).
-    pub fn load_from(renderer: &mut Renderer, dir: &Path) -> anyhow::Result<ModelLibrary> {
         let mut textures: HashMap<u64, TextureId> = HashMap::new();
         let white = renderer.white_texture();
         let mut rigs = Vec::with_capacity(ModelId::ALL.len());
         let mut bounds = Vec::with_capacity(ModelId::ALL.len());
         let mut regenerated = Vec::new();
         for id in ModelId::ALL {
-            let path = dir.join(id.file_name());
+            let path = format!("models/{}", id.file_name());
             let loaded =
-                engine::assets::gltf::load(&path).and_then(|parts| match_parts(id, &parts));
+                engine::assets::gltf::load_asset(&path).and_then(|parts| match_parts(id, &parts));
             let parts = match loaded {
                 Ok(parts) => parts,
                 Err(e) => {
@@ -342,5 +339,24 @@ impl ModelLibrary {
         out: &mut Vec<DrawItem>,
     ) -> ViewmodelDrawInfo {
         weapons::draw_viewmodel(self, anim, tint, out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The standalone game draws the embedded models: each must match its part table, or it
+    /// would be generated in memory at every start.
+    #[test]
+    fn every_model_is_embedded_and_matches_its_part_table() {
+        for id in ModelId::ALL {
+            let path = format!("models/{}", id.file_name());
+            let bytes = engine::asset_files::embedded(&path)
+                .unwrap_or_else(|| panic!("{path} is not embedded"));
+            let parts =
+                engine::assets::gltf::load_slice(bytes).unwrap_or_else(|e| panic!("{path}: {e:#}"));
+            match_parts(id, &parts).unwrap_or_else(|e| panic!("{path}: {e:#}"));
+        }
     }
 }

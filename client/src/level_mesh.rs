@@ -2,11 +2,13 @@
 //!
 //! Brushes are batched into one mesh per material (tint baked into vertex colours, world-space
 //! UVs so neighbouring brushes line up). Doors get their own mesh each so they can be hidden
-//! when open. glTF props are loaded through `engine::assets::gltf` and cached per path.
+//! when open. glTF props are loaded through `engine::assets::gltf` (from the assets folder on
+//! disk, else the copy embedded in the game) and cached per path.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
+use engine::asset_files::Source;
 use engine::assets::meshgen::{BoxDesc, MeshBuilder};
 use engine::assets::{gltf, procedural};
 use engine::gfx::{DrawItem, Fog, MeshData, PointLight, TextureId};
@@ -27,28 +29,32 @@ pub fn material_alpha(material: &str) -> f32 {
 /// Largest glTF file a level prop may load.
 pub const MAX_PROP_MODEL_BYTES: u64 = 16 * 1024 * 1024;
 
+/// Checks a level prop's `model` name: a plain relative path (no `..`, `.`, root, drive or
+/// `\`; `engine::asset_files::check_path`) ending in `.gltf` / `.glb`.
+fn check_prop_name(model: &str) -> Result<(), String> {
+    engine::asset_files::check_path(model)?;
+    let ext = Path::new(model)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !ext.eq_ignore_ascii_case("gltf") && !ext.eq_ignore_ascii_case("glb") {
+        return Err("not a .gltf / .glb file".into());
+    }
+    Ok(())
+}
+
 /// Resolves a level prop's `model` (a path relative to the assets folder) to a file inside
-/// `assets`. Levels come from servers, so the path must be relative and made only of plain
-/// names (no `..`, `.`, root, drive or `\`), end in `.gltf` / `.glb`, stay inside the
+/// `assets` on disk. Levels come from servers, so the path must be relative and made only of
+/// plain names (no `..`, `.`, root, drive or `\`), end in `.gltf` / `.glb`, stay inside the
 /// assets folder after resolving symlinks, and name a regular file of at most
 /// [`MAX_PROP_MODEL_BYTES`]. Anything else (device files, pipes, network paths, files
 /// elsewhere on disk) is refused with the reason.
 pub fn resolve_prop_model(assets: &Path, model: &str) -> Result<PathBuf, String> {
-    let rel = Path::new(model);
-    if model.is_empty() || model.contains(['\\', ':', '\0']) {
-        return Err("not a plain relative path".into());
-    }
-    if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
-        return Err("must be a relative path inside assets/ without '.' or '..'".into());
-    }
-    let ext = rel.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if !ext.eq_ignore_ascii_case("gltf") && !ext.eq_ignore_ascii_case("glb") {
-        return Err("not a .gltf / .glb file".into());
-    }
+    check_prop_name(model)?;
     let root = assets
         .canonicalize()
         .map_err(|e| format!("assets folder {}: {e}", assets.display()))?;
-    let path = root.join(rel).canonicalize().map_err(|e| e.to_string())?;
+    let path = root.join(model).canonicalize().map_err(|e| e.to_string())?;
     if !path.starts_with(&root) {
         return Err("resolves outside the assets folder".into());
     }
@@ -60,6 +66,19 @@ pub fn resolve_prop_model(assets: &Path, model: &str) -> Result<PathBuf, String>
         return Err(format!("larger than {MAX_PROP_MODEL_BYTES} bytes"));
     }
     Ok(path)
+}
+
+/// Finds a level prop's `model`: the file in `assets` on disk when there is anything at that
+/// path (checked by [`resolve_prop_model`]), else the copy embedded in the game. Both take
+/// only the same plain relative `.gltf` / `.glb` names.
+pub fn find_prop_model(assets: &Path, model: &str) -> Result<Source, String> {
+    check_prop_name(model)?;
+    if assets.join(model).symlink_metadata().is_ok() {
+        return resolve_prop_model(assets, model).map(Source::Disk);
+    }
+    engine::asset_files::embedded(model)
+        .map(Source::Embedded)
+        .ok_or_else(|| "neither in the assets folder nor embedded".into())
 }
 
 /// CPU-side level geometry (no GPU resources), useful for tools and tests.
@@ -193,15 +212,17 @@ impl LevelRender {
         let assets = engine::assets_dir();
         for prop in &level.props {
             let parts = prop_cache.entry(prop.model.clone()).or_insert_with(|| {
-                // The level may come from a server: only files inside assets/ are read.
-                let path = match resolve_prop_model(&assets, &prop.model) {
-                    Ok(path) => path,
+                // The level may come from a server: only files inside assets/ (or embedded
+                // copies of them) are read.
+                let loaded = match find_prop_model(&assets, &prop.model) {
+                    Ok(Source::Disk(path)) => gltf::load(&path),
+                    Ok(Source::Embedded(bytes)) => gltf::load_slice(bytes),
                     Err(err) => {
                         log::warn!("level prop {:?} skipped: {err}", prop.model);
                         return Vec::new();
                     }
                 };
-                match gltf::load(&path) {
+                match loaded {
                     Ok(parts) => parts
                         .into_iter()
                         .map(|part| {
@@ -219,7 +240,7 @@ impl LevelRender {
                         })
                         .collect(),
                     Err(err) => {
-                        log::warn!("level prop {}: {err}", path.display());
+                        log::warn!("level prop {:?}: {err:#}", prop.model);
                         Vec::new()
                     }
                 }
@@ -373,15 +394,50 @@ mod tests {
             "models/missing.glb",
             "models/dir.glb",
             "models/big.glb",
+            // Spellings of embedded files.
+            "models/../models/prop_console.gltf",
+            "./models/prop_console.gltf",
+            "models//prop_console.gltf",
+            "/models/prop_console.gltf",
+            "models\\prop_console.gltf",
+            "tuning.ron",
+            "levels/vestry.ron",
         ] {
             assert!(ok(evil).is_err(), "{evil:?} must be refused");
+            assert!(
+                find_prop_model(&assets, evil).is_err(),
+                "{evil:?} must be refused"
+            );
         }
+
+        // Missing on disk: the embedded copy; on disk: the checked file, also over an
+        // embedded one of the same name.
+        let embedded = engine::asset_files::embedded("models/prop_console.gltf").unwrap();
+        let find = |m: &str| find_prop_model(&assets, m);
+        assert_eq!(
+            find("models/prop_console.gltf"),
+            Ok(Source::Embedded(embedded))
+        );
+        let crate_glb = models.join("crate.glb").canonicalize().unwrap();
+        assert_eq!(find("models/crate.glb"), Ok(Source::Disk(crate_glb)));
+        std::fs::write(models.join("prop_console.gltf"), b"{}").unwrap();
+        let console = models.join("prop_console.gltf").canonicalize().unwrap();
+        assert_eq!(find("models/prop_console.gltf"), Ok(Source::Disk(console)));
+        let nowhere = base.join("no-assets-here");
+        assert!(find_prop_model(&nowhere, "models/prop_console.gltf").is_ok());
+        assert!(find_prop_model(&nowhere, "models/crate.glb").is_err());
+
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(base.join("outside.glb"), models.join("link.glb")).unwrap();
             std::os::unix::fs::symlink("/dev/zero", models.join("zero.glb")).unwrap();
             assert!(ok("models/link.glb").unwrap_err().contains("outside"));
             assert!(ok("models/zero.glb").is_err());
+            // A refused file on disk doesn't fall back to the embedded one of that name.
+            let board = models.join("prop_ready_board.gltf");
+            std::os::unix::fs::symlink(base.join("outside.glb"), &board).unwrap();
+            assert!(find("models/prop_ready_board.gltf").is_err());
+            assert!(find("models/zero.glb").is_err());
         }
         std::fs::remove_dir_all(&base).unwrap();
     }
