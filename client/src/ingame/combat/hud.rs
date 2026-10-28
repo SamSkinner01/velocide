@@ -1,5 +1,6 @@
 //! Combat HUD layer, drawn on top of `Hud::draw`: hit markers (body / headshot / armour /
-//! kill), floating damage numbers, damage direction indicators, a low-health vignette, the
+//! kill; bigger for a scattergun blast that landed most of its pellets), floating damage
+//! numbers, damage direction indicators, a low-health vignette, the
 //! death screen ("RESPAWNING IN N"), the knack (Q) slot, per-weapon cooldowns, the Arclash
 //! Discharge gauge next to the crosshair and a BRANDED warning while you carry a brand. Health and hard damage themselves go through
 //! `HudInfo` into the existing health block.
@@ -26,6 +27,8 @@ pub enum MarkerKind {
 #[derive(Clone, Copy, Debug)]
 struct Marker {
     kind: MarkerKind,
+    /// Size: 1 for a hit, more for a blast that landed most of its pellets.
+    scale: f32,
     time: f64,
 }
 
@@ -107,9 +110,20 @@ impl CombatHud {
     }
 
     pub fn hit_marker(&mut self, kind: MarkerKind, time: f64) {
+        self.hit_marker_scaled(kind, 1.0, time);
+    }
+
+    /// A hit marker `scale` times the size (a blast that landed most of its pellets:
+    /// [`blast_marker_scale`]).
+    pub fn hit_marker_scaled(&mut self, kind: MarkerKind, scale: f32, time: f64) {
         self.markers
             .retain(|m| m.kind == MarkerKind::Kill && kind != MarkerKind::Kill);
-        self.markers.push(Marker { kind, time });
+        let scale = if scale.is_finite() {
+            scale.clamp(1.0, 2.0)
+        } else {
+            1.0
+        };
+        self.markers.push(Marker { kind, scale, time });
     }
 
     pub fn damage_number(
@@ -212,12 +226,14 @@ impl CombatHud {
                 MarkerKind::Armour => (t.ash, 5.0, 4.0, 1.0),
                 MarkerKind::Kill => (t.crimson_bright, 6.0 + 4.0 * age, 12.0, 3.0),
             };
+            // A heavy blast: longer, thicker strokes further out (and a harder pop).
+            let k = m.scale;
             marker(
                 list,
                 center,
-                r0 + 3.0 * pop,
-                len,
-                thick,
+                r0 * (0.5 + 0.5 * k) + 3.0 * k * pop,
+                (len * k).round(),
+                (thick + 2.0 * (k - 1.0)).round(),
                 fade(color, alpha),
                 fade(t.ink, 0.8 * alpha),
             );
@@ -472,6 +488,13 @@ fn vignette(list: &mut UiDrawList, c: Rect, color: Vec4, strength: f32) {
     }
 }
 
+/// How big the hit marker for `hits` of a scattergun blast's `pellets` landing on one target
+/// is: × 1 up to half of them, growing to × 1.7 for all of them.
+pub fn blast_marker_scale(hits: u16, pellets: u32) -> f32 {
+    let share = hits as f32 / pellets.max(1) as f32;
+    1.0 + 0.7 * ((share - 0.5) / 0.5).clamp(0.0, 1.0)
+}
+
 /// A hit marker: four diagonal strokes around the crosshair.
 fn marker(
     list: &mut UiDrawList,
@@ -562,6 +585,23 @@ mod tests {
             h.indicators.len(),
             1,
             "no horizontal direction, no indicator"
+        );
+    }
+
+    #[test]
+    fn a_mostly_landed_blast_draws_a_bigger_marker() {
+        assert_eq!(blast_marker_scale(3, 12), 1.0);
+        assert_eq!(blast_marker_scale(6, 12), 1.0);
+        assert!(blast_marker_scale(9, 12) > 1.3);
+        assert!((blast_marker_scale(12, 12) - 1.7).abs() < 1e-6);
+        assert!((blast_marker_scale(8, 8) - 1.7).abs() < 1e-6);
+        let mut h = CombatHud::new();
+        h.hit_marker_scaled(MarkerKind::Body, blast_marker_scale(12, 12), 1.0);
+        h.hit_marker_scaled(MarkerKind::Body, f32::NAN, 1.1);
+        assert_eq!(h.markers.len(), 1);
+        assert_eq!(
+            h.markers[0].scale, 1.0,
+            "the newest marker, a NaN size made 1"
         );
     }
 }

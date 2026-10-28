@@ -189,7 +189,8 @@ fn same_intents(a: &[FireIntent], b: &[FireIntent]) -> bool {
 }
 
 /// Directions of the rays a hitscan intent fires (client-side, for tracers only: the server's
-/// spread is authoritative for damage).
+/// spread is authoritative for damage). A scattergun's blast is exactly the server's: its fixed
+/// pattern's jitter is seeded by the input (`scatter::pellet_dirs`).
 pub fn hitscan_dirs(
     intent: &FireIntent,
     input: &PlayerInput,
@@ -218,6 +219,7 @@ pub fn hitscan_dirs(
             })
             .collect()
     };
+    let blast = |w| shared::sim::scatter::blast_dirs(t, w, input).unwrap_or_default();
     let charge = match intent {
         FireIntent::Primary { charge, .. } | FireIntent::Ability { charge, .. } => *charge,
         _ => 0.0,
@@ -232,9 +234,9 @@ pub fn hitscan_dirs(
         // The Lancet's bloom (`charge`) widens its needles' spread.
         Attack::Lancet => cone(1, t.lancet.bloom_degrees * charge * 2.0),
         Attack::Flurry => cone(1, 1.0),
-        Attack::Blast => cone(t.bellows.pellets, t.bellows.cone_degrees),
+        Attack::Blast => blast(WeaponKind::Bellows),
+        Attack::Thresher => blast(WeaponKind::Thresher),
         Attack::BothBarrels => cone(t.bellows.both_pellets, t.bellows.both_cone_degrees),
-        Attack::Thresher => cone(t.thresher.pellets, t.thresher.cone_degrees),
         // Ten of the weapon's own shots at once: rays for hitscan weapons (rivets fly).
         Attack::Volley
             if !matches!(

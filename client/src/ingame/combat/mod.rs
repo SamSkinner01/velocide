@@ -99,6 +99,8 @@ pub struct AttackStyle {
     pub sfx: Sfx,
     /// Viewmodel kick 0..1.
     pub kick: f32,
+    /// View punch 0..2 (`CameraRig::punch`): the kick squared, more for the scatterguns' blasts.
+    pub punch: f32,
     /// Tracer width (m) and colour (hitscan); 0 = no tracer.
     pub beam_width: f32,
     pub beam_color: Vec4,
@@ -117,9 +119,10 @@ fn glow(c: Vec4, k: f32, a: f32) -> Vec4 {
 }
 
 pub fn attack_style(a: Attack) -> AttackStyle {
-    let s = |sfx, kick, w, c: Vec4, life, shake| AttackStyle {
+    let s = |sfx, kick: f32, w, c: Vec4, life, shake| AttackStyle {
         sfx,
         kick,
+        punch: kick * kick,
         beam_width: w,
         beam_color: c,
         beam_life: life,
@@ -154,14 +157,18 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.3,
             0.12,
         ),
-        Attack::Blast => s(
-            Sfx::BellowsBlast,
-            1.0,
-            0.036,
-            glow(bellows.primary_color(), 1.7, 0.8),
-            0.13,
-            0.22,
-        ),
+        // The scatterguns kick harder than their viewmodel's full kick (docs/balance.md).
+        Attack::Blast => AttackStyle {
+            punch: 2.0,
+            ..s(
+                Sfx::BellowsBlast,
+                1.0,
+                0.036,
+                glow(bellows.primary_color(), 1.7, 0.8),
+                0.13,
+                0.3,
+            )
+        },
         Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
         Attack::BothBarrels => s(
             Sfx::BothBarrels,
@@ -198,14 +205,17 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.13,
             0.03,
         ),
-        Attack::Thresher => s(
-            Sfx::ThresherFire,
-            0.9,
-            0.034,
-            glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
-            0.12,
-            0.18,
-        ),
+        Attack::Thresher => AttackStyle {
+            punch: 1.3,
+            ..s(
+                Sfx::ThresherFire,
+                1.0,
+                0.034,
+                glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
+                0.12,
+                0.22,
+            )
+        },
         Attack::Riveter => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.02),
         Attack::Cinderbox => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
         Attack::Longwick => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.05),
@@ -669,7 +679,16 @@ impl InGame {
                 } else {
                     MarkerKind::Body
                 };
-                self.combat.hud.hit_marker(kind, now);
+                // A scattergun blast that landed most of its pellets on one target (merged
+                // into this one confirm) draws a bigger marker.
+                let c = &net.tuning().combat;
+                let pellets = match h.attack {
+                    Attack::Blast => Some(c.bellows.pellets),
+                    Attack::Thresher => Some(c.thresher.pellets),
+                    _ => None,
+                };
+                let scale = pellets.map_or(1.0, |n| hud::blast_marker_scale(h.hits, n));
+                self.combat.hud.hit_marker_scaled(kind, scale, now);
                 let color = match kind {
                     MarkerKind::Head | MarkerKind::Kill => theme.crimson_bright,
                     MarkerKind::Armour => theme.ash,
@@ -911,7 +930,7 @@ impl InGame {
                             );
                         }
                         viewmodel.fire(style.kick);
-                        camera.punch(style.kick * style.kick);
+                        camera.punch(style.punch);
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
