@@ -31,6 +31,8 @@ OPTIONS:
     --relay-kib <N>            relayed KiB/s toward each end of a session (default 64)
     --relay-total-kib <N>      relayed KiB/s over all sessions (default 2048)
     --relay-daily-gb <N>       relayed GB per UTC day over all sessions (default 20)
+    --unverified-rate <N>      replies per second to unproven senders, in all (default 20000)
+    --control-rate <N>         requests per second from proven senders, in all (default 20000)
     --exit-when-replaced <PATH>
                                exit (to be restarted) once PATH points at another file: a
                                deploy swapped the binary
@@ -110,6 +112,12 @@ fn parse_args() -> Result<Command, String> {
                 config.relay_daily_bytes = number("--relay-daily-gb", value("--relay-daily-gb")?)?
                     .saturating_mul(1_000_000_000)
             }
+            "--unverified-rate" => {
+                config.unverified_rate = number("--unverified-rate", value("--unverified-rate")?)?
+            }
+            "--control-rate" => {
+                config.control_rate = number("--control-rate", value("--control-rate")?)?
+            }
             "--exit-when-replaced" => {
                 exit_when_replaced = Some(PathBuf::from(value("--exit-when-replaced")?))
             }
@@ -145,7 +153,11 @@ fn load_key(path: &Path) -> io::Result<[u8; KEY_LEN]> {
             Ok(key)
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // Written whole under a temporary name, then linked into place (which fails if
+            // another start made one meanwhile): a crash or a full disk never leaves a short
+            // key behind.
             let key = random_bytes::<KEY_LEN>();
+            let tmp = path.with_extension(format!("new-{}", random_nonzero_u64()));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
             #[cfg(unix)]
@@ -153,11 +165,20 @@ fn load_key(path: &Path) -> io::Result<[u8; KEY_LEN]> {
                 use std::os::unix::fs::OpenOptionsExt;
                 options.mode(0o600);
             }
-            let mut file = options.open(path)?;
-            file.write_all(&key)?;
-            file.sync_all()?;
-            log::info!("made a new key in {}", path.display());
-            Ok(key)
+            let written = options.open(&tmp).and_then(|mut file| {
+                file.write_all(&key)?;
+                file.sync_all()
+            });
+            let linked = written.and_then(|()| fs::hard_link(&tmp, path));
+            let _ = fs::remove_file(&tmp);
+            match linked {
+                Ok(()) => {
+                    log::info!("made a new key in {}", path.display());
+                    Ok(key)
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => load_key(path),
+                Err(e) => Err(e),
+            }
         }
         Err(e) => Err(e),
     }

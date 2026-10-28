@@ -116,6 +116,24 @@ fn owned(msg: Message<'_>) -> Message<'static> {
     }
 }
 
+/// Binds `role`'s end of the relay session `grant` belongs to, from `from`.
+fn bind(svc: &mut Svc, from: SocketAddr, grant: &RelayGrant, role: Role) -> Message<'static> {
+    let cookie = svc.cookie(from);
+    let mut replies = svc.ask(
+        from,
+        &Message::RelayBind {
+            cookie,
+            nonce: 77,
+            session: grant.session,
+            role,
+            grant_expires: grant.expires,
+            host_id: grant.host_id,
+            cred: grant.cred,
+        },
+    );
+    replies.remove(0)
+}
+
 fn info() -> HostInfo {
     HostInfo {
         name: "HOST".into(),
@@ -344,6 +362,12 @@ fn relays_carry_only_their_two_ends() {
     else {
         panic!("{reply:?}");
     };
+    // The session opens when the joiner binds it; the host's end is its listing's address.
+    assert_eq!(svc.service.stats().relays, 0);
+    assert!(matches!(
+        bind(&mut svc, joiner, &grant, Role::Joiner),
+        Message::RelayBound { .. }
+    ));
     // The two ends reach each other.
     let out = svc.send(joiner, &encode_relay(grant.session, b"hello"));
     assert_eq!(out, vec![(host, encode_relay(grant.session, b"hello"))]);
@@ -426,6 +450,7 @@ fn relay_traffic_has_budgets() {
     else {
         panic!()
     };
+    bind(&mut svc, joiner, &grant, Role::Joiner);
     let packet = encode_relay(grant.session, &[0; 1000]);
     let forwarded = (0..100)
         .filter(|_| !svc.send(joiner, &packet).is_empty())
@@ -457,18 +482,20 @@ fn resources_are_bounded_per_address() {
     ));
     // Relays per joiner IP.
     let (_, code, _) = registered(&svc.register(addr("198.51.100.9:4000"), info()));
-    let mut granted = 0;
+    let mut opened = 0;
     for p in 0..20u16 {
         svc.now += Duration::from_secs(3); // past the join rate limit
-        if let (Message::JoinOk { relay: Some(_), .. }, _) = svc.join(
-            SocketAddr::from(([198, 51, 100, 50], 6000 + p)),
-            code,
-            false,
-        ) {
-            granted += 1;
+        let joiner = SocketAddr::from(([198, 51, 100, 50], 6000 + p));
+        if let (Message::JoinOk { relay: Some(g), .. }, _) = svc.join(joiner, code, false)
+            && matches!(
+                bind(&mut svc, joiner, &g, Role::Joiner),
+                Message::RelayBound { .. }
+            )
+        {
+            opened += 1;
         }
     }
-    assert_eq!(granted, ServiceConfig::default().max_relays_per_ip);
+    assert_eq!(opened, ServiceConfig::default().max_relays_per_ip);
 }
 
 #[test]
@@ -501,6 +528,7 @@ fn retried_requests_get_the_same_answer() {
         lan: None,
         relay_only: false,
     });
+    let mut first = None;
     for _ in 0..20 {
         let replies: Vec<_> = svc
             .send(joiner, &join)
@@ -511,8 +539,96 @@ fn retried_requests_get_the_same_answer() {
             proto::decode(&replies[0].1),
             Ok(Message::JoinOk { .. })
         ));
+        let first = first.get_or_insert_with(|| replies[0].1.clone());
+        assert_eq!(*first, replies[0].1, "one join, one answer");
     }
-    assert_eq!(svc.service.stats().relays, 1);
+    assert_eq!(svc.service.stats().joins, 1);
+}
+
+#[test]
+fn direct_joins_dont_use_up_the_relay() {
+    // Relay slots are taken only by sessions an end binds: joins that connect directly can't
+    // fill the table and starve the players who need it.
+    let mut svc = Svc::new(ServiceConfig {
+        max_relays: 4,
+        max_relays_per_host: 2,
+        ..Default::default()
+    });
+    let (_, mine, _) = registered(&svc.register(addr("203.0.113.1:4000"), info()));
+    let (_, mine2, _) = registered(&svc.register(addr("203.0.113.2:4000"), info()));
+    for (i, code) in [mine, mine, mine2, mine2, mine, mine2]
+        .into_iter()
+        .enumerate()
+    {
+        svc.now += Duration::from_secs(3);
+        let joiner = SocketAddr::from(([203, 0, 113, 50 + i as u8], 5000));
+        assert!(matches!(
+            svc.join(joiner, code, false).0,
+            Message::JoinOk { .. }
+        ));
+    }
+    assert_eq!(svc.service.stats().relays, 0);
+    let (_, code, _) = registered(&svc.register(addr("198.51.100.1:4000"), info()));
+    let joiner = addr("198.51.100.2:5000");
+    let Message::JoinOk {
+        relay: Some(grant), ..
+    } = svc.join(joiner, code, true).0
+    else {
+        panic!("a relay-only join still gets in");
+    };
+    assert!(matches!(
+        bind(&mut svc, joiner, &grant, Role::Joiner),
+        Message::RelayBound { .. }
+    ));
+}
+
+#[test]
+fn one_network_cant_use_up_everyones_cookies() {
+    let mut svc = Svc::new(ServiceConfig::default());
+    let hello = encode(&Message::Hello { nonce: 1 });
+    // A flood from one /24 ...
+    let mut answered = 0;
+    for i in 0..5000u32 {
+        let from = SocketAddr::from(([10, 0, 0, (i % 250) as u8], 1000 + (i % 7) as u16));
+        answered += svc.send(from, &hello).len();
+    }
+    assert!(
+        answered <= 100,
+        "{answered}: one network's budget is a burst of 100"
+    );
+    // ... doesn't stop anyone else from getting a cookie.
+    assert_eq!(svc.send(addr("10.0.1.5:9"), &hello).len(), 1);
+    assert_eq!(svc.send(addr("198.51.100.4:9"), &hello).len(), 1);
+}
+
+#[test]
+fn the_browser_sees_new_games_within_a_second() {
+    let mut svc = Svc::new(ServiceConfig::default());
+    let me = addr("198.51.100.50:6000");
+    let count = |svc: &mut Svc| {
+        let cookie = svc.cookie(me);
+        match svc
+            .ask(
+                me,
+                &Message::List {
+                    cookie,
+                    nonce: 2,
+                    protocol: 11,
+                    page: 0,
+                },
+            )
+            .remove(0)
+        {
+            Message::ListPage { total, .. } => total,
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(count(&mut svc), 0);
+    registered(&svc.register(addr("198.51.100.1:4000"), info()));
+    // Cached for up to a second.
+    assert!(count(&mut svc) <= 1);
+    svc.now += Duration::from_millis(1001);
+    assert_eq!(count(&mut svc), 1);
 }
 
 #[test]
@@ -544,11 +660,15 @@ fn version_mismatch_and_unknown_codes() {
 }
 
 fn agent() -> HostAgent {
+    agent_with(true)
+}
+
+fn agent_with(gate: bool) -> HostAgent {
     HostAgent::new(HostConfig {
         service: "203.0.113.1:47400".into(),
         info: info(),
         lan: None,
-        gate: true,
+        gate,
         trust_loopback: true,
         trust_lan: false,
     })
@@ -557,10 +677,14 @@ fn agent() -> HostAgent {
 /// Brings an agent online against a real service; returns the agent, the service and the
 /// agent's (host_id, secret).
 fn online_agent() -> (HostAgent, Svc, [u8; 16], [u8; 32]) {
+    online_agent_with(true)
+}
+
+fn online_agent_with(gate: bool) -> (HostAgent, Svc, [u8; 16], [u8; 32]) {
     let service_addr = addr("203.0.113.1:47400");
     let me = addr("198.51.100.1:4000");
     let mut svc = Svc::new(ServiceConfig::default());
-    let mut agent = agent();
+    let mut agent = agent_with(gate);
     let mut ids = None;
     for i in 0..100 {
         let now = Duration::from_millis(10 * i);
@@ -605,6 +729,7 @@ fn forged_introductions_admit_nobody() {
             cred: [0; 16],
         }),
         ban_tag: [0; 16],
+        same_network: false,
     };
     let now = Duration::from_secs(2);
     // Signed with the wrong secret, or the right one but from somewhere else than the
@@ -637,6 +762,129 @@ fn forged_introductions_admit_nobody() {
     assert!(!agent.admit(12, addr("198.51.100.67:5000")), "another IP");
     assert!(agent.admit(12, joiner));
     assert!(!agent.admit(13, joiner), "the introduction is used up");
+}
+
+/// An introduction with relay session `session`, MACed for the agent.
+fn intro_for(
+    host_id: [u8; 16],
+    join_id: u64,
+    ids: [u64; 3],
+    joiner: SocketAddr,
+    session: u64,
+) -> Introduction {
+    Introduction {
+        host_id,
+        join_id,
+        client_ids: ids,
+        joiner: Some(joiner),
+        joiner_lan: None,
+        relay: Some(RelayGrant {
+            session,
+            expires: UNIX + 100,
+            host_id,
+            cred: [0; 16],
+        }),
+        ban_tag: [9; 16],
+        same_network: false,
+    }
+}
+
+#[test]
+fn an_introduction_opens_one_address() {
+    // Netcode keeps state per address that asks to connect: an introduced joiner must not get
+    // every port of its IP (thousands of pending connections).
+    let (mut agent, _svc, host_id, secret) = online_agent();
+    let service_addr = addr("203.0.113.1:47400");
+    let joiner = addr("198.51.100.66:5000");
+    let now = Duration::from_secs(2);
+    agent.on_receive(
+        now,
+        service_addr,
+        &encode_introduce(&intro_for(host_id, 1, [1, 2, 3], joiner, 5), &secret),
+    );
+    // Its NAT may use another port toward us: the first one seen is let through ...
+    let first = addr("198.51.100.66:5001");
+    assert_eq!(
+        agent.on_receive(now, first, &[0x10]),
+        Inbound::Netcode(first)
+    );
+    assert_eq!(
+        agent.on_receive(now, first, &[0x10]),
+        Inbound::Netcode(first)
+    );
+    // ... and no other.
+    for port in [5000, 5002, 6000] {
+        let other = SocketAddr::new(joiner.ip(), port);
+        assert_eq!(
+            agent.on_receive(now, other, &[0x10]),
+            Inbound::Drop,
+            "{other}"
+        );
+    }
+    assert!(agent.admit(2, first));
+}
+
+#[test]
+fn a_kicked_joiner_cant_use_another_introduction() {
+    let (mut agent, _svc, host_id, secret) = online_agent();
+    let service_addr = addr("203.0.113.1:47400");
+    let joiner = addr("198.51.100.66:5000");
+    let now = Duration::from_secs(2);
+    // Two joins in flight from the same joiner (same ban tag).
+    for (join_id, ids, session) in [(1, [1, 2, 3], 5), (2, [4, 5, 6], 6)] {
+        agent.on_receive(
+            now,
+            service_addr,
+            &encode_introduce(&intro_for(host_id, join_id, ids, joiner, session), &secret),
+        );
+    }
+    agent.on_receive(now, joiner, &[0x10]);
+    assert!(agent.admit(2, joiner));
+    agent.ban(2);
+    // Neither directly nor through the spare introduction's relay session.
+    assert_eq!(agent.on_receive(now, joiner, &[0x10]), Inbound::Drop);
+    let relayed = rendezvous::relay_addr(6);
+    assert!(!agent.admit(6, relayed));
+    assert!(!agent.admit(5, joiner));
+}
+
+#[test]
+fn a_forged_version_error_doesnt_take_a_host_offline() {
+    let (mut agent, _svc, _, _) = online_agent();
+    let service_addr = addr("203.0.113.1:47400");
+    let forged = encode(&Message::Error {
+        nonce: 0,
+        code: ErrorCode::UnsupportedVersion,
+    });
+    agent.on_receive(Duration::from_secs(2), service_addr, &forged);
+    assert!(matches!(agent.status(), HostStatus::Online { .. }));
+    // It keeps sending heartbeats.
+    let mut out = Vec::new();
+    agent.poll(Duration::from_secs(5), &mut out);
+    assert!(!out.is_empty());
+}
+
+#[test]
+fn without_the_gate_a_ban_still_holds_at_the_host() {
+    let service_addr = addr("203.0.113.1:47400");
+    let (mut agent, _svc, host_id, secret) = online_agent_with(false);
+    let joiner = addr("198.51.100.66:5000");
+    let now = Duration::from_secs(2);
+    agent.on_receive(
+        now,
+        service_addr,
+        &encode_introduce(&intro_for(host_id, 1, [1, 2, 3], joiner, 5), &secret),
+    );
+    assert!(agent.admit(2, joiner));
+    agent.ban(2);
+    assert_eq!(agent.on_receive(now, joiner, &[0x10]), Inbound::Drop);
+    assert!(!agent.admit(7, addr("198.51.100.66:5009")));
+    // Others still get in by address (the gate is off).
+    let other = addr("198.51.100.77:5000");
+    assert_eq!(
+        agent.on_receive(now, other, &[0x10]),
+        Inbound::Netcode(other)
+    );
 }
 
 #[test]

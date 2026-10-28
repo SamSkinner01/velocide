@@ -190,6 +190,9 @@ pub struct Introduction {
     pub relay: Option<RelayGrant>,
     /// What to ban the joiner by.
     pub ban_tag: [u8; TAG_LEN],
+    /// The joiner shares the host's public IP (same household or carrier NAT): its ban tag
+    /// would ban the host's own network, so the host doesn't send it.
+    pub same_network: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -554,6 +557,7 @@ fn put_intro_body(w: &mut Writer, intro: &Introduction) {
     w.addr(intro.joiner_lan);
     put_grant(w, &intro.relay);
     w.bytes(&intro.ban_tag);
+    w.bool(intro.same_network);
 }
 
 /// An `Introduce`, MACed with the host's secret so nobody else can make a host admit or punch
@@ -969,6 +973,7 @@ pub fn decode(data: &[u8]) -> Result<Message<'_>, DecodeError> {
                 joiner_lan: r.addr()?,
                 relay: get_grant(&mut r)?,
                 ban_tag: r.array()?,
+                same_network: r.bool()?,
             };
             Message::Introduce {
                 intro,
@@ -1193,6 +1198,7 @@ mod tests {
                     joiner_lan: None,
                     relay: grant,
                     ban_tag: [7; 16],
+                    same_network: false,
                 },
                 mac: [8; 16],
             },
@@ -1387,6 +1393,7 @@ mod tests {
             joiner_lan: None,
             relay: None,
             ban_tag: [7; 16],
+            same_network: true,
         };
         let secret = [5; 32];
         let data = encode_introduce(&intro, &secret);

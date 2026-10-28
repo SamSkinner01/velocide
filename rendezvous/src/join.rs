@@ -98,6 +98,7 @@ pub struct JoinAgent {
     connected: bool,
     failed: Option<String>,
     rebind: Option<Pending>,
+    relay_busy: bool,
 }
 
 impl JoinAgent {
@@ -119,6 +120,7 @@ impl JoinAgent {
             connected: false,
             failed: None,
             rebind: None,
+            relay_busy: false,
         }
     }
 
@@ -158,6 +160,10 @@ impl JoinAgent {
     }
 
     fn fail(&mut self, reason: String) {
+        // Once connected, nothing the service (or someone forging it) says ends the game.
+        if self.connected {
+            return;
+        }
         if self.failed.is_none() {
             self.failed = Some(reason);
         }
@@ -284,7 +290,9 @@ impl JoinAgent {
                 let ours = is(&self.join) || is(&self.rebind) || nonce == 0;
                 match code {
                     ErrorCode::BadCookie if ours => self.cookie = None,
-                    ErrorCode::UnsupportedVersion => self.fail(
+                    // Sent with nonce 0, so forgeable: believed only before the service has
+                    // answered us properly (a cookie).
+                    ErrorCode::UnsupportedVersion if self.cookie.is_none() => self.fail(
                         "the online service needs a newer version of the game: update it".into(),
                     ),
                     ErrorCode::RateLimited if is(&self.join) => {
@@ -294,6 +302,16 @@ impl JoinAgent {
                         self.fail("the online service is busy; try again in a minute".into())
                     }
                     ErrorCode::Refused if is(&self.rebind) => self.rebind = None,
+                    ErrorCode::Busy if is(&self.rebind) => {
+                        // No room on the relay: this way is out.
+                        self.rebind = None;
+                        self.relay_busy = true;
+                        if self.current.is_some_and(|(a, _)| a.kind == PathKind::Relay)
+                            && !self.connected
+                        {
+                            self.next_attempt(now);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -310,6 +328,10 @@ impl JoinAgent {
             Some(a) => {
                 self.current = Some((a, now));
                 self.next_punch = now;
+                if a.kind == PathKind::Relay {
+                    // The relay session opens when we bind it.
+                    self.rebind.get_or_insert_with(Pending::new);
+                }
             }
             None => {
                 let tried = &self.tried;
@@ -322,7 +344,11 @@ impl JoinAgent {
                     (false, true) => "through the relay",
                     (false, false) => "",
                 };
-                self.fail(format!("couldn't reach the host {ways}"));
+                self.fail(if self.relay_busy {
+                    format!("couldn't reach the host {ways} (the relay is busy; try again soon)")
+                } else {
+                    format!("couldn't reach the host {ways}")
+                });
             }
         }
     }

@@ -13,7 +13,9 @@
 //! - Relayed traffic only flows between the two ends of a session, within per-session,
 //!   global and daily byte budgets.
 
+use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, VecDeque};
+use std::hash::BuildHasher;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -28,9 +30,15 @@ use crate::wire::canonical;
 
 /// A listing without a heartbeat for this long is dropped (hosts send one every 2 s).
 pub const LISTING_TIMEOUT: Duration = Duration::from_secs(10);
-/// How often an unacknowledged introduction is sent again, and how many times in all.
-pub const INTRO_RESEND: Duration = Duration::from_millis(250);
-pub const INTRO_SENDS: u8 = 12;
+/// When an unacknowledged introduction is sent again: after these delays (backing off), then
+/// never (6 sends in ~4 s).
+pub const INTRO_RESENDS: [Duration; 5] = [
+    Duration::from_millis(250),
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+    Duration::from_millis(2000),
+];
 /// A relay session without traffic for this long is closed.
 pub const RELAY_IDLE: Duration = Duration::from_secs(30);
 /// How long relay credentials are valid (a session can't outlive them).
@@ -43,6 +51,11 @@ pub const MAX_LISTING_BANS: usize = 64;
 /// was lost) gets the same answer instead of a second listing or join.
 pub const RECENT_TTL: Duration = Duration::from_secs(15);
 pub const MAX_RECENT: usize = 8192;
+/// The server browser's list is rebuilt (sorted) at most this often; requests in between read
+/// the last one.
+pub const LIST_CACHE_TTL: Duration = Duration::from_secs(1);
+/// Buckets the unverified-reply budget is split into, by source network (/24, /48).
+const UNVERIFIED_SLOTS: usize = 1024;
 
 /// Limits; the defaults suit a small VPS.
 #[derive(Clone, Debug)]
@@ -61,8 +74,13 @@ pub struct ServiceConfig {
     pub relay_total_rate: u64,
     /// Relayed bytes per UTC day over all sessions (caps the VPS's traffic bill).
     pub relay_daily_bytes: u64,
-    /// Replies per second to senders whose address isn't proven (`Hello`, `Probe`, errors).
+    /// Replies per second to senders whose address isn't proven (`Hello`, `Probe`, errors), in
+    /// all, and per source network (/24 for IPv4): one network can't use up everyone's.
     pub unverified_rate: u64,
+    pub unverified_rate_per_network: u64,
+    /// Requests per second from proven addresses, in all (each also has a per-IP limit): caps
+    /// the work many IPs together can ask of the service.
+    pub control_rate: u64,
     pub ip_rates: IpRates,
     pub max_tracked_ips: usize,
 }
@@ -71,7 +89,7 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             version: String::from("dev"),
-            max_listings: 1024,
+            max_listings: 4096,
             max_listings_per_ip: 4,
             max_relays: 512,
             max_relays_per_host: 16,
@@ -80,7 +98,9 @@ impl Default for ServiceConfig {
             relay_burst: 512 * 1024,
             relay_total_rate: 2 * 1024 * 1024,
             relay_daily_bytes: 20 * 1000 * 1000 * 1000,
-            unverified_rate: 2000,
+            unverified_rate: 20_000,
+            unverified_rate_per_network: 50,
+            control_rate: 20_000,
             ip_rates: IpRates::default(),
             max_tracked_ips: 65_536,
         }
@@ -124,7 +144,8 @@ struct PendingIntro {
     join_id: u64,
     datagram: Vec<u8>,
     next_send: Duration,
-    sends_left: u8,
+    /// Resends so far (index into [`INTRO_RESENDS`]).
+    resent: usize,
 }
 
 struct Relay {
@@ -179,7 +200,13 @@ pub struct Service {
     relays: HashMap<u64, Relay>,
     limiter: IpLimiter,
     unverified: TokenBucket,
+    /// Per source network, by a keyed hash (fixed size: spoofed sources can't grow it).
+    unverified_slots: Vec<TokenBucket>,
+    slot_hasher: RandomState,
+    control: TokenBucket,
     relay_total: TokenBucket,
+    /// The public listings, sorted for the browser, with their protocol, and when built.
+    list_cache: Option<(Duration, Vec<(u32, ListEntry)>)>,
     relay_day: u64,
     relay_day_bytes: u64,
     /// Replies to recent `Register`/`Join` requests by (sender, nonce).
@@ -191,12 +218,21 @@ pub struct Service {
 impl Service {
     pub fn new(master_key: &[u8; 32], config: ServiceConfig, now: Duration) -> Self {
         let unverified = config.unverified_rate as f64;
+        let per_network = config.unverified_rate_per_network as f64;
+        let control = config.control_rate as f64;
         let total = config.relay_total_rate as f64;
         Self {
             keys: Keys::derive(master_key),
             limiter: IpLimiter::new(config.ip_rates, config.max_tracked_ips),
             unverified: TokenBucket::new(unverified * 2.0, unverified, now),
+            unverified_slots: vec![
+                TokenBucket::new(per_network * 2.0, per_network, now);
+                UNVERIFIED_SLOTS
+            ],
+            slot_hasher: RandomState::new(),
+            control: TokenBucket::new(control * 2.0, control, now),
             relay_total: TokenBucket::new(total, total, now),
+            list_cache: None,
             relay_day: 0,
             relay_day_bytes: 0,
             config,
@@ -278,6 +314,11 @@ impl Service {
                     return;
                 }
                 // From here on the sender is known to receive at `from`.
+                if !self.control.take(now, 1.0) {
+                    // Everyone together asks too much: drop (clients retry).
+                    self.stats.rate_limited += 1;
+                    return;
+                }
                 if !self.limiter.allow_control(from.ip(), now) {
                     self.stats.rate_limited += 1;
                     if msg.nonce() != 0 {
@@ -294,13 +335,14 @@ impl Service {
     pub fn tick(&mut self, now: Duration, unix: u64, out: &mut Outbox) {
         for l in self.listings.values_mut() {
             for intro in l.intros.iter_mut() {
-                if now >= intro.next_send && intro.sends_left > 0 {
+                if now >= intro.next_send {
                     out.push((l.addr, intro.datagram.clone()));
-                    intro.sends_left -= 1;
-                    intro.next_send = now + INTRO_RESEND;
+                    intro.resent += 1;
+                    intro.next_send =
+                        now + INTRO_RESENDS.get(intro.resent).copied().unwrap_or_default();
                 }
             }
-            l.intros.retain(|i| i.sends_left > 0);
+            l.intros.retain(|i| i.resent < INTRO_RESENDS.len());
         }
         let codes = &mut self.codes;
         self.listings.retain(|_, l| {
@@ -335,11 +377,31 @@ impl Service {
         reply: Vec<u8>,
         out: &mut Outbox,
     ) {
-        if reply.len() <= request_len && self.unverified.take(now, 1.0) {
+        let slot = self.unverified_slot(to.ip());
+        let within = self
+            .unverified_slots
+            .get_mut(slot)
+            .is_some_and(|b| b.take(now, 1.0));
+        if reply.len() <= request_len && within && self.unverified.take(now, 1.0) {
             out.push((to, reply));
         } else {
             self.stats.unverified_dropped += 1;
         }
+    }
+
+    /// The unverified-reply bucket of `ip`'s network (/24 for IPv4, /48 for IPv6).
+    fn unverified_slot(&self, ip: IpAddr) -> usize {
+        let network: [u8; 6] = match ip {
+            IpAddr::V4(v4) => {
+                let [a, b, c, _] = v4.octets();
+                [4, a, b, c, 0, 0]
+            }
+            IpAddr::V6(v6) => {
+                let [a, b, c, d, e, f, ..] = v6.octets();
+                [a, b, c, d, e, f]
+            }
+        };
+        (self.slot_hasher.hash_one(network) % UNVERIFIED_SLOTS as u64) as usize
     }
 
     fn error(&mut self, to: SocketAddr, nonce: u64, code: ErrorCode, out: &mut Outbox) {
@@ -451,7 +513,7 @@ impl Service {
                 protocol,
                 page,
                 ..
-            } => self.list(from, nonce, protocol, page, out),
+            } => self.list(now, from, nonce, protocol, page, out),
             Message::Join {
                 nonce,
                 code,
@@ -613,37 +675,66 @@ impl Service {
         out.push((from, encode(&Message::Ok { nonce })));
     }
 
-    fn list(&mut self, from: SocketAddr, nonce: u64, protocol: u32, page: u16, out: &mut Outbox) {
-        let mut matching: Vec<&Listing> = self
-            .listings
-            .values()
-            .filter(|l| l.info.public && l.info.protocol == protocol)
-            .collect();
-        // Fullest games first, then by name; the code makes the order total, so pages don't
-        // overlap.
-        matching.sort_by(|a, b| {
-            b.info
-                .players
-                .cmp(&a.info.players)
-                .then_with(|| a.info.name.cmp(&b.info.name))
-                .then_with(|| a.code.cmp(&b.code))
-        });
-        let total = matching.len();
+    /// The public listings in browser order, rebuilt at most every [`LIST_CACHE_TTL`].
+    fn public_listings(&mut self, now: Duration) -> &[(u32, ListEntry)] {
+        let stale = self
+            .list_cache
+            .as_ref()
+            .is_none_or(|(built, _)| now.saturating_sub(*built) >= LIST_CACHE_TTL);
+        if stale {
+            let mut entries: Vec<(u32, ListEntry)> = self
+                .listings
+                .values()
+                .filter(|l| l.info.public)
+                .map(|l| {
+                    (
+                        l.info.protocol,
+                        ListEntry {
+                            code: l.code,
+                            name: l.info.name.clone(),
+                            mode: l.info.mode,
+                            level: l.info.level.clone(),
+                            players: l.info.players,
+                            max_players: l.info.max_players,
+                            in_match: l.info.in_match,
+                            relay_only: l.info.relay_only,
+                        },
+                    )
+                })
+                .collect();
+            // Fullest games first, then by name; the code makes the order total, so pages
+            // don't overlap.
+            entries.sort_by(|(_, a), (_, b)| {
+                b.players
+                    .cmp(&a.players)
+                    .then_with(|| a.name.cmp(&b.name))
+                    .then_with(|| a.code.cmp(&b.code))
+            });
+            self.list_cache = Some((now, entries));
+        }
+        self.list_cache
+            .as_ref()
+            .map_or(&[], |(_, entries)| entries.as_slice())
+    }
+
+    fn list(
+        &mut self,
+        now: Duration,
+        from: SocketAddr,
+        nonce: u64,
+        protocol: u32,
+        page: u16,
+        out: &mut Outbox,
+    ) {
+        let all = self.public_listings(now);
+        let total = all.iter().filter(|(p, _)| *p == protocol).count();
         let pages = total.div_ceil(LIST_PAGE_LEN).clamp(1, u16::MAX as usize);
-        let entries: Vec<ListEntry> = matching
+        let entries: Vec<ListEntry> = all
             .iter()
+            .filter(|(p, _)| *p == protocol)
             .skip((page as usize).saturating_mul(LIST_PAGE_LEN))
             .take(LIST_PAGE_LEN)
-            .map(|l| ListEntry {
-                code: l.code,
-                name: l.info.name.clone(),
-                mode: l.info.mode,
-                level: l.info.level.clone(),
-                players: l.info.players,
-                max_players: l.info.max_players,
-                in_match: l.info.in_match,
-                relay_only: l.info.relay_only,
-            })
+            .map(|(_, e)| e.clone())
             .collect();
         out.push((
             from,
@@ -725,11 +816,20 @@ impl Service {
         let host_addr = listing.addr;
         let same_nat = host_addr.ip() == from.ip();
         let host_lan = listing.lan.filter(|_| same_nat);
-        let relay = self.open_relay(now, unix, host_id, host_addr, from);
-        if relay.is_none() && relay_only {
+        // Most joins connect directly: the relay session only takes a slot once an end binds
+        // it (`relay_bind`). Credentials are handed out now; if the relay is the only way,
+        // there must be room for it.
+        if relay_only && self.relay_count(&host_id, Some(from.ip())).is_none() {
             fail(self, JoinFailure::Busy, String::new(), out);
             return;
         }
+        let session = loop {
+            let s = random_nonzero_u64();
+            if !self.relays.contains_key(&s) {
+                break s;
+            }
+        };
+        let relay = Some((session, unix.saturating_add(RELAY_GRANT_SECS)));
         let grant = |keys: &Keys, role: Role| {
             relay.map(|(session, expires)| RelayGrant {
                 session,
@@ -747,6 +847,7 @@ impl Service {
             joiner_lan: lan.filter(|a| same_nat && is_lan_candidate(a)),
             relay: grant(&self.keys, Role::Host),
             ban_tag: tag,
+            same_network: same_nat,
         };
         let joiner_grant = grant(&self.keys, Role::Joiner);
         let Some(listing) = self.listings.get_mut(&host_id) else {
@@ -757,8 +858,8 @@ impl Service {
         listing.intros.push(PendingIntro {
             join_id,
             datagram,
-            next_send: now + INTRO_RESEND,
-            sends_left: INTRO_SENDS - 1,
+            next_send: now + INTRO_RESENDS[0],
+            resent: 0,
         });
         let reply = encode(&Message::JoinOk {
             nonce,
@@ -805,31 +906,6 @@ impl Service {
         }
     }
 
-    /// A relay session between a host and a joiner, if the limits allow one.
-    fn open_relay(
-        &mut self,
-        now: Duration,
-        unix: u64,
-        host_id: HostId,
-        host: SocketAddr,
-        joiner: SocketAddr,
-    ) -> Option<(u64, u64)> {
-        self.relay_count(&host_id, Some(joiner.ip()))?;
-        let session = loop {
-            let s = random_nonzero_u64();
-            if !self.relays.contains_key(&s) {
-                break s;
-            }
-        };
-        let expires = unix.saturating_add(RELAY_GRANT_SECS);
-        let mut relay = self.new_relay(now, host_id, expires);
-        relay.host = Some(host);
-        relay.joiner = Some(joiner);
-        relay.joiner_ip = Some(joiner.ip());
-        self.relays.insert(session, relay);
-        Some((session, expires))
-    }
-
     /// (Re)binds one end of a relay session to the sender: after the service restarted, or
     /// when the end's NAT gave it a new address.
     #[allow(clippy::too_many_arguments)]
@@ -864,7 +940,12 @@ impl Service {
                 self.error(from, nonce, ErrorCode::Busy, out);
                 return;
             }
-            let relay = self.new_relay(now, *host_id, grant_expires);
+            let mut relay = self.new_relay(now, *host_id, grant_expires);
+            if role == Role::Joiner {
+                // The host's end is where its listing is: it only binds once it hears from
+                // the relay (or after a restart).
+                relay.host = self.listings.get(host_id).map(|l| l.addr);
+            }
             self.relays.insert(session, relay);
         }
         let Some(relay) = self.relays.get_mut(&session) else {
@@ -919,13 +1000,16 @@ impl Service {
         let bytes = len as u64;
         let within_day =
             self.relay_day_bytes.saturating_add(bytes) <= self.config.relay_daily_bytes;
+        // Every budget must allow it before any is charged.
         if !within_day
-            || !bucket.take(now, bytes as f64)
-            || !self.relay_total.take(now, bytes as f64)
+            || !bucket.can_take(now, bytes as f64)
+            || !self.relay_total.can_take(now, bytes as f64)
         {
             self.stats.relay_dropped += 1;
             return;
         }
+        bucket.take(now, bytes as f64);
+        self.relay_total.take(now, bytes as f64);
         relay.last_active = now;
         self.relay_day_bytes += bytes;
         self.stats.relayed_packets += 1;

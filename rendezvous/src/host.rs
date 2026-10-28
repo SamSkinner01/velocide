@@ -23,7 +23,6 @@ use crate::proto::{
     self, ErrorCode, HostInfo, Introduction, Message, RelayGrant, Resume, Role, encode,
     encode_relay, introduce_signed_part,
 };
-use crate::service::is_lan_candidate;
 use crate::wire::canonical;
 use crate::{Inbound, Outbound, Pending, Resolver, relay_addr, relay_session};
 
@@ -48,7 +47,10 @@ const BAN_RETRY: Duration = Duration::from_secs(1);
 /// Join ids remembered to ignore resent introductions.
 const SEEN_JOINS: usize = 64;
 const MAX_INTROS: usize = 32;
+/// Joins in flight from one joiner (by ban tag, i.e. public IP) kept at once.
+const MAX_INTROS_PER_JOINER: usize = 3;
 const MAX_BANS: usize = proto::MAX_BANS;
+const MAX_BANNED_IPS: usize = 1024;
 
 #[derive(Clone, Debug)]
 pub struct HostConfig {
@@ -89,21 +91,30 @@ struct Intro {
     joiner_lan: Option<SocketAddr>,
     relay: Option<u64>,
     ban_tag: [u8; TAG_LEN],
+    same_network: bool,
     received: Duration,
+    /// The one address of the joiner's IP this introduction lets through, once seen (its NAT
+    /// may use another port toward us than toward the service).
+    bound: Option<SocketAddr>,
 }
 
 impl Intro {
-    /// Whether `addr` is a way this joiner may reach us.
+    /// Whether `addr` is a way this joiner may reach us: its relay session, its LAN address,
+    /// or one address of its public IP (the first seen; not every port of it: netcode keeps
+    /// state for each address that asks to connect, so one introduction opens one address).
     fn matches(&self, addr: SocketAddr) -> bool {
-        let ip = addr.ip();
         relay_session(addr).is_some_and(|s| Some(s) == self.relay)
-            || self.joiner.is_some_and(|a| a.ip() == ip)
-            || self.joiner_lan.is_some_and(|a| a.ip() == ip)
+            || self.joiner_lan == Some(addr)
+            || match self.bound {
+                Some(bound) => bound == addr,
+                None => self.joiner.is_some_and(|j| j.ip() == addr.ip()),
+            }
     }
 }
 
 struct Admitted {
     ban_tag: [u8; TAG_LEN],
+    same_network: bool,
     addr: SocketAddr,
 }
 
@@ -125,6 +136,8 @@ pub struct HostAgent {
     registration: Option<Registration>,
     /// The service has our listing (else: register, resuming `registration` if we have one).
     registered: bool,
+    /// The service has answered one of our requests (nonce-checked) at least once.
+    verified: bool,
     register: Option<Pending>,
     heartbeat: Option<Pending>,
     last_heartbeat: Option<Duration>,
@@ -139,6 +152,9 @@ pub struct HostAgent {
     rebinds: HashMap<u64, Pending>,
     punches: Vec<Punch>,
     bans: Vec<[u8; TAG_LEN]>,
+    /// Bans of joiners behind our own public IP: kept here only (at the service they would
+    /// ban our own network) and not applied to the LAN way in.
+    local_bans: Vec<[u8; TAG_LEN]>,
     ban_requests: Vec<([u8; TAG_LEN], Pending)>,
     banned_ips: HashSet<IpAddr>,
     started: Option<Duration>,
@@ -156,6 +172,7 @@ impl HostAgent {
             hello: None,
             registration: None,
             registered: false,
+            verified: false,
             register: None,
             heartbeat: None,
             last_heartbeat: None,
@@ -170,6 +187,7 @@ impl HostAgent {
             rebinds: HashMap::new(),
             punches: Vec::new(),
             bans: Vec::new(),
+            local_bans: Vec::new(),
             ban_requests: Vec::new(),
             banned_ips: HashSet::new(),
             started: None,
@@ -192,10 +210,18 @@ impl HostAgent {
         }
     }
 
+    /// Loopback, and with `trust_lan` our own LAN: the /24 of our LAN address (not every
+    /// private address: carrier NATs and VPNs use them too).
     fn trusted(&self, addr: SocketAddr) -> bool {
         let ip = canonical(addr).ip();
-        (self.config.trust_loopback && ip.is_loopback())
-            || (self.config.trust_lan && is_lan_candidate(&SocketAddr::new(ip, 1024)))
+        let same_lan = match (ip, self.config.lan.map(|l| l.ip())) {
+            (IpAddr::V4(ip), Some(IpAddr::V4(ours))) => {
+                let ([a, b, c, _], [x, y, z, _]) = (ip.octets(), ours.octets());
+                ip.is_private() && (a, b, c) == (x, y, z)
+            }
+            _ => false,
+        };
+        (self.config.trust_loopback && ip.is_loopback()) || (self.config.trust_lan && same_lan)
     }
 
     /// Sorts a received datagram: ours (handled here), relayed netcode, or netcode, which the
@@ -214,15 +240,21 @@ impl HostAgent {
             // A joiner's punch (it only had to get through the NATs) or junk.
             return Inbound::Drop;
         }
-        if !self.config.gate {
-            return Inbound::Netcode(from);
-        }
         if self.banned_ips.contains(&from.ip()) && !self.trusted(from) {
             return Inbound::Drop;
         }
+        if !self.config.gate {
+            return Inbound::Netcode(from);
+        }
         let known = self.trusted(from)
             || self.admitted.values().any(|a| a.addr == from)
-            || self.intros.iter().any(|i| i.matches(from));
+            || self.intros.iter_mut().any(|i| {
+                let ok = i.matches(from);
+                if ok && relay_session(from).is_none() && i.joiner_lan != Some(from) {
+                    i.bound = Some(from);
+                }
+                ok
+            });
         if known {
             Inbound::Netcode(from)
         } else {
@@ -257,6 +289,7 @@ impl HostAgent {
                 self.hello = None;
                 self.cookie = Some((cookie, now));
                 self.last_reply = Some(now);
+                self.verified = true;
             }
             Message::Registered {
                 host_id,
@@ -306,8 +339,14 @@ impl HostAgent {
             || ours(&self.heartbeat)
             || self.ban_requests.iter().any(|(_, p)| p.nonce == nonce)
             || self.rebinds.values().any(|p| p.nonce == nonce);
-        // UnsupportedVersion answers whatever we sent, with nonce 0.
-        if !any_request && code != ErrorCode::UnsupportedVersion {
+        // UnsupportedVersion answers whatever we sent, with nonce 0 (the service can't read
+        // another version's nonce), so anyone could forge it: only believed before the service
+        // has ever answered us properly.
+        let unsupported = code == ErrorCode::UnsupportedVersion && nonce == 0 && !self.verified;
+        if !any_request && !unsupported {
+            return;
+        }
+        if code == ErrorCode::UnsupportedVersion && !unsupported {
             return;
         }
         self.last_reply = Some(now);
@@ -378,7 +417,29 @@ impl HostAgent {
         }
         self.seen_joins.push_back(intro.join_id);
         if self.intros.len() >= MAX_INTROS {
-            self.intros.remove(0);
+            // Make room at the expense of whoever has the most joins in flight (a flood from
+            // one address can't push out everyone else's).
+            let mut counts: HashMap<[u8; TAG_LEN], usize> = HashMap::new();
+            for i in &self.intros {
+                *counts.entry(i.ban_tag).or_default() += 1;
+            }
+            let busiest = counts
+                .into_iter()
+                .max_by_key(|(_, n)| *n)
+                .map(|(tag, _)| tag);
+            if let Some(at) = self.intros.iter().position(|i| Some(i.ban_tag) == busiest) {
+                self.intros.remove(at);
+            }
+        }
+        let same_joiner = self
+            .intros
+            .iter()
+            .filter(|i| i.ban_tag == intro.ban_tag)
+            .count();
+        if same_joiner >= MAX_INTROS_PER_JOINER
+            && let Some(at) = self.intros.iter().position(|i| i.ban_tag == intro.ban_tag)
+        {
+            self.intros.remove(at);
         }
         for to in [intro.joiner, intro.joiner_lan].into_iter().flatten() {
             self.punches.push(Punch {
@@ -397,7 +458,9 @@ impl HostAgent {
             joiner_lan: intro.joiner_lan,
             relay: intro.relay.map(|g| g.session),
             ban_tag: intro.ban_tag,
+            same_network: intro.same_network,
             received: now,
+            bound: None,
         });
     }
 
@@ -411,14 +474,24 @@ impl HostAgent {
             .position(|i| i.client_ids.contains(&client_id) && i.matches(addr));
         if let Some(i) = found {
             let intro = self.intros.remove(i);
+            let via_lan = intro.joiner_lan == Some(addr);
+            if self.bans.contains(&intro.ban_tag)
+                || (!via_lan && self.local_bans.contains(&intro.ban_tag))
+            {
+                return false;
+            }
             self.admitted.insert(
                 client_id,
                 Admitted {
                     ban_tag: intro.ban_tag,
+                    same_network: intro.same_network,
                     addr,
                 },
             );
             return true;
+        }
+        if self.banned_ips.contains(&addr.ip()) && !self.trusted(addr) {
+            return false;
         }
         !self.config.gate || self.trusted(addr)
     }
@@ -434,10 +507,30 @@ impl HostAgent {
         let Some(a) = self.admitted.get(&client_id) else {
             return;
         };
-        if relay_session(a.addr).is_none() && !self.trusted(a.addr) {
+        if relay_session(a.addr).is_none()
+            && !self.trusted(a.addr)
+            && self.banned_ips.len() < MAX_BANNED_IPS
+        {
             self.banned_ips.insert(a.addr.ip());
         }
         let tag = a.ban_tag;
+        // Its other joins in flight (another attempt, the relay) are void too.
+        self.intros.retain(|i| i.ban_tag != tag);
+        // Behind our own public IP the tag would ban our own network at the service: it is
+        // kept here, for the ways in other than the LAN (a player on our own LAN can always
+        // come back over it: the LAN skips the gate).
+        if a.same_network {
+            if relay_session(a.addr).is_none() && !self.trusted(a.addr) {
+                self.banned_ips.insert(a.addr.ip());
+            }
+            if !self.local_bans.contains(&tag) {
+                if self.local_bans.len() >= MAX_BANNED_IPS {
+                    self.local_bans.remove(0);
+                }
+                self.local_bans.push(tag);
+            }
+            return;
+        }
         if !self.bans.contains(&tag) {
             if self.bans.len() >= MAX_BANS {
                 self.bans.remove(0);

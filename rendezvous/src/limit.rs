@@ -41,6 +41,12 @@ impl TokenBucket {
         }
     }
 
+    /// Whether `amount` tokens could be taken now (takes none).
+    pub fn can_take(&mut self, now: Duration, amount: f64) -> bool {
+        self.refill(now);
+        self.tokens >= amount
+    }
+
     /// Whether the bucket is full again (so its entry carries no state worth keeping).
     pub fn is_full(&mut self, now: Duration) -> bool {
         self.refill(now);

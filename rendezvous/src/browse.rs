@@ -196,7 +196,8 @@ impl Browser {
                 }
             }
             Message::Error { code, .. } => {
-                let ours = nonce == 0
+                // Nonce 0 (UnsupportedVersion) is forgeable: only before we have a cookie.
+                let ours = (nonce == 0 && self.cookie.is_none())
                     || self.hello.is_some_and(|h| h.nonce == nonce)
                     || self.requests.values().any(|p| p.nonce == nonce);
                 if !ours {
