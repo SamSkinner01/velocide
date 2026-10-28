@@ -73,8 +73,8 @@ pub fn weapon_role(w: WeaponKind) -> &'static str {
              back. Melee has no weak points."
         }
         WeaponKind::Lamplighter => {
-            "Hold to focus, release one exact hitscan beam: a full focus hits hardest and \
-             pierces a second target."
+            "Hold to focus, release one exact beam: a full focus hits hardest and pierces a \
+             second target. Your lens glints."
         }
     }
 }
@@ -101,8 +101,8 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              target still in sight takes a shot."
         }
         Ability::Waxwork => {
-            "Leaves a wax double of you where you stand: Moulds go for it instead of you. It \
-             bursts in hot wax when destroyed or spent."
+            "Leaves a wax double of you where you stand: Moulds go for it instead of you, \
+             players see you. It bursts in hot wax when destroyed or spent."
         }
         Ability::Gust => {
             "A blast of air in front of you: shoves what it hits and turns hostile projectiles \
@@ -154,7 +154,7 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
         }
         Ability::BlinkArrow => {
             "Your next arrow can be stepped to: press again while it flies, or just after it \
-             sticks, and you are there."
+             sticks, and you are there, still moving its way."
         }
         Ability::PinningArrow => {
             "Your next arrow pins what it hits: a Mould is rooted to the spot (it still \
@@ -291,6 +291,11 @@ pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
 pub fn ability_input(a: Ability, weapon: WeaponKind) -> &'static str {
     if weapon.class() == WeaponClass::Draw {
         return "ALT FIRE ARMS THE NEXT ARROW";
+    }
+    match a {
+        Ability::Waxwork => return "ALT FIRE: AT YOUR FEET",
+        Ability::Wickline => return "ALT FIRE ALONG YOUR AIM",
+        _ => {}
     }
     match a.style() {
         AbilityStyle::Charge => "HOLD ALT FIRE; RELEASE FIRES",
@@ -594,9 +599,10 @@ pub fn ability_stats(a: Ability, weapon: WeaponKind, tuning: &Tuning, pvp: bool)
             ("DAMAGE", num(primary * c.whirl.damage_scale, 1)),
             ("RADIUS", radius(c.whirl.radius)),
         ],
+        // Out and back: out hits harder; it flies out this far.
         Ability::Hurl => [
             ("DAMAGE", num(primary * c.hurl.damage_scale, 1)),
-            ("SPEED", format!("{} M/S", num(c.hurl.speed, 1))),
+            ("REACH", radius(c.hurl.max_distance)),
         ],
         Ability::Riposte => {
             let r = &c.riposte;

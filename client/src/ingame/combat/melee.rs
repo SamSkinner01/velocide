@@ -72,7 +72,7 @@ pub fn swing_kind(attack: Attack) -> Option<SwingKind> {
         Attack::Lunge => SwingKind::Lunge,
         Attack::Whirl => SwingKind::Whirl,
         Attack::Hurl => SwingKind::Hurl,
-        Attack::Riposte => SwingKind::Upswing,
+        Attack::Riposte => SwingKind::Riposte,
         _ => return None,
     })
 }

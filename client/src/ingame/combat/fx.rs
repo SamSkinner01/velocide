@@ -869,6 +869,10 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 q(*origin)
             };
             let dir = vis.muzzle_dir;
+            // The Lamplighter's beam is drawn by `tricks` (it knows how far they focused).
+            if *attack == Attack::Lamplighter {
+                return;
+            }
             // A Hurl: the throw (its piece is an entity; melee.rs).
             if *attack == Attack::Hurl {
                 super::melee::remote_hurl(ctx, *shooter, muzzle);
@@ -1079,26 +1083,15 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                     .play(Sfx::ThornShatter, PlayParams::at(p).with_volume(0.6));
             }
         }
-        // ---- the rework's effects: placeholders until client-a / client-b draw them ----
-        Fx::Wickline { from, to, .. } => {
-            let wick = hot(ability_color(Ability::Wickline), 1.8);
-            ctx.beams.beam(q(*from), q(*to), 0.03, wick, 0.35);
-            ctx.effects.glow(q(*to), wick, 0.6, 0.15);
-        }
-        Fx::TallyFired { origin, ends, .. } => {
-            let o = q(*origin);
-            let gold = hot(ability_color(Ability::Tally), 1.8);
-            for end in ends {
-                let end = q(*end);
-                ctx.beams.beam(o, end, 0.03, gold, 0.2);
-                world_impact(ctx.effects, ctx.world, o, end, 3);
-            }
-        }
-        Fx::Blink { from, to, .. } => {
-            let lime = hot(ability_color(Ability::BlinkArrow), 1.6);
-            ctx.effects.glow(q(*from), lime, 1.0, 0.2);
-            ctx.effects.glow(q(*to), lime, 1.2, 0.25);
-        }
+        // ---- the rework's effects ----
+        // client-a's (the line, the tally's shots, the step, a Riposte's block): `tricks`.
+        Fx::Wickline { .. }
+        | Fx::TallyFired { .. }
+        | Fx::Blink { .. }
+        | Fx::GuardBlock {
+            ability: Ability::Riposte,
+            ..
+        } => {}
         Fx::GuardBlock {
             position, broke, ..
         } => {

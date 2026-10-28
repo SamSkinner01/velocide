@@ -551,7 +551,7 @@ pub fn sleeve_offset(focus: f32, kick: f32) -> f32 {
 
 /// Focus: the ring turns, the sleeve runs out, the wick's flame grows and brightens with the
 /// lens and strobes white at full focus; the shot snaps the sleeve back and flares the lens.
-pub fn pose(h: &HeldWeapon, glow: &mut f32, color: &mut Vec3) -> Pose {
+pub(super) fn pose(h: &HeldWeapon, glow: &mut f32, color: &mut Vec3) -> Pose {
     let mut pose = Pose::rest(JOINTS.len());
     let focus = unit(h.draw);
     let kick = unit(h.kick);

@@ -61,8 +61,9 @@ pub trait WeaponLook: Copy {
     fn glow_color(self, alt_mode: u8) -> Vec4;
     /// Colour of the primary fire (tracers, beams, muzzle flashes): Quill pale gold, Bellows
     /// amber, Arclash blue-white, Tumbler fuse orange, Lancet steel-cyan, Thresher hot amber,
-    /// Riveter red-hot, Cinderbox cinder orange, Longwick wick gold, Kiln ember; the Trimmer's
-    /// honed steel (warm white) and the Tamper's hot iron (slash trails, hit sparks).
+    /// Riveter red-hot, Cinderbox cinder orange, Longwick wick gold, Kiln ember, the
+    /// Lamplighter's focused wick light; the Trimmer's honed steel (warm white) and the
+    /// Tamper's hot iron (slash trails, hit sparks).
     fn primary_color(self) -> Vec4;
 }
 
@@ -81,8 +82,7 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Kiln => ModelId::Kiln,
             WeaponKind::Trimmer => ModelId::Trimmer,
             WeaponKind::Tamper => ModelId::Tamper,
-            // Placeholder until it has its own model (client-a): the Quill's.
-            WeaponKind::Lamplighter => ModelId::Quill,
+            WeaponKind::Lamplighter => ModelId::Lamplighter,
         }
     }
 
@@ -100,16 +100,12 @@ impl WeaponLook for WeaponKind {
             WeaponKind::Kiln => kiln::MUZZLE,
             WeaponKind::Trimmer => trimmer::MUZZLE,
             WeaponKind::Tamper => tamper::MUZZLE,
-            WeaponKind::Lamplighter => quill::MUZZLE,
+            WeaponKind::Lamplighter => lamplighter::MUZZLE,
         }
     }
 
     fn two_handed(self) -> bool {
-        // (The Lamplighter borrows the one-handed Quill's model for now.)
-        !matches!(
-            self,
-            WeaponKind::Quill | WeaponKind::Lancet | WeaponKind::Lamplighter
-        )
+        !matches!(self, WeaponKind::Quill | WeaponKind::Lancet)
     }
 
     fn glow_color(self, alt_mode: u8) -> Vec4 {
@@ -140,40 +136,39 @@ impl WeaponLook for WeaponKind {
 ///
 /// | class | abilities |
 /// |---|---|
-/// | Precision | Brand crimson, Wickline ice, Tally white-gold, Waxwork mint |
+/// | Precision | Brand crimson, Wickline flame orange, Tally chalk ice, Waxwork tallow |
 /// | Scatter | Gust sky, Bolas orange, Bulwark brass, Flak rose |
 /// | Rapid | Wisp violet, Discharge blue, Stoke amber, Lantern signal red |
 /// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite lilac |
-/// | Draw | Brand crimson, Blink Arrow lime, Pinning Arrow steel blue, Beacon Arrow ember |
-/// | Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte lime |
+/// | Draw | Brand crimson, Blink Arrow mint, Pinning Arrow steel blue, Beacon Arrow gold |
+/// | Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte steel white |
 ///
-/// (The rework's abilities took the colours of the ones they replaced; client-a / client-b
-/// may pick their own.)
+/// (Bolas, Bulwark, Stoke, Lantern and Kite took the colours of the ones they replaced.)
 pub fn ability_color(a: Ability) -> Vec4 {
     let c = match a {
         Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
-        Ability::Wickline => Vec3::new(0.55, 0.95, 1.0),
+        Ability::Wickline => Vec3::new(1.0, 0.55, 0.18),
         Ability::Gust => Vec3::new(0.72, 0.9, 1.0),
         Ability::Bolas => Vec3::new(1.0, 0.5, 0.15),
         Ability::Wisp => Vec3::new(0.75, 0.5, 1.0),
         Ability::Discharge => Vec3::new(0.4, 0.8, 1.0),
         Ability::Breach => Vec3::new(1.0, 0.4, 0.1),
         Ability::Gravewell => Vec3::new(0.45, 1.0, 0.55),
-        Ability::Tally => Vec3::new(1.0, 0.95, 0.55),
-        Ability::Waxwork => Vec3::new(0.35, 1.0, 0.72),
+        Ability::Tally => Vec3::new(0.8, 0.95, 1.0),
+        Ability::Waxwork => Vec3::new(1.0, 0.85, 0.5),
         Ability::Bulwark => Vec3::new(1.0, 0.82, 0.36),
         Ability::Flak => Vec3::new(1.0, 0.42, 0.68),
         Ability::Stoke => Vec3::new(1.0, 0.76, 0.2),
         Ability::Lantern => Vec3::new(1.0, 0.28, 0.2),
         Ability::Limpet => Vec3::new(0.95, 1.0, 0.3),
         Ability::Kite => Vec3::new(0.82, 0.6, 1.0),
-        Ability::BlinkArrow => Vec3::new(0.7, 1.0, 0.35),
+        Ability::BlinkArrow => Vec3::new(0.5, 1.0, 0.82),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
-        Ability::BeaconArrow => Vec3::new(1.0, 0.55, 0.16),
+        Ability::BeaconArrow => Vec3::new(1.0, 0.84, 0.36),
         Ability::Lunge => Vec3::new(0.4, 0.95, 1.0),
         Ability::Whirl => Vec3::new(1.0, 0.72, 0.22),
         Ability::Hurl => Vec3::new(0.78, 0.5, 1.0),
-        Ability::Riposte => Vec3::new(0.72, 1.0, 0.35),
+        Ability::Riposte => Vec3::new(0.9, 0.93, 1.0),
     };
     c.extend(1.0)
 }
@@ -181,7 +176,8 @@ pub fn ability_color(a: Ability) -> Vec4 {
 /// Where the grip sits in view space (lower right of the screen).
 fn view_offset(w: WeaponKind) -> Vec3 {
     match w {
-        WeaponKind::Quill | WeaponKind::Lamplighter => Vec3::new(0.118, -0.112, -0.3),
+        WeaponKind::Quill => Vec3::new(0.118, -0.112, -0.3),
+        WeaponKind::Lamplighter => lamplighter::VIEW_OFFSET,
         WeaponKind::Bellows => Vec3::new(0.13, -0.13, -0.31),
         WeaponKind::Arclash => Vec3::new(0.13, -0.122, -0.31),
         WeaponKind::Tumbler => Vec3::new(0.14, -0.148, -0.32),
@@ -197,10 +193,12 @@ fn view_offset(w: WeaponKind) -> Vec3 {
 }
 
 /// Extra view rotation: the Longwick is canted so its limbs lean away from the crosshair, and
-/// turns to point its arrow at it as it is drawn.
+/// turns to point its arrow at it as it is drawn; the Lamplighter turns out a little, and
+/// further as it settles into its focus.
 fn view_rotation(anim: &ViewmodelAnim) -> Quat {
     match anim.weapon {
         WeaponKind::Longwick => longwick::view_rotation(smoothstep(anim.draw)),
+        WeaponKind::Lamplighter => lamplighter::view_rotation(anim.draw),
         _ => Quat::IDENTITY,
     }
 }
@@ -218,7 +216,8 @@ fn view_scale(w: WeaponKind) -> f32 {
 fn kick_amount(w: WeaponKind) -> (f32, f32) {
     match w {
         WeaponKind::Quill => (0.055, 0.26),
-        WeaponKind::Lamplighter => (0.075, 0.34),
+        // The beam's kick: a long hard shove back into the shoulder.
+        WeaponKind::Lamplighter => (0.1, 0.4),
         WeaponKind::Bellows => (0.085, 0.45),
         WeaponKind::Arclash => (0.016, 0.05),
         WeaponKind::Tumbler => (0.09, 0.32),
@@ -392,8 +391,7 @@ pub fn weapon_pose(h: &HeldWeapon) -> Pose {
     let mut glow = 0.9 * pulse + kick * 0.8;
     let mut color = base;
     let mut pose = match h.weapon {
-        // (The Lamplighter is drawn with the Quill's model for now.)
-        WeaponKind::Quill | WeaponKind::Lamplighter => {
+        WeaponKind::Quill => {
             let mut pose = Pose::rest(quill::JOINTS.len());
             // The crest folds flat front to back on the shot, then rises again.
             for i in 0..quill::CREST_COUNT {
@@ -449,6 +447,7 @@ pub fn weapon_pose(h: &HeldWeapon) -> Pose {
         WeaponKind::Riveter => riveter::pose(h, &mut glow),
         WeaponKind::Cinderbox => cinderbox::pose(h, &mut glow),
         WeaponKind::Longwick => longwick::pose(h, &mut glow, &mut color),
+        WeaponKind::Lamplighter => lamplighter::pose(h, &mut glow, &mut color),
         WeaponKind::Kiln => kiln::pose(h, &mut glow),
     };
     // Charging an alt (Discharge, Skewer): brighter and whiter towards full.
@@ -531,17 +530,24 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
         0.0
     };
     let shake = Vec3::new(wave(anim.time, 31.0), wave(anim.time, 37.0), 0.0) * 0.0025 * tremble;
-    // The bow comes up and in towards the eye as it is drawn.
+    // The bow comes up and in towards the eye as it is drawn; the Lamplighter settles low and
+    // out of the scope's way as it focuses. Both steady the bob.
     let draw = if w == WeaponKind::Longwick {
         smoothstep(anim.draw)
     } else {
         0.0
     };
+    let focus = if w == WeaponKind::Lamplighter {
+        smoothstep(anim.draw)
+    } else {
+        0.0
+    };
     let offset = view_offset(w)
-        + bob_offset * (1.0 - 0.6 * draw)
+        + bob_offset * (1.0 - 0.6 * draw.max(focus))
         + sway_offset
         + shake
         + longwick::DRAW_SHIFT * draw
+        + lamplighter::FOCUS_SHIFT * focus
         + Vec3::new(0.0, -0.24 * lowered, 0.04 * lowered)
         + Vec3::new(0.0, -0.008, kick_back * VIEWMODEL_SCALE) * kick
         + Vec3::new(0.025, -0.04, 0.02) * punch;

@@ -297,6 +297,16 @@ impl Spectate {
         }
         self.weapon = Some((weapon, ability));
         self.viewmodel.set_draw(if drawing { charge } else { 0.0 });
+        // A Lamplighter's focus closes their view in, as it does for them.
+        let focus = drawing && weapon == WeaponKind::Lamplighter;
+        self.camera.set_zoom(if focus {
+            super::combat::tricks::lamplighter::zoom(
+                charge,
+                super::combat::tricks::lamplighter::FULL_ZOOM,
+            )
+        } else {
+            1.0
+        });
         self.viewmodel
             .set_charge(if drawing { 0.0 } else { charge });
         self.viewmodel.set_unarmed(!player_armed(e.state));

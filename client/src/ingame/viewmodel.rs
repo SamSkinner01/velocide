@@ -127,6 +127,24 @@ impl Viewmodel {
         self.anim.salvo = Some(0.0);
     }
 
+    /// Your Riposte's guard is up (`true`): its pose is held; when it goes down without a
+    /// counter-swing, the guard lowers.
+    pub fn hold_guard(&mut self, up: bool) {
+        let s = &mut self.anim.swing;
+        if s.active() && s.kind == SwingKind::Guard {
+            if up {
+                s.progress = s.progress.min(0.5);
+            } else {
+                s.drop_guard();
+            }
+        }
+    }
+
+    /// The guard lowers without a counter-swing.
+    pub fn drop_guard(&mut self) {
+        self.anim.swing.drop_guard();
+    }
+
     /// Your Hurl's piece is out (`true`) or back in the hand.
     pub fn set_hurled(&mut self, out: bool) {
         self.anim.hurled = out;

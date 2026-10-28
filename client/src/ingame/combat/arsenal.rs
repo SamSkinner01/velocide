@@ -204,9 +204,10 @@ impl ArsenalView {
 
     /// Per frame, from the predicted weapon state: the charge glow and whine (Discharge;
     /// a held Tally / Bulwark / Riposte counts its hold in `charge` too, but neither glows nor
-    /// whines), the bow's draw (the Lamplighter's focus borrows it for now) (creak while drawing, a ring and a bright glint at full draw,
-    /// silence on release). Returns the bow's draw (0..1) and whether full draw was reached
-    /// this frame (the caller zooms and flashes, `docs/feel.md`).
+    /// whines), the bow's draw (creak while drawing, a ring and a bright glint at full draw,
+    /// silence on release). Returns the draw (0..1: the bow's, or the Lamplighter's focus,
+    /// which rides the same field and has its own sounds, `tricks::lamplighter`) and whether
+    /// the bow reached full draw this frame (the caller zooms and flashes, `docs/feel.md`).
     pub fn local_feel(
         &mut self,
         s: &WeaponState,
@@ -239,7 +240,7 @@ impl ArsenalView {
             0.0
         };
         viewmodel.set_draw(draw);
-        let drawing = s.draw > 0;
+        let drawing = s.draw > 0 && s.current() == WeaponKind::Longwick;
         if drawing && !self.local.drawing {
             audio.play_2d(Sfx::BowDraw);
         } else if !drawing && self.local.drawing {
@@ -266,7 +267,7 @@ pub fn projectile_kind(k: u16) -> Option<ArsenalProjectile> {
     Some(match k {
         kind::ARROW => ArsenalProjectile::Arrow,
         kind::PIN_ARROW => ArsenalProjectile::PinningArrow,
-        kind::BLINK_ARROW => ArsenalProjectile::Arrow,
+        kind::BLINK_ARROW => ArsenalProjectile::BlinkArrow,
         kind::BEACON_ARROW => ArsenalProjectile::BeaconArrow,
         kind::BRAND_ARROW => ArsenalProjectile::BrandArrow,
         kind::RIVET => ArsenalProjectile::Rivet,
@@ -334,10 +335,14 @@ pub fn surface_facing(world: Option<&CollisionWorld>, at: Vec3) -> Option<Vec3> 
 /// A projectile of the expansion arsenal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ArsenalProjectile {
-    /// Longwick taper arrow (the Blink Arrow's too, for now).
+    /// Longwick taper arrow.
     Arrow,
     PinningArrow,
-    /// The Beacon Arrow (placeholder: the retired Ember Arrow's model; client-a).
+    /// The Blink Arrow (docs/rework.md): a cold mint flame in a glass bead; it pulses while
+    /// you can step to it.
+    BlinkArrow,
+    /// The Beacon Arrow: a little brass lantern behind its spike, lit where it sticks
+    /// (`tricks::beacon`).
     BeaconArrow,
     /// A Brand loosed from the Longwick (the taper arrow, glowing the brand's crimson).
     BrandArrow,
@@ -356,9 +361,10 @@ pub enum ArsenalProjectile {
 }
 
 impl ArsenalProjectile {
-    pub const ALL: [ArsenalProjectile; 10] = [
+    pub const ALL: [ArsenalProjectile; 11] = [
         ArsenalProjectile::Arrow,
         ArsenalProjectile::PinningArrow,
+        ArsenalProjectile::BlinkArrow,
         ArsenalProjectile::BeaconArrow,
         ArsenalProjectile::BrandArrow,
         ArsenalProjectile::Rivet,
@@ -373,7 +379,8 @@ impl ArsenalProjectile {
         match self {
             ArsenalProjectile::Arrow | ArsenalProjectile::BrandArrow => ModelId::Arrow,
             ArsenalProjectile::PinningArrow => ModelId::PinningArrow,
-            ArsenalProjectile::BeaconArrow => ModelId::EmberArrow,
+            ArsenalProjectile::BlinkArrow => ModelId::BlinkArrow,
+            ArsenalProjectile::BeaconArrow => ModelId::BeaconArrow,
             ArsenalProjectile::Rivet => ModelId::Rivet,
             ArsenalProjectile::CinderRocket => ModelId::CinderRocket,
             ArsenalProjectile::FlakShell => ModelId::FlakShell,
@@ -391,6 +398,7 @@ impl ArsenalProjectile {
             ArsenalProjectile::Limpet | ArsenalProjectile::FlakShell => 2.4,
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
+            | ArsenalProjectile::BlinkArrow
             | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 2.2,
             _ => 2.0,
@@ -412,7 +420,8 @@ impl ArsenalProjectile {
             ArsenalProjectile::Arrow => (Vec3::new(1.2, 0.8, 0.4), 2.5),
             ArsenalProjectile::PinningArrow => (Vec3::new(0.6, 0.85, 1.4), 3.0),
             ArsenalProjectile::BrandArrow => (Vec3::new(1.6, 0.35, 0.7), 3.0),
-            ArsenalProjectile::BeaconArrow => (Vec3::new(1.8, 0.7, 0.2), 4.0),
+            ArsenalProjectile::BlinkArrow => (Vec3::new(0.7, 1.8, 1.4), 3.5),
+            ArsenalProjectile::BeaconArrow => (Vec3::new(1.8, 1.4, 0.5), 4.0),
             ArsenalProjectile::Rivet => (Vec3::new(1.4, 0.5, 0.2), 2.0),
             ArsenalProjectile::CinderRocket => (Vec3::new(2.0, 0.9, 0.3), 4.5),
             ArsenalProjectile::FlakShell => (Vec3::new(1.4, 0.6, 0.9), 3.0),
@@ -427,6 +436,7 @@ impl ArsenalProjectile {
         match self {
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
+            | ArsenalProjectile::BlinkArrow
             | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 0.24,
             ArsenalProjectile::Rivet => 0.06,
@@ -437,7 +447,10 @@ impl ArsenalProjectile {
     /// Sound when it hits / lands (blasts have their own, [`Blast::sfx`]).
     pub fn impact_sfx(self) -> Option<Sfx> {
         match self {
-            ArsenalProjectile::Arrow | ArsenalProjectile::BrandArrow => Some(Sfx::ArrowImpact),
+            ArsenalProjectile::Arrow
+            | ArsenalProjectile::BrandArrow
+            | ArsenalProjectile::BlinkArrow
+            | ArsenalProjectile::BeaconArrow => Some(Sfx::ArrowImpact),
             ArsenalProjectile::PinningArrow => Some(Sfx::PinThunk),
             ArsenalProjectile::Rivet => Some(Sfx::RivetImpact),
             ArsenalProjectile::Limpet => Some(Sfx::LimpetStick),
@@ -503,6 +516,7 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
             ArsenalProjectile::Rivet => 0.12,
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
+            | ArsenalProjectile::BlinkArrow
             | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 0.36,
             _ => 0.0,
@@ -544,6 +558,14 @@ pub fn draw_projectile(
             let b = super::fx::brand_color();
             tint.glow = (b.truncate() * (0.8 + 0.3 * flicker)).extend(1.0);
         }
+        // The bead pulses: you can step to it.
+        ArsenalProjectile::BlinkArrow => {
+            let pulse = 0.5 + 0.5 * ((time * 7.0 + p.seed as f64).sin() as f32).abs();
+            tint.glow = Vec4::splat(1.0 + 1.6 * pulse);
+            light.0 *= 0.7 + 0.6 * pulse;
+        }
+        // Stuck, it burns (`tricks::beacon` adds the beacon's light and column).
+        ArsenalProjectile::BeaconArrow if p.stuck => tint.glow = Vec4::splat(2.6 * flicker),
         _ => tint.glow = Vec4::splat(1.2 * flicker + 0.4),
     }
     lib.draw_model(p.kind.model(), projectile_transform(p, time), &tint, draws);
@@ -570,6 +592,20 @@ pub fn projectile_trail(
     let chance = |rng: &mut Rng, per_second: f32| rng.unit() < dt * per_second;
     if p.stuck {
         match p.kind {
+            ArsenalProjectile::BlinkArrow if chance(rng, 10.0) => {
+                // Cold motes rising off the bead while it waits for you.
+                effects.spawn(Particle {
+                    position: p.position - p.facing.normalize_or_zero() * 0.3 + rng.dir() * 0.05,
+                    velocity: Vec3::Y * 0.5 + rng.dir() * 0.25,
+                    max_life: 0.5,
+                    size: Vec2::splat(0.06),
+                    end_scale: 0.3,
+                    color: Vec4::new(0.55, 1.0, 0.85, 1.0),
+                    texture: FxTex::Spark,
+                    additive: true,
+                    ..Default::default()
+                });
+            }
             ArsenalProjectile::Arrow | ArsenalProjectile::BeaconArrow if chance(rng, 6.0) => {
                 // The taper keeps burning where it stuck.
                 effects.spawn(Particle {
@@ -593,10 +629,15 @@ pub fn projectile_trail(
     match p.kind {
         ArsenalProjectile::Arrow
         | ArsenalProjectile::PinningArrow
+        | ArsenalProjectile::BlinkArrow
         | ArsenalProjectile::BeaconArrow
         | ArsenalProjectile::BrandArrow => {
-            // A thin streak of wick smoke, sparks from the flame.
-            let ember = p.kind == ArsenalProjectile::BeaconArrow;
+            // A thin streak of wick smoke, sparks from the flame (the beacon's lantern and the
+            // blink bead shed more).
+            let ember = matches!(
+                p.kind,
+                ArsenalProjectile::BeaconArrow | ArsenalProjectile::BlinkArrow
+            );
             if chance(rng, if ember { 50.0 } else { 30.0 }) {
                 effects.spawn(Particle {
                     position: p.position + back * rng.range(0.0, 0.4),
@@ -615,7 +656,8 @@ pub fn projectile_trail(
             let color = match p.kind {
                 ArsenalProjectile::PinningArrow => Vec4::new(0.7, 0.85, 1.0, 1.0),
                 ArsenalProjectile::BrandArrow => super::fx::brand_color(),
-                ArsenalProjectile::BeaconArrow => Vec4::new(1.0, 0.5, 0.12, 1.0),
+                ArsenalProjectile::BlinkArrow => Vec4::new(0.5, 1.0, 0.82, 1.0),
+                ArsenalProjectile::BeaconArrow => Vec4::new(1.0, 0.84, 0.36, 1.0),
                 _ => Vec4::new(1.0, 0.75, 0.35, 1.0),
             };
             if chance(rng, if ember { 60.0 } else { 20.0 }) {
@@ -1298,7 +1340,6 @@ impl ArsenalView {
             match kind {
                 ArsenalProjectile::CinderRocket => self.blasts.push((Blast::Cinder, at, 2.6)),
                 ArsenalProjectile::Kite => self.blasts.push((Blast::Kite, at, 6.0)),
-                ArsenalProjectile::BeaconArrow => self.blasts.push((Blast::Waxwork, at, 3.0)),
                 ArsenalProjectile::FlakShell => self.flak.push((at, vel)),
                 _ => projectile_impact(effects, audio, rng, kind, at, normal),
             }
@@ -1309,7 +1350,6 @@ impl ArsenalView {
                 f.view.kind,
                 ArsenalProjectile::CinderRocket
                     | ArsenalProjectile::Kite
-                    | ArsenalProjectile::BeaconArrow
                     | ArsenalProjectile::FlakShell
                     | ArsenalProjectile::Bolas
             ) && f.view.stuck;

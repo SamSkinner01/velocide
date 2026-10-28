@@ -9,6 +9,7 @@ use engine::ui::draw::{fade, mix};
 use engine::ui::{Rect, TextStyle, Theme, UiDrawExt};
 use glam::{Vec2, Vec3, Vec4, vec2};
 use shared::input::look_dir;
+use shared::loadout::WeaponKind;
 use shared::sim::{Ability, WeaponState};
 use shared::tuning::CombatTuning;
 
@@ -275,8 +276,12 @@ impl CombatHud {
                 fade(*color, 0.85),
             );
         }
-        if w.charge > 0 || w.draw > 0 {
-            let f = if w.draw > 0 {
+        // (The Lamplighter's focus has its own ring, and a held Tally / Riposte its own marks:
+        // `tricks`.)
+        let drawing = w.draw > 0 && w.current() == WeaponKind::Longwick;
+        let charging = w.charge > 0 && !matches!(w.ability(), Ability::Tally | Ability::Riposte);
+        if charging || drawing {
+            let f = if drawing {
                 w.draw_fraction(info.tuning, info.tick_rate)
             } else {
                 w.charge_fraction(info.tuning, info.tick_rate)
@@ -289,7 +294,7 @@ impl CombatHud {
             list.fill(bar.expand(1.0), fade(t.ink, 0.7));
             let full = f >= 1.0 && (now * 10.0).fract() < 0.5;
             // The bow's draw in wick gold, charges in arc blue.
-            let (cold, hot) = if w.draw > 0 {
+            let (cold, hot) = if drawing {
                 (
                     Vec4::new(1.0, 0.6, 0.25, 1.0),
                     Vec4::new(1.0, 0.92, 0.6, 1.0),
@@ -330,7 +335,8 @@ impl CombatHud {
             );
         }
 
-        // The bow reaching full draw: a gold ring bursts out from the crosshair.
+        // The bow reaching full draw (the Lamplighter its full focus): a gold ring bursts out
+        // from the crosshair.
         let full = w.draw > 0 && w.draw_fraction(info.tuning, info.tick_rate) >= 1.0;
         match (full, self.full_draw_at) {
             (true, None) => self.full_draw_at = Some(now),
@@ -352,7 +358,7 @@ impl CombatHud {
         }
 
         // The bow at full draw (and the ability it will loose).
-        if w.draw > 0 && w.draw_fraction(info.tuning, info.tick_rate) >= 1.0 {
+        if drawing && w.draw_fraction(info.tuning, info.tick_rate) >= 1.0 {
             let text = match w.armed_ability() {
                 Some(a) => format!("FULL - {}", a.name().to_uppercase()),
                 None => "FULL".into(),

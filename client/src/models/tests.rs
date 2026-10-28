@@ -1055,12 +1055,13 @@ fn lookups() {
     assert_eq!(weapons::weapon_kind(200), WeaponKind::Quill);
     assert!(!WeaponKind::Quill.two_handed() && WeaponKind::Tumbler.two_handed());
     assert!(!WeaponKind::Lancet.two_handed() && WeaponKind::Longwick.two_handed());
-    // Every weapon has its own model (the Lamplighter borrows the Quill's until it has one:
-    // client-a), and the default builds' glows are the ability colours.
+    assert!(WeaponKind::Lamplighter.two_handed());
+    // Every weapon has its own model, and the default builds' glows are the ability colours.
     let mut models: Vec<ModelId> = WeaponKind::ALL.iter().map(|w| w.model()).collect();
     models.sort_unstable();
     models.dedup();
-    assert_eq!(models.len(), WeaponKind::COUNT - 1);
+    assert_eq!(models.len(), WeaponKind::COUNT);
+    assert_eq!(WeaponKind::Lamplighter.model(), ModelId::Lamplighter);
     assert_eq!(WeaponKind::Trimmer.model(), ModelId::Trimmer);
     assert_eq!(WeaponKind::Tamper.model(), ModelId::Tamper);
     assert_eq!(

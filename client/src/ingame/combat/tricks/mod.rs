@@ -9,6 +9,8 @@
 //! * [`blink`]: the Blink Arrow's step (afterimage, streak, arrival) and its prompt.
 //! * [`beacon`]: the lit beacon and the revealed hostiles' silhouettes through walls.
 //! * [`riposte`]: the guard on the HUD, the sparks off a block, the counter's crescent.
+//! * [`play`]: all of it in the running game (the replicated world, the own state, the
+//!   server's effects).
 //!
 //! [`Tricks`] holds their per-frame memory; the glue in `combat/mod.rs` calls it like the
 //! other views (`arsenal`, `melee`, `knacks`): [`Tricks::update`] once a frame (effects,
@@ -19,10 +21,13 @@
 pub mod beacon;
 pub mod blink;
 pub mod lamplighter;
+mod play;
 pub mod riposte;
 pub mod tally;
 pub mod waxwork;
 pub mod wickline;
+
+use std::collections::HashMap;
 
 use engine::audio::{Audio, Sfx};
 use engine::gfx::{Camera, DrawItem, PointLight, UiDrawList};
@@ -31,7 +36,10 @@ use engine::ui::Rect;
 use glam::Vec3;
 use shared::cosmetics::Cosmetics;
 use shared::protocol::{EntityState, NetId, kind};
-use shared::sim::PlayerId;
+use shared::sim::{PlayerId, WeaponState};
+use shared::tuning::CombatTuning;
+
+pub use play::{OwnFx, world_muzzle};
 
 use super::super::InGame;
 use super::super::effects::Effects;
@@ -99,6 +107,16 @@ pub struct TrickFrame<'a> {
     pub look: &'a dyn Fn(PlayerId) -> Cosmetics,
     /// The viewmodel pass's field of view (the silhouettes are drawn in it).
     pub viewmodel_fov: f32,
+    pub tuning: &'a CombatTuning,
+    pub tick_rate: u32,
+    /// A PvP world: a wax double is wax only to its caster, a beacon reveals only to its
+    /// shooter (in PvE everyone is on one side).
+    pub pvp: bool,
+    /// The own state: the Tally's marks, the predicted weapons.
+    pub tallied: [Option<NetId>; 4],
+    pub weapons: &'a WeaponState,
+    /// Your weapon's muzzle this frame (world): your own lines leave it.
+    pub muzzle: Vec3,
 }
 
 /// A staged thing and how long it has left.
@@ -117,9 +135,21 @@ pub struct Tricks {
     /// The Lamplighter is in hand (or a preview holds its focus): its scope shows as the view
     /// zooms (another weapon's zoom, the bow's, has no vignette).
     pub scoped: bool,
+    /// The scope's view at full focus (`lamplighter.zoom` of the tuning in play).
+    pub full_zoom: f32,
     /// Your own zip or step (Wickline, Blink Arrow): seconds left of its speed lines and their
     /// length.
     rush: (f32, f32),
+    /// Wax doubles and beacon arrows in the world, and the beacons' lights this frame.
+    doubles: HashMap<NetId, play::Double>,
+    beacons: HashMap<NetId, play::BeaconSeen>,
+    beacon_lights: Vec<PointLight>,
+    /// The tally's marks (who, since when).
+    marks: Vec<(NetId, f64)>,
+    /// Blows your guard took since it went up (the counter grows with them).
+    guard_blocks: u32,
+    /// Sounds due later: seconds to wait, the sound, where (`None`: yours).
+    later: Vec<(f32, Sfx, Option<Vec3>)>,
     staged: Vec<Staged>,
     /// Previews waiting for the next update.
     pending: Vec<TrickPreview>,
@@ -138,6 +168,12 @@ impl Tricks {
         self.blink.clear();
         self.staged.clear();
         self.pending.clear();
+        self.doubles.clear();
+        self.beacons.clear();
+        self.beacon_lights.clear();
+        self.marks.clear();
+        self.later.clear();
+        self.guard_blocks = 0;
     }
 
     /// Stages a preview; one-shot ones (a beam, a line, a step) happen at once.
@@ -220,21 +256,18 @@ impl Tricks {
             self.preview(p, effects, beams, rng, audio);
         }
         let view = f.camera.rotation * Vec3::NEG_Z;
-        let tells: Vec<lamplighter::Focusing> = self
-            .staged
-            .iter()
-            .filter_map(|s| match s.preview {
-                TrickPreview::Tell {
-                    muzzle, aim, focus, ..
-                } => Some(lamplighter::Focusing {
-                    player: NetId(u32::MAX),
-                    muzzle,
-                    aim,
-                    focus,
-                }),
-                _ => None,
-            })
-            .collect();
+        let mut tells = self.update_world(f, effects, beams, audio, rng, dt);
+        tells.extend(self.staged.iter().filter_map(|s| match s.preview {
+            TrickPreview::Tell {
+                muzzle, aim, focus, ..
+            } => Some(lamplighter::Focusing {
+                player: NetId(u32::MAX),
+                muzzle,
+                aim,
+                focus,
+            }),
+            _ => None,
+        }));
         self.lamplighter.update_tells(
             &tells,
             f.world,
@@ -245,7 +278,29 @@ impl Tricks {
             audio,
             dt,
         );
-        let ends = |l: &wickline::Line| (l.from, l.anchor.point());
+        // Lines leave their shooter's muzzle wherever it is now and hold what they bit.
+        let local = f.local.map(NetId::player);
+        let ends = |l: &wickline::Line| {
+            let from = match l.shooter {
+                Some(id) if Some(id) == local => f.muzzle,
+                Some(id) => f
+                    .remote
+                    .visual(id)
+                    .map(|v| v.muzzle)
+                    .filter(|m| *m != Vec3::ZERO)
+                    .unwrap_or(l.from),
+                None => l.from,
+            };
+            let to = match l.anchor {
+                wickline::Anchor::Body(id, at) => {
+                    f.entities.iter().find(|e| e.id == id).map_or(at, |e| {
+                        e.position + Vec3::Y * (at.y - e.position.y).clamp(0.3, 2.0)
+                    })
+                }
+                a => a.point(),
+            };
+            (from, to)
+        };
         self.wickline.update(dt, &ends, effects, rng);
         self.wickline.draw(beams);
         self.blink.update(dt);
@@ -298,6 +353,7 @@ impl Tricks {
         let Some(lib) = lib else {
             return;
         };
+        self.draw_world(lib, f, draws, lights, viewmodel);
         for s in &self.staged {
             match s.preview {
                 TrickPreview::Waxwork {
@@ -351,16 +407,22 @@ impl Tricks {
             return;
         }
         let c = Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
-        lamplighter::draw_scope(list, c, lamplighter::scope_strength(zoom), time);
+        let full = if self.full_zoom > 0.0 {
+            self.full_zoom
+        } else {
+            lamplighter::FULL_ZOOM
+        };
+        lamplighter::draw_scope(list, c, lamplighter::scope_strength(zoom, full), time);
     }
 
-    /// Over the HUD: the focus ring (`focus`: the local Lamplighter's), the tally, the blink
-    /// prompt.
-    pub fn hud(&mut self, list: &mut UiDrawList, camera: &Camera, focus: Option<f32>, time: f64) {
+    /// Over the HUD: the focus ring, the tally, the blink prompt, the guard (`own`: your own
+    /// projectiles, for the Blink Arrow's window).
+    pub fn hud(&mut self, list: &mut UiDrawList, f: &TrickFrame, own: &[EntityState], time: f64) {
         let c = Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
-        let focus = focus.or(self.staged_focus());
-        if let Some(f) = focus {
-            lamplighter::draw_focus_ring(list, c.center().floor(), f, time);
+        let camera = f.camera;
+        self.hud_world(list, f, own, time);
+        if let Some(focus) = self.staged_focus() {
+            lamplighter::draw_focus_ring(list, c.center().floor(), focus, time);
         }
         for s in &self.staged {
             match &s.preview {
@@ -405,7 +467,7 @@ fn staged_life(p: &TrickPreview) -> f32 {
 }
 
 /// The floor under `at` (within a few metres), for rings drawn on it.
-fn floor_under(world: Option<&CollisionWorld>, at: Vec3) -> Option<Vec3> {
+pub(super) fn floor_under(world: Option<&CollisionWorld>, at: Vec3) -> Option<Vec3> {
     let w = world?;
     w.cast_ray(
         at + Vec3::Y * 0.2,

@@ -149,14 +149,14 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.42,
             0.07,
         ),
-        // The rework's sniper: the Quill's look and sound until it has its own.
+        // The rework's sniper (client-a): its beam is `tricks::lamplighter::beam`.
         Attack::Lamplighter => s(
-            Sfx::QuillFire,
-            0.9,
-            0.07,
+            Sfx::LamplighterFire,
+            1.0,
+            0.0,
             glow(WeaponKind::Lamplighter.primary_color(), 2.0, 0.95),
-            0.35,
-            0.12,
+            0.0,
+            0.2,
         ),
         Attack::Tally => s(
             Sfx::QuillFire,
@@ -878,7 +878,18 @@ impl InGame {
                     // A held ability's press / release, a recast, an ability that isn't a
                     // shot: none of a shot's flash, kick and tracer (their own presentation
                     // is client-a's / client-b's).
-                    FireIntent::Ability { .. } if !plays_as_shot(intent) => {}
+                    FireIntent::Ability { .. } if !plays_as_shot(intent) => {
+                        // The Wickline's throw, the Tally's hold, the Waxwork's pour, the
+                        // Riposte's guard and counter (tricks/).
+                        combat.tricks.local_intent(
+                            intent,
+                            viewmodel,
+                            &mut common.audio,
+                            &mut combat.beams,
+                            cam.position,
+                            input.yaw,
+                        );
+                    }
                     FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
@@ -909,7 +920,27 @@ impl InGame {
                             continue;
                         }
                         let style = attack_style(attack);
-                        common.audio.play_2d(style.sfx);
+                        // The Lamplighter's shot sounds as hard as it was focused.
+                        let focus = match intent {
+                            FireIntent::Primary { charge, .. } => *charge,
+                            _ => 1.0,
+                        };
+                        let style = if attack == Attack::Lamplighter {
+                            let (volume, pitch) = tricks::lamplighter::shot_sound(focus);
+                            common.audio.play(
+                                style.sfx,
+                                PlayParams::default().with_volume(volume).with_pitch(pitch),
+                            );
+                            // A tap kicks lightly, a full focus hard.
+                            AttackStyle {
+                                kick: style.kick * (0.55 + 0.45 * focus),
+                                shake: style.shake * (0.4 + 0.6 * focus),
+                                ..style
+                            }
+                        } else {
+                            common.audio.play_2d(style.sfx);
+                            style
+                        };
                         // The weight under the shot (feel): a punch scaled by its kick.
                         if style.kick >= 0.3 {
                             common.audio.play(
@@ -987,6 +1018,42 @@ impl InGame {
                             }
                             Attack::Arc => {
                                 effects.glow(muzzle, fx::ARC_COLOR, 0.3, 0.06);
+                            }
+                            // The beam, as far as you can see it go (a full focus through the
+                            // first target and on).
+                            Attack::Lamplighter => {
+                                let dir = look_dir(input.yaw, input.pitch);
+                                let range = hitscan_range(attack, t);
+                                let wall = world
+                                    .and_then(|w| w.cast_ray(cam.position, dir, range, MASK_SHOTS))
+                                    .map_or(range, |h| h.distance);
+                                let bodies: Vec<(Vec3, Vec3, f32)> = net
+                                    .remote_entities()
+                                    .iter()
+                                    .filter_map(entity_capsule)
+                                    .collect();
+                                let pierce = if focus >= 1.0 {
+                                    t.lamplighter.pierce
+                                } else {
+                                    1
+                                };
+                                let (ends, _) = tricks::lamplighter::beam_ends(
+                                    cam.position,
+                                    dir,
+                                    wall,
+                                    &bodies,
+                                    pierce,
+                                );
+                                tricks::lamplighter::beam(
+                                    effects,
+                                    &mut combat.beams,
+                                    &mut combat.rng,
+                                    muzzle,
+                                    &ends,
+                                    focus,
+                                    true,
+                                );
+                                continue;
                             }
                             _ => fx::muzzle_flash(
                                 effects,
@@ -1153,6 +1220,7 @@ impl InGame {
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
     /// visuals (Discharge charge, brands), viewmodel charge, music intensity.
     pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32, real_dt: f32) {
+        let pvp = self.match_mode().is_pvp();
         let InGame {
             session,
             combat,
@@ -1171,6 +1239,27 @@ impl InGame {
         let fx = session.client_mut().drain_fx();
         // The play of the game keeps a copy (replay.rs).
         potg.recorder.record_fx(&fx);
+        // Your own steps, lines, tally shots and blocks play as they arrive (tricks/).
+        {
+            let net = session.client();
+            let muzzle = tricks::world_muzzle(last_camera, viewmodel.last_draw().map(|d| d.muzzle));
+            let own = combat.tricks.own_fx(
+                &fx,
+                net.local_player_id(),
+                muzzle,
+                net.remote_entities(),
+                effects,
+                &mut combat.beams,
+                &mut common.audio,
+                &mut combat.rng,
+            );
+            if own.hitstop > 0.0 {
+                feedback.hitstop(own.hitstop);
+            }
+            if own.snap {
+                session.client_mut().snap_view();
+            }
+        }
         combat.queue.push(fx);
         let net = session.client();
         if !net.is_in_game() {
@@ -1185,6 +1274,8 @@ impl InGame {
         let listener = last_camera.position;
         let local_chest = net.local_state().map(|s| s.position + Vec3::Y * 1.1);
 
+        // Other players' Riposte guards (tricks/).
+        tricks::Tricks::pose_guards(remote, entities);
         // Remote players: dead / charging / protected visuals.
         for e in entities.iter().filter(|e| e.kind == kind::PLAYER) {
             let vis = remote.visual_mut(e.id);
@@ -1325,6 +1416,10 @@ impl InGame {
                     combat.knacks.snare_sprung(position.to_vec3());
                 }
             }
+            // The Lamplighter's beams, the lines, tallies, steps and blocks of others (tricks/).
+            for ev in &due {
+                combat.tricks.fx(&mut ctx, ev);
+            }
         }
         combat.beams.update(vdt);
         // Brand sigils (drawn this frame only, after the update).
@@ -1376,6 +1471,7 @@ impl InGame {
                     .map(|p| p.cosmetics)
                     .unwrap_or_default()
             };
+            let weapons = *combat.predictor.state();
             let frame = tricks::TrickFrame {
                 entities,
                 remote,
@@ -1384,7 +1480,14 @@ impl InGame {
                 local,
                 look: &look,
                 viewmodel_fov: common.settings.viewmodel_fov,
+                tuning: t,
+                tick_rate: rate,
+                pvp,
+                tallied: net.own_combat().map_or([None; 4], |c| c.combat.tallied),
+                weapons: &weapons,
+                muzzle: tricks::world_muzzle(last_camera, viewmodel.last_draw().map(|d| d.muzzle)),
             };
+            combat.tricks.full_zoom = t.lamplighter.zoom;
             combat.tricks.update(
                 &frame,
                 effects,
@@ -1439,11 +1542,28 @@ impl InGame {
         );
         let eased = draw * draw * (3.0 - 2.0 * draw);
         rig.set_zoom(1.0 - BOW_ZOOM * eased);
-        // The Lamplighter's scope (tricks/lamplighter.rs) zooms much further.
+        // The Lamplighter's scope (tricks/lamplighter.rs) zooms much further, with its own
+        // focus sounds and a whiter flash when the lens comes true.
+        let state = combat.predictor.state();
+        let lamplighter = !state.is_unarmed() && state.current() == WeaponKind::Lamplighter;
         let staged = combat.tricks.staged_focus();
-        combat.tricks.scoped = staged.is_some();
-        if let Some(focus) = staged {
-            rig.set_zoom(tricks::lamplighter::zoom(focus));
+        combat.tricks.scoped = lamplighter || staged.is_some();
+        let focus = staged.or((lamplighter && state.draw > 0).then_some(draw));
+        if let Some(focus) = focus {
+            rig.set_zoom(tricks::lamplighter::zoom(focus, t.lamplighter.zoom));
+        }
+        // Your Riposte's guard held up while the state says so (tricks/).
+        let guarding = !state.is_unarmed()
+            && state.ability() == shared::sim::Ability::Riposte
+            && state.charge > 0;
+        viewmodel.hold_guard(guarding);
+        let focus_now = (lamplighter && state.draw > 0).then_some(draw);
+        if combat
+            .tricks
+            .lamplighter
+            .local_feel(focus_now, &mut common.audio)
+        {
+            feedback.flash(glam::Vec3::new(1.0, 0.95, 0.82), 0.1);
         }
         if full_now {
             feedback.flash(glam::Vec3::new(1.0, 0.86, 0.5), 0.14);
@@ -1515,6 +1635,7 @@ impl InGame {
                 .map(|p| p.cosmetics)
                 .unwrap_or_default()
         };
+        let weapons = *self.combat.predictor.state();
         let frame = tricks::TrickFrame {
             entities: net.remote_entities(),
             remote: &self.remote,
@@ -1523,6 +1644,15 @@ impl InGame {
             local: net.local_player_id(),
             look: &look,
             viewmodel_fov: common.settings.viewmodel_fov,
+            tuning: &net.tuning().combat,
+            tick_rate: net.tick_rate(),
+            pvp: self.match_mode().is_pvp(),
+            tallied: net.own_combat().map_or([None; 4], |c| c.combat.tallied),
+            weapons: &weapons,
+            muzzle: tricks::world_muzzle(
+                &self.last_camera,
+                self.viewmodel.last_draw().map(|d| d.muzzle),
+            ),
         };
         self.combat.tricks.draw(
             lib,
@@ -1607,7 +1737,24 @@ impl InGame {
         self.combat.hud.draw(list, &common.theme, &info);
         // The Lamplighter's scope and focus ring, the tally, the blink prompt (tricks/).
         if !dead {
-            self.combat.tricks.hud(list, &self.last_camera, None, now);
+            let look = |_| shared::cosmetics::Cosmetics::default();
+            let frame = tricks::TrickFrame {
+                entities: net.remote_entities(),
+                remote: &self.remote,
+                world: net.world().map(|w| &w.collision.world),
+                camera: &self.last_camera,
+                local: net.local_player_id(),
+                look: &look,
+                viewmodel_fov: common.settings.viewmodel_fov,
+                tuning: t,
+                tick_rate: rate,
+                pvp: self.match_mode().is_pvp(),
+                tallied: own.map_or([None; 4], |c| c.combat.tallied),
+                weapons: &weapons,
+                muzzle: self.last_camera.position,
+            };
+            let (own_projectiles, _, _) = own_projectiles(net);
+            self.combat.tricks.hud(list, &frame, &own_projectiles, now);
         }
         // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
         let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);

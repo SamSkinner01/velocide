@@ -1179,8 +1179,9 @@ pub fn projectile_look(k: u16, parried: bool) -> ProjectileLook {
         kind::NEEDLE => look(1.0, 0.35, 0.2, 1.0, 0.07),
         kind::ARROW => look(1.0, 0.8, 0.42, 0.9, 0.05),
         kind::PIN_ARROW => look(0.55, 0.75, 1.0, 0.9, 0.05),
-        kind::BLINK_ARROW => look(0.7, 1.0, 0.35, 0.9, 0.05),
-        kind::BEACON_ARROW => look(1.0, 0.55, 0.16, 1.1, 0.06),
+        // The rework's arrows (client-a): the Blink's cold mint, the Beacon's lantern gold.
+        kind::BLINK_ARROW => look(0.5, 1.0, 0.82, 1.0, 0.06),
+        kind::BEACON_ARROW => look(1.0, 0.84, 0.36, 1.1, 0.06),
         kind::BRAND_ARROW => look(1.0, 0.25, 0.45, 1.0, 0.05),
         kind::RIVET => look(1.0, 0.42, 0.18, 0.8, 0.035),
         kind::CINDER_ROCKET => look(1.0, 0.6, 0.25, 1.1, 0.06),
