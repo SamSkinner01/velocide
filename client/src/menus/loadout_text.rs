@@ -109,12 +109,12 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              around as your own. Gust the floor to jump."
         }
         Ability::Bolas => {
-            "Weighted balls on a cord: the first hostile it touches is bound, and one close to \
-             it too, sharing the damage either takes."
+            "Two wax weights on a burning cord: the first hostile it touches is bound, and one \
+             close by is tied to it, taking a share of every hit."
         }
         Ability::Bulwark => {
-            "Hold up a slab of hardened wax: hits from the front are absorbed until it \
-             shatters. You move slower behind it."
+            "Raise a slab of hardened wax: shots and blows from the front are absorbed until it \
+             cracks apart. Yours pass; you move slower."
         }
         Ability::Flak => {
             "A shell that bursts into a ring of pellets after a short flight, just short of a \
@@ -128,13 +128,17 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
             "Charge a shock nova around you that throws everything away. More charge, bigger \
              and harder. It never hurts you."
         }
+        Ability::Stoke if weapon == WeaponKind::Kiln => {
+            "Stoke the Kiln: for a few seconds it sprays faster and further, then it overheats \
+             and can't spray for a moment."
+        }
         Ability::Stoke => {
             "Stoke the weapon: for a few seconds it fires faster and sets what it hits alight, \
              then it overheats and can't fire for a moment."
         }
         Ability::Lantern => {
-            "Set down a lantern that shoots the nearest hostile with your weapon for a while. \
-             Moulds may attack it. One at a time."
+            "Toss down a brass lantern that fires your weapon at the nearest hostile for a \
+             while, slower and weaker. Moulds may break it."
         }
         Ability::Breach => {
             "A point-blank blast just in front of you. It throws you hard and hurts you a \
@@ -291,6 +295,14 @@ pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
 pub fn ability_input(a: Ability, weapon: WeaponKind) -> &'static str {
     if weapon.class() == WeaponClass::Draw {
         return "ALT FIRE ARMS THE NEXT ARROW";
+    }
+    // The rework's Scatter / Rapid / Explosive abilities say what the press does.
+    match a {
+        Ability::Bulwark => return "HOLD ALT FIRE TO HOLD IT UP",
+        Ability::Stoke => return "ALT FIRE: STOKED AT ONCE",
+        Ability::Lantern => return "ALT FIRE: TOSSED AHEAD",
+        Ability::Bolas => return "ALT FIRE: WHIRLED AT YOUR AIM",
+        _ => {}
     }
     match a.style() {
         AbilityStyle::Charge => "HOLD ALT FIRE; RELEASE FIRES",
