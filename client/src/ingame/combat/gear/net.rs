@@ -74,6 +74,9 @@ pub(super) struct NetState {
     stoked: [(bool, bool); LOADOUT_SLOTS],
     /// Seconds to each orbiting wisp's next hum.
     hums: HashMap<NetId, f32>,
+    /// Your slab shattered: not drawn again until you let go (your predicted hold lasts until
+    /// the server's correction).
+    own_broke: bool,
     // This frame's draws.
     bolas: Vec<(Vec3, Vec3, f32)>,
     kites: Vec<(Vec3, Vec3, f32)>,
@@ -220,6 +223,9 @@ impl GearView {
                     if broke {
                         bulwark::shatter(f.effects, f.beams, f.audio, f.rng, root);
                         self.net.slabs.remove(&id);
+                        if Some(id) == n.local {
+                            self.net.own_broke = true;
+                        }
                     } else {
                         let cracked = bulwark::crack_stage(absorbed) > bulwark::crack_stage(seen);
                         bulwark::absorb(f.effects, f.audio, f.rng, at, normal, cracked);
@@ -452,7 +458,11 @@ impl GearView {
         }
         // Yours: up while the Bulwark is held (predicted), its strength the server's.
         let w = n.weapons;
-        if !n.dead && w.charge > 0 && w.ability() == Ability::Bulwark {
+        let holding = !n.dead && w.charge > 0 && w.ability() == Ability::Bulwark;
+        if !holding {
+            self.net.own_broke = false;
+        }
+        if holding && !self.net.own_broke {
             let strength = n
                 .own
                 .filter(|e| e.flags & player_flags::GUARDING != 0)
