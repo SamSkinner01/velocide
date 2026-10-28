@@ -408,17 +408,16 @@ impl KindleView {
         self.staged_haste = false;
     }
 
-    /// Your haste 0..1 of its time left: the server's prediction when the movement state carries
-    /// it (`predicted`: seconds left, total), else the timer started by the drink, held while
-    /// the `HASTE` flag (`flag`) says so; a timer the server never confirmed is dropped after
-    /// its first moments.
+    /// Your haste 0..1 of its time left. The movement state's haste (`predicted`: seconds left,
+    /// total) once the server has set it; before that (it learns of it a round trip after the
+    /// drink, like the Pinned slow) the timer started by the drink, held while the `HASTE` flag
+    /// (`flag`) says so; a timer the server never confirms is dropped after its first moments.
     pub fn strength(&self, flag: bool, predicted: Option<(f32, f32)>) -> f32 {
-        if let Some((left, total)) = predicted {
-            return if left > 0.0 && total > 0.0 {
-                (left / total).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+        if let Some((left, total)) = predicted
+            && left > 0.0
+            && total > 0.0
+        {
+            return (left / total).clamp(0.0, 1.0);
         }
         let own = if self.haste.0 > 0.0 {
             self.haste.0 / self.haste.1.max(0.01)
@@ -706,9 +705,11 @@ mod tests {
         k.haste = (2.5, 5.0);
         assert_eq!(k.strength(false, None), 0.0, "never confirmed");
         assert!((k.strength(true, None) - 0.5).abs() < 1e-6);
-        // The movement state's prediction wins when there is one.
+        // The movement state's haste wins once there is one; until then the drink's timer.
         assert!((k.strength(false, Some((1.0, 4.0))) - 0.25).abs() < 1e-6);
-        assert_eq!(k.strength(true, Some((0.0, 4.0))), 0.0);
+        assert!((k.strength(true, Some((0.0, 4.0))) - 0.5).abs() < 1e-6);
+        k.haste = (0.0, 5.0);
+        assert_eq!(k.strength(false, Some((0.0, 4.0))), 0.0);
         assert_eq!(haste_fov(0.0), 0.0);
         assert_eq!(haste_fov(f32::NAN), 0.0);
         assert!((haste_fov(0.6) - HASTE_FOV).abs() < 1e-6);

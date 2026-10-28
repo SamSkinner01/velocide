@@ -1084,6 +1084,7 @@ fn gear_previews(h: &mut Harness, game: &mut InGame) {
         let thorn = ahead(4.5, -3.2 + k as f32 * 0.3) + Vec3::Y * 1.2;
         game.preview_gear(G::Relay {
             attack,
+            turned: attack == Attack::Riveter,
             from: eye - Vec3::Y * 0.2 + right * 0.2,
             thorn,
             to: target,

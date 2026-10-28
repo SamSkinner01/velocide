@@ -1,6 +1,7 @@
 //! Thorns relaying every weapon (docs/rework.md §4, area **client-b**): the first player
-//! attack that reaches a live thorn shatters it and is relayed at the nearest hostile. How it
-//! looks depends on what reached the thorn ([`Relayed`]):
+//! attack that reaches a live thorn shatters it and is relayed at the nearest hostile
+//! (`Fx::Ricochet`; `projectile` set when a projectile turned there). How it looks depends on
+//! what reached the thorn ([`Relayed`]):
 //!
 //! * **A ray** (any hitscan, a pellet): the ray ricochets on through the thorns in the
 //!   attack's own tracer colour, brighter and wider each bounce, each thorn shattering with
@@ -19,7 +20,8 @@ use engine::audio::{PlayParams, Sfx};
 use glam::{Vec2, Vec3, Vec4};
 use shared::sim::Attack;
 
-use super::super::effects::{FxTex, Particle};
+use super::super::effects::{Effects, FxTex, Particle};
+use super::Rng;
 use super::fx::{FxCtx, thorn_shatter};
 
 /// What reached the thorn, for its look.
@@ -33,25 +35,33 @@ pub enum Relayed {
     Blast,
 }
 
-/// The relay's look for `attack` (rays by default: every hitscan primary and ability).
-pub fn relayed(attack: Attack) -> Relayed {
+/// The relay's look for `attack` (`turned`: a projectile turned at the thorn): a swing batted
+/// it, a cone, a nova or an explosion (a bomb's, a rocket's, a charge's) flung it, else it was
+/// a ray (every hitscan primary and ability, each pellet and zap).
+pub fn relayed(attack: Attack, turned: bool) -> Relayed {
+    if turned {
+        return Relayed::Projectile;
+    }
     match attack {
-        Attack::Tumble
+        Attack::Trimmer
+        | Attack::Tamper
+        | Attack::Lunge
+        | Attack::Whirl
+        | Attack::Fist
+        | Attack::Hurl => Relayed::Blow,
+        Attack::Kiln
+        | Attack::Discharge
+        | Attack::Breach
+        | Attack::Gust
+        | Attack::Slam
+        | Attack::Tumble
         | Attack::Gravewell
-        | Attack::Riveter
         | Attack::Cinderbox
+        | Attack::Limpet
+        | Attack::Riveter
         | Attack::Longwick
         | Attack::PinningArrow
-        | Attack::Limpet
-        | Attack::Flak
-        | Attack::Hurl
-        | Attack::Thorn => Relayed::Projectile,
-        Attack::Trimmer | Attack::Tamper | Attack::Lunge | Attack::Whirl | Attack::Fist => {
-            Relayed::Blow
-        }
-        Attack::Kiln | Attack::Discharge | Attack::Breach | Attack::Gust | Attack::Slam => {
-            Relayed::Blast
-        }
+        | Attack::Thorn => Relayed::Blast,
         _ => Relayed::Ray,
     }
 }
@@ -64,13 +74,14 @@ fn glass(k: f32, a: f32) -> Vec4 {
 /// The gold of a relay, for mixing into an attack's own colour.
 const RELAY_GOLD: Vec4 = Vec4::new(1.6, 1.5, 0.9, 0.95);
 
-/// Plays a relay through `points` (each thorn it passed, then where it ended) of `attack`.
-pub fn play(ctx: &mut FxCtx, attack: Attack, points: &[Vec3]) {
-    match relayed(attack) {
+/// Plays a relay through `points` (each thorn it passed, then where it ended) of `attack`
+/// (`turned`: a projectile turned at the first thorn, heading for the last point).
+pub fn play(ctx: &mut FxCtx, attack: Attack, turned: bool, points: &[Vec3]) {
+    match relayed(attack, turned) {
         Relayed::Ray => ray(ctx, attack, points),
         Relayed::Projectile => {
-            for w in points.windows(2) {
-                turn(ctx, attack, w[0], w[1]);
+            if let (Some(&at), Some(&to)) = (points.first(), points.last()) {
+                turn(ctx, attack, at, to);
             }
         }
         kind @ (Relayed::Blow | Relayed::Blast) => {
@@ -149,6 +160,27 @@ pub fn turn(ctx: &mut FxCtx, attack: Attack, at: Vec3, to: Vec3) {
     ctx.audio.play(Sfx::ThornTurn, PlayParams::at(at));
 }
 
+/// A projectile flying on from a thorn (its `RELAYED` flag) this frame: glass glinting off it
+/// all the way to its target, so the turned shot reads as the thorn's.
+pub fn relayed_glint(effects: &mut Effects, rng: &mut Rng, position: Vec3, dt: f32) {
+    effects.billboard(position, 0.45, glass(1.2, 0.5), FxTex::Glow, 0.0);
+    if rng.unit() < dt * 40.0 {
+        effects.spawn(Particle {
+            position: position + rng.dir() * 0.08,
+            velocity: rng.dir() * 0.6,
+            max_life: 0.3,
+            size: Vec2::splat(0.06),
+            color: glass(1.6, 1.0),
+            end_alpha: 0.0,
+            texture: FxTex::Shard,
+            additive: true,
+            rotation: rng.angle(),
+            spin: rng.range(-10.0, 10.0),
+            ..Default::default()
+        });
+    }
+}
+
 /// The thorn at `at` batted at `to` by a blow or a blast (`i`: its place in a chain): a glass
 /// spear streaking there with a trail of shards, a hit at the far end, the sound.
 pub fn bat(ctx: &mut FxCtx, kind: Relayed, at: Vec3, to: Vec3, i: usize) {
@@ -197,13 +229,15 @@ mod tests {
 
     #[test]
     fn every_kind_of_attack_relays_its_own_way() {
-        assert_eq!(relayed(Attack::Quill), Relayed::Ray);
-        assert_eq!(relayed(Attack::Blast), Relayed::Ray);
-        assert_eq!(relayed(Attack::Thresher), Relayed::Ray);
-        assert_eq!(relayed(Attack::Riveter), Relayed::Projectile);
-        assert_eq!(relayed(Attack::Longwick), Relayed::Projectile);
-        assert_eq!(relayed(Attack::Hurl), Relayed::Projectile);
-        assert_eq!(relayed(Attack::Trimmer), Relayed::Blow);
-        assert_eq!(relayed(Attack::Kiln), Relayed::Blast);
+        assert_eq!(relayed(Attack::Quill, false), Relayed::Ray);
+        assert_eq!(relayed(Attack::Blast, false), Relayed::Ray);
+        assert_eq!(relayed(Attack::Thresher, false), Relayed::Ray);
+        assert_eq!(relayed(Attack::Riveter, true), Relayed::Projectile);
+        assert_eq!(relayed(Attack::Longwick, true), Relayed::Projectile);
+        assert_eq!(relayed(Attack::Hurl, true), Relayed::Projectile);
+        assert_eq!(relayed(Attack::Trimmer, false), Relayed::Blow);
+        assert_eq!(relayed(Attack::Kiln, false), Relayed::Blast);
+        // A bomb going off with a thorn in its radius flings it.
+        assert_eq!(relayed(Attack::Tumble, false), Relayed::Blast);
     }
 }

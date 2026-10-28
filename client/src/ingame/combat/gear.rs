@@ -79,9 +79,11 @@ pub enum GearPreview {
         steer_for: f32,
         seconds: f32,
     },
-    /// `attack` fired from `from` reaching a thorn at `thorn`, relayed at `to`.
+    /// `attack` fired from `from` reaching a thorn at `thorn`, relayed at `to` (`turned`: a
+    /// projectile turning there).
     Relay {
         attack: Attack,
+        turned: bool,
         from: Vec3,
         thorn: Vec3,
         to: Vec3,
@@ -173,6 +175,7 @@ struct Flyer {
 #[derive(Clone, Copy, Debug)]
 struct Incoming {
     attack: Attack,
+    turned: bool,
     from: Vec3,
     thorn: Vec3,
     to: Vec3,
@@ -182,7 +185,7 @@ struct Incoming {
 /// What waits for an `FxCtx` (played after the update).
 #[derive(Clone, Copy, Debug)]
 enum Pending {
-    Relay(Attack, Vec3, Vec3),
+    Relay(Attack, bool, Vec3, Vec3),
     KiteBurst(Vec3),
     WispPop(Vec3),
 }
@@ -362,11 +365,13 @@ impl GearView {
             }
             GearPreview::Relay {
                 attack,
+                turned,
                 from,
                 thorn,
                 to,
             } => self.incoming.push(Incoming {
                 attack,
+                turned,
                 from,
                 thorn,
                 to,
@@ -390,7 +395,7 @@ impl GearView {
         // Relays: the incoming attack reaches its thorn, then the relay plays.
         for r in &mut self.incoming {
             if r.age == 0.0 {
-                match relay::relayed(r.attack) {
+                match relay::relayed(r.attack, r.turned) {
                     relay::Relayed::Ray => {
                         let style = super::attack_style(r.attack);
                         f.beams.beam(
@@ -410,7 +415,8 @@ impl GearView {
             }
             r.age += dt;
             if r.age >= 0.05 {
-                self.pending.push(Pending::Relay(r.attack, r.thorn, r.to));
+                self.pending
+                    .push(Pending::Relay(r.attack, r.turned, r.thorn, r.to));
                 r.age = f32::INFINITY;
             }
         }
@@ -698,7 +704,9 @@ impl GearView {
     pub fn play_pending(&mut self, ctx: &mut FxCtx) {
         for p in std::mem::take(&mut self.pending) {
             match p {
-                Pending::Relay(attack, thorn, to) => relay::play(ctx, attack, &[thorn, to]),
+                Pending::Relay(attack, turned, thorn, to) => {
+                    relay::play(ctx, attack, turned, &[thorn, to])
+                }
                 Pending::KiteBurst(at) => kite::burst(ctx, at, 4.5),
                 Pending::WispPop(at) => super::fx::explosion(ctx, at, 4.0, Attack::Wisp, true),
             }
