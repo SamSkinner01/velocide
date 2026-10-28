@@ -974,9 +974,20 @@ impl InGame {
                         camera.punch(style.punch);
                         // A stoked weapon's shot throws embers off the muzzle (stoke.rs).
                         if combat.gear.heat().stoked.is_some()
-                            && matches!(intent, FireIntent::Primary { .. })
+                            && let FireIntent::Primary { weapon, .. } = intent
                         {
                             stoke::stoked_shot(effects, &mut combat.rng, muzzle, aim);
+                            // A stoked Kiln reaches further (`stoke.kiln_reach`).
+                            if *weapon == shared::loadout::WeaponKind::Kiln {
+                                arsenal::kiln_spray(
+                                    effects,
+                                    &mut combat.rng,
+                                    muzzle,
+                                    aim,
+                                    t.kiln.range * t.stoke.kiln_reach,
+                                    t.kiln.cone_degrees * 0.8,
+                                );
+                            }
                         }
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();

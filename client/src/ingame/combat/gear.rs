@@ -918,6 +918,7 @@ impl InGame {
             weapons: combat.predictor.state(),
             dead: net.own_combat().is_some_and(|c| c.combat.dead),
             remote,
+            movement: &net.tuning().movement,
         };
         combat.gear.update_net(&gear, &mut frame);
         let (glow, body) = stoke::heat_tint(&combat.gear.heat, combat.gear.time);

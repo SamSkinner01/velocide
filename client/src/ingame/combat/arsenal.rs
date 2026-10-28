@@ -1390,15 +1390,16 @@ impl ArsenalView {
 /// The statuses a replicated enemy or player shows (its `BURNING` / `PINNED` flags).
 pub fn replicated_statuses(e: &EntityState) -> impl Iterator<Item = Status> + use<> {
     use shared::protocol::{enemy_flags, player_flags};
+    // A Bolas's bind pins too: it shows as its cord (gear.rs), not the arrow's shackles.
     let (burning, pinned) = if e.kind == kind::PLAYER {
         (
             e.flags & player_flags::BURNING != 0,
-            e.flags & player_flags::PINNED != 0,
+            e.flags & player_flags::PINNED != 0 && e.flags & player_flags::BOUND == 0,
         )
     } else if kind::is_enemy(e.kind) {
         (
             e.flags & enemy_flags::BURNING != 0,
-            e.flags & enemy_flags::PINNED != 0,
+            e.flags & enemy_flags::PINNED != 0 && e.flags & enemy_flags::BOUND == 0,
         )
     } else {
         (false, false)

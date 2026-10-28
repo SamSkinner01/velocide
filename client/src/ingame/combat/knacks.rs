@@ -43,9 +43,9 @@ use crate::models::{ModelId, ModelLibrary, Tint, knacks as props};
 
 pub use shared::loadout::Knack;
 
-/// How long the Kindle Flask's haste lasts (`kindle::HASTE_TIME` until the tuning says).
-fn haste_time(_t: &CombatTuning) -> f32 {
-    super::kindle::HASTE_TIME
+/// How long the Kindle Flask's haste lasts.
+fn haste_time(t: &CombatTuning) -> f32 {
+    t.knacks.kindle_flask.haste_time
 }
 
 // ---------------------------------------------------------------------------------------------

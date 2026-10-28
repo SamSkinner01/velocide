@@ -1540,7 +1540,8 @@ fn gear_use_shots(h: &mut Harness, game: &mut InGame) {
     spawn(game, 3);
     h.frames(game, 90, still);
 
-    // A Lantern tossed ahead.
+    // A Lantern tossed ahead (the Stoke's cooldown is the slot's: ready it).
+    game.send_chat("/give");
     select(game, 1, 1);
     h.frames(game, 20, |g, _| {
         aim_mould(g);
@@ -1563,14 +1564,24 @@ fn gear_use_shots(h: &mut Harness, game: &mut InGame) {
     });
     game.controls.yaw += 0.5;
     game.controls.pitch += 0.1;
-    h.frames(game, 30, |g, _| {
+    h.frames(game, 14, |g, _| {
         g.controls.yaw -= 0.015;
         hold(g, Buttons::ALT_FIRE)
     });
     h.shot("gear_use_kite");
+    h.frames(game, 16, |g, _| {
+        g.controls.yaw -= 0.015;
+        hold(g, Buttons::ALT_FIRE)
+    });
+    h.shot("gear_use_kite_late");
     h.frames(game, 60, still);
 
-    // A Bolas thrown at the Moulds.
+    // A Bolas thrown at fresh Moulds (two close together get the cord between them), once
+    // the lantern has burnt out.
+    h.frames(game, 240, still);
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 90, still);
     select(game, 3, 0);
     h.frames(game, 20, |g, _| {
         aim_mould(g);
@@ -1585,6 +1596,7 @@ fn gear_use_shots(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 60, still);
 
     // The Wisp orbiting you, then flung.
+    game.send_chat("/give");
     game.send_chat("/loadout arclash:wisp,discharge");
     h.frames(game, 20, |g, _| {
         aim_mould(g);

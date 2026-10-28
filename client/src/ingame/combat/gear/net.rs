@@ -99,6 +99,8 @@ pub struct NetGear<'a> {
     pub dead: bool,
     /// Others' drawn muzzles (their stoked weapons' embers).
     pub remote: &'a RemotePlayers,
+    /// Eye heights (others' slabs).
+    pub movement: &'a shared::tuning::MovementTuning,
 }
 
 /// A body for the cords: feet, height, radius.
@@ -122,14 +124,15 @@ fn bound(e: &EntityState) -> bool {
     }
 }
 
-/// A player's eye (`LOW_PROFILE`: sliding, lower), drawn [`REMOTE_SCALE`] larger.
-fn eye_of(e: &EntityState) -> Vec3 {
+/// A player's eye as the server has it (`LOW_PROFILE`: sliding, lower): their slab stands
+/// where shots stop, not where the larger-drawn Shrike's eye would be.
+fn eye_of(e: &EntityState, t: &shared::tuning::MovementTuning) -> Vec3 {
     let h = if e.flags & player_flags::LOW_PROFILE != 0 {
-        0.85
+        t.slide_eye_height
     } else {
-        1.6
+        t.eye_height
     };
-    e.position + Vec3::Y * h * REMOTE_SCALE
+    e.position + Vec3::Y * h
 }
 
 impl GearView {
@@ -162,7 +165,7 @@ impl GearView {
         }
         let e = n.frame.entities.iter().find(|e| e.id == player)?;
         Some(bulwark::slab_transform_for(
-            eye_of(e),
+            eye_of(e, n.movement),
             e.yaw,
             e.pitch,
             &n.frame.tuning.bulwark,
@@ -315,6 +318,10 @@ impl GearView {
             let vel = replicated_velocity(e, at, rate, t);
             let age = ((at - e.aux as f64) / rate as f64) as f32;
             let own = Some(e.owner) == n.frame.local_owner;
+            // Turned at a thorn: glass glinting off it all the way to its target.
+            if e.flags & projectile_flags::RELAYED != 0 {
+                super::relay::relayed_glint(f.effects, f.rng, pos, dt);
+            }
             match e.kind {
                 kind::BOLAS => {
                     bolas::flight_trail(f.effects, f.rng, pos, age, dt);
@@ -425,7 +432,12 @@ impl GearView {
             if e.kind == kind::PLAYER && Some(e.id) != n.local {
                 let (_, ability, level) = player_weapon(e.state);
                 if e.flags & player_flags::GUARDING != 0 && ability == Ability::Bulwark {
-                    let root = bulwark::slab_transform_for(eye_of(e), e.yaw, e.pitch, bulwark_t);
+                    let root = bulwark::slab_transform_for(
+                        eye_of(e, n.movement),
+                        e.yaw,
+                        e.pitch,
+                        bulwark_t,
+                    );
                     let strength = ((e.aux >> 12) & 0xF) as f32 / 15.0;
                     slabs_now.push((
                         e.id,
