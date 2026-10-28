@@ -1602,7 +1602,7 @@ impl InGame {
         // Your Tallow Skin's sheen, the Surge's speed lines (knacks.rs).
         let c = engine::ui::Rect::from_min_size(glam::Vec2::ZERO, list.canvas_size);
         if !dead {
-            let rush = self.combat.melee.rush();
+            let rush = self.combat.melee.rush().max(self.combat.tricks.rush());
             self.combat.knacks.hud(list, c, tallow, rush, now);
         }
     }

@@ -238,6 +238,14 @@ impl Prediction {
             self.render_offset = Vec3::ZERO;
         }
     }
+
+    /// Drops the correction smoothing and the tick interpolation, so the view stands at the
+    /// predicted position at once: a teleport the player meant (the Blink Arrow's step) snaps
+    /// instead of sliding there.
+    pub fn snap_view(&mut self) {
+        self.render_offset = Vec3::ZERO;
+        self.prev_position = self.current.position;
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +369,29 @@ mod tests {
         assert!(c.snapped);
         assert_eq!(p.render_offset(), Vec3::ZERO);
         assert_eq!(p.render_position(0.0), teleported.position);
+    }
+
+    #[test]
+    fn a_meant_step_snaps_the_view_even_when_short() {
+        // A Blink Arrow's step under the snap distance would be smoothed like a correction;
+        // `snap_view` puts the view there at once.
+        let w = world();
+        let t = Tuning::default();
+        let start = MoveState::spawn(Vec3::ZERO);
+        let mut p = Prediction::new(0, start);
+        for seq in 1..=10 {
+            p.apply(input(seq), &w.move_env(), &t.movement, w.dt());
+        }
+        let stepped = MoveState::spawn(Vec3::new(1.5, 0.0, -1.0));
+        let c = p
+            .reconcile(10, &stepped, &w.move_env(), &t.movement, &t.net, w.dt())
+            .unwrap();
+        assert!(!c.snapped && p.render_offset().length() > 1.0);
+        p.snap_view();
+        assert_eq!(p.render_offset(), Vec3::ZERO);
+        for alpha in [0.0, 0.5, 1.0] {
+            assert_eq!(p.render_position(alpha), stepped.position);
+        }
     }
 
     #[test]

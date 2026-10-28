@@ -117,6 +117,9 @@ pub struct Tricks {
     /// The Lamplighter is in hand (or a preview holds its focus): its scope shows as the view
     /// zooms (another weapon's zoom, the bow's, has no vignette).
     pub scoped: bool,
+    /// Your own zip or step (Wickline, Blink Arrow): seconds left of its speed lines and their
+    /// length.
+    rush: (f32, f32),
     staged: Vec<Staged>,
     /// Previews waiting for the next update.
     pending: Vec<TrickPreview>,
@@ -177,6 +180,21 @@ impl Tricks {
         });
     }
 
+    /// You were yanked or stepped somewhere: the HUD's speed lines for `seconds`.
+    pub fn rush_for(&mut self, seconds: f32) {
+        self.rush = (seconds, seconds);
+    }
+
+    /// Your zip's / step's rush (1 = just started → 0), for the HUD's speed lines (with the
+    /// Lunge's and the Surge's: `knacks::KnackView::hud`).
+    pub fn rush(&self) -> f32 {
+        if self.rush.0 > 0.0 {
+            self.rush.0 / self.rush.1.max(0.01)
+        } else {
+            0.0
+        }
+    }
+
     /// The local focus a preview holds (the caller zooms with it).
     pub fn staged_focus(&self) -> Option<f32> {
         self.staged.iter().find_map(|s| match s.preview {
@@ -197,6 +215,7 @@ impl Tricks {
         dt: f32,
     ) {
         self.time += dt.max(0.0) as f64;
+        self.rush.0 = (self.rush.0 - dt.max(0.0)).max(0.0);
         for p in std::mem::take(&mut self.pending) {
             self.preview(p, effects, beams, rng, audio);
         }

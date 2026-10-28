@@ -473,6 +473,14 @@ impl NetClient {
         self.prediction.as_ref().map(|p| p.render_position(alpha))
     }
 
+    /// Snaps the drawn local position to the predicted one (no correction smoothing): a step
+    /// the player meant, such as the Blink Arrow's (`Prediction::snap_view`).
+    pub fn snap_view(&mut self) {
+        if let Some(p) = self.prediction.as_mut() {
+            p.snap_view();
+        }
+    }
+
     /// Latest authoritative state of the local player.
     pub fn server_state(&self) -> Option<&MoveState> {
         self.prediction.as_ref().map(Prediction::server_state)
