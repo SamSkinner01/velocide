@@ -36,7 +36,7 @@ use super::projectiles::{Projectile, ProjectileKind, projectile_target_pad};
 use super::trail::Trail;
 use super::{HitTarget, Hitbox, PlayerId, SimEvent, SimWorld};
 use crate::input::PlayerInput;
-use crate::protocol::{EntityState, NetId, kind, thorn_flags};
+use crate::protocol::{EntityState, NetId, kind, projectile_flags, thorn_flags};
 use crate::tuning::Tuning;
 
 /// What a thorn is doing.
@@ -464,9 +464,11 @@ impl SimWorld {
         world_f: f32,
         boxes: &[Hitbox],
     ) -> bool {
+        // (An orbiting Wisp circles its owner: it reaches nothing.)
         if self.thorns.is_empty()
             || !matches!(p.owner, Owner::Player(_))
             || !p.kind.relays_off_thorns()
+            || p.ability_flags & projectile_flags::ORBITING != 0
         {
             return false;
         }
