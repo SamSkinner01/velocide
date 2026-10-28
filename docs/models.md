@@ -128,6 +128,7 @@ changes, so the standard look keeps each model's own glow colours.
 | `on_ground`, `sliding`, `dashing`, `slamming`, `wall_cling: Option<normal>` | movement state (priority: slide > slam > dash > wall > air > ground) |
 | `firing` | recoil 0..1 (1 on the shot, decay over ~0.2 s) |
 | `punching` | punch progress 0..1 (left arm thrust; fast out in the first 25 %) |
+| `drinking` | Kindle Flask drink progress 0..1 (`weapons::drink`, 0.75 s): the left hand comes up to the mask with the flask in it (`draw_shrike` draws it, unstoppered), the head tips back as it is drained |
 | `downed`, `dead` | kneeling with a guttering wick / flat on its back, wick snuffed (flame hidden, eye slits dark, a dull smoulder) |
 | `time` | seconds (idle breathing, the wick's flicker: flame height, eye slits) |
 | `weapon` | the held weapon's wire id (`shared::loadout::WeaponKind`: 0 Quill, 1 Bellows, 2 Arclash, 3 Tumbler, 4 Lancet, 5 Thresher, 6 Riveter, 7 Cinderbox, 8 Longwick, 9 Kiln, 10 Trimmer, 11 Tamper; `weapons::two_handed`: the Quill and Lancet are one-handed) |
@@ -152,7 +153,8 @@ changes, so the standard look keeps each model's own glow colours.
 | `throw_item` | what the left hand throws (`None` = a Thorn; a knack's flask / snare / pot model) |
 | `switch` | 0 (just switched, below the screen) → 1 (raised); animate over ~0.12 s |
 | `punch` | punch progress 0..1: the left fist thrusts in from the lower left; knuckle studs flare |
-| `throw` | throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles (or the knack's flask / pot cupped on the fist, the snare's disc edge-on), flicks it at ~0.5 |
+| `throw` | throw progress 0..1: the left hand rises with a thorn held point-forward between the knuckles (or the knack's pot cupped on the fist, the snare's disc edge-on), flicks it at ~0.5 |
+| `drink` | Kindle Flask drink progress 0..1 (`weapons::drink`, `DRINK_TIME` 0.75 s): the left fist brings the flask up from below the screen into the lower middle (placed in view space beside the fist, `drink::flask`), its stopper pulled (hidden) as it comes up, tips it back about the view's X until the neck points at the mouth while the kindling flares and drains (`flask_glow`), then drops away to the lower left; the gun dips like a punch's (`drink::lowering`); a melee weapon's left half is put away |
 | `bob_phase`, `bob_amount` | walk bob (advance phase by ~speed × 1.2 rad/s; amount = ground speed / run speed) |
 | `sway` | smoothed look velocity (rad/s); the weapon lags |
 | `spin` | Tumbler / Thresher drum angle — keep a `DrumTurn` per local player: `drum.kick()` on every Tumbler or Thresher shot, `drum.update(dt)` every frame, `spin = drum.angle()` (one chamber = `DrumTurn::STEP`, eased in with ~10 % overshoot; the Thresher's six shell windows have the same spacing) |
@@ -174,9 +176,9 @@ players until the replicated state carries their ability and draw).
 | class | ability colours (`ability_color`) |
 |---|---|
 | Precision | Brand crimson, Splinter ice, Skewer white-gold, Flurry mint |
-| Scatter | Gust sky, Both Barrels orange, Slug brass, Flak rose |
-| Rapid | Wisp violet, Discharge blue, Volley amber, Flare signal red |
-| Explosive | Breach orange-red, Gravewell green, Limpet yellow, Mortar lilac |
+| Scatter | Gust sky, Bolas cord orange, Bulwark pale honey, Flak rose (`gear::BOLAS_COLOR`, `BULWARK_COLOR`) |
+| Rapid | Wisp violet, Discharge blue, Stoke forge red, Lantern lamplight gold (`gear::STOKE_COLOR`, `LANTERN_COLOR`) |
+| Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite rose (`gear::KITE_COLOR`) |
 | Draw | Brand crimson, Triple Nock lime, Pinning Arrow steel blue, Ember Arrow ember |
 | Melee | Lunge cyan, Whirl amber, Hurl violet, Upswing lime |
 
@@ -275,8 +277,9 @@ pelvis / robe / body squashes towards the floor; heads, braziers and doors fall 
 | left fist (1st person) | `vm_fist.gltf` | forearm (wraps, brass bracer, cuff), fist (glove, brass knuckle plate), trim *Team* (cords), knuckles *TeamGlow* (ember studs, flare with the wick's colour on the punch) |
 | player projectiles | `proj_bomb/gravewell/wisp/thorn.gltf` (`models::projectiles`) | `body` + `glow` (bomb: studded iron ball, orange fuse band; gravewell: canister with green core rings and front clamp claws); wisp: `core` + `tendrils` + `halo` (translucent); thorn: `glass` *Core* (translucent) + `core` *Glow* (amber core line) + `collar` (brass fletching), ~0.64 m, tip `THORN_TIP` = 0.22 m in front of the origin |
 | arsenal projectiles | `proj_arrow/arrow_pinning/arrow_ember/rivet/cinder_rocket/flak_shell/limpet/mortar_shell/flare.gltf` | `body` + `glow`, all flying along -Z: taper arrow (wax shaft, red cock vane, iron head, the taper's flame behind it, ~0.72 m), pinning arrow (dark shaft, barbed steel head, chain, steel-blue rings), ember arrow (iron cage round a bulb of coals), rivet (red-hot, domed head at the back), cinder rocket (clay casing, brass nose, fins, cinder exhaust), flak shell (brass case, rose timer band, ring of pellet tips), limpet (iron dome on four claws facing -Z, a lamp to blink), mortar shell (fat iron teardrop, tail fins, lilac bands, fuse nose), flare (brass-capped tube, sputtering flame head) |
-| knacks (`models::knacks`) | `prop_kindle_flask/snare/soot_pot.gltf` | flask: `body` (brass cage, wax stopper, sling) + `glass` (translucent belly) + `embers` *Glow* (kindling inside); snare (~0.9 m wax trap on the floor): `base` (poured wax disc, brass ring, hinges) + `jaw_r` / `jaw_l` (toothed brass half hoops, open flat; `knacks::snare_pose(armed, sprung, time)` snaps them up past upright) + `lamp` *Glow* (the wick lamp: dull arming, pulsing armed, flashing sprung); soot pot: `body` (black clay, cord net, rag) + `fuse` *Glow* |
+| knacks (`models::knacks`) | `prop_kindle_flask/snare/soot_pot.gltf` | flask: `body` (brass cage, sling) + `glass` (translucent belly) + `embers` *Glow* (kindling inside) + `stopper` (wax, hidden while it is drunk, `knacks::FLASK_STOPPER`); snare (~0.9 m wax trap on the floor): `base` (poured wax disc, brass ring, hinges) + `jaw_r` / `jaw_l` (toothed brass half hoops, open flat; `knacks::snare_pose(armed, sprung, time)` snaps them up past upright) + `lamp` *Glow* (the wick lamp: dull arming, pulsing armed, flashing sprung); soot pot: `body` (black clay, cord net, rag) + `fuse` *Glow* |
 | enemy projectiles / fx | `proj_ember_bomb/needle.gltf`, `fx_ember_core.gltf`, `fx_aim_laser.gltf` | `shell` + `cracks` *Glow* (ember bomb, a 0.3 m slag ball with glowing seams); `shaft` + `glow` *Glow* (needle, 0.95 m, white-hot point, red fletch); `core` (ember core: a white-hot coal with glowing shards); `core` + `sheath` (translucent) *Glow* (aim laser: a unit beam 1 m along -Z, scaled to width × width × length and tinted through `Tint::glow`; the Heron's laser and needle streaks) |
+| ability gear (`models::gear`, docs/rework.md) | `proj_bolas.gltf`, `prop_bulwark.gltf`, `prop_lantern.gltf`, `proj_kite.gltf` | bolas (~0.8 m): `balls` (two red sealing-wax weights on lead, brass caps, set drips; ±`BOLAS_REACH` on X) + `cord` *Core* (a braided wick bowed back, embers in it); bulwark (2.2 × 1.8 × 0.1 m, `BULWARK_SIZE`, bowed 0.14 m forward, origin at its centre, face −Z): `slab` (translucent honey wax lofted across eight stave rings, top corners cut, drips at its foot) + `heart` *Core* (a faint glow through the middle, translucent) + `frame` (brass bands riveted front and back, two iron grips behind) + `rim` *Glow* (the wick round the front's edge) + `crack_0..2` *Glow* (flat jagged runs on both faces; `gear::bulwark_pose(absorbed, flash, left, time)` shows them from ¼, 0.55, 0.8 and flares rim and heart on a blow); lantern (~0.6 m, origin on the floor, faces −Z): `base` (three splayed iron feet, brass plate and column) + `head` (hexagonal brass cage, pointed roof with vents and a ring, the taper, the lens snout; turns about `LANTERN_PIVOT`) + `glass` (translucent panes) + `flame` *Core* (flickers in height about the wick, gutters out) + `lens` *Glow* (the carrier's colour; `LANTERN_MUZZLE`): `gear::lantern_pose(yaw, pitch, kick, color, left, time)`; kite (~0.9 m, flies −Z, sail level): `frame` (cane spars, brass ferrules) + `sail` (red oiled paper in a shallow V, a darker ring) + `ember` *Glow* (smouldering edges, the heart at `KITE_HEART`) + `tail` (ochre ribbon bows) |
 | props | `prop_jump_pad/checkpoint/exit_gate/door.gltf` | jump pad: base, rim, glow; checkpoint: base, lamp, halo; exit gate: frame, portal (translucent), lights *Core*; door: frame, panel_l, panel_r, light |
 | hub props (`models::hub`) | `prop_ready_board.gltf`, `prop_console.gltf` | placed by the Vestry as level props: the ready board (frame, slate, brass header plate + candle sconces; 6 × 3.4 m, the client writes on the slate: `hub::board`), the practice console (stone lectern with a slanted desk, a summoning bell and a lever, panel *Glow*; a sign board: `hub::console`) |
 
@@ -344,7 +347,11 @@ tube, Longwick rest / half / full draw / release, Kiln rest / spraying / Dischar
 blade, the slam's wind / fall / impact / recovery, Lunge, Whirl, Hurl, Upswing),
 `melee_weapons` / `melee_weapons_34` (real scale), `melee_hurled`, `melee_3p_trimmer` /
 `melee_3p_tamper` (third person through the swings), `knack_props` (flask, pot, snare
-arming / armed / sprung), `vm_00..22` (each
+arming / armed / sprung), `gear_models` (the rework's gear at real scale), `gear_bulwark` /
+`gear_bulwark_back` / `gear_bulwark_close` (the slab's crack stages front and back, a blow
+landing), `gear_lantern` (rest, aiming, firing in the carriers' colours, guttering),
+`gear_closeup` (bolas, kite), `gear_drink_3p` and `vm_drink_0..6` (the Kindle Flask drunk in
+third and first person), `vm_00..22` (each
 weapon rest / kick / alt mode, Quill crest folding, Bellows
 pump, Arclash Discharge 40 % / full, Tumbler drum turning, switch, punch, thorn throw, bob +
 sway), `weapons` / `weapons_34` (the guns at real scale), `projectiles`, `thorns` (planted at

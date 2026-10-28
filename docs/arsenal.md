@@ -451,7 +451,7 @@ no charges.
 | knack | in the hand | in the world | you | sounds |
 |---|---|---|---|---|
 | Thorn | the thorn between the knuckles (as before) | as before | | `ThornThrow` … |
-| Kindle Flask | the flask cupped on the fist | the `KINDLE_FLASK` tumbling with kindling sparks; breaking: glass, a burst in the heal colour; the `KINDLE_POOL`: embers rising and a glowing haze in the palette's heal colour, a turning dashed rim, a warm light. Its heals (`Fx::Heal` from the pool) are a quiet trickle of kindling from the floor into the lantern, not the full kindling chime every quarter second | a faint warm flash per heal | `KnackThrow`, `FlaskShatter`, `KindlePool` (crackle while it burns) |
+| Kindle Flask | drunk, not thrown (the rework, below): the flask raised to the mask, unstoppered and tipped back | others' haste: embers off the wick, a speed trail | the haste's embers, edges and FOV kick; heal ticks | `KindleDrink`, `KindleTick`, `HasteFade` |
 | Snare | the disc held edge-on | the `SNARE` flying, then lying on the floor (`STUCK`): the wax trap with its jaws open, its wick lamp dull while it arms and pulsing once `ARMED` (in the palette's hazard colour), a dashed trigger ring for its owner; `Fx::SnareSprung`: a flash, chains whipping up, the jaws snapped shut there for a moment | | `SnareSet`, `SnareArmed`, `SnareSpring` |
 | Soot Pot | the pot cupped on the fist | the `SOOT_POT` with its fuse spitting; bursting: shards, a dark puff, a scorch; the `SOOT_CLOUD`: big, dark, near-opaque billows kept topped up over the whole sphere (~60 alive at 5 m, darker at the core), thinning over its last fifth — dense enough to hide players inside and behind it | | `SootBurst` |
 | Tallow Skin | | other Shrikes under `TALLOW` are paler and glossier with a slow glisten and drips of glinting wax | a waxy sheen at the screen's edges, tallow drips running down from the top, a glint travelling round | `TallowSkin` |
@@ -467,6 +467,58 @@ thing after `/loadout trimmer tamper knack:...` (`melee_weapon_*`, `knack_use_*`
 TIER (TRIMMER)"), the tier block shows the weapon and "A KILL TO WIN", the results name the tier
 "FINAL TRIMMER". **Controls**: the Q / gamepad North action is **KNACK** (`Action::Knack`;
 settings files that call it `ThrowThorn` or `ThrowPrism` still load).
+
+## Client: the Kindle draught, Thorn relays, the Scatter / Rapid / Explosive abilities (rework, area client-b)
+
+What you see and hear of `docs/rework.md`'s §3 (the Kindle Flask drunk), §4 (Thorns relaying
+every weapon) and the Bolas, Bulwark, Wisp's orbit, Stoke, Lantern and Kite. One file per
+thing under `client/src/ingame/combat/` (`kindle`, `relay`, `bolas`, `bulwark`, `wisp`,
+`stoke`, `lantern`, `kite`) and `gear.rs`, which ties the abilities to the frame (what lives
+across frames, your slab's bar and the heat gauge, the heat on your viewmodel). Models in
+`client/src/models/gear.rs` and `models/weapons/drink.rs` (`docs/models.md`), sounds in the
+`client-b` block at the end of `Sfx` (`docs/audio.md`).
+
+**The Kindle Flask** (`kindle.rs`). Drinking it (the predicted `FireIntent::Knack`) plays the
+drink in first person (`ViewmodelAnim::drink`: the left hand brings the flask up from below the
+screen into the lower middle, pulls the stopper, tips it back while the kindling inside flares
+and drains, and drops it away to the lower left, the gun dipping meanwhile; 0.75 s) with
+`KindleDrink`. Another player's drink (`Fx::Knack`) raises their left hand to the mask with the
+flask in it (`PlayerAnim::drinking`), their wick flares and the swig sounds at them. Your haste
+(the drink's timer, held while the server's `HASTE` flag says so; the movement state's
+`haste_time` when it carries it) shows as a 5° FOV kick eased in and out
+(`CameraRig::set_fov_boost`), embers streaming past the view as you run through them, ember
+streaks flowing out along the screen's sides (longer and faster with your speed) and a warm
+glow at its foot (`kindle::haste_hud`), the Q slot's bar draining; `HasteFade` as it runs
+out. Others' (`HASTE`, `kindle::haste_trail`): a stream of embers blown back off the chest
+wick and, moving fast, a speed trail at chest and knee height. Heal ticks are `Fx::Heal` from
+the healed player's own body (no ember burst there: `kindle::is_draught_heal`): kindling motes
+curling up round the body into the lantern, `KindleTick`, a faint warm flash for you. The
+pool, its light, its heal trickle and its sounds are gone.
+
+**Thorn relays** (`relay.rs`, `Fx::Ricochet` of any `attack`). How a relay looks depends on what
+reached the thorn (`relay::relayed`):
+
+| reached the thorn | the relay |
+|---|---|
+| a ray (any hitscan, a pellet) | the ray ricochets on in the attack's own tracer colour, warming to the relay gold and widening with each bounce (jagged for arcs), each thorn shattering with `Ricochet` rising in pitch |
+| a projectile (bomb, rivet, rocket, arrow, limpet, flak shell, hurled blade, kite, bolas) | a glass flare at the thorn, the new heading lit for a moment (a broken line fading out towards the target) and a ring, `ThornTurn`; the projectile itself flies on as drawn |
+| a blow (a swing, a lunge, a whirl, a punch) or a blast (a cone, a nova, an explosion) | the thorn batted at the target: a broad glassy spear (amber for a blast) with a white-hot core, shards strewn along it, a hit at the far end, `ThornBat` |
+
+**The abilities.**
+
+| ability | colour | in the world | you | sounds |
+|---|---|---|---|---|
+| Bolas (`bolas.rs`) | orange | `ModelId::Bolas` spinning flat about the flight, embers shaken off the cord; bound: rings of cord whipping in round the legs, then the cord wound twice round them (a smouldering spiral) with the weights hanging off it, swinging; the link: a sagging, smouldering cord between the two bound bodies' chests, a bright knot running along it when damage is carried across | | `BolasThrow`, `BolasBind`, `BolasLink`, `BolasShare` |
+| Bulwark (`bulwark.rs`) | pale honey | `ModelId::Bulwark` 1.2 m out along the aim (`bulwark::slab_transform`: its yaw, pitch within ±30°, face away from the holder): translucent wax glowing from inside, the rim's wick burning lower as its time runs out; a blow flares rim and cracks and chips wax off where it struck; the crack stages appear at ¼, 0.55 and 0.8 of what it can take; shattered: glowing chunks flung from its face, dust, a flash; lowered: it slumps away | your slab drawn more see-through; a bar under the crosshair (what it can still take, ticks at the crack stages, its time below; the warning colour, blinking and notched, below a quarter) | `BulwarkRaise`, `BulwarkAbsorb`, `BulwarkCrack`, `BulwarkShatter`, `BulwarkDrop` |
+| Wisp (`wisp.rs`) | violet | the wisp tumbling on its circle round the caller (1.6 m, chest height, 0.55 turns a second), a fading violet track of its last half turn, crackle and glow; zaps as before (`Fx::WispZap`); flung: a violet flash and arcs where it leaves the orbit, then the Wisp projectile and its pop | it sweeps through the view once a turn (a thinner track) | `WispLaunch`, `WispHum`, `WispZap`, `WispFling` |
+| Stoke (`stoke.rs`) | forge red | the stoked weapon's glow ramping from its ability colour to white-hot and its metal reddening (`stoke::heat_tint` through `Tint::glow` / `Tint::body`), embers spitting from the muzzle; spent: a dull red glow, steam jetting from the muzzle and rolling off the weapon | the same on your viewmodel (`Viewmodel::set_heat`); the heat gauge right of the crosshair: STOKED burning down in forge red, then OVERHEAT in the palette's warning colour, blinking and striped, refilling | `StokeIgnite`, `StokeVent` |
+| Lantern (`lantern.rs`) | lamplight gold | `ModelId::Lantern` tumbling, set down with dust and a glow; its cage turns and tilts to its target (`lantern::aim`), the lens in the carrier's primary colour flaring on each shot: an Arclash's jagged zap, a Riveter's rivet streak (the rivet itself is the replicated projectile), a Kiln's ember cone; a warm light round it; the taper gutters in its last fifth, then smoke (destroyed: glass and brass shards) | | `LanternSet`, the carrier's primary sound (quieter), `LanternOut` |
+| Kite (`kite.rs`) | rose | `ModelId::Kite` nose first, banking into its turns (the roll follows the heading's swing), its heart pulsing; a ribbon of its path over the last half second (brighter while steered), embers falling off; the burst: the fireball with a ring of rose embers and burning paper | | `KiteLaunch`, `KiteFlutter` (while it flies), the explosion |
+
+`InGame::preview_kindle(KindlePreview)` / `preview_gear(GearPreview)` stage any of it
+client-side for tools; `combat_shots` shoots them (`kindle_*`, `gear_*`, `relay_*`;
+`COMBAT_SHOTS=rework` stops after them) and `models_view` the models (`gear_*`,
+`vm_drink_*`).
 
 ## Tuning and balance per mode
 
