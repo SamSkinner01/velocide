@@ -555,6 +555,18 @@ pub struct BellowsTuning {
     pub interval: f32,
     /// Knockback per pellet along its ray.
     pub pellet_knockback: f32,
+    /// Random offset of each pellet from its place in the fixed pattern (degrees; the pattern's
+    /// outer ring sits on `cone_degrees`).
+    pub pattern_jitter_degrees: f32,
+    /// Point blank: a pellet that hits within `point_blank_range` m deals
+    /// × `point_blank_multiplier`, easing back to × 1 at `point_blank_end` m.
+    pub point_blank_range: f32,
+    pub point_blank_end: f32,
+    pub point_blank_multiplier: f32,
+    /// A blast landing at least this fraction of its pellets on a light Mould (base health below
+    /// `pinning_arrow.heavy_health`) staggers it for `stagger_time` s.
+    pub stagger_fraction: f32,
+    pub stagger_time: f32,
     pub gust_range: f32,
     pub gust_cone_degrees: f32,
     pub gust_damage: f32,
@@ -577,11 +589,17 @@ impl Default for BellowsTuning {
     fn default() -> Self {
         Self {
             pellets: 12,
-            pellet_damage: 8.0,
+            pellet_damage: 11.0,
             cone_degrees: 8.0,
             pellet_range: 60.0,
             interval: 0.8,
-            pellet_knockback: 2.0,
+            pellet_knockback: 1.3,
+            pattern_jitter_degrees: 0.5,
+            point_blank_range: 3.0,
+            point_blank_end: 4.0,
+            point_blank_multiplier: 1.25,
+            stagger_fraction: 0.34,
+            stagger_time: 0.35,
             gust_range: 7.0,
             gust_cone_degrees: 60.0,
             gust_damage: 6.0,
@@ -806,18 +824,36 @@ pub struct ThresherTuning {
     pub pellet_range: f32,
     pub interval: f32,
     pub pellet_knockback: f32,
+    /// Random offset of each pellet from its place in the fixed pattern (degrees; the pattern's
+    /// outer ring sits on `cone_degrees`).
+    pub pattern_jitter_degrees: f32,
+    /// Point blank: a pellet that hits within `point_blank_range` m deals
+    /// × `point_blank_multiplier`, easing back to × 1 at `point_blank_end` m.
+    pub point_blank_range: f32,
+    pub point_blank_end: f32,
+    pub point_blank_multiplier: f32,
+    /// A blast landing at least this fraction of its pellets on a light Mould (base health below
+    /// `pinning_arrow.heavy_health`) staggers it for `stagger_time` s.
+    pub stagger_fraction: f32,
+    pub stagger_time: f32,
     pub ability_power: f32,
 }
 
 impl Default for ThresherTuning {
     fn default() -> Self {
         Self {
-            pellets: 7,
-            pellet_damage: 7.5,
-            cone_degrees: 11.0,
+            pellets: 8,
+            pellet_damage: 10.0,
+            cone_degrees: 10.0,
             pellet_range: 45.0,
             interval: 0.42,
-            pellet_knockback: 1.5,
+            pellet_knockback: 0.7,
+            pattern_jitter_degrees: 0.6,
+            point_blank_range: 3.0,
+            point_blank_end: 4.0,
+            point_blank_multiplier: 1.0,
+            stagger_fraction: 0.375,
+            stagger_time: 0.2,
             ability_power: 0.9,
         }
     }
@@ -2458,13 +2494,15 @@ impl BellowsTuning {
         let d = Self::default();
         clamp_count!(self; pellets);
         clamp!(self, d, 0.0, MAX_DAMAGE; pellet_damage, gust_damage);
-        clamp!(self, d, 0.0, 180.0; cone_degrees);
+        clamp!(self, d, 0.0, 180.0; cone_degrees, pattern_jitter_degrees);
         clamp!(self, d, 0.0, 360.0; gust_cone_degrees);
-        clamp!(self, d, 0.0, MAX_DIST; pellet_range, gust_range);
-        clamp!(self, d, 0.0, MAX_TIME; interval, gust_cooldown);
+        clamp!(self, d, 0.0, MAX_DIST; pellet_range, gust_range, point_blank_range,
+            point_blank_end);
+        clamp!(self, d, 0.0, MAX_TIME; interval, gust_cooldown, stagger_time);
+        clamp!(self, d, 0.0, 1.0; stagger_fraction);
         clamp!(self, d, 0.0, MAX_SPEED; pellet_knockback, gust_knockback, gust_up, gust_recoil);
         clamp!(self, d, 0.0, MAX_MULT; ability_power, deflect_speed_multiplier,
-            deflect_damage_multiplier);
+            deflect_damage_multiplier, point_blank_multiplier);
     }
 }
 
@@ -2520,11 +2558,12 @@ impl ThresherTuning {
         let d = Self::default();
         clamp_count!(self; pellets);
         clamp!(self, d, 0.0, MAX_DAMAGE; pellet_damage);
-        clamp!(self, d, 0.0, 180.0; cone_degrees);
-        clamp!(self, d, 0.0, MAX_DIST; pellet_range);
-        clamp!(self, d, 0.0, MAX_TIME; interval);
+        clamp!(self, d, 0.0, 180.0; cone_degrees, pattern_jitter_degrees);
+        clamp!(self, d, 0.0, MAX_DIST; pellet_range, point_blank_range, point_blank_end);
+        clamp!(self, d, 0.0, MAX_TIME; interval, stagger_time);
         clamp!(self, d, 0.0, MAX_SPEED; pellet_knockback);
-        clamp!(self, d, 0.0, MAX_MULT; ability_power);
+        clamp!(self, d, 0.0, MAX_MULT; ability_power, point_blank_multiplier);
+        clamp!(self, d, 0.0, 1.0; stagger_fraction);
     }
 }
 

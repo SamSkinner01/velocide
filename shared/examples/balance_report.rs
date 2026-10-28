@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run -p shared --release --example balance_report               # everything
 //! cargo run -p shared --release --example balance_report -- primaries ttk swarm pvp oneshots
-//!     abilities knacks healing
+//!     abilities knacks healing shotguns
 //! cargo run -p shared --release --example balance_report -- --tuning path/to/tuning.ron
 //! ```
 
@@ -437,6 +437,163 @@ fn healing(base: &Tuning) {
     println!();
 }
 
+/// The weapons the play-like tables compare (melee and the Kiln's cone have no aim to miss).
+fn ranged() -> Vec<WeaponKind> {
+    weapons()
+        .into_iter()
+        .filter(|w| w.class() != WeaponClass::Melee && *w != WeaponKind::Kiln)
+        .collect()
+}
+
+fn scatter() -> [WeaponKind; 2] {
+    [WeaponKind::Bellows, WeaponKind::Thresher]
+}
+
+fn shotguns(base: &Tuning) {
+    println!("## Shotguns in play\n");
+    println!(
+        "Moulds juking across the line of fire (5 m/s, turning every 0.8 s), the crosshair \
+         0.1 s behind them (a good player tracking); endless. DPS aimed at the body / the weak \
+         point; the scatterguns add the share of their pellets that landed (body / weak \
+         point).\n"
+    );
+    let moulds = ["gnawer", "censer", "heron"];
+    let ranges = [5.0, 8.0, 12.0];
+    let cols: Vec<String> = moulds
+        .iter()
+        .flat_map(|m| ranges.map(|r| format!("{} {r:.0} m", mould_label(m, false))))
+        .collect();
+    let mut head = vec!["weapon"];
+    head.extend(cols.iter().map(String::as_str));
+    header(&head);
+    for w in ranged() {
+        let mut cells = vec![w.name().to_string()];
+        for m in moulds {
+            for r in ranges {
+                let t: Vec<Trace> = [Aim::Body, Aim::Weak(0)]
+                    .into_iter()
+                    .map(|aim| in_play(base, w.default_build(), m, r, aim, Play::STRAFE, 8.0))
+                    .collect();
+                let mut cell = format!("{} / {}", num(t[0].dps()), num(t[1].dps()));
+                if scatter().contains(&w) {
+                    cell.push_str(&format!(
+                        " ({:.0} / {:.0} %)",
+                        100.0 * t[0].landed(),
+                        100.0 * t[1].landed()
+                    ));
+                }
+                cells.push(cell);
+            }
+        }
+        row(&cells);
+    }
+    println!();
+    println!(
+        "Blast by blast, juking as above, aimed at the body: pellets landed and damage per blast \
+         (worst / mean), the blasts that staggered the Mould, and blasts to kill one at NORMAL \
+         (most / mean over 12 Moulds placed a tick apart in the juke).\n"
+    );
+    header(&[
+        "weapon",
+        "Mould",
+        "range m",
+        "pellets landed",
+        "damage",
+        "staggered",
+        "blasts to kill",
+    ]);
+    for w in scatter() {
+        for m in [
+            "gnawer",
+            "censer",
+            "snuffer",
+            "heron",
+            "harrier",
+            "bellwether",
+        ] {
+            for r in [8.0, 12.0] {
+                let t = in_play(base, w.default_build(), m, r, Aim::Body, Play::STRAFE, 8.0);
+                let landed: Vec<u32> = t.volleys.iter().map(|v| v.landed.min(v.rays)).collect();
+                let dealt: Vec<f32> = t.volleys.iter().map(|v| v.dealt).collect();
+                let n = t.volleys.len().max(1) as f32;
+                let rays = t.volleys.first().map_or(0, |v| v.rays);
+                let kills: Vec<usize> = (0..12)
+                    .map(|i| {
+                        let mut b =
+                            Bench::new(base, Side::Pve, Assume::default(), w.default_build());
+                        b.set_motion(Motion::Strafe {
+                            speed: 5.0,
+                            period: 0.8,
+                        });
+                        b.aim_lag = 0.1;
+                        b.mould_at(m, r, false, Some(mould_health(base, m, 1)));
+                        // Start the juke `i` ticks in, the crosshair already trailing.
+                        b.run_idle(i as f32 * DT + 0.1, Aim::Body);
+                        b.run(Trigger::Primary, Aim::Body, Stop::secs(6.0))
+                            .volleys
+                            .len()
+                    })
+                    .collect();
+                row(&[
+                    w.name().to_string(),
+                    mould_label(m, false),
+                    format!("{r:.0}"),
+                    format!(
+                        "{} / {:.1} of {rays}",
+                        landed.iter().min().copied().unwrap_or(0),
+                        landed.iter().sum::<u32>() as f32 / n
+                    ),
+                    format!(
+                        "{} / {}",
+                        num(dealt.iter().copied().fold(f32::INFINITY, f32::min)),
+                        num(dealt.iter().sum::<f32>() / n)
+                    ),
+                    format!("{:.0} %", 100.0 * t.stagger_rate()),
+                    format!(
+                        "{} / {:.1}",
+                        kills.iter().max().copied().unwrap_or(0),
+                        kills.iter().sum::<usize>() as f32 / kills.len() as f32
+                    ),
+                ]);
+            }
+        }
+    }
+    println!();
+    println!(
+        "A Mould running in at the shooter (its own AI), one blast at its body from 8 m \
+         (endless): how much further away it ended up, how long it was staggered, and how long \
+         until it ran at you again.\n"
+    );
+    header(&[
+        "weapon",
+        "Mould",
+        "pellets landed",
+        "pushed back m",
+        "staggered s",
+        "running again s",
+    ]);
+    for w in scatter() {
+        for m in ["gnawer", "snuffer", "smelter", "gaoler"] {
+            let Some(p) = blast_push(base, w, m, 8.0) else {
+                continue;
+            };
+            row(&[
+                w.name().to_string(),
+                mould_label(m, false),
+                format!(
+                    "{} of {}",
+                    p.volley.landed.min(p.volley.rays),
+                    p.volley.rays
+                ),
+                format!("{:.1}", p.back),
+                format!("{:.2}", p.staggered),
+                format!("{:.2}", p.recovered),
+            ]);
+        }
+    }
+    println!();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let assume = Assume::default();
@@ -486,5 +643,8 @@ fn main() {
     }
     if want("healing") {
         healing(&base);
+    }
+    if want("shotguns") {
+        shotguns(&base);
     }
 }
