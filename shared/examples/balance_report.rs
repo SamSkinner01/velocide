@@ -275,7 +275,7 @@ fn oneshots(base: &Tuning) {
     println!("## PvP one-shots: one trigger pull / one ability use (body / head)\n");
     println!(
         "Bold = kills from full health. The bow at a full draw and at 90 %. Allowed: a \
-         full-draw bow headshot, a Slug headshot, a full-charge Skewer headshot.\n"
+         full-draw bow headshot, a full-focus Lamplighter headshot.\n"
     );
     header(&["attack", "carrier", "3 m", "5 m", "10 m", "5 m, 90 % draw"]);
     let cell = |f: &dyn Fn(f32, Aim) -> f32, r: f32| {

@@ -104,17 +104,15 @@ impl StyleBonus {
 
 /// What freshness is tracked for: every weapon's primary fire and every ability (an ability
 /// is one key whichever weapon carries it), plus the fist, the slam, parries, thorns and
-/// snares (the knacks that deal damage). The first sixteen are the second-generation set in
-/// its old order; the expansion's and the refit's are appended (the index is the position in
+/// snares (the knacks that deal damage). The second-generation set first, then the
+/// expansion's, the refit's and the rework's (the index is the position in
 /// `StyleView::freshness`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StyleKey {
     Quill,
     Brand,
-    Splinter,
     Bellows,
     Gust,
-    BothBarrels,
     Arclash,
     Wisp,
     Discharge,
@@ -132,36 +130,38 @@ pub enum StyleKey {
     Cinderbox,
     Longwick,
     Kiln,
-    Skewer,
-    Flurry,
-    Slug,
     Flak,
-    Volley,
-    Flare,
     Limpet,
-    Mortar,
-    TripleNock,
     PinningArrow,
-    EmberArrow,
     // ---- refit (docs/refit.md): melee, the Snare knack ----
     Trimmer,
     Tamper,
     Lunge,
     Whirl,
     Hurl,
-    Upswing,
     Snare,
+    // ---- rework (docs/rework.md): the sniper, the new abilities ----
+    Lamplighter,
+    Wickline,
+    Tally,
+    Waxwork,
+    Bolas,
+    Bulwark,
+    Stoke,
+    Lantern,
+    Kite,
+    BlinkArrow,
+    BeaconArrow,
+    Riposte,
 }
 
 impl StyleKey {
-    pub const COUNT: usize = 40;
+    pub const COUNT: usize = 41;
     pub const ALL: [StyleKey; Self::COUNT] = [
         StyleKey::Quill,
         StyleKey::Brand,
-        StyleKey::Splinter,
         StyleKey::Bellows,
         StyleKey::Gust,
-        StyleKey::BothBarrels,
         StyleKey::Arclash,
         StyleKey::Wisp,
         StyleKey::Discharge,
@@ -178,24 +178,27 @@ impl StyleKey {
         StyleKey::Cinderbox,
         StyleKey::Longwick,
         StyleKey::Kiln,
-        StyleKey::Skewer,
-        StyleKey::Flurry,
-        StyleKey::Slug,
         StyleKey::Flak,
-        StyleKey::Volley,
-        StyleKey::Flare,
         StyleKey::Limpet,
-        StyleKey::Mortar,
-        StyleKey::TripleNock,
         StyleKey::PinningArrow,
-        StyleKey::EmberArrow,
         StyleKey::Trimmer,
         StyleKey::Tamper,
         StyleKey::Lunge,
         StyleKey::Whirl,
         StyleKey::Hurl,
-        StyleKey::Upswing,
         StyleKey::Snare,
+        StyleKey::Lamplighter,
+        StyleKey::Wickline,
+        StyleKey::Tally,
+        StyleKey::Waxwork,
+        StyleKey::Bolas,
+        StyleKey::Bulwark,
+        StyleKey::Stoke,
+        StyleKey::Lantern,
+        StyleKey::Kite,
+        StyleKey::BlinkArrow,
+        StyleKey::BeaconArrow,
+        StyleKey::Riposte,
     ];
 
     pub fn index(self) -> usize {
@@ -207,10 +210,8 @@ impl StyleKey {
         Some(match attack {
             Attack::Quill => StyleKey::Quill,
             Attack::Brand => StyleKey::Brand,
-            Attack::Splinter => StyleKey::Splinter,
             Attack::Blast => StyleKey::Bellows,
             Attack::Gust => StyleKey::Gust,
-            Attack::BothBarrels => StyleKey::BothBarrels,
             Attack::Arc => StyleKey::Arclash,
             Attack::Wisp => StyleKey::Wisp,
             Attack::Discharge => StyleKey::Discharge,
@@ -226,24 +227,27 @@ impl StyleKey {
             Attack::Cinderbox => StyleKey::Cinderbox,
             Attack::Longwick => StyleKey::Longwick,
             Attack::Kiln => StyleKey::Kiln,
-            Attack::Skewer => StyleKey::Skewer,
-            Attack::Flurry => StyleKey::Flurry,
-            Attack::Slug => StyleKey::Slug,
             Attack::Flak => StyleKey::Flak,
-            Attack::Volley => StyleKey::Volley,
-            Attack::Flare => StyleKey::Flare,
             Attack::Limpet => StyleKey::Limpet,
-            Attack::Mortar => StyleKey::Mortar,
-            Attack::TripleNock => StyleKey::TripleNock,
             Attack::PinningArrow => StyleKey::PinningArrow,
-            Attack::EmberArrow => StyleKey::EmberArrow,
             Attack::Trimmer => StyleKey::Trimmer,
             Attack::Tamper => StyleKey::Tamper,
             Attack::Lunge => StyleKey::Lunge,
             Attack::Whirl => StyleKey::Whirl,
             Attack::Hurl => StyleKey::Hurl,
-            Attack::Upswing => StyleKey::Upswing,
             Attack::Snare => StyleKey::Snare,
+            Attack::Lamplighter => StyleKey::Lamplighter,
+            Attack::Wickline => StyleKey::Wickline,
+            Attack::Tally => StyleKey::Tally,
+            Attack::Waxwork => StyleKey::Waxwork,
+            Attack::Bolas => StyleKey::Bolas,
+            Attack::Bulwark => StyleKey::Bulwark,
+            Attack::Stoke => StyleKey::Stoke,
+            Attack::Lantern => StyleKey::Lantern,
+            Attack::Kite => StyleKey::Kite,
+            Attack::BlinkArrow => StyleKey::BlinkArrow,
+            Attack::BeaconArrow => StyleKey::BeaconArrow,
+            Attack::Riposte => StyleKey::Riposte,
             Attack::Enemy { .. } | Attack::World | Attack::Dev => return None,
         })
     }
@@ -280,10 +284,8 @@ impl StyleKey {
         match self {
             StyleKey::Quill => "QUILL",
             StyleKey::Brand => "BRAND",
-            StyleKey::Splinter => "SPLINTER",
             StyleKey::Bellows => "BELLOWS",
             StyleKey::Gust => "GUST",
-            StyleKey::BothBarrels => "BOTH BARRELS",
             StyleKey::Arclash => "ARCLASH",
             StyleKey::Wisp => "WISP",
             StyleKey::Discharge => "DISCHARGE",
@@ -300,24 +302,27 @@ impl StyleKey {
             StyleKey::Cinderbox => "CINDERBOX",
             StyleKey::Longwick => "LONGWICK",
             StyleKey::Kiln => "KILN",
-            StyleKey::Skewer => "SKEWER",
-            StyleKey::Flurry => "FLURRY",
-            StyleKey::Slug => "SLUG",
             StyleKey::Flak => "FLAK",
-            StyleKey::Volley => "VOLLEY",
-            StyleKey::Flare => "FLARE",
             StyleKey::Limpet => "LIMPET",
-            StyleKey::Mortar => "MORTAR",
-            StyleKey::TripleNock => "TRIPLE NOCK",
             StyleKey::PinningArrow => "PINNING ARROW",
-            StyleKey::EmberArrow => "EMBER ARROW",
             StyleKey::Trimmer => "TRIMMER",
             StyleKey::Tamper => "TAMPER",
             StyleKey::Lunge => "LUNGE",
             StyleKey::Whirl => "WHIRL",
             StyleKey::Hurl => "HURL",
-            StyleKey::Upswing => "UPSWING",
             StyleKey::Snare => "SNARE",
+            StyleKey::Lamplighter => "LAMPLIGHTER",
+            StyleKey::Wickline => "WICKLINE",
+            StyleKey::Tally => "TALLY",
+            StyleKey::Waxwork => "WAXWORK",
+            StyleKey::Bolas => "BOLAS",
+            StyleKey::Bulwark => "BULWARK",
+            StyleKey::Stoke => "STOKE",
+            StyleKey::Lantern => "LANTERN",
+            StyleKey::Kite => "KITE",
+            StyleKey::BlinkArrow => "BLINK ARROW",
+            StyleKey::BeaconArrow => "BEACON ARROW",
+            StyleKey::Riposte => "RIPOSTE",
         }
     }
 }
@@ -879,7 +884,7 @@ mod tests {
         }
         assert_eq!(
             StyleKey::build_keys(&WeaponKind::Bellows.default_build()),
-            [StyleKey::Bellows, StyleKey::Gust, StyleKey::BothBarrels]
+            [StyleKey::Bellows, StyleKey::Gust, StyleKey::Bulwark]
         );
         assert_eq!(
             StyleKey::build_keys(&WeaponKind::Tumbler.default_build()),
@@ -923,11 +928,11 @@ mod tests {
     fn view_round_trips_freshness() {
         let t = StyleTuning::default();
         let mut s = PlayerStyle::new();
-        s.freshness[3] = t.freshness_min;
-        s.freshness[4] = 0.6;
+        s.freshness[StyleKey::Bellows.index()] = t.freshness_min;
+        s.freshness[StyleKey::Gust.index()] = 0.6;
         let v = s.view(&t);
         assert_eq!(v.freshness[0], 255);
-        assert_eq!(v.freshness[3], 0);
+        assert_eq!(v.freshness[StyleKey::Bellows.index()], 0);
         assert!((v.freshness(StyleKey::Gust, &t) - 0.6).abs() < 0.01);
         assert!(v.is_stale(StyleKey::Bellows, &t));
         assert!(!v.is_stale(StyleKey::Gust, &t));

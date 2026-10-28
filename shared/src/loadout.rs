@@ -62,12 +62,12 @@ impl WeaponClass {
     pub fn abilities(self) -> &'static [Ability] {
         use Ability::*;
         match self {
-            WeaponClass::Precision => &[Brand, Splinter, Skewer, Flurry],
-            WeaponClass::Scatter => &[Gust, BothBarrels, Slug, Flak],
-            WeaponClass::Rapid => &[Wisp, Discharge, Volley, Flare],
-            WeaponClass::Explosive => &[Breach, Gravewell, Limpet, Mortar],
-            WeaponClass::Draw => &[Brand, TripleNock, PinningArrow, EmberArrow],
-            WeaponClass::Melee => &[Lunge, Whirl, Hurl, Upswing],
+            WeaponClass::Precision => &[Brand, Wickline, Tally, Waxwork],
+            WeaponClass::Scatter => &[Gust, Bolas, Bulwark, Flak],
+            WeaponClass::Rapid => &[Wisp, Discharge, Stoke, Lantern],
+            WeaponClass::Explosive => &[Breach, Gravewell, Limpet, Kite],
+            WeaponClass::Draw => &[Brand, BlinkArrow, PinningArrow, BeaconArrow],
+            WeaponClass::Melee => &[Lunge, Whirl, Hurl, Riposte],
         }
     }
 }
@@ -104,10 +104,13 @@ pub enum WeaponKind {
     Trimmer = 10,
     /// Foundry ramming hammer: a slow, heavy swing through everything in its arc.
     Tamper = 11,
+    // ---- rework (docs/rework.md): the sniper ----
+    /// A lamplighter's pole turned rifle: hold to focus a hitscan beam, release to fire.
+    Lamplighter = 12,
 }
 
 impl WeaponKind {
-    pub const ALL: [WeaponKind; 12] = [
+    pub const ALL: [WeaponKind; 13] = [
         WeaponKind::Quill,
         WeaponKind::Bellows,
         WeaponKind::Arclash,
@@ -120,6 +123,7 @@ impl WeaponKind {
         WeaponKind::Kiln,
         WeaponKind::Trimmer,
         WeaponKind::Tamper,
+        WeaponKind::Lamplighter,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -146,6 +150,7 @@ impl WeaponKind {
             WeaponKind::Kiln => "Kiln",
             WeaponKind::Trimmer => "Trimmer",
             WeaponKind::Tamper => "Tamper",
+            WeaponKind::Lamplighter => "Lamplighter",
         }
     }
 
@@ -164,12 +169,15 @@ impl WeaponKind {
             WeaponKind::Kiln => "ember sprayer",
             WeaponKind::Trimmer => "hooked wick-shears",
             WeaponKind::Tamper => "foundry ramming hammer",
+            WeaponKind::Lamplighter => "focusing lens rifle",
         }
     }
 
     pub fn class(self) -> WeaponClass {
         match self {
-            WeaponKind::Quill | WeaponKind::Lancet => WeaponClass::Precision,
+            WeaponKind::Quill | WeaponKind::Lancet | WeaponKind::Lamplighter => {
+                WeaponClass::Precision
+            }
             WeaponKind::Bellows | WeaponKind::Thresher => WeaponClass::Scatter,
             WeaponKind::Arclash | WeaponKind::Riveter | WeaponKind::Kiln => WeaponClass::Rapid,
             WeaponKind::Tumbler | WeaponKind::Cinderbox => WeaponClass::Explosive,
@@ -187,18 +195,19 @@ impl WeaponKind {
     pub fn default_build(self) -> WeaponBuild {
         use Ability::*;
         let abilities = match self {
-            WeaponKind::Quill => [Brand, Splinter],
-            WeaponKind::Bellows => [Gust, BothBarrels],
+            WeaponKind::Quill => [Brand, Wickline],
+            WeaponKind::Bellows => [Gust, Bulwark],
             WeaponKind::Arclash => [Wisp, Discharge],
             WeaponKind::Tumbler => [Breach, Gravewell],
-            WeaponKind::Lancet => [Skewer, Flurry],
-            WeaponKind::Thresher => [Slug, Flak],
-            WeaponKind::Riveter => [Volley, Wisp],
-            WeaponKind::Cinderbox => [Limpet, Mortar],
-            WeaponKind::Longwick => [TripleNock, PinningArrow],
-            WeaponKind::Kiln => [Flare, Discharge],
+            WeaponKind::Lancet => [Tally, Waxwork],
+            WeaponKind::Thresher => [Bolas, Flak],
+            WeaponKind::Riveter => [Stoke, Lantern],
+            WeaponKind::Cinderbox => [Limpet, Kite],
+            WeaponKind::Longwick => [BlinkArrow, PinningArrow],
+            WeaponKind::Kiln => [Lantern, Discharge],
             WeaponKind::Trimmer => [Lunge, Hurl],
-            WeaponKind::Tamper => [Whirl, Upswing],
+            WeaponKind::Tamper => [Whirl, Riposte],
+            WeaponKind::Lamplighter => [Wickline, Waxwork],
         };
         WeaponBuild {
             weapon: self,
@@ -207,23 +216,25 @@ impl WeaponKind {
     }
 }
 
-/// An alt-fire ability. The discriminant is the wire id.
+/// An alt-fire ability. The discriminant is the wire id. The rework (`docs/rework.md`) retired
+/// eleven abilities and gave their ids to new ones; the kept ones kept theirs. A name an older
+/// build saved that no longer exists loads as the weapon's default ([`WeaponBuild`]'s
+/// deserialisation).
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[repr(u8)]
 pub enum Ability {
-    // ---- the second-generation set (docs/roster.md) ----
     /// Marking shot: the target takes extra damage from everyone for a while.
     #[default]
     Brand = 0,
-    /// The shot bursts into shrapnel that reflects off walls.
-    Splinter = 1,
+    /// A burning wick-thread: zips you to the level, yanks a light target to you.
+    Wickline = 1,
     /// Air blast: knockback, turns hostile projectiles around.
     Gust = 2,
-    /// Double blast with blast-jump recoil.
-    BothBarrels = 3,
-    /// Slow ball lightning that zaps what is near.
+    /// Wax-weighted balls on a cord: bind the first hostile (and one near it).
+    Bolas = 3,
+    /// Ball lightning orbiting you, zapping what comes near; press again to fling it.
     Wisp = 4,
     /// Hold to charge a shock nova around you.
     Discharge = 5,
@@ -231,65 +242,63 @@ pub enum Ability {
     Breach = 6,
     /// Canister that pulls enemies together, then implodes.
     Gravewell = 7,
-    // ---- expansion (docs/arsenal.md) ----
-    /// Hold to charge a shot that pierces through several targets.
-    Skewer = 8,
-    /// Three quick shots in a tight burst.
-    Flurry = 9,
-    /// One heavy, accurate slug instead of pellets.
-    Slug = 10,
+    /// Hold to sweep the crosshair over targets, release to shoot each one.
+    Tally = 8,
+    /// A wax double of you that draws the Moulds, then bursts.
+    Waxwork = 9,
+    /// Hold up a slab of hardened wax that absorbs what hits it from the front.
+    Bulwark = 10,
     /// A shell that airbursts into a ring of pellets at range.
     Flak = 11,
-    /// Dumps a dense burst at once, then cools down.
-    Volley = 12,
-    /// A flare that leaves a burning patch on the ground.
-    Flare = 13,
+    /// Faster fire that sets targets alight, then the weapon overheats.
+    Stoke = 12,
+    /// A lantern on the floor that shoots the nearest hostile with your weapon.
+    Lantern = 13,
     /// Charges that stick to anything; press again to detonate them.
     Limpet = 14,
-    /// A heavy lobbed shell with a wide blast.
-    Mortar = 15,
-    /// Three arrows in a fan.
-    TripleNock = 16,
+    /// An ember kite you steer with your crosshair.
+    Kite = 15,
+    /// An arrow you can step to.
+    BlinkArrow = 16,
     /// An arrow that pins its target in place.
     PinningArrow = 17,
-    /// An arrow that bursts into flame on impact.
-    EmberArrow = 18,
-    // ---- refit (docs/refit.md): melee ----
+    /// An arrow that lights a beacon: what is near it is revealed and takes more damage.
+    BeaconArrow = 18,
     /// A dash along the aim; the first target the body reaches takes a heavy hit.
     Lunge = 19,
     /// A spin that hits everything around and knocks it outward.
     Whirl = 20,
-    /// Throws a spinning blade / hammer-head.
+    /// Throws a spinning blade / hammer-head that comes back.
     Hurl = 21,
-    /// A rising strike that launches what it hits into the air.
-    Upswing = 22,
+    /// Hold to guard; release to counter-swing if anything was blocked.
+    Riposte = 22,
 }
 
 impl Ability {
     pub const ALL: [Ability; 23] = [
         Ability::Brand,
-        Ability::Splinter,
+        Ability::Wickline,
         Ability::Gust,
-        Ability::BothBarrels,
+        Ability::Bolas,
         Ability::Wisp,
         Ability::Discharge,
         Ability::Breach,
         Ability::Gravewell,
-        Ability::Skewer,
-        Ability::Flurry,
-        Ability::Slug,
+        Ability::Tally,
+        Ability::Waxwork,
+        Ability::Bulwark,
         Ability::Flak,
-        Ability::Volley,
-        Ability::Flare,
+        Ability::Stoke,
+        Ability::Lantern,
         Ability::Limpet,
-        Ability::Mortar,
-        Ability::TripleNock,
+        Ability::Kite,
+        Ability::BlinkArrow,
         Ability::PinningArrow,
-        Ability::EmberArrow,
+        Ability::BeaconArrow,
         Ability::Lunge,
         Ability::Whirl,
         Ability::Hurl,
-        Ability::Upswing,
+        Ability::Riposte,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -301,32 +310,32 @@ impl Ability {
         self as u8
     }
 
-    /// Display name ("Both Barrels").
+    /// Display name ("Pinning Arrow").
     pub fn name(self) -> &'static str {
         match self {
             Ability::Brand => "Brand",
-            Ability::Splinter => "Splinter",
+            Ability::Wickline => "Wickline",
             Ability::Gust => "Gust",
-            Ability::BothBarrels => "Both Barrels",
+            Ability::Bolas => "Bolas",
             Ability::Wisp => "Wisp",
             Ability::Discharge => "Discharge",
             Ability::Breach => "Breach",
             Ability::Gravewell => "Gravewell",
-            Ability::Skewer => "Skewer",
-            Ability::Flurry => "Flurry",
-            Ability::Slug => "Slug",
+            Ability::Tally => "Tally",
+            Ability::Waxwork => "Waxwork",
+            Ability::Bulwark => "Bulwark",
             Ability::Flak => "Flak",
-            Ability::Volley => "Volley",
-            Ability::Flare => "Flare",
+            Ability::Stoke => "Stoke",
+            Ability::Lantern => "Lantern",
             Ability::Limpet => "Limpet",
-            Ability::Mortar => "Mortar",
-            Ability::TripleNock => "Triple Nock",
+            Ability::Kite => "Kite",
+            Ability::BlinkArrow => "Blink Arrow",
             Ability::PinningArrow => "Pinning Arrow",
-            Ability::EmberArrow => "Ember Arrow",
+            Ability::BeaconArrow => "Beacon Arrow",
             Ability::Lunge => "Lunge",
             Ability::Whirl => "Whirl",
             Ability::Hurl => "Hurl",
-            Ability::Upswing => "Upswing",
+            Ability::Riposte => "Riposte",
         }
     }
 
@@ -334,28 +343,28 @@ impl Ability {
     pub fn blurb(self) -> &'static str {
         match self {
             Ability::Brand => "marks the target: it takes extra damage from everyone",
-            Ability::Splinter => "bursts into shrapnel that reflects off walls",
+            Ability::Wickline => "zip to where it anchors; yanks light targets to you",
             Ability::Gust => "air blast: shoves, turns projectiles around",
-            Ability::BothBarrels => "double blast, launches you backwards",
-            Ability::Wisp => "slow ball lightning that zaps what is near",
+            Ability::Bolas => "binds the first hostile, and a second one near it",
+            Ability::Wisp => "orbiting ball lightning; press again to fling it",
             Ability::Discharge => "hold to charge a shock nova around you",
             Ability::Breach => "point-blank blast for blast-jumps",
             Ability::Gravewell => "pulls enemies together, then implodes",
-            Ability::Skewer => "hold to charge a shot that pierces several targets",
-            Ability::Flurry => "three quick shots in a tight burst",
-            Ability::Slug => "one heavy, accurate slug",
+            Ability::Tally => "hold to mark targets, release to shoot every one",
+            Ability::Waxwork => "a wax double that draws the Moulds, then bursts",
+            Ability::Bulwark => "hold up a wax slab that absorbs hits from the front",
             Ability::Flak => "a shell that airbursts into a ring of pellets",
-            Ability::Volley => "dumps a dense burst at once",
-            Ability::Flare => "leaves a burning patch on the ground",
+            Ability::Stoke => "faster fire that burns, then the weapon overheats",
+            Ability::Lantern => "a lantern that shoots the nearest hostile for you",
             Ability::Limpet => "sticky charges; press again to detonate",
-            Ability::Mortar => "heavy lobbed shell, wide blast",
-            Ability::TripleNock => "three arrows in a fan",
+            Ability::Kite => "an ember kite you steer with your crosshair",
+            Ability::BlinkArrow => "an arrow you can step to",
             Ability::PinningArrow => "pins the target in place",
-            Ability::EmberArrow => "bursts into flame on impact",
+            Ability::BeaconArrow => "reveals what is near it; they take more damage",
             Ability::Lunge => "dash forward: the first target takes a heavy hit",
             Ability::Whirl => "spin: hits everything around you, knocks it away",
-            Ability::Hurl => "throws a spinning blade or hammer-head",
-            Ability::Upswing => "rising strike that launches targets upward",
+            Ability::Hurl => "throws a blade or hammer-head that comes back",
+            Ability::Riposte => "hold to guard; release to counter what you blocked",
         }
     }
 
@@ -372,10 +381,10 @@ impl Ability {
 )]
 #[repr(u8)]
 pub enum Knack {
-    /// The relay spike: Quill shots ricochet off it (PvE only).
+    /// The relay spike: every weapon's shots and blows relay off it (PvE only).
     #[default]
     Thorn = 0,
-    /// A lobbed flask: a pool that heals the Shrikes standing in it.
+    /// A flask you drink: haste and healing over a few seconds.
     KindleFlask = 1,
     /// A wax trap: the first hostile to come close is pinned.
     Snare = 2,
@@ -423,8 +432,8 @@ impl Knack {
     /// One-line description (menus).
     pub fn blurb(self) -> &'static str {
         match self {
-            Knack::Thorn => "relay spike: Quill shots ricochet off it",
-            Knack::KindleFlask => "lobbed flask: a pool that heals you and your team",
+            Knack::Thorn => "relay spike: your shots and blows relay off it",
+            Knack::KindleFlask => "drink it: haste and healing for a few seconds",
             Knack::Snare => "wax trap: pins the first hostile that steps close",
             Knack::SootPot => "soot cloud: Moulds can't see into or through it",
             Knack::TallowSkin => "half damage and no knockback for a few seconds",
@@ -449,10 +458,95 @@ impl Knack {
 }
 
 /// A weapon with its two chosen abilities (alt A, alt B).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// Read from a human-readable format (RON: settings, tuning files), an ability name this
+/// build doesn't know (one the rework retired, `"Splinter"`) becomes the weapon's default for
+/// that slot instead of failing the whole file; `sanitized` then repairs the rest. The wire
+/// (bincode) keeps the plain derived encoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct WeaponBuild {
     pub weapon: WeaponKind,
     pub abilities: [Ability; BUILD_ABILITIES],
+}
+
+impl<'de> Deserialize<'de> for WeaponBuild {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename = "WeaponBuild")]
+        struct Exact {
+            weapon: WeaponKind,
+            abilities: [Ability; BUILD_ABILITIES],
+        }
+        #[derive(Deserialize)]
+        #[serde(rename = "WeaponBuild")]
+        struct Lenient {
+            weapon: WeaponKind,
+            abilities: [LenientAbility; BUILD_ABILITIES],
+        }
+        if !d.is_human_readable() {
+            let Exact { weapon, abilities } = Exact::deserialize(d)?;
+            return Ok(WeaponBuild { weapon, abilities });
+        }
+        let Lenient { weapon, abilities } = Lenient::deserialize(d)?;
+        let default = weapon.default_build().abilities;
+        Ok(WeaponBuild {
+            weapon,
+            abilities: [0, 1].map(|i| abilities[i].0.unwrap_or(default[i])),
+        })
+    }
+}
+
+/// An [`Ability`] read by name, `None` for a name this build doesn't know.
+struct LenientAbility(Option<Ability>);
+
+impl<'de> Deserialize<'de> for LenientAbility {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visit;
+        impl<'de> serde::de::Visitor<'de> for Visit {
+            type Value = LenientAbility;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an ability name")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, name: &str) -> Result<Self::Value, E> {
+                // The variant names (`format!("{a:?}")`: `PinningArrow`).
+                let known = Ability::ALL.into_iter().find(|a| format!("{a:?}") == name);
+                Ok(LenientAbility(known))
+            }
+
+            fn visit_enum<A: serde::de::EnumAccess<'de>>(
+                self,
+                data: A,
+            ) -> Result<Self::Value, A::Error> {
+                use serde::de::VariantAccess;
+                let (Ident(name), variant) = data.variant()?;
+                variant.unit_variant()?;
+                self.visit_str(&name)
+            }
+        }
+        /// A variant name, read as an identifier (any name).
+        struct Ident(String);
+        impl<'de> Deserialize<'de> for Ident {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                struct Name;
+                impl serde::de::Visitor<'_> for Name {
+                    type Value = Ident;
+
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        f.write_str("an ability name")
+                    }
+
+                    fn visit_str<E: serde::de::Error>(self, name: &str) -> Result<Ident, E> {
+                        Ok(Ident(name.to_string()))
+                    }
+                }
+                d.deserialize_identifier(Name)
+            }
+        }
+        // The variant list is only a hint (the visitor accepts any name).
+        d.deserialize_enum("Ability", &[], Visit)
+    }
 }
 
 impl Default for WeaponBuild {
@@ -637,8 +731,29 @@ mod tests {
             (WeaponKind::Trimmer.id(), WeaponKind::Tamper.id()),
             (10, 11)
         );
-        assert_eq!((Ability::Lunge.id(), Ability::Upswing.id()), (19, 22));
+        assert_eq!((Ability::Lunge.id(), Ability::Hurl.id()), (19, 21));
         assert_eq!((Knack::Thorn.id(), Knack::Surge.id()), (0, 5));
+        // The rework (docs/rework.md): new abilities on the retired ids, the sniper is 12.
+        let ids = [
+            (Ability::Wickline, 1),
+            (Ability::Bolas, 3),
+            (Ability::Tally, 8),
+            (Ability::Waxwork, 9),
+            (Ability::Bulwark, 10),
+            (Ability::Flak, 11),
+            (Ability::Stoke, 12),
+            (Ability::Lantern, 13),
+            (Ability::Limpet, 14),
+            (Ability::Kite, 15),
+            (Ability::BlinkArrow, 16),
+            (Ability::PinningArrow, 17),
+            (Ability::BeaconArrow, 18),
+            (Ability::Riposte, 22),
+        ];
+        for (a, id) in ids {
+            assert_eq!(a.id(), id, "{a:?}");
+        }
+        assert_eq!(WeaponKind::Lamplighter.id(), 12);
         // Weapon ids stay below the unarmed marker, knack ids fit 4 bits.
         const { assert!(WeaponKind::COUNT < 15 && Knack::COUNT <= 16) };
     }
@@ -679,10 +794,43 @@ mod tests {
         assert!(Knack::PVP_FALLBACK.pvp_allowed());
         // Presets saved before knacks existed still load (with the Thorn).
         let old =
-            "(slots: (Some((weapon: Kiln, abilities: (Flare, Discharge))), None, None, None))";
+            "(slots: (Some((weapon: Kiln, abilities: (Lantern, Discharge))), None, None, None))";
         let l: Loadout = ron::from_str(old).unwrap();
         assert_eq!(l.knack, Knack::Thorn);
         assert_eq!(l.slot(0).map(|b| b.weapon), Some(WeaponKind::Kiln));
+    }
+
+    #[test]
+    fn retired_ability_names_load_as_the_weapons_defaults() {
+        // A loadout saved before the rework: Splinter, Flare, Mortar, Upswing are gone.
+        let old = "(slots: (Some((weapon: Quill, abilities: (Brand, Splinter))), \
+                   Some((weapon: Kiln, abilities: (Flare, Discharge))), \
+                   Some((weapon: Cinderbox, abilities: (Mortar, Limpet))), \
+                   Some((weapon: Tamper, abilities: (Upswing, Whirl)))), knack: Snare)";
+        let l: Loadout = ron::from_str(old).unwrap();
+        assert_eq!(l.knack, Knack::Snare);
+        let builds: Vec<WeaponBuild> = l.builds().copied().collect();
+        // Each unknown name becomes that slot's default (Quill B: Wickline; Kiln A: Lantern;
+        // Cinderbox A: Limpet, which repeats B: `sanitized` fixes it).
+        assert_eq!(builds[0].abilities, [Ability::Brand, Ability::Wickline]);
+        assert_eq!(builds[1].abilities, [Ability::Lantern, Ability::Discharge]);
+        assert_eq!(builds[2].abilities, [Ability::Limpet, Ability::Limpet]);
+        assert_eq!(builds[3].abilities, [Ability::Whirl, Ability::Whirl]);
+        let fixed = l.sanitized();
+        assert!(fixed.is_valid(), "{fixed:?}");
+        assert_eq!(
+            fixed.slot(2).map(|b| b.abilities),
+            Some([Ability::Limpet, Ability::Kite])
+        );
+        // Unknown weapons still fail (a typo there is the settings' text format's business).
+        assert!(
+            ron::from_str::<WeaponBuild>("(weapon: Railgun, abilities: (Brand, Brand))").is_err()
+        );
+        // The wire keeps the exact encoding.
+        let b = WeaponKind::Lamplighter.default_build();
+        let bytes = crate::protocol::encode(&b);
+        let back: WeaponBuild = crate::protocol::decode_server_message(&bytes).unwrap();
+        assert_eq!(back, b);
     }
 
     #[test]
@@ -697,11 +845,11 @@ mod tests {
         assert!(fixed.is_valid(), "{fixed:?}");
         let dup = WeaponBuild {
             weapon: WeaponKind::Quill,
-            abilities: [Ability::Splinter, Ability::Splinter],
+            abilities: [Ability::Tally, Ability::Tally],
         };
         let fixed = dup.sanitized();
         assert!(fixed.is_valid());
-        assert_eq!(fixed.abilities[0], Ability::Splinter);
+        assert_eq!(fixed.abilities[0], Ability::Tally);
 
         // Repeated weapon: the second copy is dropped. Empty: back to the default.
         let l = Loadout {

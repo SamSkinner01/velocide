@@ -253,19 +253,6 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 None,
             ),
             SimEvent::ThornExpired { id } => fx.push(tick, Fx::ThornExpired { id: *id }, None),
-            SimEvent::Splinters {
-                shooter,
-                origin,
-                ends,
-            } => fx.push(
-                tick,
-                Fx::Splinters {
-                    shooter: shooter.0 as u16,
-                    origin: (*origin).into(),
-                    ends: ends.iter().map(|e| QPos::from(*e)).collect(),
-                },
-                None,
-            ),
             SimEvent::Burst {
                 shooter,
                 attack,
@@ -461,6 +448,82 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 },
                 None,
             ),
+            // ---- rework (docs/rework.md): everyone, the caster too (it can't predict them) ----
+            SimEvent::Wickline {
+                player,
+                from,
+                to,
+                anchored,
+            } => fx.push(
+                tick,
+                Fx::Wickline {
+                    player: *player,
+                    from: (*from).into(),
+                    to: (*to).into(),
+                    anchored: *anchored,
+                },
+                None,
+            ),
+            SimEvent::TallyFired {
+                shooter,
+                origin,
+                ends,
+            } => fx.push(
+                tick,
+                Fx::TallyFired {
+                    shooter: *shooter,
+                    origin: (*origin).into(),
+                    ends: ends.iter().map(|e| QPos::from(*e)).collect(),
+                },
+                None,
+            ),
+            SimEvent::Blink { player, from, to } => fx.push(
+                tick,
+                Fx::Blink {
+                    player: *player,
+                    from: (*from).into(),
+                    to: (*to).into(),
+                },
+                None,
+            ),
+            SimEvent::GuardBlock {
+                player,
+                ability,
+                position,
+                broke,
+            } => fx.push(
+                tick,
+                Fx::GuardBlock {
+                    player: *player,
+                    ability: *ability,
+                    position: (*position).into(),
+                    broke: *broke,
+                },
+                None,
+            ),
+            SimEvent::BolasBound { positions, .. } => fx.push(
+                tick,
+                Fx::BolasBound {
+                    positions: positions.iter().map(|p| QPos::from(*p)).collect(),
+                },
+                None,
+            ),
+            SimEvent::LanternShot {
+                lantern,
+                origin,
+                ends,
+            } => fx.push(
+                tick,
+                Fx::LanternShot {
+                    lantern: *lantern,
+                    origin: (*origin).into(),
+                    ends: ends.iter().map(|e| QPos::from(*e)).collect(),
+                },
+                None,
+            ),
+            SimEvent::HurlCaught { player } => {
+                fx.push(tick, Fx::HurlCaught { player: *player }, None)
+            }
             // Visible through entities / other events, or server-internal.
             SimEvent::Jumped { .. }
             | SimEvent::Landed { .. }

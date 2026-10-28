@@ -223,27 +223,11 @@ pub fn hitscan_dirs(
         _ => 0.0,
     };
     match attack {
-        Attack::Quill
-        | Attack::Brand
-        | Attack::Splinter
-        | Attack::Arc
-        | Attack::Skewer
-        | Attack::Slug => vec![aim],
+        Attack::Quill | Attack::Brand | Attack::Arc | Attack::Lamplighter => vec![aim],
         // The Lancet's bloom (`charge`) widens its needles' spread.
         Attack::Lancet => cone(1, t.lancet.bloom_degrees * charge * 2.0),
-        Attack::Flurry => cone(1, 1.0),
         Attack::Blast => cone(t.bellows.pellets, t.bellows.cone_degrees),
-        Attack::BothBarrels => cone(t.bellows.both_pellets, t.bellows.both_cone_degrees),
         Attack::Thresher => cone(t.thresher.pellets, t.thresher.cone_degrees),
-        // Ten of the weapon's own shots at once: rays for hitscan weapons (rivets fly).
-        Attack::Volley
-            if !matches!(
-                weapon,
-                Some(WeaponKind::Riveter | WeaponKind::Kiln | WeaponKind::Tumbler)
-            ) =>
-        {
-            cone(10, 6.0)
-        }
         _ => Vec::new(),
     }
 }
