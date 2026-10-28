@@ -5,6 +5,10 @@
 //! | [`Session::single_player`]  | in-process thread on `127.0.0.1:0`       | that loopback port   |
 //! | [`Session::host`]           | in-process thread on `0.0.0.0:<port>`, lobby | loopback, same port |
 //! | [`Session::join`]           | remote                                   | the given address    |
+//! | `JoinTarget::Code`          | remote, found through the rendezvous service | LAN, direct or relay |
+//!
+//! A host with `ServerConfig::online` set is also listed at the rendezvous service
+//! (docs/rendezvous.md); [`Session::online_status`] has its join code.
 //!
 //! Single-player is just a private listen server, so there is exactly one code path. Hosted
 //! servers start in the lobby (docs/lobby.md); the session gives the in-process server a
@@ -24,7 +28,9 @@
 //! netcode's `Secure` mode): resolve them to [`JoinTarget::Address`].
 
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
 
+use rendezvous::HostStatus;
 use server::{NetSimConfig, ServerConfig, ServerHandle};
 use shared::lobby::{Difficulty, GameMode};
 
@@ -44,7 +50,14 @@ pub enum SessionKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JoinTarget {
     Address(SocketAddr),
-    // Future: SteamLobby(u64), SteamId(u64), Matchmaking { ticket: String }
+    /// The game behind a join code, found through the rendezvous service at `service`
+    /// (`host:port`). `relay_only`: never connect directly (hides our address from the host).
+    Code {
+        service: String,
+        code: rendezvous::Code,
+        relay_only: bool,
+    },
+    // Future: SteamLobby(u64), SteamId(u64)
 }
 
 /// How to start a session.
@@ -70,6 +83,8 @@ pub struct Session {
     kind: SessionKind,
     server: Option<ServerHandle>,
     client: NetClient,
+    /// Hosting online: the listing's state (join code).
+    online: Option<Arc<Mutex<HostStatus>>>,
 }
 
 impl Session {
@@ -125,6 +140,7 @@ impl Session {
                     kind: SessionKind::SinglePlayer,
                     server: Some(server),
                     client: net,
+                    online: None,
                 })
             }
             SessionSpec::Host { mut server } => {
@@ -138,12 +154,14 @@ impl Session {
                         .get_or_insert_with(random_host_token);
                     client.host_token = Some(token);
                 }
+                let online = server.online.as_ref().map(|o| o.status.clone());
                 let server = ServerHandle::spawn(*server)?;
                 let net = NetClient::connect(server.connect_addr(), client)?;
                 Ok(Session {
                     kind: SessionKind::Host,
                     server: Some(server),
                     client: net,
+                    online,
                 })
             }
             SessionSpec::Join {
@@ -152,8 +170,35 @@ impl Session {
                 kind: SessionKind::Join,
                 server: None,
                 client: NetClient::connect(addr, client)?,
+                online: None,
+            }),
+            SessionSpec::Join {
+                target:
+                    JoinTarget::Code {
+                        service,
+                        code,
+                        relay_only,
+                    },
+            } => Ok(Session {
+                kind: SessionKind::Join,
+                server: None,
+                client: NetClient::connect_online(&service, code, relay_only, client)?,
+                online: None,
             }),
         }
+    }
+
+    /// Hosting online: the shared listing state (the lobby panel keeps it).
+    pub fn online_handle(&self) -> Option<Arc<Mutex<HostStatus>>> {
+        self.online.clone()
+    }
+
+    /// Hosting online: the listing's state (connecting, the join code, or why the service
+    /// can't be reached). `None` when not hosting online.
+    pub fn online_status(&self) -> Option<HostStatus> {
+        self.online
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|s| s.clone()))
     }
 
     pub fn kind(&self) -> SessionKind {

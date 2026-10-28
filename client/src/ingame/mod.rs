@@ -197,6 +197,7 @@ impl InGame {
                     addr.to_string(),
                 )
             }
+            StartMode::JoinCode { code } => crate::menus::lobby::join_code_spec(code, common)?,
         };
         common.load_models(renderer);
         let client = client.with_cosmetics(common.settings.cosmetics);

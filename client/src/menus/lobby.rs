@@ -21,6 +21,7 @@
 //! (`menus::customize`) replaces it while open; look changes go to the server (debounced).
 //! Ready also has its own key (`Action::Ready`, F1 / d-pad down), on both screens.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use engine::audio::{Audio, Sfx};
@@ -29,7 +30,8 @@ use engine::ui::draw::{self, fade};
 use engine::ui::hud;
 use engine::ui::{Rect, TextFilter, TextStyle, Ui, UiDrawExt};
 use glam::{Vec4, vec2};
-use server::{ServerCommand, ServerConfig};
+use rendezvous::HostStatus;
+use server::{OnlineConfig, ServerCommand, ServerConfig};
 use shared::cosmetics::Cosmetics;
 use shared::lobby::{GameMode, LevelInfo, LobbyPhase, LobbyState, MatchSettings, time_limit_text};
 use shared::protocol::MAX_CHAT_CHARS;
@@ -53,7 +55,7 @@ use crate::net::{
     ClientConfig, ConnectionState, JoinTarget, NetClient, NetEvent, Session, SessionKind,
     SessionSpec, lan, resolve_address,
 };
-use crate::settings::Settings;
+use crate::settings::{HostOnline, Settings};
 
 /// The host's settings edits are sent at most this often (seconds).
 const SETTINGS_SEND_INTERVAL: f64 = 0.15;
@@ -126,6 +128,8 @@ pub struct LobbyPanel {
     target: String,
     /// "FRIENDS JOIN WITH 192.168.1.20:47420" (host only).
     join_hint: Option<String>,
+    /// Hosting online: the listing's state (the join code is shown from it).
+    online: Option<Arc<Mutex<HostStatus>>>,
     chat_draft: String,
     draft: Option<HostDraft>,
     last_settings_send: f64,
@@ -161,6 +165,7 @@ impl LobbyPanel {
             kind,
             target,
             join_hint,
+            online: None,
             chat_draft: String::new(),
             draft: None,
             last_settings_send: f64::NEG_INFINITY,
@@ -182,13 +187,25 @@ impl LobbyPanel {
 
     /// For a session: its kind, and the LAN join hint when it hosts.
     pub fn for_session(session: &Session, target: String, auto_ready: bool) -> Self {
-        Self::new(
+        let mut panel = Self::new(
             session.kind(),
             target,
             session.hosted_port().map(lan::join_hint),
             auto_ready,
             session.client().in_lobby(),
-        )
+        );
+        panel.online = session.online_handle();
+        panel
+    }
+
+    /// The online line for a host: the join code, or what it's waiting for.
+    fn online_hint(&self) -> Option<String> {
+        let status = self.online.as_ref()?.lock().ok()?.clone();
+        Some(match status {
+            HostStatus::Online { code } => format!("JOIN CODE {code}"),
+            HostStatus::Connecting => "ONLINE: GETTING A JOIN CODE...".into(),
+            HostStatus::Unreachable(why) => format!("ONLINE: {}", why.to_uppercase()),
+        })
     }
 
     /// Advances the panel's clock (every frame, open or not).
@@ -485,17 +502,23 @@ impl LobbyPanel {
                 44.0
             }
         };
-        let hint = self
-            .join_hint
-            .as_deref()
-            .map(|h| format!("{h}  (UDP)"))
-            .unwrap_or_else(|| {
-                if is_host {
-                    "YOU ARE THE HOST".into()
-                } else {
-                    String::new()
-                }
-            });
+        let lan_hint = self.join_hint.as_deref().map(|h| format!("{h}  (UDP)"));
+        let online_hint = self.online_hint();
+        if let (Some(_), Some(lan)) = (&online_hint, &lan_hint) {
+            // The code is what friends need; the LAN address goes underneath.
+            ui.painter().text(
+                vec2(canvas.max.x - 12.0, 56.0),
+                &lan.replace("FRIENDS JOIN WITH", "LAN:"),
+                &TextStyle::new(theme.bone_dim).right().shadow(theme.shadow),
+            );
+        }
+        let hint = online_hint.or(lan_hint).unwrap_or_else(|| {
+            if is_host {
+                "YOU ARE THE HOST".into()
+            } else {
+                String::new()
+            }
+        });
         ui.painter().text(
             vec2(canvas.max.x - 12.0, 44.0),
             &hint,
@@ -906,6 +929,9 @@ impl LobbyPanel {
             ui.default_focus();
             ui.label(&self.target);
             ui.label_colored(&format!("{state}{dots}"), ui.theme().bone);
+            if let Some(progress) = net.transport_progress() {
+                ui.label_colored(&progress, ui.theme().bone_dim);
+            }
             ui.text(&format!("{time:.1} S"), &TextStyle::new(ui.theme().ash));
             ui.spacing(4.0);
             cancel = ui.button("CANCEL");
@@ -968,6 +994,63 @@ pub fn countdown_band(
     );
 }
 
+fn no_online_service() -> anyhow::Error {
+    anyhow::anyhow!(
+        "online play needs an online service and this build has none built in: enter one in \
+         SETTINGS > ONLINE SERVICE"
+    )
+}
+
+/// Sets up online hosting (docs/rendezvous.md) from `--online` or the host menu's choice.
+/// Returns whether the game is hosted online. Without a service, the menu's choice falls back
+/// to LAN hosting; an explicit `--online` is an error.
+pub fn host_online(server: &mut ServerConfig, common: &Common) -> anyhow::Result<bool> {
+    let s = &common.settings;
+    let explicit = common.launch.online;
+    let choice = explicit.unwrap_or(s.host_online);
+    if choice == HostOnline::Off {
+        return Ok(false);
+    }
+    let Some(service) = s.online_service(common.launch.rendezvous.as_deref()) else {
+        if explicit.is_some() {
+            return Err(no_online_service());
+        }
+        log::info!("hosting on the LAN only: this build has no online service");
+        return Ok(false);
+    };
+    server.online = Some(OnlineConfig {
+        public: choice == HostOnline::Public,
+        relay_only: common.launch.relay_only || s.host_relay_only,
+        ..OnlineConfig::new(&service)
+    });
+    server.server_name = format!("{}'S GAME", common.player_name().to_uppercase());
+    Ok(true)
+}
+
+/// The session for joining by code, and what the connecting screen calls it.
+pub fn join_code_spec(code: &str, common: &Common) -> anyhow::Result<(SessionSpec, String)> {
+    let parsed = rendezvous::Code::parse(code).ok_or_else(|| {
+        anyhow::anyhow!(
+            "'{}' isn't a join code: those have 8 letters and digits, like ABCD-EFGH",
+            code.trim()
+        )
+    })?;
+    let s = &common.settings;
+    let service = s
+        .online_service(common.launch.rendezvous.as_deref())
+        .ok_or_else(no_online_service)?;
+    Ok((
+        SessionSpec::Join {
+            target: JoinTarget::Code {
+                service,
+                code: parsed,
+                relay_only: common.launch.relay_only || s.join_relay_only,
+            },
+        },
+        format!("CODE {parsed}"),
+    ))
+}
+
 /// The menu-style lobby screen: while connecting, and on servers whose lobby has no world.
 pub struct LobbyScreen {
     session: Option<Session>,
@@ -1004,13 +1087,19 @@ impl LobbyScreen {
                 server.lobby.autostart = common.launch.autostart;
                 server.lobby.settings.mode = common.launch.mode.unwrap_or(s.host_mode);
                 server.lobby.settings.difficulty = common.launch.difficulty.unwrap_or(s.difficulty);
+                let target = if host_online(&mut server, common)? {
+                    "HOSTING ONLINE".to_string()
+                } else {
+                    format!("HOSTING ON PORT {port}")
+                };
                 (
                     SessionSpec::Host {
                         server: Box::new(server),
                     },
-                    format!("HOSTING ON PORT {port}"),
+                    target,
                 )
             }
+            StartMode::JoinCode { code } => join_code_spec(code, common)?,
             StartMode::Join { address } => {
                 let addr = resolve_address(address)
                     .map_err(|e| anyhow::anyhow!("can't join '{address}': {e}"))?;
@@ -1028,8 +1117,8 @@ impl LobbyScreen {
         let session = Session::start(spec, client)?;
         // Port 0 binds an ephemeral port: show the real one.
         let target = match session.hosted_port() {
-            Some(port) => format!("HOSTING ON PORT {port}"),
-            None => target,
+            Some(port) if session.online_handle().is_none() => format!("HOSTING ON PORT {port}"),
+            _ => target,
         };
         log::info!("session started: {target} as '{name}'");
         let mut lobby = Self::from_handoff(
