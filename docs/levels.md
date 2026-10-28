@@ -20,7 +20,13 @@ stone, wax and brass — no blood or flesh.
 
 Levels are scanned from `assets/levels/` by the menus and the lobby (`shared::lobby::scan_levels`),
 so a new file shows up in the single-player list and the host's level picker on its own; new
-players still start on Crucible of Veins (`Settings::last_level`). Every arena is also a grind
+players still start on Crucible of Veins (`Settings::last_level`). The files are also compiled
+into the game and the server (`engine::asset_files`), which then run without an assets folder:
+`LevelDef::list` is the union of the files on disk and the embedded ones, and
+`LevelDef::load_named` / `sim::load_level` read `levels/<name>.ron` from disk if it is there,
+else the embedded copy (`LevelDef::load(path)` reads one file on disk; `LevelDef::dir()` is
+where `level_gen` writes). Level names are plain relative names: one with `/..`, `\` or `:`
+is found nowhere. Every arena is also a grind
 and gun-game arena (`docs/style_modes.md`). Music follows the level kind (`arena` /
 `campaign`); the client picks the track from `LevelKind`, so there are no per-level variants.
 

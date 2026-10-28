@@ -143,19 +143,33 @@ r.render(&FrameDesc { camera, draws: &draws, sprites: &sprites, ui: &ui, /* ... 
 
 Shaders: `common.wgsl` (shared structs, bindings, snapping, lighting, fog — prepended to
 `scene.wgsl` and `fx.wgsl`), `scene.wgsl` (meshes), `fx.wgsl` (sprites, decals, lines),
-`post.wgsl`, `blit.wgsl` (upscale + UI). They are `include_str!`-embedded as the startup default.
+`post.wgsl`, `blit.wgsl` (upscale + UI). They are embedded in the binary with the rest of
+`assets/` (`engine::asset_files`). The renderer starts with the embedded copies; if the files in
+`assets_dir()/shaders` differ it builds those instead, keeping the embedded ones (with a
+`log::error!`) when they don't compile, e.g. an old assets folder next to a newer game.
 
-- `reload_shaders()` re-reads them from `assets_dir()/shaders`, builds all pipelines inside a
+- `reload_shaders()` re-reads them from `assets_dir()/shaders` (a file missing there from its
+  embedded copy), builds all pipelines inside a
   wgpu validation error scope, and on failure keeps the old pipelines and returns the naga error
   (file + line; for scene/fx the message notes the prepended `common.wgsl` offset).
   `shader_error()` keeps the last error for display.
 - `set_shader_hot_reload(true)` watches the directory (`hotreload::FileWatcher`) and reloads
-  automatically at the start of `render`.
+  automatically at the start of `render` (without the folder on disk there is nothing to watch).
 
 Uncaptured wgpu errors are logged (`log::error!`) instead of panicking.
 
 ## Assets
 
+- `asset_files` (also without the `client` feature): the files of `assets/`. `build.rs`
+  compiles every file under it into the engine (`include_bytes!` table; hidden files and `~`
+  backups skipped; without `client` only `tuning.ron`, `levels/` and `enemies/`), and reruns
+  when a file there is added, removed or edited. `find(path) -> Option<Source>` (`Disk(path)` /
+  `Embedded(bytes)`), `read(path)`, `read_to_string(path)`, `list(dir, ext)` (stems, the union
+  of disk and embedded) look in `assets_dir()` first and fall back to the embedded copy;
+  `embedded(path)` / `embedded_list(dir, ext)` skip the disk. Paths are `/`-separated plain
+  relative names (`levels/vestry.ron`); `check_path` refuses `..`, `.`, empty names, absolute
+  paths, `\`, `:` and NUL, and such paths are found nowhere. The first lookup logs which assets
+  folder is in use (or that there is none).
 - `assets::procedural`: `material_texture(name)` for concrete, brick, metal, rust, grate (alpha
   holes), wax (poured, drip runs), waxstone (set wax, pour lines), lava, tile (32 px), wood,
   hazard (32 px), glass (translucent, 32 px), dirt, panel (128 px); unknown names give a magenta
@@ -173,7 +187,9 @@ Uncaptured wgpu errors are logged (`log::error!`) instead of panicking.
   repeats every 2 m; use `BoxUv::texel_density(32.0, texture_size)` for other sizes) and faces
   subdivided every 2 m. World UVs line up across adjacent brushes. Front faces are CCW.
 - `assets::gltf`: `load(path) -> Vec<ModelPart>` (default scene, node transforms baked, embedded
-  base64 or external `.bin` buffers, PNG/JPEG images, missing normals → flat normals);
+  base64 or external `.bin` buffers, PNG/JPEG images, missing normals → flat normals),
+  `load_slice(bytes)` (self-contained files only), `load_asset("models/x.gltf")` (the file in
+  the assets folder on disk, else the copy embedded in the binary: `engine::asset_files`);
   `write(path, &MeshData)` and `write_parts(path, &[ModelPart])` produce a self-contained `.gltf`
   (base64 data URIs, embedded PNG textures, nearest samplers). `ModelPart::base_color` is meant
   as the draw tint.
