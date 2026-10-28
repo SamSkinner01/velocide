@@ -2,7 +2,8 @@
 //! players (real clients with simulated latency, a server bot) and chat, and saves PNGs:
 //!
 //! - the **warm-up** (docs/lobby.md): the host arriving in the Vestry with the lobby overlay
-//!   open (`warmup_overlay_host`), the hub with the HUD card and the ready board
+//!   open (`warmup_overlay_host`; hosting online through an in-process rendezvous service, so
+//!   its join code shows, docs/rendezvous.md), the hub with the HUD card and the ready board
 //!   (`warmup_board`), the customise sub-screen over the world (`warmup_customize`), the
 //!   overlay's LOADOUT (`warmup_loadout`) and its weapon picker (`warmup_loadout_weapon`), the
 //!   firing range's Effigies (`warmup_range`), a
@@ -204,6 +205,38 @@ fn common_for(name: &str, look: Cosmetics) -> Common {
     Common::new(settings, scratch, Audio::disabled(), launch)
 }
 
+/// A rendezvous service on a loopback port, for the rest of the run (docs/rendezvous.md).
+fn spawn_rendezvous() -> anyhow::Result<std::net::SocketAddr> {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0")?;
+    socket.set_read_timeout(Some(Duration::from_millis(5)))?;
+    let addr = socket.local_addr()?;
+    std::thread::spawn(move || {
+        let epoch = Instant::now();
+        let unix = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs())
+        };
+        let mut service = rendezvous::Service::new(
+            &rendezvous::crypto::random_bytes(),
+            rendezvous::ServiceConfig::default(),
+            Duration::ZERO,
+        );
+        let mut buf = [0u8; 2048];
+        let mut out = Vec::new();
+        loop {
+            if let Ok((len, from)) = socket.recv_from(&mut buf) {
+                service.handle(epoch.elapsed(), unix(), from, &buf[..len], &mut out);
+            }
+            service.tick(epoch.elapsed(), unix(), &mut out);
+            for (to, data) in out.drain(..) {
+                let _ = socket.send_to(&data, to);
+            }
+        }
+    });
+    Ok(addr)
+}
+
 /// Lobby screen frames until the session goes to the game screen, then the game screen.
 fn enter_game(rig: &mut Rig, common: &mut Common, mut lobby: LobbyScreen) -> InGame {
     let t = rig.lobby(common, &mut lobby, 6.0, |_| false);
@@ -242,6 +275,8 @@ fn main() -> anyhow::Result<()> {
         flame: 6,
     };
     let mut host_common = common_for("GRAVEL_SHRIKE", host_look);
+    // Online (join code): the players below still join by address over loopback.
+    host_common.settings.online_service = spawn_rendezvous()?.to_string();
     let host = LobbyScreen::start(
         &StartMode::Host {
             port: Some(0),

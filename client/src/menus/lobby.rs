@@ -503,15 +503,11 @@ impl LobbyPanel {
             }
         };
         let lan_hint = self.join_hint.as_deref().map(|h| format!("{h}  (UDP)"));
-        let online_hint = self.online_hint();
-        if let (Some(_), Some(lan)) = (&online_hint, &lan_hint) {
-            // The code is what friends need; the LAN address goes underneath.
-            ui.painter().text(
-                vec2(canvas.max.x - 12.0, 56.0),
-                &lan.replace("FRIENDS JOIN WITH", "LAN:"),
-                &TextStyle::new(theme.bone_dim).right().shadow(theme.shadow),
-            );
-        }
+        // Online: the code is what friends need; the LAN address follows it.
+        let online_hint = self.online_hint().map(|code| match &lan_hint {
+            Some(lan) => format!("{code}   {}", lan.replace("FRIENDS JOIN WITH", "LAN")),
+            None => code,
+        });
         let hint = online_hint.or(lan_hint).unwrap_or_else(|| {
             if is_host {
                 "YOU ARE THE HOST".into()

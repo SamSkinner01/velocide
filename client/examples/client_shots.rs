@@ -1,6 +1,7 @@
 //! Renders the real client screens headless (GPU, no window) with scripted input and saves
-//! PNGs: every main-menu page (the LOADOUT page also with its ability, weapon and knack
-//! pickers and the HUNTER preset loaded), each settings tab, a notice, the update prompt (a new
+//! PNGs: every main-menu page (host and join also with an online service set; the LOADOUT
+//! page also with its ability, weapon and knack pickers and the HUNTER preset loaded), each
+//! settings tab, a notice, the update prompt (a new
 //! release, its download, a failure), single-player gameplay (bot driven),
 //! the pause menu (+ its loadout and settings pages), chat, the scoreboard and the connecting
 //! screen. Used to check layout and look without clicking through the game.
@@ -161,6 +162,13 @@ fn main() -> anyhow::Result<()> {
     h.shot("menu_host");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("menu_join");
+    // With an online service (docs/rendezvous.md): the host page's ONLINE choice and the join
+    // page's code field and browser button.
+    h.common.settings.online_service = "play.example.com:47400".into();
+    h.menu(&mut menu, &[&[Escape], &[], &[Up], &[Enter]]);
+    h.shot("menu_host_online");
+    h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
+    h.shot("menu_join_online");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
     h.shot("menu_customize");
     h.menu(&mut menu, &[&[Escape], &[], &[Down], &[Enter]]);
