@@ -8,7 +8,8 @@
 //! and spend the rest of the animation recovering: the Trimmer's alternate sides, right then
 //! left; the Tamper's is one committed overhead slam that bounces off what it hits and is
 //! hauled back up. The abilities have their own moves: the Lunge thrusts, the Whirl sweeps
-//! everything round, the Hurl throws, the Upswing rises from the floor.
+//! everything round, the Hurl throws, the Upswing rises from the floor; the Riposte
+//! (docs/rework.md) raises a guard and answers from it with a heavy counter-swing.
 
 use engine::gfx::DrawItem;
 use engine::glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
@@ -42,6 +43,13 @@ pub enum SwingKind {
     Hurl,
     /// From the floor up past the head.
     Upswing,
+    /// The Riposte's guard: the weapon raised crosswise in front (the Trimmer's two blades
+    /// crossed), held while the button is (its progress runs over the longest guard; ended
+    /// early it drops back to rest, [`Swing::drop_guard`]).
+    Guard,
+    /// The Riposte's counter-swing: from the guard, a heavy cut across the front (the
+    /// Trimmer's blades both, crossing).
+    Riposte,
 }
 
 /// A swing in progress.
@@ -69,6 +77,13 @@ impl Swing {
         self.progress += dt.max(0.0) / duration(weapon, self.kind);
         if self.progress >= 1.0 {
             self.progress = 0.0;
+        }
+    }
+
+    /// The guard ends without a counter: it lowers back to rest from wherever it is.
+    pub fn drop_guard(&mut self) {
+        if self.active() && self.kind == SwingKind::Guard {
+            self.progress = self.progress.max(GUARD_DROP);
         }
     }
 
@@ -110,8 +125,15 @@ pub fn duration(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
         (_, SwingKind::Hurl) => 0.5,
         (MeleeWeapon::Trimmer, SwingKind::Upswing) => 0.45,
         (MeleeWeapon::Tamper, SwingKind::Upswing) => 0.6,
+        // The longest a guard can be held (`riposte.guard_time`).
+        (_, SwingKind::Guard) => 1.0,
+        (MeleeWeapon::Trimmer, SwingKind::Riposte) => 0.42,
+        (MeleeWeapon::Tamper, SwingKind::Riposte) => 0.62,
     }
 }
+
+/// Where a dropped guard's track picks up (it lowers to rest from there).
+const GUARD_DROP: f32 = 0.92;
 
 /// Progress at which the blow lands (the edge's brightest moment, the trail's end).
 pub fn impact(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
@@ -122,6 +144,10 @@ pub fn impact(weapon: MeleeWeapon, kind: SwingKind) -> f32 {
         (_, SwingKind::Whirl) => 0.6,
         (_, SwingKind::Hurl) => 0.3,
         (_, SwingKind::Upswing) => 0.32,
+        // Up (the flare holds while it is).
+        (_, SwingKind::Guard) => 0.12,
+        (MeleeWeapon::Trimmer, SwingKind::Riposte) => 0.24,
+        (MeleeWeapon::Tamper, SwingKind::Riposte) => 0.2,
     }
 }
 
@@ -294,8 +320,43 @@ fn track(weapon: MeleeWeapon, kind: SwingKind) -> Vec<(f32, Key, Ease)> {
             (0.5, key(0.1, -0.05, -0.28, 0.05, 0.55, 0.1), Out),
             (1.0, TAMP_REST, Smooth),
         ],
+        // The blade laid across the front, edge out, pointing up to the left (the left one,
+        // mirrored and a little lower, up to the right: crossed).
+        (MeleeWeapon::Trimmer, SwingKind::Guard) => vec![
+            (0.0, TRIM_REST, Smooth),
+            (0.12, TRIM_GUARD, Out),
+            (GUARD_DROP, TRIM_GUARD, Smooth),
+            (1.0, TRIM_REST, Smooth),
+        ],
+        // The haft held across the front at the chest, the head on the left.
+        (MeleeWeapon::Tamper, SwingKind::Guard) => vec![
+            (0.0, TAMP_REST, Smooth),
+            (0.12, TAMP_GUARD, Out),
+            (GUARD_DROP, TAMP_GUARD, Smooth),
+            (1.0, TAMP_REST, Smooth),
+        ],
+        // From the guard, flung out to the right and cut back across, low on the left.
+        (MeleeWeapon::Trimmer, SwingKind::Riposte) => vec![
+            (0.0, TRIM_GUARD, Smooth),
+            (0.08, key(0.24, -0.05, -0.3, -0.85, 0.25, -0.7), Out),
+            (0.24, key(-0.1, -0.17, -0.36, 1.1, -0.4, -1.0), In),
+            (0.4, key(-0.12, -0.2, -0.34, 1.15, -0.5, -0.9), Out),
+            (1.0, TRIM_REST, Smooth),
+        ],
+        // From the guard, the head swung flat round from the right, across the front.
+        (MeleeWeapon::Tamper, SwingKind::Riposte) => vec![
+            (0.0, TAMP_GUARD, Smooth),
+            (0.08, key(0.3, -0.14, -0.25, -0.9, -1.1, 1.2), Out),
+            (0.2, key(-0.25, -0.16, -0.3, 0.9, -1.25, 1.2), In),
+            (0.38, key(-0.28, -0.2, -0.3, 0.95, -1.3, 1.1), Out),
+            (1.0, TAMP_REST, Smooth),
+        ],
     }
 }
+
+/// The Trimmer's right blade in the Riposte's guard, the Tamper's haft in it.
+const TRIM_GUARD: Key = key(0.07, -0.08, -0.28, 1.2, 0.35, -1.45);
+const TAMP_GUARD: Key = key(0.08, -0.15, -0.3, 0.1, -0.25, 1.3);
 
 /// The idle placement of the right hand.
 fn rest(weapon: MeleeWeapon) -> Key {
@@ -328,6 +389,17 @@ pub fn view_left(swing: &Swing, extra: Vec3) -> Mat4 {
         SwingKind::Whirl if swing.active() => sample(
             &track(MeleeWeapon::Trimmer, SwingKind::Whirl),
             unit(swing.progress - 0.12),
+        ),
+        // The guard crosses both blades; the counter cuts with both, the left a beat behind
+        // (an X).
+        SwingKind::Guard if swing.active() => sample(
+            &track(MeleeWeapon::Trimmer, SwingKind::Guard),
+            unit(swing.progress),
+        )
+        .lerp(key(0.07, -0.13, -0.28, 1.2, 0.35, -1.45), 0.5),
+        SwingKind::Riposte if swing.active() => sample(
+            &track(MeleeWeapon::Trimmer, SwingKind::Riposte),
+            unit(swing.progress - 0.06),
         ),
         // Otherwise it stays up in the guard (a little pulled in while the right one works).
         _ if swing.active() => TRIM_REST.lerp(key(0.12, -0.2, -0.28, 0.1, 0.0, 0.2), 0.5),
@@ -462,6 +534,8 @@ fn hands_together(swing: &Swing) -> bool {
             SwingKind::Hurl => p < 0.3,
             SwingKind::Upswing => (0.2..0.6).contains(&p),
             SwingKind::Lunge => false,
+            SwingKind::Guard => false,
+            SwingKind::Riposte => p < 0.24,
         }
 }
 
@@ -555,7 +629,7 @@ pub fn muzzle(weapon: MeleeWeapon) -> Vec3 {
 pub fn strike_path(weapon: MeleeWeapon, swing: &Swing, n: usize) -> Vec<Vec3> {
     let hit = impact(weapon, swing.kind);
     let from = match swing.kind {
-        SwingKind::Slash | SwingKind::Upswing => hit * 0.3,
+        SwingKind::Slash | SwingKind::Upswing | SwingKind::Riposte => hit * 0.3,
         _ => 0.0,
     };
     (0..n.max(2))
@@ -666,8 +740,26 @@ fn arm_track(weapon: MeleeWeapon, kind: SwingKind) -> Vec<(f32, ArmKey, Ease)> {
             (0.32, arm(0.15, 2.8, 0.2, 0.0, 0.0), In),
             (1.0, rest, Smooth),
         ],
+        // Across the chest, the weapon held flat in front.
+        (_, SwingKind::Guard) => vec![
+            (0.0, rest, Smooth),
+            (0.12, ARM_GUARD, Out),
+            (GUARD_DROP, ARM_GUARD, Smooth),
+            (1.0, rest, Smooth),
+        ],
+        // From the guard out to the right, then cut across to the left.
+        (_, SwingKind::Riposte) => vec![
+            (0.0, ARM_GUARD, Smooth),
+            (0.08, arm(-1.0, 1.45, 0.35, 0.0, 1.2), Out),
+            (0.24, arm(1.1, 1.2, 0.1, 0.1, 1.4), In),
+            (0.4, arm(1.1, 1.15, 0.15, 0.1, 1.3), Out),
+            (1.0, rest, Smooth),
+        ],
     }
 }
+
+/// The right arm in the Riposte's guard: drawn across the chest, the weapon flat in front.
+const ARM_GUARD: ArmKey = arm(0.9, 1.3, 1.0, 0.2, 1.45);
 
 /// The right arm at rest: the weapon held up in front (a gun's aim, so the third-person
 /// Shrike points it along the look like any other weapon).
@@ -828,12 +920,14 @@ mod tests {
     use super::*;
 
     const WEAPONS: [MeleeWeapon; 2] = [MeleeWeapon::Trimmer, MeleeWeapon::Tamper];
-    const KINDS: [SwingKind; 5] = [
+    const KINDS: [SwingKind; 7] = [
         SwingKind::Slash,
         SwingKind::Lunge,
         SwingKind::Whirl,
         SwingKind::Hurl,
         SwingKind::Upswing,
+        SwingKind::Guard,
+        SwingKind::Riposte,
     ];
 
     #[test]

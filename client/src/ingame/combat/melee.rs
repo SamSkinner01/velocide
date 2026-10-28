@@ -51,6 +51,7 @@ pub fn ability_color(kind: SwingKind) -> Vec4 {
         SwingKind::Whirl => weapon_ability_color(Ability::Whirl),
         SwingKind::Hurl => weapon_ability_color(Ability::Hurl),
         SwingKind::Upswing => weapon_ability_color(Ability::Upswing),
+        SwingKind::Guard | SwingKind::Riposte => super::tricks::riposte::STEEL,
     }
 }
 
@@ -98,6 +99,8 @@ pub fn swing_sfx(weapon: MeleeWeapon, kind: SwingKind) -> Sfx {
         (_, SwingKind::Whirl) => Sfx::Whirl,
         (_, SwingKind::Hurl) => Sfx::HurlThrow,
         (_, SwingKind::Upswing) => Sfx::Upswing,
+        (_, SwingKind::Guard) => Sfx::RiposteGuard,
+        (_, SwingKind::Riposte) => Sfx::RiposteCounter,
     }
 }
 
@@ -163,6 +166,8 @@ fn arc(weapon: MeleeWeapon, kind: SwingKind, left: bool) -> Option<Arc> {
     };
     Some(match (weapon, kind) {
         (MeleeWeapon::Trimmer, SwingKind::Slash) => flat(1.75, 0.35, 1.7),
+        // The counter: a wide flat cut across the front.
+        (_, SwingKind::Riposte) => flat(2.1, 0.2, 2.0),
         (MeleeWeapon::Tamper, SwingKind::Slash) => vertical(true, 2.0),
         (_, SwingKind::Upswing) => vertical(false, 1.8),
         (_, SwingKind::Whirl) => Arc {

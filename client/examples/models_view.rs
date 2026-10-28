@@ -1208,6 +1208,27 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             MeleeWeapon::Tamper,
             swing(SwingKind::Upswing, 0.3, false),
         ),
+        // The Riposte (docs/rework.md): the guard and the counter.
+        (
+            "TRIMMER RIPOSTE GUARD",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Guard, 0.5, false),
+        ),
+        (
+            "TRIMMER RIPOSTE COUNTER",
+            MeleeWeapon::Trimmer,
+            swing(SwingKind::Riposte, 0.22, false),
+        ),
+        (
+            "TAMPER RIPOSTE GUARD",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Guard, 0.5, false),
+        ),
+        (
+            "TAMPER RIPOSTE COUNTER",
+            MeleeWeapon::Tamper,
+            swing(SwingKind::Riposte, 0.18, false),
+        ),
     ];
     let color = Vec3::new(1.0, 0.55, 0.25);
     for (i, (name, weapon, s)) in cases.into_iter().enumerate() {
@@ -1354,6 +1375,30 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
                 swing(SwingKind::Slash, 0.13, false),
                 swing(SwingKind::Upswing, 0.32, false),
                 swing(SwingKind::Hurl, 0.15, false),
+            ],
+        ),
+        (
+            "melee_3p_riposte_trimmer",
+            "RIPOSTE (3RD PERSON, TRIMMER): REST, GUARD, COUNTER WIND / CUT / DONE",
+            10u8,
+            [
+                idle,
+                swing(SwingKind::Guard, 0.5, false),
+                swing(SwingKind::Riposte, 0.08, false),
+                swing(SwingKind::Riposte, 0.24, false),
+                swing(SwingKind::Riposte, 0.4, false),
+            ],
+        ),
+        (
+            "melee_3p_riposte_tamper",
+            "RIPOSTE (3RD PERSON, TAMPER): REST, GUARD, COUNTER WIND / CUT / DONE",
+            11u8,
+            [
+                idle,
+                swing(SwingKind::Guard, 0.5, false),
+                swing(SwingKind::Riposte, 0.08, false),
+                swing(SwingKind::Riposte, 0.2, false),
+                swing(SwingKind::Riposte, 0.38, false),
             ],
         ),
     ] {
