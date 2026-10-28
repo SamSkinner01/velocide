@@ -1428,12 +1428,14 @@ mod tests {
             kind::CINDER_ROCKET,
             kind::FLAK_SHELL,
             kind::LIMPET,
-            kind::KITE,
-            kind::BOLAS,
         ] {
             assert!(projectile_kind(k).is_some(), "kind {k}");
         }
         assert_eq!(projectile_kind(kind::BOMB), None);
+        // The rework's Bolas, Kite and tossed Lantern are the gear's (gear.rs).
+        for k in [kind::KITE, kind::BOLAS, kind::LANTERN_TOSS] {
+            assert_eq!(projectile_kind(k), None, "kind {k}");
+        }
         for kind in ArsenalProjectile::ALL {
             for stuck in [false, true] {
                 let p = ProjectileView {

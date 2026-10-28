@@ -135,16 +135,25 @@ impl LagCompHistory {
         let (a, b, frac) = self.bracket(t);
         let hitboxes = match b {
             None => a.hitboxes.clone(),
-            Some(b) => a
-                .hitboxes
-                .iter()
-                .map(
-                    |ha| match b.hitboxes.iter().find(|hb| hb.target == ha.target) {
-                        Some(hb) => ha.lerp(hb, frac),
-                        None => ha.clone(),
-                    },
-                )
-                .collect(),
+            Some(b) => {
+                let span = (b.tick - a.tick) as f32;
+                a.hitboxes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ha)| {
+                        // Same order in consecutive frames, unless the set changed.
+                        let hb = b
+                            .hitboxes
+                            .get(i)
+                            .filter(|hb| hb.target == ha.target)
+                            .or_else(|| b.hitboxes.iter().find(|hb| hb.target == ha.target));
+                        match hb {
+                            Some(hb) => ha.blend(hb, frac, span),
+                            None => ha.clone(),
+                        }
+                    })
+                    .collect()
+            }
         };
         Rewound {
             time_ticks: t,
@@ -162,8 +171,11 @@ impl LagCompHistory {
         let t = self.clamp_time(view_time_ticks, max_rewind_ms)?;
         let (a, b, frac) = self.bracket(t);
         let ha = a.hitboxes.iter().find(|h| h.target == target)?;
-        match b.and_then(|b| b.hitboxes.iter().find(|h| h.target == target)) {
-            Some(hb) => Some(ha.lerp(hb, frac)),
+        let Some(b) = b else {
+            return Some(ha.clone());
+        };
+        match b.hitboxes.iter().find(|h| h.target == target) {
+            Some(hb) => Some(ha.blend(hb, frac, (b.tick - a.tick) as f32)),
             None => Some(ha.clone()),
         }
     }
@@ -276,6 +288,26 @@ mod tests {
         assert!((dist - 9.6).abs() < 1e-3);
         let now = h.rewind(40.0, 250.0);
         assert!(now.ray_hit(origin, Vec3::Z, 100.0, Some(shooter)).is_none());
+    }
+
+    #[test]
+    fn a_teleport_is_rewound_as_clients_show_it() {
+        // Player 0 jumps 20 m between ticks 5 and 6 (a respawn, a blink): clients show it at
+        // the old place until tick 6, so a rewind never puts it halfway.
+        let mut h = LagCompHistory::new(60, 500.0);
+        h.record(4, vec![player_at(0, 0.0)]);
+        h.record(5, vec![player_at(0, 0.5)]);
+        h.record(6, vec![player_at(0, 20.5)]);
+        let x = |t: f64| h.rewind(t, 500.0).hitboxes[0].shapes[0].a.x;
+        assert!((x(4.5) - 0.25).abs() < 1e-5, "walking: interpolated");
+        assert_eq!(x(5.5), 0.5);
+        assert_eq!(x(5.99), 0.5);
+        assert_eq!(x(6.0), 20.5);
+        let target = HitTarget::Player(PlayerId(0));
+        assert_eq!(
+            h.rewind_target(target, 5.5, 500.0).unwrap().shapes[0].a.x,
+            0.5
+        );
     }
 
     #[test]

@@ -39,7 +39,8 @@ pub struct WeaponPredictor {
 pub struct PredictedShot {
     pub input: PlayerInput,
     pub intents: Vec<FireIntent>,
-    /// The predicted eye when it fired (projectile stand-ins launch from it).
+    /// The predicted eye when it fired, before its input's movement (projectiles launch from
+    /// there, `shared::sim::projectiles::LaunchView`; so do their stand-ins).
     pub eye: Option<glam::Vec3>,
     /// Its effects were already played on the press frame ([`WeaponPredictor::lookahead`]).
     pub played: bool,
@@ -99,9 +100,18 @@ impl WeaponPredictor {
         }
         let alive = !net.own_combat().is_some_and(|c| c.dead_at(input.seq));
         let mut shot = self.apply(&input, alive, &net.tuning().combat, net.tick_rate());
-        shot.eye = net
-            .local_state()
-            .map(|s| s.eye_position(&net.tuning().movement));
+        // Its projectiles leave from where the input's movement started (in the stance after
+        // it), as on the server.
+        shot.eye = net.prediction().map(|p| {
+            let now = p.state();
+            let back = p.previous_state().position - now.position;
+            let back = if back.length() <= shared::sim::TELEPORT_PER_TICK {
+                back
+            } else {
+                glam::Vec3::ZERO
+            };
+            now.eye_position(&net.tuning().movement) + back
+        });
         Some(shot)
     }
 
@@ -189,7 +199,8 @@ fn same_intents(a: &[FireIntent], b: &[FireIntent]) -> bool {
 }
 
 /// Directions of the rays a hitscan intent fires (client-side, for tracers only: the server's
-/// spread is authoritative for damage).
+/// spread is authoritative for damage). A scattergun's blast is exactly the server's: its fixed
+/// pattern's jitter is seeded by the input (`scatter::pellet_dirs`).
 pub fn hitscan_dirs(
     intent: &FireIntent,
     input: &PlayerInput,
@@ -218,6 +229,7 @@ pub fn hitscan_dirs(
             })
             .collect()
     };
+    let blast = |w| shared::sim::scatter::blast_dirs(t, w, input).unwrap_or_default();
     let charge = match intent {
         FireIntent::Primary { charge, .. } | FireIntent::Ability { charge, .. } => *charge,
         _ => 0.0,
@@ -226,8 +238,8 @@ pub fn hitscan_dirs(
         Attack::Quill | Attack::Brand | Attack::Arc | Attack::Lamplighter => vec![aim],
         // The Lancet's bloom (`charge`) widens its needles' spread.
         Attack::Lancet => cone(1, t.lancet.bloom_degrees * charge * 2.0),
-        Attack::Blast => cone(t.bellows.pellets, t.bellows.cone_degrees),
-        Attack::Thresher => cone(t.thresher.pellets, t.thresher.cone_degrees),
+        Attack::Blast => blast(WeaponKind::Bellows),
+        Attack::Thresher => blast(WeaponKind::Thresher),
         _ => Vec::new(),
     }
 }

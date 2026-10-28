@@ -9,14 +9,17 @@ weapon / ability / melee / knack / "Balance profiles" tables that match them.
 
 Two passes: **phase 1** (the ten guns and their nineteen abilities, then re-checked against
 **pve**'s bigger Mould hit shapes and **feel**'s projectile hit pad and bow), **phase 2** (the
-Trimmer and the Tamper, Lunge / Whirl / Hurl / Upswing, the knacks).
+Trimmer and the Tamper, Lunge / Whirl / Hurl / Upswing, the knacks). Then the rework
+(`docs/rework.md`): **the shotguns pass** (its own section at the end: why the Bellows and the
+Thresher felt weak in play, the fixed pellet pattern, point blank, the stagger, the feedback).
+The Bellows / Thresher rows of the tables in between are from before it.
 
 ## The harness
 
 ```text
 cargo run -p shared --release --example balance_report                    # all of it (~15 s)
 cargo run -p shared --release --example balance_report -- pvp oneshots    # sections: primaries
-                              ttk swarm pvp oneshots abilities knacks healing
+                              ttk swarm pvp oneshots abilities knacks healing shotguns
 cargo run -p shared --release --example balance_report -- --tuning other.ron   # another file
 ```
 
@@ -40,8 +43,14 @@ numbers ahead of a merge).
   velocity and facing are restored every tick (no knockback drift, no AI); they take damage
   without dying unless a run uses real health, so one run is a damage-over-time curve and every
   time to kill (NORMAL ×1.0, HARD ×1.3) is read off it. The shooter is held in place too, except
-  while a Lunge carries it. Moving targets, dodging and cover are not measured: the numbers are
-  a skilled player's ceiling.
+  while a Lunge carries it. Moving targets, dodging and cover are not measured by these: the
+  numbers are a skilled player's ceiling.
+* **Play-like** (the `shotguns` section, the shotguns pass): `Motion::Strafe` moves a target
+  across the line of fire (5 m/s, turning back every 0.8 s: `Play::STRAFE`) and
+  `Bench::aim_lag` puts the crosshair where the aim point was 0.1 s before (a good player
+  tracking it); `Motion::Free` lets Moulds run their own AI at the shooter and take the real
+  knockback (`blast_push`). Every hitscan trigger pull is a `Volley` (rays fired, rays landed,
+  damage, whether it staggered the Mould).
 * **Ranges** (feet to feet): 5 / 15 / 30 m; melee at contact (a Mould's hit radius + 1.2 m, a
   player 2 m); "at its range": scatterguns and the Kiln 5 m, melee 2 m, the rest 15 m.
 * **Policies**: a primary is held (the bow: full draws); an ability is used whenever it is ready
@@ -297,7 +306,8 @@ recovers). Kept at 0.5.
 ## Locked in by tests
 
 * `shared/tests/combat_balance.rs` (PvE): every primary sustains **60–150 DPS** on a Gnawer
-  body at its range; every Mould dies to every primary at NORMAL within **9 s** (200+ HP) /
+  body at its range (the scatterguns above it: the shotguns pass below has their tests); every
+  Mould dies to every primary at NORMAL within **9 s** (200+ HP) /
   **1.5 s** (the rest), best of body and weak point, melee at contact (the Hurl for a hovering
   Harrier), the Gaoler from behind; on every weapon the best ability adds at most **1.5 ×** the
   second best (single target), none adds more than **300 DPS** on a pack, every damage ability
@@ -306,7 +316,8 @@ recovers). Kept at 0.5.
   `BalanceTuning::default()`.
 * `shared/tests/combat_arsenal.rs`: the analytic PvP test; `pvp_one_shots_and_times_to_kill_
   measured_in_play` (every pull and ability use on every carrier, melee included, at 3 / 5 /
-  10 m, body and head, the bow at a full and a 90 % draw; both buttons on one tick for Both
+  10 m, body and head — a full Bellows blast to the body kills at 3 m and only there, the
+  shotguns pass's exception — the bow at a full and a 90 % draw; both buttons on one tick for Both
   Barrels, Volley, Whirl and Upswing; every primary's all-body time to kill at its range inside
   0.8–1.8 s); `pvp_knacks_are_choices_not_a_must_pick` (Tallow Skin at most ×1.6 on average, the
   flask changes some duel).
@@ -329,3 +340,142 @@ recovers). Kept at 0.5.
   deflects, Surge / Snare / Soot Pot.
 * `docs/roster.md`, `docs/gameplay.md` and `docs/expansion.md` still quote some old starting
   values; `docs/arsenal.md` and `assets/tuning.ron` are the reference.
+
+## The shotguns pass (the rework, `docs/rework.md` §5)
+
+The player (2026-10-28): *"The shotguns are severely underpowered, so buff them."* The harness
+disagreed: on paper the Bellows and the Thresher were already the top primaries at 5 m (132 /
+142 DPS on a Gnawer's body; the Longwick 116, the Trimmer 115 at contact). The report's
+`shotguns` section (`Play`, `Motion`, `Volley`, `blast_push` in the harness) measures what a
+standing target and a perfect aim hid.
+
+### Why they felt weak
+
+| finding | measured before | why it matters |
+|---|---|---|
+| **Every blast was a dice roll**: each pellet flew uniformly at random over the cone's disc (half of them in its outer 30 %) | a Mould juking at 5 m/s, the crosshair 0.1 s behind it: the Thresher's worst blast on a Censer at 8 m landed 4 of 7 pellets (30 of 52.5), on a Heron at 12 m 2 of 7 (15); the Bellows' worst on a Heron at 12 m 6 of 12 (48 of 96), on a Censer 7 | the breakpoints you feel became luck: a juking Censer at 12 m took one or two Bellows blasts, two or three of the Thresher's, a Snuffer up to three of the Thresher's |
+| **Nothing reacted to a blast**: a stagger needs one hit's knockback above 4 m/s (`ai::STAGGER_KNOCKBACK`, after `knockback_scale`), and a pellet pushed 2.0 (Bellows) / 1.5 (Thresher) × at most 1.5 | 0 % of the blasts staggered anything. A Gnawer running in, all 12 pellets at 8 m: shoved 3.1 m back without losing its footing, running at you again 0.40 s later (the Thresher's 7: 0.1 m, 0.13 s) | a blast that lands everything looked like it did nothing |
+| **On a moving Mould the "top DPS" tied the bow's body shots** | juking at 8 m, aimed at the body: Bellows 127 (Gnawer) / 120 (Censer) / 114 (Heron), Thresher 145 / 125 / 113, Longwick 118, Lancet 94. At the head the precision weapons keep their ×2 / ×2.5 while pellets spill off it: Longwick 236 / 236 / 295 against the Bellows' 161 / 129 / 138 | the close-range weapon lost to an arrow at the head from the range it should own |
+| **The blast didn't read** | one body marker for twelve pellets, the size of a Quill needle's (the confirm merges a tick's hits on a target, so the number did show the total); the view punch of a bow release (kick 1.0, squared); a breathy −11 LU "whumpf" | nothing said "that hit hard" |
+| Not the cause | hit assist (pellets test the same padded shapes as every ray: 0.35 m body / 0.15 m weak point on a Mould), damage falloff (there is none), the damage number (the blast's total) | |
+
+### Changes
+
+| what | before → after | why |
+|---|---|---|
+| **Fixed pellet pattern** (`shared/src/sim/scatter.rs`: `pellet_pattern`, `pellet_dirs`) | uniformly random over the cone → a centre pellet, an inner ring at half the cone (Bellows 5, Thresher 3) and the outer ring on its edge (6 / 4), each pellet moved at most 0.5° / 0.6° (`pattern_jitter_degrees`) | a good aim lands the same pellets every time. The jitter is seeded by the input's `seq` alone, so the client's tracers (`weapon_feel::hitscan_dirs`) are exactly the server's pellets |
+| **Stagger** (`scatter::blast_stagger`; `stagger_fraction`, `stagger_time`) | never → a blast landing at least 4 of the Bellows' 12 / 3 of the Thresher's 8 pellets on a light Mould (base health below `pinning_arrow.heavy_health`, 300) staggers it 0.35 s / 0.2 s | "a blast that connects staggers a light Mould"; the Smelter and the Gaoler shrug it off |
+| `bellows.pellet_knockback`, `thresher.pellet_knockback` | 2.0 → 1.3, 1.5 → 0.7 | a staggered Mould stops steering and brakes slowly: at 2.0 a standing Gnawer would fly ~10 m, out of the shotgun's range. A charging one is now stopped and shoved 2 m back |
+| **Point blank** (`hitscan::PointBlank` on the pellets' `ShotSpec`; `point_blank_range` / `_end` / `_multiplier`) | — → the Bellows' pellets hitting within 3 m deal ×1.25, easing back to ×1 at 4 m (the Thresher: ×1) | the jam-it-in-their-face reward in PvE; in PvP it carries the one-shot exception (below) without touching 5 m |
+| `bellows.pellet_damage` | 8 → 11 (96 → 132 a blast) | ×1.375 a blast; 5 m DPS 132 → 199 (the 5 m Gnawer's pellets land at 3.9 m: a little point blank) |
+| `thresher.pellets`, `pellet_damage`, `cone_degrees` | 7 × 7.5 → 8 × 10 (52.5 → 80 a blast), 11° → 10° | 5 m DPS 142 → 213; eight make a rounder pattern (1 + 3 + 4), the tighter cone keeps its outer ring on a Gnawer to 12 m |
+| PvP `Bellows` | damage 0.6 → 0.52 (5.72 a pellet); overrides `"bellows.point_blank_multiplier": 1.6`, `"bellows.pellet_knockback": 2.0` | 69 a blast: still two at 5 m (0.8 s) and three through Tallow Skin (at 0.55, 73, two broke through), 80 to the head at 5 m (was 91); a full blast inside 3 m 110 (11 of its 12 pellets still kill) |
+| PvP `Thresher` | damage 0.75 → 0.49 (4.9 a pellet); override `"thresher.pellet_knockback": 1.5` | 39 a blast as before: three on the body (0.83 s), two on the head up close (74 a blast at 3 m; at 5 m 49, was 28). Thresher + Flak stays 0.42 s (a blast and a contact ring stay under 100) |
+| **one-shot rule** | + a full Bellows blast to the body at point blank (≤ 3 m) | the contract's stated exception; from 5 m on no Bellows blast kills, body or head |
+| hit marker (client: `hud::blast_marker_scale`, `CombatHud::hit_marker_scaled`) | always ×1 → ×1 up to half a blast's pellets on one target, growing to ×1.7 (longer, thicker strokes, a harder pop) for all of them | a mostly-landed blast reads as one |
+| view punch / shake (client: `AttackStyle::punch`; `CameraRig::punch` takes 0..2) | Bellows 1.0 / 0.22 → 2.0 / 0.3 (~0.7° → 1.4°), Thresher 0.81 / 0.18 → 1.3 / 0.22, the Thresher's viewmodel kick 0.9 → 1.0 | more kick |
+| blast sounds (`engine/src/audio/sfx.rs`, `docs/audio.md`) | `BellowsBlast` −11 → −10 LU: a deeper core (weight 1.15), the pellets crunching out, a clean 90→30 Hz sub under the distortion. `ThresherFire` −12 → −11: core 0.8 → 0.95, a short clean sub | heavier, the Thresher still quick enough for every 0.42 s |
+
+### The numbers, before → after
+
+`cargo run -p shared --release --example balance_report -- primaries shotguns pvp oneshots`.
+
+**Primaries on a Gnawer** (standing, the crosshair on it; DPS body / head). The next best
+primary: the Longwick 116 / 231, the Trimmer 115 at contact.
+
+| weapon | 5 m | 15 m | 30 m |
+|---|---|---|---|
+| Bellows | 132 / 250 → **199 / 352** (×1.51) | 146 / 144 → 210 / 196 | 58 / 61 → 94 / 87 |
+| Thresher | 142 / 252 → **213 / 384** (×1.50) | 127 / 92 → 197 / 178 | 33 / 29 → 94 / 74 |
+
+**Juking Moulds** (5 m/s, turning every 0.8 s, the crosshair 0.1 s behind; DPS body / head;
+endless). Body to body, both scatterguns out-damage every other primary on all three Moulds to
+12 m; on the Gnawer (what the test checks) at the head too. At a small weak point 8 m away (the
+Censer's lantern, the Heron's ×2.5 head) a bow that lands every arrow on it still deals more
+than a blast aimed there: the precision weapons' reward, not the scatterguns' job.
+
+| weapon | Gnawer 5 m | Gnawer 8 m | Censer 8 m | Heron 8 m | Gnawer 12 m | Censer 12 m | Heron 12 m |
+|---|---|---|---|---|---|---|---|
+| Bellows before | 120 / 194 | 127 / 161 | 120 / 129 | 114 / 138 | 122 / 131 | 104 / 106 | 93 / 103 |
+| Bellows after | **168 / 284** | **180 / 236** | **165 / 210** | **153 / 233** | 170 / 188 | 153 / 164 | 147 / 153 |
+| Thresher before | 138 / 205 | 145 / 165 | 125 / 132 | 113 / 141 | 127 / 115 | 103 / 99 | 96 / 99 |
+| Thresher after | **216 / 331** | **230 / 296** | **200 / 224** | **174 / 251** | 209 / 180 | 156 / 140 | 149 / 158 |
+| Longwick | 118 / 236 | 118 / 236 | 118 / 236 | 118 / 295 | 118 / 223 | 118 / 210 | 118 / 33 |
+| Lancet | 94 / 182 | 94 / 175 | 94 / 189 | 94 / 210 | 94 / 170 | 94 / 173 | 94 / 171 |
+| Quill | 87 / 174 | 87 / 174 | 87 / 174 | 87 / 218 | 87 / 174 | 87 / 174 | 87 / 218 |
+
+**Blast by blast** on the same juking Moulds, aimed at the body: the worst blast (pellets
+landed, damage), blasts to kill one at NORMAL (most / mean over 12 starts), the blasts that
+staggered it.
+
+| Mould, range | Bellows before → after | Thresher before → after |
+|---|---|---|
+| Gnawer, 12 m | 9 of 12, 80; 1 / 1.0 → 11 of 12, 132; 1 / 1.0 | 4 of 7, 30; 2 / 1.2 → 6 of 8, 70; 1 / 1.0 |
+| Censer, 8 m | 12 of 12, 96; 1 / 1.0 → 12 of 12, 132; 1 / 1.0 | 4 of 7, 30; 2 / 2.0 → 8 of 8, 80; 1 / 1.0 |
+| Censer, 12 m | 7 of 12, 56; 2 / 1.1 → 11 of 12, 121; 1 / 1.0 | 4 of 7, 30; 3 / 2.4 → 6 of 8, 60; 2 / 2.0 |
+| Snuffer, 12 m | 11 of 12, 100; 1 / 1.0 → 11 of 12, 170; 1 / 1.0 | 3 of 7, 22.5; 3 / 2.1 → 6 of 8, 75; 1 / 1.0 |
+| Heron, 8 m | 10 of 12, 80; 1 / 1.0 → 11 of 12, 121; 1 / 1.0 | 4 of 7, 30; 2 / 2.0 → 6 of 8, 60; 1 / 1.0 |
+| Heron, 12 m | 6 of 12, 48; 2 / 1.1 → 10 of 12, 110; 1 / 1.0 | 2 of 7, 15; 3 / 2.1 → 5 of 8, 50; 2 / 1.5 |
+| Bellwether, 8 m | 12 of 12, 96; 3 / 3.0 → 12 of 12, 132; 2 / 2.0 | 7 of 7, 52.5; 5 / 5.0 → 8 of 8, 80; 3 / 3.0 |
+| staggered | 0 % → 100 % of the blasts, every light Mould | 0 % → 100 % |
+
+**One blast at a Mould running in** (its own AI, endless; at 8 m): pushed back / staggered /
+running at you again.
+
+| Mould | Bellows before → after | Thresher before → after |
+|---|---|---|
+| Gnawer | 3.1 m, —, 0.40 s → 2.0 m, 0.32 s, 0.45 s | 0.1 m, —, 0.13 s → 0.0 m, 0.17 s, 0.25 s |
+| Snuffer | 4.9 m, —, 0.58 s → 4.2 m, 0.32 s, 0.58 s | 0.5 m, —, 0.58 s → 0.1 m, 0.17 s, 0.58 s |
+| Smelter, Gaoler | not moved, not staggered (heavy) | not moved, not staggered |
+
+**Other PvE tables.** Time to kill at 15 m, NORMAL (body / weak point): the Bellows' Bellwether
+1.60 → 0.80, Smelter 2.40 → 1.60, Gaoler from behind 3.20 / 2.40 → 1.60 / 1.60; the
+Thresher's Bellwether 1.67 / 2.50 → 0.83 / 0.83, Smelter 2.92 → 1.67, Gaoler from behind 2.92 →
+2.08 / 1.67. The swarm (six Gnawers, 10 m): Bellows 1.60 → 1.60 (three blasts: the 8° pattern
+covers one or two of a pack 1.6 m apart), Thresher 2.08 → 1.25. Build gains: Flak 63, Slug 46, Gust 4 as before; Both
+Barrels (on its way out) 43 / 64 → 23 / 48 (it takes the primary's now stronger shot).
+
+**PvP** (100 HP; per blast body / head, time to kill holding the trigger):
+
+| | before | after |
+|---|---|---|
+| Bellows at 3 / 5 / 10 m | 58 / **115**, 58 / 91, 48 / 24 | **110** / **220**, 69 / 80, 46 / 34 |
+| Bellows time to kill, 5 m | 0.80 (two blasts) | 0.80 |
+| Thresher at 3 / 5 / 10 m | 39 / 79, 39 / 28, 28 / 11 | 39 / 74, 39 / 49, 20 / 15 |
+| Thresher time to kill body / head, 5 m; 15 m | 0.83 / 1.25; 5.00 / 5.00 | 0.83 / 0.83; 2.50 / 3.75 |
+| through Tallow Skin (duel, 5 m) | Bellows 1.60, Thresher 1.25 | 1.60, 1.25 (at 0.55 a Bellows blast broke through in two: 0.52 keeps the third) |
+| with their abilities (5 m) | Thresher + Slug / Flak 0.42, Bellows 0.80 | the same |
+
+The tight pattern costs the Thresher at 10 m in PvP (its outer ring misses a player's body: 28
+→ 20 a blast) and helps it at 15 m (the centre stays on: 5.0 → 2.5 s); its job is up close.
+
+### Tests
+
+* `shared/tests/combat_balance.rs`: `scatterguns_are_the_strongest_primaries_up_close` (≥ 1.35 ×
+  132 / 142 at 5 m; on a Gnawer at 5 and 8 m, standing and juking, body and head, above every
+  other primary aimed the same way, melee at contact), `a_connecting_blast_staggers_a_light_mould`
+  (one blast from 8 m: every light Mould staggered, the Smelter and the Gaoler not),
+  `blasts_land_most_of_their_pellets_every_time` (juking Gnawer, Censer, Heron: every blast at
+  least ¾ of its pellets at 8 m, ½ at 12 m); `every_primary_sustains_damage_inside_the_band` lets
+  the scatterguns past 150.
+* `shared/tests/combat_arsenal.rs`: the analytic PvP test (a Bellows blast × its point blank
+  kills; the Thresher three body blasts, not two, two head blasts, not one) and the in-play one
+  (a full Bellows blast to the body kills at 3 m and only there); the Thresher's pellet count read
+  from the tuning.
+* `shared/tests/combat_weapons.rs`: `bellows_blast_and_both_barrels` reads its numbers from the
+  tuning, `bellows_point_blank_hits_harder` (every pellet at 2 m × the multiplier).
+* Unit: `scatter::tests` (the pattern's rings, the jitter bounded and seeded by `seq`),
+  `hud::tests::a_mostly_landed_blast_draws_a_bigger_marker`, the camera's punch test (a blast
+  punches about twice a full kick, under the cap).
+
+### Left open
+
+* **PvP tracking** isn't modelled: a constant 0.1 s lag against a player strafing at 8–16 m/s
+  makes every hitscan miss most of the time (the Quill landed 28 % at 8 m/s), the Bellows' cone
+  forgiving it most (88 % inside 8 m). Real players lead; play-test it.
+* The stagger has no animation of its own: it shows as the Mould losing its footing (no
+  steering, the blast's push carrying it). A flinch pose would be the client's.
+* Point blank in PvE is the Bellows' only (×1.25 inside 3 m); the Thresher has the fields at ×1.
+* Phase 2 (after the other areas merge): the Scatter pool's new abilities (Bolas, Bulwark) and
+  every other new ability, the Lamplighter, the drinkable Kindle Flask, the README tables; the
+  Both Barrels / Slug rows above go with them.

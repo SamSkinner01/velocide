@@ -217,12 +217,18 @@ available unless the client was cut off for seconds (then it gets a full snapsho
 players record a body capsule + head sphere. `rewind(view_time_ticks, max_rewind_ms)` clamps
 the time to `[newest − lag_comp_max_ms, newest]` (and the recorded range), then interpolates
 every target between the two recorded ticks around it (same ticks the client interpolated
-between). `Rewound::ray_hit` finds the nearest hit, ignoring the shooter.
+between); a target that moved more than `TELEPORT_PER_TICK` (3 m) between them teleported and
+is where it was until the later tick, as clients show it (`Hitbox::blend`).
+`Rewound::ray_hit` finds the nearest hit, ignoring the shooter.
 
 Weapons run inside `SimWorld::step`, which receives the history as
 `Option<&dyn HitboxHistory>`; a hitscan shot from `input` calls
-`history.rewind_hitboxes(input.view_time_ticks(), max_rewind_ms)`. Parry timing validates
-against the same rewound time with `parry_tolerance_ms` extra.
+`history.rewind_hitboxes(input.view_time_ticks(), max_rewind_ms)`. A player's projectile fired
+from `input` flies from that view time: its first step makes up the flight since, each tick
+against the shapes rewound to that moment, and its owner draws it at the render tick
+(`shared::sim::projectiles`, `docs/feel.md` "Hit registration"). Parry timing validates
+against the same rewound time with `parry_tolerance_ms` extra. A shot fired on a frame between
+ticks carries that frame's render tick as its view time (`NetClient::latch_view`).
 
 **Per-player rewind bound.** The view time is chosen by the client, so on its own
 `lag_comp_max_ms` would let a LAN player always claim the full rewind (and the longest parry
@@ -391,7 +397,10 @@ Run them with `cargo test -p client --test net_loopback -- --nocapture`.
 - Door open/close reaches clients with the snapshot, slightly after the server toggled it, so a
   player touching a door exactly as it changes may get a small correction.
 - Remote players are shown ≈ latency + 100 ms in the past (inherent to interpolation); lag
-  compensation makes hits fair, but projectiles/parries need the tolerance windows in tuning.
+  compensation makes hits (hitscan and players' projectiles) land on what the shooter saw,
+  parries need the tolerance windows in tuning. A lag-compensated projectile shows up for
+  others already that far into its flight (a full-draw arrow ~28 m at 100 ms RTT), and its
+  owner sees its own projectiles that far behind the server, like everything else.
 - Clock offset uses a symmetric EMA; a sudden latency increase is followed within ~1 s.
 - `Unsecure` netcode: no encryption keys / auth; switch to `Secure` connect tokens from a
   matchmaker for public servers.

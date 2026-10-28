@@ -93,10 +93,13 @@ fn the_pad_is_for_targets_not_the_level() {
 #[test]
 fn enemy_projectiles_get_no_pad() {
     let t = shared::tuning::Tuning::default();
-    assert_eq!(projectile_target_pad(&t, Owner::Enemy(NetId(7))), 0.0);
-    assert_eq!(projectile_target_pad(&t, Owner::World), 0.0);
     assert_eq!(
-        projectile_target_pad(&t, Owner::Player(shared::sim::PlayerId(1))),
+        projectile_target_pad(&t.combat, Owner::Enemy(NetId(7))),
+        0.0
+    );
+    assert_eq!(projectile_target_pad(&t.combat, Owner::World), 0.0);
+    assert_eq!(
+        projectile_target_pad(&t.combat, Owner::Player(shared::sim::PlayerId(1))),
         t.combat.projectile_hit_pad
     );
 

@@ -200,7 +200,7 @@ and fires nothing.
 | **Quill** primary | hitscan from the eye along the aim, 24, every 0.28 s, ricochets off thorns |
 | Brand (alt A) | hitscan 10, ricochets; whatever the last leg hits (and survives) is branded: `SimWorld::brand_target` (one brand per player, newest per target, 5 s), `SimEvent::Branded`; 2.5 s |
 | Splinter (alt B) | hitscan 20, ricochets; at the last leg's `Impact` 6 secondary traces (`splinter_burst`): 40° cone, 18 m, 9 each, deterministic spread (`SpreadRng` of tick/player/seq); from a target along the shot with that target excluded, from the level along the shot reflected about the surface normal; same (rewound) hitboxes; `SimEvent::Splinters`; 1.1 s |
-| **Bellows** primary (Blast) | 12 pellets in an 8° cone (deterministic spread), 8 each, knockback 2 m/s each along the ray, 60 m, no ricochet; 0.8 s |
+| **Bellows** primary (Blast) | 12 pellets in a fixed pattern on an 8° cone (`shared::sim::scatter`: a centre pellet, 5 at half the cone, 6 on its edge, ±0.5° jitter seeded by the input), 11 each (×1.25 within 3 m), knockback 1.3 m/s each along the ray, 60 m, no ricochet; a blast landing 4+ pellets on a light Mould staggers it 0.35 s; 0.8 s (`docs/balance.md`, the shotguns pass) |
 | Gust (alt A) | `area::gust`: every hostile hitbox (rewound, padded) in a 7 m / 60° cone with line of sight: 6 (always a body hit), knockback `aim × 18 + 4ŷ`; every hostile projectile (enemies'; opponents' in PvP; not stuck, not pending on someone else) in the cone now or where the shooter saw it is turned around with `redirect_projectile` (owner → shooter, along the aim — no auto-aim, ×1.25 speed, ×1.5 damage, `parried`, attack → `Gust`) — no heal or parry reward, `SimEvent::Deflected` (style DEFLECT); recoil `−aim × 10` on the shooter; 1.6 s |
 | Both Barrels (alt B) | 24 pellets in a 5° cone, 8 each; recoil `−aim × 9`; puts the primary on its interval too; 1.4 s |
 | **Arclash** primary (Arc) | while held, a zap every 0.1 s: hitscan 30 m, 6, no ricochet; a hit chains (`arc_chain`) to the nearest other hostile within 7 m of the padded shape (line of sight from the previous target; branded targets first), ≤ 2 jumps, ×0.75 per jump, flags `HITSCAN \| CHAINED`, `SimEvent::ArcChain` |
@@ -253,9 +253,21 @@ victims.
 
 Swept spheres, simulated on the server only. Per tick: exact ballistic step
 (`p += v·dt − ½g·dt²ŷ`, `v −= g·dt·ŷ`), sphere cast against the level (`MASK_SHOTS`) and a
-swept-sphere test against the **current** hitboxes of everything the owner `can_hit` (owners
+swept-sphere test against the current hitboxes of everything the owner `can_hit` (owners
 and co-op teammates are never hit; enemy projectiles never hit enemies); the earliest contact
-wins.
+wins. A player's projectile is swept in each target's moving frame (players have moved this
+tick, enemies move after the projectiles, by their velocity), so a target crossing its path
+between ticks is touched where it was then.
+
+**Lag compensation** (`docs/feel.md`, "Hit registration"): a player's projectile fired from
+an input flies from that input's view time `V` (clamped like a hitscan rewind and by
+`net.projectile_lag_comp_max_ms`, 350): on its first step it makes up the `now − 1 − V` ticks
+of flight its shooter already watched, each tick swept against the hit shapes rewound to that
+moment, then flies on in the present (its fuse and lifetime count from `V`). A contact made on
+the way is moved onto the target as it is now. It leaves from where the input's movement
+started (`LaunchView::eye_shift`). Not the Wisp, the Kite and the Hurl (orbiting, steered,
+returning: driven from the present every tick). `SimWorld::projectile_seen` is where the owner
+saw its projectile for a recast.
 
 | kind (net kind) | gravity | radius | life | on target | on level | parryable |
 |---|---|---|---|---|---|---|
@@ -538,11 +550,14 @@ Prediction duties:
   event and "RESPAWNING IN N.N".
 * **Projectiles/thorns**: other players' / enemies' projectiles and *all* thorns are drawn
   at `replicated_position(e, render_tick, …)` (consistent with lag compensation, parry and
-  ricochet validation). **Your own projectiles** are taken from the newest snapshot and drawn
-  at the present (`server_tick_estimate`, at most 6 ticks past the newest snapshot), starting
-  at the drawn muzzle and blending onto the true path over 0.15 s; before the server reports
-  one, a local stand-in flies it from the muzzle on the shot's frame and hands over to it
-  without a pop or a double (`stand_in.rs`, `docs/feel.md`); your own explosions
+  ricochet validation). **Your own projectiles** are drawn at the render tick too: the server
+  flies them from the view time their shot was aimed at (Projectiles, "Lag compensation"), so
+  that is where they are among the targets you see; before one shows there, a local stand-in
+  flies it from the muzzle on the shot's frame (on the same clock, stopping in the server's
+  padded hit shapes) and hands over to it without a pop or a double (`stand_in.rs`,
+  `docs/feel.md` "Hit registration"). Deflected ones and the orbiting Wisp, the steered Kite
+  and the returning Hurl are taken from the newest snapshot and drawn at the present
+  (`server_tick_estimate`, at most 6 ticks past the newest snapshot). Your own explosions
   (`Fx::Explosion::owner`) play on arrival to match (an own Breach's bang was already played
   by the prediction).
 

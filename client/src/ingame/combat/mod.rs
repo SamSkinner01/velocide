@@ -110,6 +110,8 @@ pub struct AttackStyle {
     pub sfx: Sfx,
     /// Viewmodel kick 0..1.
     pub kick: f32,
+    /// View punch 0..2 (`CameraRig::punch`): the kick squared, more for the scatterguns' blasts.
+    pub punch: f32,
     /// Tracer width (m) and colour (hitscan); 0 = no tracer.
     pub beam_width: f32,
     pub beam_color: Vec4,
@@ -128,9 +130,10 @@ fn glow(c: Vec4, k: f32, a: f32) -> Vec4 {
 }
 
 pub fn attack_style(a: Attack) -> AttackStyle {
-    let s = |sfx, kick, w, c: Vec4, life, shake| AttackStyle {
+    let s = |sfx, kick: f32, w, c: Vec4, life, shake| AttackStyle {
         sfx,
         kick,
+        punch: kick * kick,
         beam_width: w,
         beam_color: c,
         beam_life: life,
@@ -174,14 +177,18 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.25,
             0.06,
         ),
-        Attack::Blast => s(
-            Sfx::BellowsBlast,
-            1.0,
-            0.036,
-            glow(bellows.primary_color(), 1.7, 0.8),
-            0.13,
-            0.22,
-        ),
+        // The scatterguns kick harder than their viewmodel's full kick (docs/balance.md).
+        Attack::Blast => AttackStyle {
+            punch: 2.0,
+            ..s(
+                Sfx::BellowsBlast,
+                1.0,
+                0.036,
+                glow(bellows.primary_color(), 1.7, 0.8),
+                0.13,
+                0.3,
+            )
+        },
         Attack::Gust => s(Sfx::BellowsGust, 0.8, 0.0, Vec4::ONE, 0.0, 0.16),
         Attack::Arc => AttackStyle {
             jagged: true,
@@ -210,14 +217,17 @@ pub fn attack_style(a: Attack) -> AttackStyle {
             0.13,
             0.03,
         ),
-        Attack::Thresher => s(
-            Sfx::ThresherFire,
-            0.9,
-            0.034,
-            glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
-            0.12,
-            0.18,
-        ),
+        Attack::Thresher => AttackStyle {
+            punch: 1.3,
+            ..s(
+                Sfx::ThresherFire,
+                1.0,
+                0.034,
+                glow(WeaponKind::Thresher.primary_color(), 1.7, 0.8),
+                0.12,
+                0.22,
+            )
+        },
         Attack::Riveter => s(Sfx::RiveterFire, 0.3, 0.0, Vec4::ONE, 0.0, 0.02),
         Attack::Cinderbox => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
         Attack::Longwick => s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.05),
@@ -562,28 +572,7 @@ fn parry_feedback(
     effects.sparks(fist + view * 0.3, -view, 10);
 }
 
-/// The local player's projectiles from the newest snapshot, the (present) time to draw them
-/// at, and the local owner code.
-fn own_projectiles(net: &NetClient) -> (Vec<EntityState>, f64, Option<u16>) {
-    let Some(me) = net.local_player_id().map(|p| p.0 as u16) else {
-        return (Vec::new(), 0.0, None);
-    };
-    let Some((latest, frame)) = net.frames().latest() else {
-        return (Vec::new(), 0.0, Some(me));
-    };
-    let own = frame
-        .states()
-        .filter(|e| kind::is_projectile(e.kind) && e.owner == me)
-        .collect();
-    // Present time, but never far past what the server has confirmed (impacts we haven't
-    // heard of yet).
-    let now = net
-        .server_tick_estimate()
-        .unwrap_or(latest as f64)
-        .min(latest as f64 + 6.0)
-        .max(net.render_tick());
-    (own, now, Some(me))
-}
+use stand_in::own_projectiles;
 
 /// Approximate displayed hit capsules for client-side tracer ends: (entity, a, b, radius).
 pub(crate) fn entity_capsule(e: &EntityState) -> Option<(Vec3, Vec3, f32)> {
@@ -688,7 +677,16 @@ impl InGame {
                 } else {
                     MarkerKind::Body
                 };
-                self.combat.hud.hit_marker(kind, now);
+                // A scattergun blast that landed most of its pellets on one target (merged
+                // into this one confirm) draws a bigger marker.
+                let c = &net.tuning().combat;
+                let pellets = match h.attack {
+                    Attack::Blast => Some(c.bellows.pellets),
+                    Attack::Thresher => Some(c.thresher.pellets),
+                    _ => None,
+                };
+                let scale = pellets.map_or(1.0, |n| hud::blast_marker_scale(h.hits, n));
+                self.combat.hud.hit_marker_scaled(kind, scale, now);
                 let color = match kind {
                     MarkerKind::Head | MarkerKind::Kill => theme.crimson_bright,
                     MarkerKind::Armour => theme.ash,
@@ -938,7 +936,7 @@ impl InGame {
                             );
                         }
                         viewmodel.fire(style.kick);
-                        camera.punch(style.kick * style.kick);
+                        camera.punch(style.punch);
                         // A stoked weapon's shot throws embers off the muzzle (stoke.rs).
                         if combat.gear.heat().stoked.is_some()
                             && matches!(intent, FireIntent::Primary { .. })
@@ -958,8 +956,10 @@ impl InGame {
                             aim,
                             t,
                         );
-                        // Own projectiles leave the muzzle now, not a round trip later.
+                        // Own projectiles leave the muzzle now, not a round trip later (from
+                        // the view the shot was aimed at, as the server flies them).
                         if let Some(owner) = owner {
+                            let view = stand_in::shot_view(net, input);
                             for l in stand_in::launches(
                                 intent,
                                 aim,
@@ -969,7 +969,7 @@ impl InGame {
                                 live_limpets,
                                 &mut combat.rng,
                             ) {
-                                combat.stand_ins.spawn(l, muzzle, owner, own_now, t);
+                                combat.stand_ins.spawn(l, muzzle, owner, own_now, view, t);
                             }
                         }
                         let charge = match intent {
@@ -1179,6 +1179,8 @@ impl InGame {
     /// Per frame (visual time): Fx playback, entity bookkeeping, remote player combat
     /// visuals (Discharge charge, brands), viewmodel charge, music intensity.
     pub(super) fn combat_update(&mut self, common: &mut Common, vdt: f32, real_dt: f32) {
+        // Other players are what our shots can hit only in PvP (stand-ins stop in targets).
+        let pvp = self.match_mode().is_pvp();
         let InGame {
             session,
             combat,
@@ -1251,19 +1253,21 @@ impl InGame {
         let own_offset = viewmodel
             .last_draw()
             .map_or(Vec3::ZERO, |d| last_camera.rotation * d.muzzle);
-        // Own projectiles' stand-ins: fly, stop, hand over to the server's (real time: the
-        // projectiles they stand in for don't stop for hitstop).
-        let bodies: Vec<(Vec3, Vec3, f32)> = entities.iter().filter_map(entity_capsule).collect();
-        let rtt = net.stats().rtt_ms / 1000.0;
+        // Own projectiles' stand-ins: fly, stop where the server's will, hand over to the
+        // server's (real time: the projectiles they stand in for don't stop for hitstop).
+        let targets = stand_in::displayed_targets(net, pvp);
+        let rendered = stand_in::rendered_own(net);
         combat.stand_ins.update(
             &stand_in::StandInFrame {
                 own: &own,
                 now: own_time,
+                rendered: &rendered,
+                render: render_tick,
                 tick_rate: rate,
                 tuning: t,
                 world: net.world().map(|w| &w.collision.world),
-                bodies: &bodies,
-                timeout: (rtt * 1.5 + 0.25).clamp(0.3, 1.2),
+                targets: &targets,
+                timeout: stand_in::timeout(net),
             },
             real_dt,
         );
