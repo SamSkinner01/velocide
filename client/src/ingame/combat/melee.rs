@@ -850,6 +850,15 @@ impl MeleeView {
             if age > 0.06 {
                 hurled_sparks(ctx.effects, ctx.rng, weapon, at, dt);
             }
+            // It turned (the far end of its flight, or what it struck): coming back now.
+            let turned = self
+                .hurled
+                .iter()
+                .find(|h| h.0 == e.id)
+                .is_some_and(|h| h.3.dot(e.velocity) < 0.0);
+            if turned {
+                ctx.audio.play(Sfx::HurlReturn, PlayParams::at(at));
+            }
             seen.push((e.id, weapon, at, e.velocity, e.owner));
         }
         // Gone since last frame: it struck something where it was last drawn, or (the Hurl
