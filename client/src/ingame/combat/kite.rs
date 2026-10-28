@@ -166,6 +166,33 @@ pub fn trail_effects(
     effects.billboard(heart, 0.7, rose(1.3, 0.55), FxTex::Glow, 0.0);
 }
 
+/// Your steered kite's aim this frame: a small turning rose diamond where your crosshair meets
+/// the level (up to 60 m out), the point the kite is turning towards.
+pub fn steer_marker(
+    beams: &mut Beams,
+    world: Option<&engine::physics::CollisionWorld>,
+    eye: Vec3,
+    look: Vec3,
+    time: f64,
+) {
+    let look = look.normalize_or(Vec3::NEG_Z);
+    let reach = 60.0;
+    let at = world
+        .and_then(|w| w.cast_ray(eye, look, reach, engine::physics::MASK_SHOTS))
+        .map_or(eye + look * reach, |h| h.point - look * 0.1);
+    let r = 0.12 * eye.distance(at).max(2.0) / 10.0 + 0.1;
+    let spin = (time * 2.0) as f32;
+    let up = (Vec3::Y - look * look.dot(Vec3::Y)).normalize_or(Vec3::X);
+    let right = look.cross(up).normalize_or(Vec3::X);
+    let corner = |k: usize| {
+        let a = spin + k as f32 * std::f32::consts::FRAC_PI_2;
+        at + (right * a.cos() + up * a.sin()) * r
+    };
+    for k in 0..4 {
+        beams.frame_beam(corner(k), corner(k + 1), 0.025 * r / 0.2, rose(1.8, 0.85));
+    }
+}
+
 /// Where the heart of a kite drawn with [`kite_transform`] is.
 pub fn heart(position: Vec3, velocity: Vec3, bank: f32) -> Vec3 {
     kite_transform(position, velocity, bank).transform_point3(KITE_HEART)

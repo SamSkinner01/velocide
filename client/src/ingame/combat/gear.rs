@@ -689,6 +689,10 @@ impl GearView {
             if k.trail.flutter_due(dt) {
                 f.audio.play(Sfx::KiteFlutter, PlayParams::at(k.position));
             }
+            if k.age < k.steer_for {
+                // Steered (the staged one: towards its point, as your crosshair would).
+                kite::steer_marker(f.beams, f.world, f.eye, k.steer - f.eye, self.time);
+            }
         }
         self.kites.retain(|k| k.age.is_finite());
         self.pending
