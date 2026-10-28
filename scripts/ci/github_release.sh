@@ -48,7 +48,7 @@ Built from [\`${SHA:0:7}\`]($page/commit/$SHA): $(git log -1 --format=%s "$SHA")
 
 **Linux:** download [velocide-linux-x86_64]($here/velocide-linux-x86_64), make it executable once with \`chmod +x velocide-linux-x86_64\` (or in the file manager: Properties → Permissions → "Allow executing file as program"), then run it. It needs a Vulkan driver and a distro from about 2020 or newer (glibc 2.31).
 
-The game is that one file: there is nothing to unpack or install, and it runs from any folder.
+The game is that one file: there is nothing to unpack or install, and it runs from any folder. If you played an older version from a zip, put this file in a new folder, not the old one: an old \`assets\` folder next to the game would override what's built into it.
 
 **Everyone in a game needs the same version**, the server too. This one is \`$tag\`. The game checks for a newer version each time it starts and offers to update itself from the main menu, so you only download it by hand once.
 
