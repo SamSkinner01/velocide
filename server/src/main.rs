@@ -178,10 +178,12 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // Players must run the same build as the server: the version is the first thing to check.
     log::info!(
-        "{} dedicated server '{}'",
+        "{} dedicated server '{}', version {}",
         shared::GAME_NAME,
-        config.server_name
+        config.server_name,
+        shared::build_info::label()
     );
     if config.dev_commands {
         log::warn!(

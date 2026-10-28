@@ -2,6 +2,7 @@
 //! scoring and the network protocol. Everything here must be deterministic given the same
 //! inputs and starting state, because clients run the same code for prediction.
 
+pub mod build_info;
 /// Character customisation (plain data; the client draws it).
 pub mod cosmetics;
 pub mod input;
