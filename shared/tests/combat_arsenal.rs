@@ -119,12 +119,12 @@ fn thresher_is_an_automatic_scattergun() {
     let d = dummy(&mut a, Vec3::new(0.0, 0.0, -4.0), 0.0, BIG);
     let body = dummy_body(&a, d);
     a.aim(p, body);
-    // Held 0.9 s: blasts at 0, 0.42 and 0.84 s, 7 pellets each, all landing at 4 m.
+    // Held 0.9 s: blasts at 0, 0.42 and 0.84 s, every pellet landing at 4 m.
     let ev = hold(&mut a, p, Buttons::FIRE, 54, 2);
     let hits = hits_on(&ev, d, Attack::Thresher);
-    assert_eq!(hits.len(), 21);
-    let pellet = Tuning::default().combat.thresher.pellet_damage;
-    assert!(hits.iter().all(|h| h.info.amount == pellet));
+    let th = Tuning::default().combat.thresher;
+    assert_eq!(hits.len(), 3 * th.pellets as usize);
+    assert!(hits.iter().all(|h| h.info.amount == th.pellet_damage));
 }
 
 #[test]
@@ -566,6 +566,16 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
     for (name, damage) in body_max {
         assert!(!one_shot(damage), "{name}: {damage}");
     }
+    // The stated exception: a full Bellows blast at point blank kills a body; the Thresher's
+    // takes three blasts on the body, two on the head.
+    let bellows = pvp.bellows.pellets as f32 * pvp.bellows.pellet_damage;
+    assert!(one_shot(bellows * pvp.bellows.point_blank_multiplier));
+    let thresher = pvp.thresher.pellets as f32 * pvp.thresher.pellet_damage;
+    assert!(!one_shot(2.0 * thresher) && one_shot(3.0 * thresher));
+    assert!(!one_shot(
+        thresher * pvp.thresher.point_blank_multiplier * head
+    ));
+    assert!(one_shot(2.0 * thresher * head));
 
     // Headshot one-shots: a full-draw arrow, a full-focus Lamplighter beam — and not a bow
     // short of full (a Lamplighter focused past ~60 % still does: the balance area's call,
@@ -642,11 +652,12 @@ fn pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band() {
 
 /// The PvP rules measured in play (`balance_support`, docs/balance.md): every trigger pull and
 /// every ability use on every carrier, at 3, 5 and 10 m, aimed at the body and at the head.
-/// Body: never 100. Head: only a full-draw arrow (plain or special) and a focused Lamplighter
-/// beam — and a Bellows blast inside 5 m, the scattergun's point-blank reward (at 0.7 its
-/// pellets one-shot a head at 5 m too). At a 90 % draw no arrow kills, special ones included.
-/// Both buttons at once never stack a swing and a Whirl on one tick. Every primary's all-body
-/// time to kill at its range stays inside 0.8–1.8 s.
+/// Body: never 100 — except a full Bellows blast at point blank (3 m, the stated exception: it
+/// must kill there, and not from 5 m). Head: only a full-draw arrow (plain or special) and a
+/// focused Lamplighter beam — and a Bellows blast inside 5 m, the scattergun's point-blank
+/// reward (at 0.7 its pellets one-shot a head at 5 m too). At a 90 % draw no arrow kills,
+/// special ones included. Both buttons at once never stack a swing and a Whirl on one tick.
+/// Every primary's all-body time to kill at its range stays inside 0.8–1.8 s.
 #[test]
 fn pvp_one_shots_and_times_to_kill_measured_in_play() {
     let base = Tuning::default();
@@ -657,7 +668,11 @@ fn pvp_one_shots_and_times_to_kill_measured_in_play() {
         let sniper = w == WeaponKind::Lamplighter;
         for range in [3.0, 5.0, 10.0] {
             let body = per_trigger(&base, Side::Pvp, w, range, Aim::Body, 1.0);
-            assert!(!kills(body), "{w:?} body at {range} m: {body}");
+            let point_blank = w == WeaponKind::Bellows && range < 5.0;
+            assert!(
+                kills(body) == point_blank,
+                "{w:?} body at {range} m: {body}"
+            );
             let head = per_trigger(&base, Side::Pvp, w, range, Aim::Weak(0), 1.0);
             let allowed = bow || sniper || (w == WeaponKind::Bellows && range < 5.0);
             assert!(allowed || !kills(head), "{w:?} head at {range} m: {head}");

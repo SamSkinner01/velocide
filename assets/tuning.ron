@@ -170,11 +170,17 @@
         // 2: twin-barrel blast cannon. Defaults Gust, Bulwark.
         bellows: (
             pellets: 12,
-            pellet_damage: 8.0,
-            cone_degrees: 8.0,
+            pellet_damage: 11.0,   // 8: top DPS on paper, weak in play (docs/balance.md, "Shotguns")
+            cone_degrees: 8.0,     // the fixed pattern's outer ring (1 + 5 at half of it + 6)
             pellet_range: 60.0,
             interval: 0.8,
-            pellet_knockback: 2.0,
+            pellet_knockback: 1.3, // a blast staggers now: at 2.0 it would fling a Gnawer ~10 m
+            pattern_jitter_degrees: 0.5,
+            point_blank_range: 3.0,      // pellets hitting within 3 m deal x1.25 ...
+            point_blank_end: 4.0,        // ... back to x1 at 4 m
+            point_blank_multiplier: 1.25,
+            stagger_fraction: 0.34, // 4 of the 12 pellets on a light Mould stagger it ...
+            stagger_time: 0.35,     // ... this long
             gust_range: 7.0,
             gust_cone_degrees: 60.0,
             gust_damage: 6.0,
@@ -263,12 +269,18 @@
         ),
         // Drum-fed auto-scattergun (Scatter), automatic while held.
         thresher: (
-            pellets: 7,
-            pellet_damage: 7.5,    // 7: below the Bellows everywhere; 8 / 10 deg: above it to 15 m
-            cone_degrees: 11.0,    // with the Moulds' bigger hit shapes (docs/balance.md)
+            pellets: 8,            // 7 x 7.5: top DPS on paper, weak in play (docs/balance.md)
+            pellet_damage: 10.0,
+            cone_degrees: 10.0,    // the fixed pattern's outer ring (1 + 3 at half of it + 4)
             pellet_range: 45.0,
             interval: 0.42,
-            pellet_knockback: 1.5,
+            pellet_knockback: 0.7, // every blast staggers a light Mould briefly
+            pattern_jitter_degrees: 0.6,
+            point_blank_range: 3.0,
+            point_blank_end: 4.0,
+            point_blank_multiplier: 1.0, // the sustained one: no point-blank bonus
+            stagger_fraction: 0.375, // 3 of the 8 pellets
+            stagger_time: 0.2,
             ability_power: 0.9,
         ),
         // Pneumatic rivet driver (Rapid): fast hot rivets with light gravity.
@@ -729,7 +741,7 @@
     // `cargo run -p shared --release --example balance_report` (docs/balance.md). PvP aims at
     // 0.8-1.6 s to kill for a skilled player at the weapon's range; one-shots only from
     // full-draw bow headshots and full-focus Lamplighter headshots (and a Bellows blast to the
-    // head inside 5 m).
+    // head inside 5 m, a full one to the body at point blank, 3 m).
     balance: (
         pve: (
             weapons: {},
@@ -740,8 +752,8 @@
             weapons: {
                 Tumbler: (damage: 0.9),       // 65 a bomb, as before the PvE raise
                 Lancet: (damage: 0.85),
-                Bellows: (damage: 0.6),       // 4.8 a pellet: no head one-shot from 5 m on
-                Thresher: (damage: 0.75),     // 5.6 a pellet, as before the PvE raise
+                Bellows: (damage: 0.52),      // 5.7 a pellet: 69 a blast (x1.6 inside 3 m: 110)
+                Thresher: (damage: 0.49),     // 4.9 a pellet: 39 a blast, as before
                 Cinderbox: (damage: 0.75),
                 Longwick: (damage: 0.5, interval: 0.85),
                 Kiln: (damage: 0.9),          // 3.6 a spray, as before the PvE raise
@@ -760,6 +772,12 @@
             },
             overrides: {
                 "quill.brand_multiplier": 1.25, // a brand invites everyone in a free-for-all
+                // A full Bellows blast inside 3 m kills a body (the stated exception).
+                "bellows.point_blank_multiplier": 1.6,
+                // The PvE pellets push less (a blast staggers a Mould instead): players keep
+                // the old shove.
+                "bellows.pellet_knockback": 2.0,
+                "thresher.pellet_knockback": 1.5,
                 "tally.max_targets": 3,
                 // Half damage for 3 s won every even duel (twice every time to kill).
                 "knacks.tallow_skin.damage_scale": 0.7,

@@ -1204,29 +1204,9 @@ impl SimWorld {
                 let shot = ShotSpec::new(eye, dir, c.hitscan_range, l.damage, attack);
                 self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
             }
+            // A fixed pellet pattern, point blank, the stagger (`scatter.rs`).
             WeaponKind::Bellows | WeaponKind::Thresher => {
-                let (count, cone, range, damage, knockback) = if weapon == WeaponKind::Bellows {
-                    let b = &c.bellows;
-                    let (n, cone) = (b.pellets, b.cone_degrees);
-                    (n, cone, b.pellet_range, b.pellet_damage, b.pellet_knockback)
-                } else {
-                    let th = &c.thresher;
-                    let (n, cone) = (th.pellets, th.cone_degrees);
-                    (
-                        n,
-                        cone,
-                        th.pellet_range,
-                        th.pellet_damage,
-                        th.pellet_knockback,
-                    )
-                };
-                let shots: Vec<ShotSpec> = (0..count.max(1))
-                    .map(|_| {
-                        let dir = spread_dir(aim, cone, &mut rng);
-                        ShotSpec::new(eye, dir, range, damage, attack).knockback(knockback)
-                    })
-                    .collect();
-                self.fire_hitscan_group(t, history, id, input, attack, &shots);
+                self.fire_blast(t, history, id, input, weapon)
             }
             WeaponKind::Arclash => self.arc_zaps(t, history, id, input, &[aim], 1.0, attack),
             WeaponKind::Tumbler => {
