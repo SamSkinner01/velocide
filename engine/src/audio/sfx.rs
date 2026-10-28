@@ -292,6 +292,46 @@ pub enum Sfx {
     TallowSkin,
     /// Surge: the wick flaring and a hard rush of air.
     Surge,
+    // client-a: the rework's Lamplighter and its Precision / Draw / Melee abilities
+    // (docs/rework.md, docs/audio.md "The rework").
+    /// The Lamplighter focusing: its focus ring ratcheting faster, the wick hissing up and a
+    /// glassy hum climbing as the lens comes true (1.4 s; stop it on release).
+    LamplighterFocus,
+    /// Full focus: one clear lens note and the flame's soft whoomph.
+    LamplighterFull,
+    /// The beam: a hard crack, a searing hiss down the line, a deep boom and a long tail.
+    LamplighterFire,
+    /// Someone else's Lamplighter focusing: a faint, high glassy shimmer (0.6 s, re-trigger
+    /// at them while they focus).
+    LamplighterTell,
+    /// Wickline: a burning cord whipped out, crackling.
+    WicklineFire,
+    /// The Wickline's yank: the cord snapping taut and a hard rush along it.
+    WicklineZip,
+    /// Tally: a target tallied (a dry chalk stroke and a tick).
+    TallyMark,
+    /// One of the tally's shots (one per shot, a few hundredths of a second apart).
+    TallyShot,
+    /// Waxwork: hot wax poured into your shape and setting.
+    WaxworkCast,
+    /// The wax double slumping and bursting.
+    WaxworkBurst,
+    /// Blink Arrow: the step to the arrow (a sucking rush and a pop).
+    Blink,
+    /// Beacon Arrow: the beacon catching (a whoomph and a bright bell note).
+    BeaconLight,
+    /// A lit beacon's hum (1.2 s, soft both ends: re-trigger while it burns).
+    BeaconHum,
+    /// Hurl: the piece turning back in the air.
+    HurlReturn,
+    /// Hurl: the piece caught (a slap and a ring).
+    HurlCatch,
+    /// Riposte: the guard raised (steel scraping, a held ring).
+    RiposteGuard,
+    /// Riposte: a blow caught on the guard (a hard clang and sparks).
+    RiposteBlock,
+    /// Riposte: the counter-swing (a heavy whoosh and a ringing edge).
+    RiposteCounter,
 }
 
 /// Mixing and playback metadata of one sound.
@@ -520,6 +560,24 @@ impl Sfx {
         Sfx::SootBurst,
         Sfx::TallowSkin,
         Sfx::Surge,
+        Sfx::LamplighterFocus,
+        Sfx::LamplighterFull,
+        Sfx::LamplighterFire,
+        Sfx::LamplighterTell,
+        Sfx::WicklineFire,
+        Sfx::WicklineZip,
+        Sfx::TallyMark,
+        Sfx::TallyShot,
+        Sfx::WaxworkCast,
+        Sfx::WaxworkBurst,
+        Sfx::Blink,
+        Sfx::BeaconLight,
+        Sfx::BeaconHum,
+        Sfx::HurlReturn,
+        Sfx::HurlCatch,
+        Sfx::RiposteGuard,
+        Sfx::RiposteBlock,
+        Sfx::RiposteCounter,
     ];
 
     /// Number of sounds; `sfx as usize` is a valid index below this.
@@ -736,6 +794,27 @@ impl Sfx {
             SootBurst => info(-14.0, 3, 0.04, 0.1),
             TallowSkin => info(-15.0, 2, 0.03, 0.2),
             Surge => info(-15.0, 3, 0.05, 0.05),
+
+            // client-a: the rework
+            LamplighterFocus => info(-19.0, 2, 0.0, 0.05),
+            LamplighterFull => info(-15.0, 2, 0.0, 0.1),
+            // The loudest gun: a focused shot is rare and should be heard across the map.
+            LamplighterFire => info(-11.0, 3, 0.03, 0.0),
+            LamplighterTell => info(-21.0, 4, 0.02, 0.2),
+            WicklineFire => info(-15.0, 3, 0.05, 0.03),
+            WicklineZip => info(-15.0, 3, 0.04, 0.05),
+            TallyMark => info(-18.0, 4, 0.04, 0.04),
+            TallyShot => variants(info(-14.0, 4, 0.05, 0.02), 2),
+            WaxworkCast => info(-16.0, 2, 0.03, 0.1),
+            WaxworkBurst => info(-13.0, 3, 0.04, 0.05),
+            Blink => info(-14.0, 3, 0.03, 0.05),
+            BeaconLight => info(-15.0, 3, 0.03, 0.05),
+            BeaconHum => info(-21.0, 3, 0.0, 0.2),
+            HurlReturn => info(-18.0, 3, 0.05, 0.05),
+            HurlCatch => info(-16.0, 3, 0.05, 0.05),
+            RiposteGuard => info(-17.0, 2, 0.03, 0.05),
+            RiposteBlock => variants(info(-13.0, 4, 0.05, 0.03), 2),
+            RiposteCounter => info(-13.0, 3, 0.04, 0.05),
         }
     }
 }
@@ -3952,6 +4031,276 @@ fn recipe(sfx: Sfx, r: &mut Rng) -> Vec<f32> {
             let rush = whoosh(r, 0.3, 900.0, 4000.0, 1.3);
             let kick = thump(0.12, 160.0, 60.0, 0.008, 0.04);
             layer(&[(&kick, 0.8, 0.0), (&fwoom, 1.0, 0.0), (&rush, 0.8, 0.02)])
+        }
+        // ----- client-a: the rework (docs/rework.md, docs/audio.md "The rework") -------------
+        // The Lamplighter is glass and brass lit by a wick (a lens singing, a searing beam);
+        // the Wickline a burning cord, the Tally chalk, the Waxwork hot wax, the arrows' tricks
+        // air and light, the Riposte steel.
+        LamplighterFocus => {
+            // The focus ring ratcheting round, faster as the lens comes true; the wick hissing
+            // up under a glassy hum that climbs 320 Hz → 1.3 kHz over 0.9 s, then holds with
+            // a trembling shimmer. 1.4 s; stop it on release.
+            let dur = 1.4;
+            let mut ticks = Vec::new();
+            let (mut at, mut k) = (0.02f32, 0);
+            while at < 0.95 {
+                let tick = metal(
+                    0.03,
+                    2600.0 + k as f32 * 60.0,
+                    &[(1.0, 1.0, 0.006), (2.3, 0.5, 0.004)],
+                );
+                mix_at(&mut ticks, &tick, 0.5 + 0.4 * at, at);
+                at += lerp(0.12, 0.05, at / 0.95);
+                k += 1;
+            }
+            let mut hum = Osc::new(Wave::Triangle);
+            let mut over = Osc::new(Wave::Sine);
+            let mut trem = Osc::new(Wave::Sine);
+            let glass = render(dur, |t, _| {
+                let f = sweep(t.min(0.9), 320.0, 1300.0, 0.9);
+                let x = hum.next(f) * 0.6 + over.next(f * 3.01) * 0.2;
+                let env = smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(1.25, dur, t));
+                let rate = lerp(5.0, 14.0, (t / 0.9).min(1.0));
+                x * env * (0.85 + 0.15 * trem.next(rate))
+            });
+            let hiss = noise(r, dur, Pass::Band, 1800.0, 4200.0, 1.1, 0.4, 2.0);
+            layer(&[(&glass, 1.0, 0.0), (&ticks, 0.5, 0.0), (&hiss, 0.25, 0.0)])
+        }
+        LamplighterFull => {
+            // The lens comes true: one clear glassy note (C7 with a soft twelfth above it) and
+            // the wick's flame flaring behind it.
+            let note = metal(
+                0.7,
+                2093.0,
+                &[(1.0, 1.0, 0.25), (3.0, 0.3, 0.12), (4.17, 0.12, 0.06)],
+            );
+            let flare = noise(r, 0.3, Pass::Band, 400.0, 1400.0, 0.9, 0.02, 0.1);
+            let sparkle = noise(r, 0.25, Pass::High, 7500.0, 9500.0, 0.7, 0.002, 0.07);
+            let mut b = layer(&[(&note, 0.8, 0.0), (&flare, 0.5, 0.0), (&sparkle, 0.25, 0.0)]);
+            echo(&mut b, 0.08, 0.25, 0.2, 5000.0, 0.2);
+            b
+        }
+        LamplighterFire => {
+            // The focused beam: a hard crack, the wick's light searing down the line (a bright
+            // hiss falling 7 → 1.8 kHz), a deep boom under it and the brass tube ringing on
+            // into a long tail.
+            let crack = quill_crack(r, 0.6);
+            let sear = noise(r, 0.35, Pass::Band, 7000.0, 1800.0, 1.4, 0.0005, 0.09);
+            let boom = thump(0.5, 150.0, 38.0, 0.02, 0.12);
+            let ring = metal(
+                0.9,
+                880.0,
+                &[(1.0, 1.0, 0.3), (2.37, 0.5, 0.18), (4.1, 0.25, 0.1)],
+            );
+            let mut b = layer(&[
+                (&crack, 1.0, 0.0),
+                (&boom, 0.9, 0.0),
+                (&sear, 0.5, 0.004),
+                (&ring, 0.18, 0.01),
+            ]);
+            drive(&mut b, 1.6);
+            reverb(&mut b, 0.6, 0.45, 0.2, 0.25);
+            b
+        }
+        LamplighterTell => {
+            // A lens catching the light somewhere out there: a faint, high glassy shimmer
+            // that swells and fades (0.6 s; re-trigger at the sniper while they focus).
+            let dur = 0.6;
+            let (mut a, mut b2, mut wob) = (
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Sine),
+            );
+            let shimmer = render(dur, |t, _| {
+                let w = 1.0 + 0.004 * wob.next(7.0);
+                (a.next(3520.0 * w) * 0.6 + b2.next(5274.0 * w) * 0.3) * bell(t, dur)
+            });
+            let air = noise(r, dur, Pass::High, 6000.0, 8000.0, 0.7, 0.2, 0.3);
+            layer(&[(&shimmer, 1.0, 0.0), (&air, 0.3, 0.0)])
+        }
+        WicklineFire => {
+            // The burning cord whipped out: a whip-crack, a fast falling zip and the wick
+            // crackling along its length.
+            let crack = noise(r, 0.05, Pass::Band, 6000.0, 2500.0, 1.2, 0.0002, 0.01);
+            let mut zip = tone(0.22, Wave::Saw, 2400.0, 500.0, 0.18, 0.001, 0.07);
+            lowpass(&mut zip, 3200.0);
+            let burn = envelope(crackle(r, 0.35, 900.0, 0.2), 0.005, 0.12);
+            let rush = whoosh(r, 0.25, 3000.0, 900.0, 1.3);
+            layer(&[
+                (&crack, 0.9, 0.0),
+                (&zip, 0.35, 0.0),
+                (&rush, 0.6, 0.005),
+                (&burn, 0.5, 0.02),
+            ])
+        }
+        WicklineZip => {
+            // Yanked along the line: the cord snapping taut (a low twang and a tug), then a
+            // hard rush of air.
+            let mut twang = pluck(r, 0.35, 130.0, 0.993);
+            for (i, s) in twang.iter_mut().enumerate() {
+                *s *= perc(i as f32 / SR, 0.001, 0.1);
+            }
+            lowpass(&mut twang, 1600.0);
+            let snap = click(r, 0.002);
+            let tug = thump(0.15, 120.0, 70.0, 0.01, 0.04);
+            let rush = whoosh(r, 0.4, 600.0, 3500.0, 1.2);
+            layer(&[
+                (&snap, 0.6, 0.0),
+                (&tug, 0.8, 0.0),
+                (&twang, 0.8, 0.0),
+                (&rush, 0.9, 0.03),
+            ])
+        }
+        TallyMark => {
+            // A target tallied: a dry chalk stroke and a small bright tick.
+            let stroke = noise(r, 0.06, Pass::Band, 3200.0, 2000.0, 1.5, 0.002, 0.018);
+            let tick = metal(0.08, 2900.0, &[(1.0, 1.0, 0.02), (2.5, 0.4, 0.012)]);
+            layer(&[(&stroke, 0.8, 0.0), (&tick, 0.7, 0.01)])
+        }
+        TallyShot => {
+            // One of the tally's shots: a short, dry crack with a little weight under it.
+            let pitch = r.range(0.8, 0.9);
+            let crack = quill_crack(r, pitch);
+            let body = thump(0.12, 260.0, 90.0, 0.006, 0.03);
+            layer(&[(&crack, 1.0, 0.0), (&body, 0.6, 0.0)])
+        }
+        WaxworkCast => {
+            // Hot wax poured into your shape: a thick, glugging pour with a sizzle on it, then
+            // a hollow knock as the double sets.
+            let dur = 0.45;
+            let mut n = Rng::new(r.next_u64());
+            let mut bp = Svf::default();
+            let mut glug = Osc::new(Wave::Sine);
+            let pour = render(dur, |t, _| {
+                let g = 0.55 + 0.45 * glug.next(lerp(9.0, 14.0, t / dur));
+                bp.bandpass(n.bipolar(), lerp(380.0, 650.0, t / dur), 2.2) * g * bell(t, dur)
+            });
+            let sizzle = noise(r, 0.5, Pass::High, 4000.0, 2500.0, 0.8, 0.03, 0.2);
+            let set = thump(0.18, 320.0, 160.0, 0.006, 0.05);
+            let knock = metal(0.15, 700.0, &[(1.0, 0.6, 0.05), (2.2, 0.3, 0.03)]);
+            layer(&[
+                (&pour, 1.0, 0.0),
+                (&sizzle, 0.3, 0.05),
+                (&set, 0.8, 0.4),
+                (&knock, 0.3, 0.4),
+            ])
+        }
+        WaxworkBurst => {
+            // The double slumps (a wet sag), then bursts: a soft boom, hot wax splattering
+            // and a long sizzle.
+            let sag = noise(r, 0.3, Pass::Low, 700.0, 200.0, 1.0, 0.02, 0.12);
+            let boom = thump(0.4, 120.0, 45.0, 0.015, 0.1);
+            let splat = envelope(crackle(r, 0.4, 1400.0, 0.12), 0.002, 0.15);
+            let sizzle = noise(r, 0.7, Pass::High, 3500.0, 2000.0, 0.8, 0.02, 0.3);
+            let mut b = layer(&[
+                (&sag, 0.7, 0.0),
+                (&boom, 1.0, 0.16),
+                (&splat, 0.7, 0.17),
+                (&sizzle, 0.4, 0.18),
+            ]);
+            drive(&mut b, 1.4);
+            b
+        }
+        Blink => {
+            // Stepping to the arrow: a short sucking rush that swells to its end (a whoosh run
+            // backwards), a pop where you arrive and a bright shimmer after it.
+            let dur = 0.16;
+            let mut n = Rng::new(r.next_u64());
+            let mut svf = Svf::default();
+            let suck = render(dur, |t, _| {
+                let k = t / dur;
+                svf.process(n.bipolar(), lerp(800.0, 4500.0, k), 1.4, SR)
+                    .band
+                    * k
+                    * k
+            });
+            let pop = thump(0.12, 300.0, 120.0, 0.004, 0.03);
+            let shimmer = fm(0.3, 1800.0, 2600.0, 2.0, 3.0, 0.3, 0.002, 0.1);
+            layer(&[(&suck, 1.0, 0.0), (&pop, 0.9, dur), (&shimmer, 0.3, dur)])
+        }
+        BeaconLight => {
+            // The beacon catching: a whoomph and a bright bell note that keeps on ringing.
+            let whoomph = noise(r, 0.35, Pass::Low, 300.0, 1600.0, 0.9, 0.01, 0.1);
+            let note = metal(
+                1.0,
+                1318.0,
+                &[(1.0, 1.0, 0.35), (2.76, 0.4, 0.2), (5.4, 0.2, 0.1)],
+            );
+            let mut b = layer(&[(&whoomph, 0.8, 0.0), (&note, 0.7, 0.03)]);
+            echo(&mut b, 0.12, 0.3, 0.25, 4000.0, 0.3);
+            b
+        }
+        BeaconHum => {
+            // A lit beacon: a low, slowly pulsing hum with a faint high ring on it (1.2 s,
+            // soft both ends: re-trigger while it burns).
+            let dur = 1.2;
+            let (mut a, mut b2, mut lfo) = (
+                Osc::new(Wave::Triangle),
+                Osc::new(Wave::Sine),
+                Osc::new(Wave::Sine),
+            );
+            render(dur, |t, _| {
+                let pulse = 0.7 + 0.3 * lfo.next(2.5);
+                (a.next(220.0) * 0.5 + b2.next(1318.0) * 0.15) * pulse * bell(t, dur)
+            })
+        }
+        HurlReturn => {
+            // The piece coming round: its whirr dipping as it turns, then rising again as it
+            // heads back.
+            let dur = 0.5;
+            let mut n = Rng::new(r.next_u64());
+            let mut svf = Svf::default();
+            render(dur, |t, _| {
+                let flutter = 0.5 + 0.5 * (t * 16.0 * std::f32::consts::TAU).sin();
+                let turn = (2.0 * t / dur - 1.0).abs();
+                let f = lerp(800.0, 1400.0, turn);
+                svf.process(n.bipolar(), f, 2.5, SR).band * flutter * bell(t, dur)
+            })
+        }
+        HurlCatch => {
+            // Caught: the glove slapping round the haft and a short ring of the steel.
+            let slap = noise(r, 0.06, Pass::Band, 1800.0, 900.0, 1.0, 0.0005, 0.015);
+            let thud = thump(0.1, 220.0, 110.0, 0.004, 0.025);
+            let ring = metal(
+                0.3,
+                r.range(1500.0, 1700.0),
+                &[(1.0, 0.7, 0.1), (2.7, 0.3, 0.05)],
+            );
+            layer(&[(&slap, 1.0, 0.0), (&thud, 0.8, 0.0), (&ring, 0.4, 0.005)])
+        }
+        RiposteGuard => {
+            // The guard raised: steel scraping along steel, a set and a held ring.
+            let scrape = noise(r, 0.25, Pass::Band, 2500.0, 5000.0, 3.0, 0.01, 0.08);
+            let set = thump(0.12, 200.0, 120.0, 0.005, 0.03);
+            let ring = metal(0.4, 1250.0, &[(1.0, 0.6, 0.15), (2.4, 0.3, 0.08)]);
+            layer(&[(&scrape, 0.8, 0.0), (&set, 0.6, 0.08), (&ring, 0.4, 0.08)])
+        }
+        RiposteBlock => {
+            // A blow caught on the guard: a hard bright clang and a burst of sparks.
+            let clang = metal(
+                0.5,
+                r.range(780.0, 860.0),
+                &[
+                    (1.0, 1.0, 0.16),
+                    (2.31, 0.7, 0.1),
+                    (3.9, 0.45, 0.06),
+                    (5.6, 0.25, 0.04),
+                ],
+            );
+            let hit = thump(0.15, 260.0, 100.0, 0.004, 0.04);
+            let sparks = crackle(r, 0.25, 1600.0, 0.08);
+            let mut b = layer(&[(&clang, 0.9, 0.0), (&hit, 0.8, 0.0), (&sparks, 0.5, 0.004)]);
+            drive(&mut b, 1.7);
+            b
+        }
+        RiposteCounter => {
+            // The counter-swing: a heavy whoosh let go all at once and a ringing edge.
+            let swing = whoosh(r, 0.3, 500.0, 3500.0, 1.6);
+            let heave = thump(0.2, 90.0, 150.0, 0.06, 0.06);
+            let ring = metal(0.5, 1900.0, &[(1.0, 0.7, 0.2), (2.7, 0.35, 0.1)]);
+            let mut b = layer(&[(&swing, 1.0, 0.0), (&heave, 0.8, 0.05), (&ring, 0.3, 0.08)]);
+            drive(&mut b, 1.3);
+            b
         }
     }
 }
