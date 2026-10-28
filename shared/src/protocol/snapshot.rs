@@ -149,9 +149,7 @@ pub mod kind {
     /// it is [`super::projectile_flags::GUIDED`] (homing on the thrower's chest, no gravity)
     /// and [`super::projectile_flags::RETURNING`].
     pub const HURL: u16 = 77;
-    /// Retired (the Kindle Flask is drunk now, docs/rework.md §3): never sent. The id is free
-    /// once nothing draws it any more.
-    pub const KINDLE_FLASK: u16 = 78;
+    // 78: free (the Kindle Flask's lobbed flask, retired: it is drunk now, docs/rework.md §3).
     /// Snare (knack): thrown (`knacks.snare.gravity`); `STUCK` once it lies on the floor
     /// (`position` current), [`super::projectile_flags::ARMED`] once armed. Sprung or expired:
     /// removed.
@@ -193,9 +191,7 @@ pub mod kind {
     /// [`super::waxwork_flags`], `health` = health, `aux` = the tick it slumps. (136 was the
     /// Flare's burning patch, retired with v11.)
     pub const WAXWORK: u16 = 136;
-    /// Retired (the Kindle Flask's pool is gone, docs/rework.md §3): never sent. The id is
-    /// free once nothing draws it any more.
-    pub const KINDLE_POOL: u16 = 137;
+    // 137: free (the Kindle Flask's pool, retired with v11).
     /// A Soot Pot's cloud: `position` = centre, `owner` = thrower, `state` = radius (dm), `aux`
     /// = tick it clears. Moulds can't see into, out of or through it; draw it dense.
     pub const SOOT_CLOUD: u16 = 138;

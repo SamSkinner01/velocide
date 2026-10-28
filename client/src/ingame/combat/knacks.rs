@@ -3,9 +3,8 @@
 //!
 //! * The HUD's **knack slot** ([`draw_slot`]): an icon per knack, its name, charge pips and the
 //!   recharge of the next charge (it replaces the thorn pips; the Thorn is a knack too).
-//! * **Kindle Flask**: the flask tumbling through the air, then the kindling pool where it
-//!   broke ([`pool_effects`]: embers rising in the heal colour, a ring at its edge, a warm light,
-//!   a soft crackle).
+//! * **Kindle Flask**: drunk, not thrown (docs/rework.md): the drink, the haste and its heal
+//!   ticks are `kindle.rs` ([`KnackView::kindle`]).
 //! * **Snare**: the wax trap on the floor ([`draw_snare`]: its jaws open, the wick lamp dull
 //!   while it arms and pulsing once armed, its trigger ring for its owner's side), snapping shut
 //!   when it springs ([`snare_spring`]).
@@ -38,10 +37,16 @@ use super::super::viewmodel::Viewmodel;
 use super::Rng;
 use super::entities::EntityFrame;
 use super::fx::{Beams, FxCtx};
+use super::kindle::KindleView;
 use super::melee::lunge_streak;
 use crate::models::{ModelId, ModelLibrary, Tint, knacks as props};
 
 pub use shared::loadout::Knack;
+
+/// How long the Kindle Flask's haste lasts (`kindle::HASTE_TIME` until the tuning says).
+fn haste_time(_t: &CombatTuning) -> f32 {
+    super::kindle::HASTE_TIME
+}
 
 // ---------------------------------------------------------------------------------------------
 // HUD
@@ -369,7 +374,6 @@ pub fn tallow_tint(strength: f32, time: f64) -> Vec4 {
 /// A thrown knack in flight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Thrown {
-    Flask,
     Snare,
     SootPot,
 }
@@ -377,7 +381,6 @@ pub enum Thrown {
 impl Thrown {
     pub fn model(self) -> ModelId {
         match self {
-            Thrown::Flask => ModelId::KindleFlask,
             Thrown::Snare => ModelId::Snare,
             Thrown::SootPot => ModelId::SootPot,
         }
@@ -412,10 +415,9 @@ pub fn draw_thrown(
         .draw(&pose, root, &Tint::default(), out);
 }
 
-/// A thrown knack's wake: kindling sparks behind the flask, a sputter from the pot's fuse.
+/// A thrown knack's wake: a sputter from the pot's fuse.
 pub fn thrown_trail(effects: &mut Effects, rng: &mut Rng, thing: Thrown, position: Vec3, dt: f32) {
     let (color, rate) = match thing {
-        Thrown::Flask => (accent(Knack::KindleFlask), 40.0),
         Thrown::SootPot => (Vec4::new(1.0, 0.7, 0.3, 1.0), 30.0),
         Thrown::Snare => return,
     };
@@ -431,109 +433,6 @@ pub fn thrown_trail(effects: &mut Effects, rng: &mut Rng, thing: Thrown, positio
             additive: true,
             ..Default::default()
         });
-    }
-}
-
-/// The flask breaking at `at`: glass, a burst of kindling in the heal colour, the sound.
-pub fn flask_shatter(effects: &mut Effects, audio: &mut Audio, rng: &mut Rng, at: Vec3) {
-    let heal = accent(Knack::KindleFlask);
-    for _ in 0..14 {
-        effects.spawn(Particle {
-            position: at + Vec3::Y * 0.1,
-            velocity: (rng.dir() + Vec3::Y * 0.8) * rng.range(1.5, 4.0),
-            gravity: 12.0,
-            max_life: rng.range(0.3, 0.6),
-            size: Vec2::splat(0.05),
-            color: Vec4::new(0.85, 1.0, 0.9, 1.0),
-            end_alpha: 0.3,
-            texture: FxTex::Shard,
-            additive: true,
-            rotation: rng.angle(),
-            spin: rng.range(-10.0, 10.0),
-            ..Default::default()
-        });
-    }
-    effects.glow(at + Vec3::Y * 0.3, heal, 2.4, 0.35);
-    audio.play(Sfx::FlaskShatter, PlayParams::at(at));
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Per-frame particles of a kindling pool of `radius` at `position` (on the floor; `left` =
-/// fraction of its life remaining: it dies down at the end), and its rim.
-pub fn pool_effects(
-    effects: &mut Effects,
-    beams: &mut Beams,
-    rng: &mut Rng,
-    position: Vec3,
-    radius: f32,
-    left: f32,
-    dt: f32,
-    time: f64,
-) {
-    let heal = accent(Knack::KindleFlask);
-    let r = radius.max(0.5);
-    let strength = left.clamp(0.0, 1.0).sqrt();
-    // Kindling embers drifting up all over the pool.
-    let mut budget = (dt * 110.0 * r / 3.5 * strength).max(0.0);
-    while budget > 0.0 {
-        if budget < 1.0 && rng.unit() > budget {
-            break;
-        }
-        budget -= 1.0;
-        let a = rng.angle();
-        let d = rng.unit().sqrt() * r;
-        effects.spawn(Particle {
-            position: position + Vec3::new(a.cos() * d, 0.05, a.sin() * d),
-            velocity: Vec3::Y * rng.range(0.6, 1.6) + rng.dir() * 0.2,
-            gravity: -0.4,
-            drag: 0.6,
-            max_life: rng.range(0.6, 1.2),
-            size: Vec2::splat(rng.range(0.05, 0.1)),
-            color: heal,
-            texture: FxTex::Spark,
-            additive: true,
-            ..Default::default()
-        });
-    }
-    // A soft glowing haze low over it.
-    if rng.unit() < dt * 10.0 * strength {
-        let a = rng.angle();
-        let d = rng.unit().sqrt() * r * 0.8;
-        effects.spawn(Particle {
-            position: position + Vec3::new(a.cos() * d, 0.25, a.sin() * d),
-            velocity: Vec3::Y * 0.3,
-            max_life: rng.range(0.8, 1.4),
-            size: Vec2::splat(r * 0.5),
-            end_scale: 1.4,
-            color: heal.truncate().extend(0.3 * strength),
-            texture: FxTex::Glow,
-            additive: true,
-            ..Default::default()
-        });
-    }
-    // The rim: a slowly turning ring of light on the floor.
-    let rim = (heal.truncate() * 1.6).extend(0.75 * strength);
-    let n = 20;
-    let turn = (time * 0.4) as f32;
-    let point = |k: usize| {
-        let a = k as f32 / n as f32 * std::f32::consts::TAU + turn;
-        position + Vec3::new(a.cos() * r, 0.06, a.sin() * r)
-    };
-    for k in 0..n {
-        if k % 2 == 0 {
-            beams.frame_beam(point(k), point(k + 1), 0.06, rim);
-        }
-    }
-}
-
-/// The light a kindling pool casts.
-pub fn pool_light(position: Vec3, radius: f32, left: f32, time: f64) -> PointLight {
-    let heal = accent(Knack::KindleFlask).truncate();
-    let breathe = 0.85 + 0.15 * ((time * 2.3).sin() as f32);
-    PointLight {
-        position: position + Vec3::Y * 0.6,
-        color: heal * 1.6 * breathe * left.clamp(0.0, 1.0).sqrt(),
-        radius: radius * 2.0,
     }
 }
 
@@ -687,17 +586,12 @@ pub fn snare_spring(effects: &mut Effects, beams: &mut Beams, audio: &mut Audio,
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KnackPreview {
     /// A thrown knack flying from `from` (gravity `gravity`) that bursts / settles where it
-    /// meets the level: a flask leaves a pool, a pot a cloud, a snare lies down and arms.
+    /// meets the level: a pot leaves a cloud, a snare lies down and arms.
     Throw {
         thing: Thrown,
         from: Vec3,
         velocity: Vec3,
         gravity: f32,
-    },
-    Pool {
-        position: Vec3,
-        radius: f32,
-        seconds: f32,
     },
     Cloud {
         position: Vec3,
@@ -750,34 +644,23 @@ struct Seen {
     still: bool,
 }
 
-/// A replicated hazard on screen this frame (its light).
-#[derive(Clone, Copy, Debug)]
-struct LiveArea {
-    position: Vec3,
-    radius: f32,
-    left: f32,
-}
-
 /// Knack visuals that live across frames.
 #[derive(Default)]
 pub struct KnackView {
     flying: Vec<Flying>,
-    pools: Vec<Area>,
     clouds: Vec<Area>,
     snares: Vec<Trap>,
     staged: Vec<KnackPreview>,
-    /// Replicated flasks, snares, pots, pools and clouds seen last frame (a pool or cloud
-    /// appearing is where a flask or pot broke; a snare arming ticks).
+    /// Replicated snares, pots and clouds seen last frame (a cloud appearing is where a pot
+    /// broke; a snare arming ticks).
     seen: HashMap<NetId, Seen>,
-    /// Replicated pools this frame (lights).
-    live_pools: Vec<LiveArea>,
     /// Snares that just sprang (the jaws shut for a moment where the entity was).
     sprung: Vec<(Vec3, f32)>,
     /// Your Tallow Skin / Surge (staged), seconds left and total.
     tallow: (f32, f32),
     surge: (f32, f32),
-    /// Seconds to the next pool crackle.
-    crackle: f32,
+    /// The Kindle Flask: the drink, the haste, its heal ticks (`kindle.rs`).
+    pub kindle: KindleView,
     time: f64,
 }
 
@@ -793,8 +676,7 @@ pub struct UpdateCtx<'a> {
 
 /// Radius a snare springs within (docs/refit.md: 1.8 m).
 const SNARE_RADIUS: f32 = 1.8;
-/// A Kindle pool's radius and a soot cloud's (docs/refit.md: 3.5 m, 5 m).
-const POOL_RADIUS: f32 = 3.5;
+/// A soot cloud's radius (docs/refit.md: 5 m).
 const CLOUD_RADIUS: f32 = 5.0;
 
 impl KnackView {
@@ -810,7 +692,8 @@ impl KnackView {
     }
 
     /// A predicted knack of the local player (`FireIntent::Knack`): the left hand throws its
-    /// thing (a Thorn, the flask, the snare, the pot) or Tallow Skin / Surge start on you.
+    /// thing (a Thorn, the snare, the pot) or drinks the Kindle Flask, or Tallow Skin / Surge
+    /// start on you.
     pub fn local_knack(
         &mut self,
         knack: Knack,
@@ -823,7 +706,8 @@ impl KnackView {
                 viewmodel.throw_thorn();
                 audio.play_2d(Sfx::ThornThrow);
             }
-            Knack::KindleFlask | Knack::Snare | Knack::SootPot => {
+            Knack::KindleFlask => self.kindle.drink(viewmodel, audio, haste_time(t)),
+            Knack::Snare | Knack::SootPot => {
                 viewmodel.throw_item(thrown_of(knack).map(Thrown::model));
                 audio.play_2d(Sfx::KnackThrow);
             }
@@ -875,16 +759,6 @@ impl KnackView {
                 });
                 ctx.audio.play(Sfx::KnackThrow, PlayParams::at(from));
             }
-            KnackPreview::Pool {
-                position,
-                radius,
-                seconds,
-            } => self.pools.push(Area {
-                position,
-                radius,
-                age: 0.0,
-                seconds,
-            }),
             KnackPreview::Cloud {
                 position,
                 radius,
@@ -924,8 +798,8 @@ impl KnackView {
         }
     }
 
-    /// Advances staged things: throws landing (a flask breaks into its pool, a pot into its
-    /// cloud, a snare lies down), pools, clouds and snares burning / arming / springing.
+    /// Advances staged things: throws landing (a pot breaks into its cloud, a snare lies
+    /// down), clouds and snares billowing / arming / springing.
     pub fn update(&mut self, ctx: &mut UpdateCtx) {
         let dt = ctx.dt.max(0.0);
         self.time += dt as f64;
@@ -957,15 +831,6 @@ impl KnackView {
         self.flying.retain(|f| f.age < 4.0);
         for (thing, at) in landed {
             match thing {
-                Thrown::Flask => {
-                    flask_shatter(ctx.effects, ctx.audio, ctx.rng, at);
-                    self.pools.push(Area {
-                        position: at,
-                        radius: POOL_RADIUS,
-                        age: 0.0,
-                        seconds: 4.0,
-                    });
-                }
                 Thrown::SootPot => {
                     soot_burst(ctx.effects, ctx.audio, ctx.rng, at);
                     self.clouds.push(Area {
@@ -989,29 +854,6 @@ impl KnackView {
             }
         }
 
-        self.crackle -= dt;
-        let crackle = self.crackle <= 0.0 && !self.pools.is_empty();
-        if crackle {
-            self.crackle = 1.2;
-        }
-        for p in &mut self.pools {
-            p.age += dt;
-            let left = 1.0 - p.age / p.seconds.max(0.1);
-            pool_effects(
-                ctx.effects,
-                ctx.beams,
-                ctx.rng,
-                p.position,
-                p.radius,
-                left,
-                dt,
-                self.time,
-            );
-            if crackle {
-                ctx.audio.play(Sfx::KindlePool, PlayParams::at(p.position));
-            }
-        }
-        self.pools.retain(|p| p.age < p.seconds);
         for c in &mut self.clouds {
             c.age += dt;
             let left = 1.0 - c.age / c.seconds.max(0.1);
@@ -1038,55 +880,25 @@ impl KnackView {
         self.snares.retain(|s| s.age < 20.0);
     }
 
-    /// The replicated knacks this frame: thrown things' wakes, a pool or cloud appearing
-    /// (the flask / pot breaking there), pools burning and clouds billowing, a snare arming,
-    /// Tallow Skin glinting on other players.
+    /// The replicated knacks this frame: thrown things' wakes, a cloud appearing (the pot
+    /// breaking there) and billowing, a snare arming, Tallow Skin glinting on other players.
     pub fn update_replicated(&mut self, f: &EntityFrame, ctx: &mut UpdateCtx) {
         let dt = ctx.dt.max(0.0);
         for s in self.seen.values_mut() {
             s.still = false;
         }
-        self.live_pools.clear();
         let rate = f.tick_rate.max(1) as f32;
         for e in f.entities {
             match e.kind {
-                kind::KINDLE_POOL | kind::SOOT_CLOUD => {
+                kind::SOOT_CLOUD => {
                     let radius = (e.state as f32 / 10.0).max(0.5);
-                    let (full, first) = if e.kind == kind::KINDLE_POOL {
-                        // Retired: never sent any more (client-b drops the pool).
-                        (4.0, Thrown::Flask)
-                    } else {
-                        (f.tuning.knacks.soot_pot.duration, Thrown::SootPot)
-                    };
+                    let full = f.tuning.knacks.soot_pot.duration;
                     let left = ((e.aux as f64 - f.render_tick) as f32 / (full * rate).max(1.0))
                         .clamp(0.0, 1.0);
                     if !self.seen.contains_key(&e.id) {
-                        match first {
-                            Thrown::Flask => {
-                                flask_shatter(ctx.effects, ctx.audio, ctx.rng, e.position)
-                            }
-                            _ => soot_burst(ctx.effects, ctx.audio, ctx.rng, e.position),
-                        }
+                        soot_burst(ctx.effects, ctx.audio, ctx.rng, e.position);
                     }
-                    if e.kind == kind::KINDLE_POOL {
-                        pool_effects(
-                            ctx.effects,
-                            ctx.beams,
-                            ctx.rng,
-                            e.position,
-                            radius,
-                            left.max(0.15),
-                            dt,
-                            self.time,
-                        );
-                        self.live_pools.push(LiveArea {
-                            position: e.position,
-                            radius,
-                            left: left.max(0.15),
-                        });
-                    } else {
-                        soot_effects(ctx.effects, ctx.rng, e.position, radius, left, dt);
-                    }
+                    soot_effects(ctx.effects, ctx.rng, e.position, radius, left, dt);
                     self.seen.insert(
                         e.id,
                         Seen {
@@ -1161,7 +973,7 @@ impl KnackView {
         lib: Option<&ModelLibrary>,
         f: &EntityFrame,
         draws: &mut Vec<DrawItem>,
-        lights: &mut Vec<PointLight>,
+        _lights: &mut Vec<PointLight>,
     ) {
         if let Some(lib) = lib {
             for (e, time, offset) in f.projectiles() {
@@ -1191,18 +1003,13 @@ impl KnackView {
                 draw_snare(lib, *at, 0.0, 1.0, (age / 0.06).min(1.0), self.time, draws);
             }
         }
-        for p in &self.live_pools {
-            if lights.len() < 48 {
-                lights.push(pool_light(p.position, p.radius, p.left, self.time));
-            }
-        }
     }
 
     pub fn draw(
         &self,
         lib: Option<&ModelLibrary>,
         draws: &mut Vec<DrawItem>,
-        lights: &mut Vec<PointLight>,
+        _lights: &mut Vec<PointLight>,
     ) {
         if let Some(lib) = lib {
             for f in &self.flying {
@@ -1216,12 +1023,7 @@ impl KnackView {
                 draw_snare(lib, s.position, s.yaw, armed, sprung, self.time, draws);
             }
         }
-        for p in &self.pools {
-            if lights.len() < 48 {
-                let left = 1.0 - p.age / p.seconds.max(0.1);
-                lights.push(pool_light(p.position, p.radius, left, self.time));
-            }
-        }
+        self.kindle.draw(lib, draws);
     }
 
     /// How strongly your Tallow Skin shows (0..1, its time left): the predicted timer, kept
@@ -1238,18 +1040,19 @@ impl KnackView {
         }
     }
 
-    /// Your Tallow Skin's sheen (`tallow`: [`KnackView::tallow_strength`]) and the speed lines
-    /// of a Surge or a Lunge (`rush`: `MeleeView::rush`) (the combat HUD calls it).
+    /// Your Tallow Skin's sheen (`tallow`: [`KnackView::tallow_strength`]), the speed lines
+    /// of a Surge or a Lunge (`rush`: `MeleeView::rush`) and the Kindle Flask's haste (the
+    /// combat HUD calls it).
     pub fn hud(&self, list: &mut UiDrawList, c: Rect, tallow: f32, rush: f32, now: f64) {
         tallow_hud(list, c, tallow, now);
         surge_hud(list, c, self.surge_self().max(rush), now);
+        self.kindle.hud(list, c, now);
     }
 }
 
 /// The thrown thing of a knack (`None`: Tallow Skin, Surge and the Thorn aren't these).
 pub fn thrown_of(knack: Knack) -> Option<Thrown> {
     match knack {
-        Knack::KindleFlask => Some(Thrown::Flask),
         Knack::Snare => Some(Thrown::Snare),
         Knack::SootPot => Some(Thrown::SootPot),
         _ => None,
@@ -1259,15 +1062,14 @@ pub fn thrown_of(knack: Knack) -> Option<Thrown> {
 /// The thrown thing a replicated projectile kind is.
 pub fn thrown_kind(k: u16) -> Option<Thrown> {
     match k {
-        kind::KINDLE_FLASK => Some(Thrown::Flask),
         kind::SNARE => Some(Thrown::Snare),
         kind::SOOT_POT => Some(Thrown::SootPot),
         _ => None,
     }
 }
 
-/// Another player used a knack (`Fx::Knack`): the throw (their left arm), Tallow Skin's
-/// sound (the sheen is their `TALLOW` flag), the Surge's streak and rush.
+/// Another player used a knack (`Fx::Knack`): the throw (their left arm), the Kindle Flask's
+/// swig, Tallow Skin's sound (the sheen is their `TALLOW` flag), the Surge's streak and rush.
 pub fn remote_knack(ctx: &mut FxCtx, player: PlayerId, knack: Knack) {
     let id = NetId::player(player);
     let Some(e) = ctx.entities.iter().find(|e| e.id == id).copied() else {
@@ -1275,10 +1077,11 @@ pub fn remote_knack(ctx: &mut FxCtx, player: PlayerId, knack: Knack) {
     };
     let at = e.position + Vec3::Y * 1.2;
     match knack {
-        Knack::KindleFlask | Knack::Snare | Knack::SootPot | Knack::Thorn => {
+        Knack::Snare | Knack::SootPot | Knack::Thorn => {
             ctx.remote.visual_mut(id).punching = 0.01;
             ctx.audio.play(Sfx::KnackThrow, PlayParams::at(at));
         }
+        Knack::KindleFlask => super::kindle::remote_drink(ctx, &e),
         Knack::TallowSkin => ctx.audio.play(Sfx::TallowSkin, PlayParams::at(at)),
         Knack::Surge => {
             ctx.audio.play(Sfx::Surge, PlayParams::at(at));
@@ -1288,9 +1091,14 @@ pub fn remote_knack(ctx: &mut FxCtx, player: PlayerId, knack: Knack) {
     }
 }
 
-/// The viewpoint's own knack in a replay (first person): the throw with its thing in hand, or
-/// Tallow Skin's / the Surge's sound.
+/// The viewpoint's own knack in a replay (first person): the throw with its thing in hand, the
+/// Kindle Flask's drink, or Tallow Skin's / the Surge's sound.
 pub fn first_person_knack(vm: &mut Viewmodel, audio: &mut Audio, knack: Knack) {
+    if knack == Knack::KindleFlask {
+        vm.drink();
+        audio.play_2d(Sfx::KindleDrink);
+        return;
+    }
     match thrown_of(knack) {
         Some(thing) => {
             vm.throw_item(Some(thing.model()));
@@ -1301,54 +1109,6 @@ pub fn first_person_knack(vm: &mut Viewmodel, audio: &mut Audio, knack: Knack) {
             Knack::Surge => Sfx::Surge,
             _ => Sfx::ThornThrow,
         }),
-    }
-}
-
-/// A heal from a Kindle pool (`Fx::Heal` from the pool's centre, every quarter second while
-/// someone stands in it)?
-pub fn is_pool_heal(entities: &[EntityState], from: Vec3) -> bool {
-    entities
-        .iter()
-        .any(|e| e.kind == kind::KINDLE_POOL && e.position.distance(from) < 0.3)
-}
-
-/// A Kindle pool healing `player`: kindling drawn up from the floor at their feet into their
-/// lantern, a faint warm flash for you; quiet (the pool's own crackle carries the sound, a
-/// kindling chime every quarter second would drown everything).
-pub fn pool_heal(ctx: &mut FxCtx, player: PlayerId, pool: Vec3, amount: f32) {
-    use crate::models::shrike::{LANTERN_HEIGHT, REMOTE_SCALE};
-    let local = Some(player) == ctx.local;
-    let to = if local {
-        ctx.local_chest
-    } else {
-        ctx.entities
-            .iter()
-            .find(|e| e.id == NetId::player(player))
-            .map(|e| e.position + Vec3::Y * LANTERN_HEIGHT * REMOTE_SCALE)
-    };
-    let Some(to) = to else {
-        return;
-    };
-    let feet = Vec3::new(to.x, pool.y + 0.1, to.z);
-    let heal = accent(Knack::KindleFlask);
-    for _ in 0..4 {
-        let start = feet + Vec3::new(ctx.rng.range(-0.3, 0.3), 0.0, ctx.rng.range(-0.3, 0.3));
-        ctx.effects.spawn(Particle {
-            position: start,
-            velocity: (to - start) / 0.35,
-            max_life: 0.35,
-            size: Vec2::splat(0.07),
-            color: heal,
-            texture: FxTex::Spark,
-            additive: true,
-            ..Default::default()
-        });
-    }
-    if local {
-        ctx.feedback.flash(
-            crate::palette::palette().flash_heal,
-            (amount / 60.0).min(0.06),
-        );
     }
 }
 
@@ -1403,11 +1163,6 @@ mod tests {
             radius: 5.0,
             seconds: 1.0,
         });
-        view.staged.push(KnackPreview::Pool {
-            position: Vec3::X * 4.0,
-            radius: 3.5,
-            seconds: 0.5,
-        });
         view.staged.push(KnackPreview::TallowSelf { seconds: 3.0 });
         let mut step = |view: &mut KnackView, frames: usize| {
             for _ in 0..frames {
@@ -1426,7 +1181,7 @@ mod tests {
         assert_eq!(view.clouds.len(), 1);
         assert!(view.tallow_self() > 0.7 && view.tallow_self() < 1.0);
         step(&mut view, 60);
-        assert!(view.clouds.is_empty() && view.pools.is_empty());
+        assert!(view.clouds.is_empty());
         // The cloud kept a dense population of billows while it lasted.
         assert!(
             effects.particle_count() > 30,

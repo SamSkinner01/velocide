@@ -44,6 +44,8 @@ pub struct Viewmodel {
     since_spray: f32,
     time: f64,
     last_draw: Option<ViewmodelDrawInfo>,
+    /// The weapon's heat (Stoke, `combat::stoke`): its glow and body tint.
+    heat: Option<(Vec4, Vec4)>,
 }
 
 impl Viewmodel {
@@ -82,6 +84,22 @@ impl Viewmodel {
     pub fn throw_item(&mut self, item: Option<ModelId>) {
         self.anim.throw = 0.01;
         self.anim.throw_item = item;
+    }
+
+    /// The weapon's heat this frame (Stoke: `combat::stoke::heat_tint`): its glow parts and its
+    /// body tinted by these (`Vec4::ONE` both: cold).
+    pub fn set_heat(&mut self, glow: Vec4, body: Vec4) {
+        self.heat = (glow != Vec4::ONE || body != Vec4::ONE).then_some((glow, body));
+    }
+
+    /// Starts drinking the Kindle Flask (the left hand, `models::weapons::drink`).
+    pub fn drink(&mut self) {
+        self.anim.drink = 1e-3;
+    }
+
+    /// Drinking the Kindle Flask right now.
+    pub fn drinking(&self) -> bool {
+        crate::models::weapons::drink::drinking(self.anim.drink)
     }
 
     /// The weapon in the hand (last drawn).
@@ -179,6 +197,12 @@ impl Viewmodel {
                 }
             }
         }
+        if a.drink > 0.0 {
+            a.drink += dt / crate::models::weapons::drink::DRINK_TIME;
+            if a.drink >= 1.0 {
+                a.drink = 0.0;
+            }
+        }
         self.drum.update(dt);
         a.spin = self.drum.angle();
         match melee::of(a.weapon) {
@@ -232,7 +256,12 @@ impl Viewmodel {
         self.anim.weapon = weapon;
         self.anim.ability = ability;
         let start = out.len();
-        self.last_draw = Some(lib.draw_viewmodel(&self.anim, &Tint::team(team), out));
+        let mut tint = Tint::team(team);
+        if let Some((glow, body)) = self.heat {
+            tint.glow = glow;
+            tint.body = body;
+        }
+        self.last_draw = Some(lib.draw_viewmodel(&self.anim, &tint, out));
         // Movement feel on top of the model's own animation.
         let offset = Vec3::new(
             -0.015 * self.slide,

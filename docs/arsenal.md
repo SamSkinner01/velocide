@@ -223,7 +223,7 @@ behave the same (their damage scaled, below). New ones, as built:
 | Pinning Arrow | an arrow at the draw that pins what it hits (Pinned, below); 2.5 s |
 | Ember Arrow | an arrow at the draw whose own hit is 0.9 × a plain arrow's, then it bursts — on a target, on the level or at the end of its flight: r 3 m, 36 dmg, kb 8, and 2 Burn stacks on everything in the burst; 3.0 s |
 | Both Barrels | as `docs/roster.md` (24 × 8 dmg, 5°, recoil 9), but 1.8 s (was 1.4) and, like Volley, it takes the primary's shot: it waits for the blast to be ready and fires instead of it (never a blast and Both Barrels on one tick) |
-| Wisp | as `docs/roster.md`, but zaps 11 dmg (was 8), pop 30 (was 25), 2.4 s (was 2.8) |
+| Wisp | the rework's twist: orbits you, zapping, flung on a second press ("The rework's abilities, as built (arsenal-b)") |
 | Brand (on the Longwick) | a branding arrow at the draw: what it hits is branded exactly like a Brand shot (`quill.brand_*`) |
 
 ### Abilities on other weapons
@@ -379,7 +379,7 @@ Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
 | player `PINNED` | 13 | slowed by a Pinning Arrow (PvP) |
 | player `DRAWING` | 14 | drawing the Longwick |
 | player `HASTE` | 17 | hasted by a Kindle Flask (the drinker's `MoveState::haste_time` says how long) |
-| projectile `RELAYED` | 5 | turned at a thorn: flies straight (no gravity) |
+| projectile `RELAYED` | 8 | turned at a thorn: flies straight (no gravity) |
 | enemy `BURNING` | 13 | burning |
 | enemy `PINNED` | 14 | rooted by a Pinning Arrow |
 
@@ -396,12 +396,12 @@ Limpet's hold) while `CHARGING` (0 otherwise; 0 and 255 survive exactly).
 | 75 | `EMBER_ARROW` | arrow gravity, bursts (an `Explosion` with `attack` `EmberArrow`) |
 | 76 | `BRAND_ARROW` | arrow gravity |
 | 77 | `HURL` | the Hurl's blade / hammer-head, gravity `hurl.gravity`; `state` = the carrier's `WeaponKind` id (10 Trimmer: a blade, 11 Tamper: a hammer-head); direct damage |
-| 78 | `KINDLE_FLASK` | retired (the flask is drunk, rework): never sent |
+| 78 | — | free (was `KINDLE_FLASK`: the flask is drunk now, rework) |
 | 79 | `SNARE` | gravity `knacks.snare.gravity`, passes through bodies; `STUCK` once it lies on the floor (`position` current), `ARMED` (projectile flag bit 4) once armed; sprung or worn out: removed |
 | 96 | `SOOT_POT` | gravity `knacks.soot_pot.gravity`; bursts into a `SOOT_CLOUD` (and a `ProjectileImpact`) |
 | 97–103 | reserved for the arsenal | (82–95 are the enemies area's) |
 | 136 | `BURNING_PATCH` | `position` = centre on the floor, `owner` = owner code, `state` = radius (dm), `aux` = burn-out tick |
-| 137 | `KINDLE_POOL` | retired (no pool, rework): never sent |
+| 137 | — | free (was `KINDLE_POOL`: no pool, rework) |
 | 138 | `SOOT_CLOUD` | `position` = centre, `owner` = thrower, `state` = radius (dm), `aux` = tick it clears; draw it dense enough to hide players |
 | 139 | reserved | |
 
@@ -458,7 +458,8 @@ abilities kept their ids, the new ones took the retired ids.
 `Riposte`; `StyleKey` the same (41 keys). `DamageFlags::REVEALED` (bit 18): a Beacon's ×1.15.
 `Blocked::Guarded`: a guard caught it.
 
-**Entity kinds** (freed: 69 `MORTAR_SHELL`, 70 `FLARE`, 75 `EMBER_ARROW`, 136 `BURNING_PATCH`):
+**Entity kinds** (freed: 69 `MORTAR_SHELL`, 70 `FLARE`, 75 `EMBER_ARROW`, 136 `BURNING_PATCH`;
+78 `KINDLE_FLASK` and 137 `KINDLE_POOL` are free, unused):
 
 | kind | name | what |
 |---|---|---|
@@ -477,7 +478,7 @@ abilities kept their ids, the new ones took the retired ids.
 
 | flags | bit | meaning |
 |---|---|---|
-| player `HASTE` | 17 | the drunk Kindle Flask's haste (arsenal-b sets it) |
+| player `HASTE` | 17 | the drunk Kindle Flask's haste (while `MoveState::haste_time` runs, the drinker alive) |
 | player `REVEALED` | 18 | lit by a Beacon Arrow |
 | player `GUARDING` | 19 | a guard is up (the held ability says Bulwark or Riposte); `aux` bits 12–15 = strength left, sixteenths (15 = whole) |
 | player `STOKED` / `OVERHEATED` | 20 / 21 | the held weapon is stoked / overheated (from `WeaponState`) |
@@ -485,7 +486,7 @@ abilities kept their ids, the new ones took the retired ids.
 | player `TALLYING` | 23 | holding a Tally (`state`'s level = how long) |
 | player `DRAWING` | 14 | also the Lamplighter's focus (level in `state`, like the bow's draw) |
 | enemy `REVEALED` / `BOUND` / `LURED` | 16 / 17 / 18 | lit by a beacon / bound / targeting a Waxwork |
-| projectile `GUIDED` / `RETURNING` / `ORBITING` | 5 / 6 / 7 | see the kinds; `replicated_position`: `GUIDED` flies without gravity, `ORBITING` is at `position` |
+| projectile `GUIDED` / `RETURNING` / `ORBITING` / `RELAYED` | 5 / 6 / 7 / 8 | see the kinds; `RELAYED`: turned at a thorn; `replicated_position`: `GUIDED` and `RELAYED` fly without gravity, `ORBITING` is at `position` |
 
 **Own state**: `WeaponState` gains `live[4]`, `live_mode[4]`, `stoke[4]`, `overheat[4]`;
 `PlayerCombat::tallied: [Option<NetId>; 4]` (the Tally's marks, players as `NetId::player`);
@@ -545,6 +546,25 @@ focus, 1.60 s body TTK; Wickline 10 / 20; Tally 30 / 60 a shot; Blink Arrow 42 /
 Arrow 31.5 / 63 at a full draw; Hurl 75.6 on the Trimmer (both legs), 89.2 on the Tamper (it
 turns at its target). Riposte and Waxwork read 0 there (the harness's targets don't attack; the
 burst comes at 5 s).
+
+## The rework's abilities, as built (arsenal-b)
+
+Server side in `shared/src/sim/abilities/{bolas,bulwark,wisp,stoke,lantern,kite}.rs` (Stoke's
+rate and overheat: `step_weapons`); the contract's starting numbers (`assets/tuning.ron`).
+
+| ability | as built |
+|---|---|
+| Bolas | instant; `BOLAS` (30 m/s, gravity 8, r 0.35 m, 2 s). On the first hostile it touches (hit assist): its own `bolas.damage` (0) and a bind — `apply_pin` (the Pinning Arrow's times: a Mould 1.4 s, heavies 0.6 s, a player slowed to half for 1 s) and `BOUND` for as long. The nearest other hostile whose padded shape is within 6 m of the first's centre, in sight of it, is bound too and the two are on a **cord** for 4 s (`BOUND` that long): what either takes (its `dealt`, after every rule) is dealt × 0.6 to the other — the same source and attack (kill credit is the attacker's), on the body, no knockback, no flags; never shared again (`BolasWorld::sharing`), never to the one who dealt it, never stoking a Burn. One cord per target (the newest); it goes slack with time or when an end dies. Waxwork doubles are never bound. Off the level it just drops. `Fx::BolasBound { positions }` (one or two) |
+| Bulwark | channel (up to 4 s), the guard (110°, 150 absorb, pitch clamped ±30°, 0.75 speed: arsenal-a's groundwork). The **slab** (`bulwark_slab`): a 2.2 × 1.8 m rectangle 1.2 m out from the chest (eye − 0.4 m), facing the guard. A hostile projectile about to hit its holder from inside the cone is destroyed at the slab (no blast, no parry delay; a `ProjectileImpact` there) and its damage (direct, or its blast's) is absorbed; a hostile ray (another player's) crossing it from the front before anything else ends there (`slab_on_ray`, asked by `trace_leg`), absorbed — so nothing behind the slab is hit either. Both book through `guard_absorbed` (strength, `GuardBlock`, the shatter into 9 s). Blasts centred in front and blows are the guard's ordinary cover. Your own and teammates' shots pass; from behind it doesn't help |
+| Wisp (twist) | press, live 6 s (`wisp_orbit_time`). The use spawns the `WISP` orbiting its caster: 1.6 m out at 1.2 m above the feet, 240°/s, pulled in short of a wall, velocity 0, `ORBITING` (`position` current, `aux` = the orbit's start); it zaps the nearest hostile within 7 m (padded, in sight) every 0.25 s for 9 (`Attack::Wisp`), never touches anything, never relays off a thorn. At the orbit's end (or its owner's death) it is gone without a pop and the 4 s cooldown starts (`end_live`). The recast flings it along the aim at 18 m/s (no gravity): the first hostile its sweep meets before the level is a direct hit of the pop (r 4 m, 35, kb 8), the level or 2 s pop it where it is; the cooldown then runs 4 s from the pop (`set_alt_cooldown`: a flight shorter than 2 s re-bases the predicted `lifetime + cooldown`). A wisp a Gust turns is just a projectile of its new owner's |
+| Stoke | instant; `step_weapons` stokes the slot for 4 s (the primary's interval ÷ 1.6, `primary_interval_ticks`), then 1.5 s overheated (no primary), cooldown 10 s from the use, `STOKED` / `OVERHEATED` (all predicted). Server: `stoke_after_damage` — every hit of the stoked weapon's primary that went through (rays, rivets, zaps and their chains, relayed shots; judged when it lands) sets 1 Burn stack as `Attack::Stoke` from the shooter; not a Burn tick, a cord's share, a Waxwork double, nor the Kiln's — the Kiln's spray (and the thorns it flings) reaches 1.3 × `kiln.range` instead (`kiln_reach`) |
+| Lantern | instant, cooldown 12 s. `LANTERN_TOSS` (10 m/s, gravity 20; it falls past bodies). Where it ends — the level, the end of its flight — the lantern stands on the floor below (within 50 m; none: over a pit, it's lost), replacing its owner's old one: `kind::LANTERN`, 80 HP, 8 s. From 0.5 m above its foot it fires, whenever due and something is in range, at the nearest hostile whose padded shape is within 18 m, in sight of its centre (current shapes): the carrier's primary every interval ÷ 0.5, × 0.6 its damage, as `Attack::Lantern` (not scaled by `ability_power`) — the Arclash a zap (`trace_shot`, then `arc_chain`), the Riveter a rivet (its spread), the Kiln a `kiln_cone` 8 m long. `Fx::LanternShot { ends }`: the zap's end, the Kiln cone's far end, the rivet's aim point. Hostile blasts (Moulds', PvP opponents') hurt it like a body at its centre (`blast_lanterns`); at 0 it is gone |
+| Kite | press, cooldown 5 s; `KITE` (16 m/s, no gravity, 7 s), `GUIDED` while steered. Each tick before it moves (`kite_tick`), while its owner holds ALT with the Kite selected (their latest input, `SimPlayer::last_input`), for at most 4 s, it turns towards the point under their crosshair — the first hostile (current shapes, hit assist) or the level along the look, else `hitscan_range` out — by at most 120°/s, speed kept, re-launched every tick it turns. Let go (or switched away, dead, the time up, relayed off a thorn) and it flies straight for good (`GUIDED` cleared). It explodes on contact (r 4.5 m, 75, kb 18) or where it is at 7 s |
+
+Measured (`balance_report -- abilities`, PvE on Gnawers): Bolas build gain 7.5 DPS alone,
+~100 in a pack (the cord carries pellets onto a second body); Wisp 144 a use on the
+Arclash (16 zaps of an orbit, no fling: the harness never recasts), Stoke a build gain of 27.5
+(Riveter) to 60 (Kiln, in a pack), Lantern 63–83 a use, Kite 71.5 (346 in a pack).
 
 ## Client: melee and knacks (refit, area arsenal-client)
 
@@ -612,7 +632,7 @@ no charges.
 | knack | in the hand | in the world | you | sounds |
 |---|---|---|---|---|
 | Thorn | the thorn between the knuckles (as before) | as before | | `ThornThrow` … |
-| Kindle Flask | the flask cupped on the fist | the `KINDLE_FLASK` tumbling with kindling sparks; breaking: glass, a burst in the heal colour; the `KINDLE_POOL`: embers rising and a glowing haze in the palette's heal colour, a turning dashed rim, a warm light. Its heals (`Fx::Heal` from the pool) are a quiet trickle of kindling from the floor into the lantern, not the full kindling chime every quarter second | a faint warm flash per heal | `KnackThrow`, `FlaskShatter`, `KindlePool` (crackle while it burns) |
+| Kindle Flask | drunk, not thrown (the rework, below): the flask raised to the mask, unstoppered and tipped back | others' haste: embers off the wick, a speed trail | the haste's embers, edges and FOV kick; heal ticks | `KindleDrink`, `KindleTick`, `HasteFade` |
 | Snare | the disc held edge-on | the `SNARE` flying, then lying on the floor (`STUCK`): the wax trap with its jaws open, its wick lamp dull while it arms and pulsing once `ARMED` (in the palette's hazard colour), a dashed trigger ring for its owner; `Fx::SnareSprung`: a flash, chains whipping up, the jaws snapped shut there for a moment | | `SnareSet`, `SnareArmed`, `SnareSpring` |
 | Soot Pot | the pot cupped on the fist | the `SOOT_POT` with its fuse spitting; bursting: shards, a dark puff, a scorch; the `SOOT_CLOUD`: big, dark, near-opaque billows kept topped up over the whole sphere (~60 alive at 5 m, darker at the core), thinning over its last fifth — dense enough to hide players inside and behind it | | `SootBurst` |
 | Tallow Skin | | other Shrikes under `TALLOW` are paler and glossier with a slow glisten and drips of glinting wax | a waxy sheen at the screen's edges, tallow drips running down from the top, a glint travelling round | `TallowSkin` |
@@ -628,6 +648,84 @@ thing after `/loadout trimmer tamper knack:...` (`melee_weapon_*`, `knack_use_*`
 TIER (TRIMMER)"), the tier block shows the weapon and "A KILL TO WIN", the results name the tier
 "FINAL TRIMMER". **Controls**: the Q / gamepad North action is **KNACK** (`Action::Knack`;
 settings files that call it `ThrowThorn` or `ThrowPrism` still load).
+
+## Client: the Kindle draught, Thorn relays, the Scatter / Rapid / Explosive abilities (rework, area client-b)
+
+What you see and hear of `docs/rework.md`'s §3 (the Kindle Flask drunk), §4 (Thorns relaying
+every weapon) and the Bolas, Bulwark, Wisp's orbit, Stoke, Lantern and Kite. One file per
+thing under `client/src/ingame/combat/` (`kindle`, `relay`, `bolas`, `bulwark`, `wisp`,
+`stoke`, `lantern`, `kite`) and `gear.rs`, which ties the abilities to the frame (what lives
+across frames, your slab's bar and the heat gauge, the heat on your viewmodel). Models in
+`client/src/models/gear.rs` and `models/weapons/drink.rs` (`docs/models.md`), sounds in the
+`client-b` block at the end of `Sfx` (`docs/audio.md`).
+
+**The Kindle Flask** (`kindle.rs`). Drinking it (the predicted `FireIntent::Knack`) plays the
+drink in first person (`ViewmodelAnim::drink`: the left hand brings the flask up from below the
+screen into the lower middle, pulls the stopper, tips it back while the kindling inside flares
+and drains, and drops it away to the lower left, the gun dipping meanwhile; 0.75 s) with
+`KindleDrink`. Another player's drink (`Fx::Knack`) raises their left hand to the mask with the
+flask in it (`PlayerAnim::drinking`), their wick flares and the swig sounds at them. Your haste
+(the drink's timer, held while the server's `HASTE` flag says so; the movement state's
+`haste_time` when it carries it) shows as a 5° FOV kick eased in and out
+(`CameraRig::set_fov_boost`), embers streaming past the view as you run through them, ember
+streaks flowing out along the screen's sides (longer and faster with your speed) and a warm
+glow at its foot (`kindle::haste_hud`), the Q slot's bar draining; `HasteFade` as it runs
+out. Others' (`HASTE`, `kindle::haste_trail`): a stream of embers blown back off the chest
+wick and, moving fast, a speed trail at chest and knee height. Heal ticks are `Fx::Heal` from
+the healed player's own body (no ember burst there: `kindle::is_draught_heal`): kindling motes
+curling up round the body into the lantern, `KindleTick`, a faint warm flash for you. The
+pool, its light, its heal trickle and its sounds are gone.
+
+**Thorn relays** (`relay.rs`, `Fx::Ricochet` of any `attack`). How a relay looks depends on what
+reached the thorn (`relay::relayed`):
+
+| reached the thorn | the relay |
+|---|---|
+| a ray (any hitscan, a pellet) | the ray ricochets on in the attack's own tracer colour, warming to the relay gold and widening with each bounce (jagged for arcs), each thorn shattering with `Ricochet` rising in pitch |
+| a projectile (bomb, rivet, rocket, arrow, limpet, flak shell, hurled blade, kite, bolas) | a glass flare at the thorn, the new heading lit for a moment (a broken line fading out towards the target) and a ring, `ThornTurn`; the projectile itself flies on as drawn |
+| a blow (a swing, a lunge, a whirl, a punch) or a blast (a cone, a nova, an explosion) | the thorn batted at the target: a broad glassy spear (amber for a blast) with a white-hot core, shards strewn along it, a hit at the far end, `ThornBat` |
+
+**The abilities.**
+
+| ability | colour | in the world | you | sounds |
+|---|---|---|---|---|
+| Bolas (`bolas.rs`) | orange | `ModelId::Bolas` spinning flat about the flight, embers shaken off the cord; bound: rings of cord whipping in round the legs, then the cord wound twice round them (a smouldering spiral) with the weights hanging off it, swinging; the link: a sagging, smouldering cord between the two bound bodies' chests, a bright knot running along it when damage is carried across | | `BolasThrow`, `BolasBind`, `BolasLink`, `BolasShare` |
+| Bulwark (`bulwark.rs`) | pale honey | `ModelId::Bulwark` 1.2 m out along the aim (`bulwark::slab_transform`: its yaw, pitch within ±30°, face away from the holder): translucent wax glowing from inside, the rim's wick burning lower as its time runs out; a blow flares rim and cracks and chips wax off where it struck; the crack stages appear at ¼, 0.55 and 0.8 of what it can take; shattered: glowing chunks flung from its face, dust, a flash; lowered: it slumps away | your slab drawn more see-through; a bar under the crosshair (what it can still take, ticks at the crack stages, its time below; the warning colour, blinking and notched, below a quarter) | `BulwarkRaise`, `BulwarkAbsorb`, `BulwarkCrack`, `BulwarkShatter`, `BulwarkDrop` |
+| Wisp (`wisp.rs`) | violet | the wisp tumbling on its circle round the caller (1.6 m, chest height, 0.55 turns a second), a fading violet track of its last half turn, crackle and glow; zaps as before (`Fx::WispZap`); flung: a violet flash and arcs where it leaves the orbit, then the Wisp projectile and its pop | it sweeps through the view once a turn (a thinner track) | `WispLaunch`, `WispHum`, `WispZap`, `WispFling` |
+| Stoke (`stoke.rs`) | forge red | the stoked weapon's glow ramping from its ability colour to white-hot and its metal reddening (`stoke::heat_tint` through `Tint::glow` / `Tint::body`), embers spitting from the muzzle; spent: a dull red glow, steam jetting from the muzzle and rolling off the weapon | the same on your viewmodel (`Viewmodel::set_heat`); the heat gauge right of the crosshair: STOKED burning down in forge red, then OVERHEAT in the palette's warning colour, blinking and striped, refilling | `StokeIgnite`, `StokeVent` |
+| Lantern (`lantern.rs`) | lamplight gold | `ModelId::Lantern` tumbling, set down with dust and a glow; its cage turns and tilts to its target (`lantern::aim`), the lens in the carrier's primary colour flaring on each shot: an Arclash's jagged zap, a Riveter's rivet streak (the rivet itself is the replicated projectile), a Kiln's ember cone; a warm light round it; the taper gutters in its last fifth, then smoke (destroyed: glass and brass shards) | | `LanternSet`, the carrier's primary sound (quieter), `LanternOut` |
+| Kite (`kite.rs`) | rose | `ModelId::Kite` nose first, banking into its turns (the roll follows the heading's swing), its heart pulsing; a ribbon of its path over the last half second (brighter while steered), embers falling off; the burst: the fireball with a ring of rose embers and burning paper | | `KiteLaunch`, `KiteFlutter` (while it flies), the explosion |
+
+**From the wire** (`gear/net.rs`; "The rework on the wire" above). The `BOLAS`, `KITE` and
+`LANTERN_TOSS` projectiles are the gear's, not the arsenal pipeline's (`arsenal::projectile_kind`
+leaves them out), drawn from `EntityFrame::projectiles` so own stand-ins (`stand_in.rs`: the
+bolas, the kite, the toss) and handovers come along; a kite's bank and ribbon are kept per id; a
+`GUIDED` kite of yours draws the steering marker where your crosshair meets the level. An
+`ORBITING` `WISP` (the entity drawer skips it: `gear::draws_entity`) is drawn on its circle
+(`arclash.wisp_orbit_*`) at the angle the server has it at, round where its owner is drawn
+(you: your predicted feet), humming. A `LANTERN` sets down on first sight, shoots on
+`Fx::LanternShot` (its `state` says the carrier; the shot's end gives the cage's tilt, `yaw`
+its turn), burns out at `aux` (gone well before: destroyed). A player `GUARDING` with the
+Bulwark gets the slab in front of their eye (`bulwark::slab_transform_for`: the tuning's
+distance, pitch limit and size), its cracks from `aux` bits 12–15; yours stands while your
+predicted `WeaponState::charge` holds the Bulwark up, its strength from your entity, with raise
+/ lower / shatter as slabs appear, vanish or break (`Fx::GuardBlock { broke }`); a block chips
+the face where the hit's point projects onto it (`bulwark::block_point`), a new crack stage
+adds `BulwarkCrack`. Every `BOUND` body (enemy bit 17, player bit 22) wears the wound cord and
+weights; `Fx::BolasBound` binds at its positions and, with two, links the bodies nearest them
+for `bolas.link_time` (while both stay bound), a pulse running along the cord and
+`BolasShare` whenever either's health drops. Your Stoke comes from `WeaponState::stoke` /
+`overheat` of the slot in hand (`StokeIgnite` / `StokeVent` as any slot catches or is spent);
+others' `STOKED` weapons glow hotter (their `charge` glow) and spit embers, `OVERHEATED` ones
+vent steam from their muzzles. The `HASTE` flag holds your haste and draws others'. Local
+sounds: the bolas' and the kite's throws, the lantern's toss (`attack_style`), the Wisp's fling
+(a `Recast`, `GearView::local_intent`).
+
+`InGame::preview_kindle(KindlePreview)` / `preview_gear(GearPreview)` stage any of it
+client-side for tools; `combat_shots` shoots them (`kindle_*`, `gear_*`, `relay_*`) and the
+real thing after `/loadout ...` (`gear_use_*`; `COMBAT_SHOTS=rework` stops after them);
+`models_view` the models (`gear_*`, `vm_drink_*`); `client_shots` the Scatter pool's picker
+(`menu_loadout_ability_scatter`).
 
 ## Tuning and balance per mode
 
@@ -789,6 +887,20 @@ its range).
   along, out after 6 s), the Hurl (both legs on two targets, the head turning at the first, the
   range and the catch's refund), the Riposte (a Gnawer's bite blocked, staggered, the counter;
   nothing blocked = no swing; a needle turned back from the front, landing from behind).
+* `shared/tests/combat_rework_b.rs` (arsenal-b's set): Stoke (12 → 20 rivets a second, the
+  Burn as the Stoke, `STOKED` then `OVERHEATED` and no primary, predicted exactly; the Kiln's
+  longer reach and its own Burn), the Kite (turning at most 120°/s onto the crosshair, its blast
+  at the dummy; let go: straight, `GUIDED` gone, no taking it back), the Bolas (two bound on a
+  cord, `BOUND`, 60 % shared each way and never shared back, slack after 4 s; a lone bind; PvP
+  never back to the source), the Wisp (orbiting with its caster, 9 a zap every 0.25 s, gone at
+  the end without a pop and the cooldown from then; beside a wall: kept out, no pop; flung: a
+  direct pop on the dummy, the cooldown from the pop), the Lantern (on the floor, `LANTERN`, half
+  rate and 0.6× for the Arclash, the Riveter and the Kiln, out after 8 s; one at a time, waiting
+  with nothing in range, broken by a Mould's blast, lost over a pit), the Bulwark (rivets
+  destroyed at the slab, no damage, worn; a ray ending on the slab and one at a player behind it
+  stopped; your own shots pass; from behind it doesn't help; a spent slab shatters into 9 s).
+  `combat_ricochet.rs` adds a Hurl turned at a thorn and a lagging shooter's rivet relayed in its
+  made-up flight; `combat_weapons.rs` the orbiting Wisp zapping, then flung onto a wall.
 * `shared/src/sim/abilities/guard.rs` (unit): front-only, whole explosions, no knockback, Burn /
   world / floor hazards pass, turning turns it, a spent Bulwark shatters (its cooldown, the
   slow lifted), teammates aren't caught, the guard drops with its ability.

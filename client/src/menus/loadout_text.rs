@@ -25,8 +25,8 @@ pub type Stat = (&'static str, String);
 pub fn weapon_role(w: WeaponKind) -> &'static str {
     match w {
         WeaponKind::Quill => {
-            "Exact hitscan spikes for careful aim. A shot passing a Thorn ricochets into the \
-             next target, harder each bounce."
+            "Exact hitscan spikes for careful aim: they land at any range and reward a hit on \
+             a weak point."
         }
         WeaponKind::Lancet => {
             "Fast hitscan needles. The first shot is exact; holding the trigger heats it and \
@@ -109,12 +109,12 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
              around as your own. Gust the floor to jump."
         }
         Ability::Bolas => {
-            "Weighted balls on a cord: the first hostile it touches is bound, and one close to \
-             it too, sharing the damage either takes."
+            "Two wax weights on a burning cord: the first hostile it touches is bound, and one \
+             close by is tied to it, taking a share of every hit."
         }
         Ability::Bulwark => {
-            "Hold up a slab of hardened wax: hits from the front are absorbed until it \
-             shatters. You move slower behind it."
+            "Raise a slab of hardened wax: shots and blows from the front are absorbed until it \
+             cracks apart. Yours pass; you move slower."
         }
         Ability::Flak => {
             "A shell that bursts into a ring of pellets after a short flight, just short of a \
@@ -128,13 +128,17 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
             "Charge a shock nova around you that throws everything away. More charge, bigger \
              and harder. It never hurts you."
         }
+        Ability::Stoke if weapon == WeaponKind::Kiln => {
+            "Stoke the Kiln: for a few seconds it sprays faster and further, then it overheats \
+             and can't spray for a moment."
+        }
         Ability::Stoke => {
             "Stoke the weapon: for a few seconds it fires faster and sets what it hits alight, \
              then it overheats and can't fire for a moment."
         }
         Ability::Lantern => {
-            "Set down a lantern that shoots the nearest hostile with your weapon for a while. \
-             Moulds may attack it. One at a time."
+            "Toss down a brass lantern that fires your weapon at the nearest hostile for a \
+             while, slower and weaker. Moulds may break it."
         }
         Ability::Breach => {
             "A point-blank blast just in front of you. It throws you hard and hurts you a \
@@ -187,13 +191,14 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
 pub fn knack_text(k: Knack) -> &'static str {
     match k {
         Knack::Thorn => {
-            "A barbed glass spike that plants itself where it lands. A shot or blow that reaches \
-             a live Thorn is relayed off it into the next target (another Thorn first), harder \
-             each bounce. Throw it at a Mould: it hurts and drops, still live."
+            "A barbed glass spike that plants itself where it lands. Any shot, blow or blast \
+             that reaches a live Thorn shatters it and is relayed at the next target (another \
+             Thorn first), harder each time. Throw it at a Mould: it hurts and drops."
         }
         Knack::KindleFlask => {
-            "Drink a flask of kindling: for a few seconds you run, slide and dash faster and \
-             heal a little every second. It's yours only, in every mode."
+            "Drink the kindling: for a few seconds you run, fly, slide and dash faster and \
+             heal a little every second. It's yours only; drink it to chase, to get away, or \
+             to stay in a fight."
         }
         Knack::Snare => {
             "Throw a wax trap to the floor. Once armed, the first hostile that comes close is \
@@ -219,7 +224,7 @@ pub fn knack_text(k: Knack) -> &'static str {
 pub fn knack_input(k: Knack) -> &'static str {
     match k {
         Knack::Thorn | Knack::SootPot => "KNACK: THROWS IT ALONG YOUR AIM",
-        Knack::KindleFlask => "KNACK: AT ONCE, ON YOU",
+        Knack::KindleFlask => "KNACK: DRINK IT AT ONCE",
         Knack::Snare => "KNACK: THROWS IT TO THE FLOOR",
         Knack::TallowSkin => "KNACK: AT ONCE, ON YOU",
         Knack::Surge => "KNACK: AT ONCE, ALONG YOUR LOOK",
@@ -296,6 +301,14 @@ pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
 pub fn ability_input(a: Ability, weapon: WeaponKind) -> &'static str {
     if weapon.class() == WeaponClass::Draw {
         return "ALT FIRE ARMS THE NEXT ARROW";
+    }
+    // The rework's Scatter / Rapid / Explosive abilities say what the press does.
+    match a {
+        Ability::Bulwark => return "HOLD ALT FIRE TO HOLD IT UP",
+        Ability::Stoke => return "ALT FIRE: STOKED AT ONCE",
+        Ability::Lantern => return "ALT FIRE: TOSSED AHEAD",
+        Ability::Bolas => return "ALT FIRE: WHIRLED AT YOUR AIM",
+        _ => {}
     }
     match a.style() {
         AbilityStyle::Charge => "HOLD ALT FIRE; RELEASE FIRES",

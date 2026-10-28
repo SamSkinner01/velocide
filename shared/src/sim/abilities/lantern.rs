@@ -15,7 +15,8 @@
 //!   with the carrier's primary numbers (`ability_power` doesn't scale them: it is the
 //!   weapon's own shot). With nothing in range it waits, ready. Every shot is a
 //!   [`SimEvent::LanternShot`] (`ends`: the zap's end; the Kiln: the far end of its cone's
-//!   axis; rivets: none, they are projectiles) and turns the lantern (`yaw` on the wire).
+//!   axis; a rivet: the point aimed at, the rivet itself being a projectile) and turns the
+//!   lantern (`yaw` on the wire).
 //! * **Damage**: hostile blasts (Moulds', PvP opponents') hurt it like a body at its centre
 //!   ([`SimWorld::blast_lanterns`]); at 0 it is gone.
 
@@ -299,7 +300,8 @@ impl SimWorld {
                     r.damage * scale,
                     attack,
                 );
-                Vec::new()
+                // (The rivet is its own entity: the end says where it was aimed.)
+                vec![aim]
             }
             WeaponKind::Kiln => {
                 let cone = KilnCone {

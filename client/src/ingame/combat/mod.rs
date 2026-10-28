@@ -19,14 +19,25 @@
 //! `combat_update` (Fx playback, entity bookkeeping, music), `combat_draw`, `combat_hud`.
 
 pub mod arsenal;
+/// The rework's Scatter / Rapid / Explosive abilities and the Thorn relays (docs/rework.md).
+pub mod bolas;
+pub mod bulwark;
 pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
+pub mod gear;
 pub mod hud;
+/// The Kindle Flask drunk: the drink, the haste, its heal ticks (docs/rework.md).
+pub mod kindle;
+pub mod kite;
 pub mod knacks;
+pub mod lantern;
 pub mod melee;
+pub mod relay;
 pub mod stand_in;
+pub mod stoke;
 pub mod weapon_feel;
+pub mod wisp;
 
 use engine::audio::{PlayParams, Sfx};
 use engine::gfx::UiDrawList;
@@ -229,9 +240,17 @@ pub fn attack_style(a: Attack) -> AttackStyle {
         Attack::PinningArrow => s(Sfx::PinningRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06),
         // The rework's abilities: placeholder sounds until client-a / client-b give them
         // their own.
-        Attack::Bolas => s(Sfx::FlakFire, 0.5, 0.0, Vec4::ONE, 0.0, 0.06),
-        Attack::Kite => s(Sfx::CinderboxFire, 0.6, 0.0, Vec4::ONE, 0.0, 0.1),
-        Attack::Lantern | Attack::Waxwork => s(Sfx::LimpetThrow, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
+        // The bolas whirled out, the kite launched, the lantern tossed (gear.rs draws them).
+        Attack::Bolas => s(Sfx::BolasThrow, 0.35, 0.0, Vec4::ONE, 0.0, 0.03),
+        Attack::Kite => AttackStyle {
+            flash: 0.0,
+            ..s(Sfx::KiteLaunch, 0.3, 0.0, Vec4::ONE, 0.0, 0.03)
+        },
+        Attack::Lantern => AttackStyle {
+            flash: 0.0,
+            ..s(Sfx::KnackThrow, 0.2, 0.0, Vec4::ONE, 0.0, 0.0)
+        },
+        Attack::Waxwork => s(Sfx::LimpetThrow, 0.3, 0.0, Vec4::ONE, 0.0, 0.0),
         Attack::BlinkArrow | Attack::BeaconArrow => {
             s(Sfx::BowRelease, 1.0, 0.0, Vec4::ONE, 0.0, 0.06)
         }
@@ -314,6 +333,8 @@ pub struct CombatClient {
     /// Melee trails, streaks and hurled pieces; the knacks' things (`melee.rs`, `knacks.rs`).
     pub melee: melee::MeleeView,
     pub knacks: knacks::KnackView,
+    /// The rework's abilities and the Thorn relays (`gear.rs`).
+    pub gear: gear::GearView,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -351,6 +372,7 @@ impl CombatClient {
             stand_ins: stand_in::StandIns::new(),
             melee: melee::MeleeView::new(),
             knacks: knacks::KnackView::new(),
+            gear: gear::GearView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             early: Vec::new(),
@@ -376,6 +398,7 @@ impl CombatClient {
         self.early.clear();
         self.melee.clear();
         self.knacks.clear();
+        self.gear.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.parry_predicted_at = None;
@@ -869,7 +892,11 @@ impl InGame {
                     // A held ability's press / release, a recast, an ability that isn't a
                     // shot: none of a shot's flash, kick and tracer (their own presentation
                     // is client-a's / client-b's).
-                    FireIntent::Ability { .. } if !plays_as_shot(intent) => {}
+                    // Not a shot: a held ability's press or release, a recast (the Wisp
+                    // flung: gear.rs), the Stoke, ...
+                    FireIntent::Ability { .. } if !plays_as_shot(intent) => {
+                        combat.gear.local_intent(intent, &mut common.audio);
+                    }
                     FireIntent::Primary { .. } | FireIntent::Ability { .. } => {
                         let Some(attack) = intent.attack() else {
                             continue;
@@ -910,6 +937,12 @@ impl InGame {
                         }
                         viewmodel.fire(style.kick);
                         camera.punch(style.punch);
+                        // A stoked weapon's shot throws embers off the muzzle (stoke.rs).
+                        if combat.gear.heat().stoked.is_some()
+                            && matches!(intent, FireIntent::Primary { .. })
+                        {
+                            stoke::stoked_shot(effects, &mut combat.rng, muzzle, aim);
+                        }
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
@@ -1312,6 +1345,8 @@ impl InGame {
                     combat.knacks.snare_sprung(position.to_vec3());
                 }
             }
+            // Blocks on slabs, bolas binds, lantern shots (gear.rs, played with the gear).
+            combat.gear.note_fx(&due);
         }
         combat.beams.update(vdt);
         // Brand sigils (drawn this frame only, after the update).
@@ -1410,6 +1445,10 @@ impl InGame {
         let rate_k = if target > combat.music { 1.5 } else { 0.25 };
         combat.music += (target - combat.music) * (1.0 - (-rate_k * vdt.max(0.0)).exp());
         common.audio.set_music_intensity(combat.music);
+        // The Kindle Flask's haste, its previews and heal ticks (kindle.rs); the rework's
+        // abilities (gear.rs).
+        self.combat_kindle(common, vdt);
+        self.combat_gear(common, vdt);
     }
 
     /// Combat entities and tracers.
@@ -1462,6 +1501,17 @@ impl InGame {
         self.combat
             .knacks
             .draw(lib, &mut out.draws, &mut out.lights);
+        self.combat.gear.draw(
+            lib,
+            self.last_camera.position,
+            self.controls.yaw,
+            self.controls.pitch,
+            &mut out.draws,
+            &mut out.lights,
+        );
+        self.combat
+            .gear
+            .draw_net(lib, &mut out.draws, &mut out.lights);
     }
 
     /// Combat HUD layer (after `Hud::draw`).
@@ -1508,10 +1558,11 @@ impl InGame {
                 } else {
                     0.0
                 },
-                active: if k == knacks::Knack::TallowSkin {
-                    tallow
-                } else {
-                    0.0
+                active: match k {
+                    knacks::Knack::TallowSkin => tallow,
+                    // The haste draining (kindle.rs).
+                    knacks::Knack::KindleFlask => self.combat.knacks.kindle.shown(),
+                    _ => 0.0,
                 },
             })
         };
@@ -1541,6 +1592,7 @@ impl InGame {
         if !dead {
             let rush = self.combat.melee.rush();
             self.combat.knacks.hud(list, c, tallow, rush, now);
+            self.combat.gear.hud(list, &common.theme, c, now);
         }
     }
 }

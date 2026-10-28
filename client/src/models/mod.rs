@@ -15,6 +15,8 @@
 /// The Shrike's cosmetics kit: masks, crests, cloaks, emblems (`shared::cosmetics`).
 pub mod cosmetics;
 pub mod enemies;
+/// The rework's ability gear: the Bolas, the Bulwark's slab, the Lantern, the Kite.
+pub mod gear;
 /// Warm-up hub props: the ready board and the practice console (docs/lobby.md).
 pub mod hub;
 pub mod kit;
@@ -135,10 +137,19 @@ pub enum ModelId {
     SootPot,
     /// The wax puddle a stranded Mould melts into and re-forms out of.
     WaxPuddle,
+    // The rework's ability gear (docs/rework.md, `gear`).
+    /// Two wax balls on a wick cord (Bolas).
+    Bolas,
+    /// The hardened wax slab raised in front of a Bulwark.
+    Bulwark,
+    /// The turret lantern set down by Lantern.
+    Lantern,
+    /// The steered ember kite (Kite).
+    Kite,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 53] = [
+    pub const ALL: [ModelId; 57] = [
         ModelId::Shrike,
         ModelId::ShrikeKit,
         ModelId::Gnawer,
@@ -192,6 +203,10 @@ impl ModelId {
         ModelId::Snare,
         ModelId::SootPot,
         ModelId::WaxPuddle,
+        ModelId::Bolas,
+        ModelId::Bulwark,
+        ModelId::Lantern,
+        ModelId::Kite,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -255,6 +270,10 @@ impl ModelId {
             ModelId::Snare => "prop_snare.gltf",
             ModelId::SootPot => "prop_soot_pot.gltf",
             ModelId::WaxPuddle => "fx_wax_puddle.gltf",
+            ModelId::Bolas => "proj_bolas.gltf",
+            ModelId::Bulwark => "prop_bulwark.gltf",
+            ModelId::Lantern => "prop_lantern.gltf",
+            ModelId::Kite => "proj_kite.gltf",
         }
     }
 
@@ -288,6 +307,9 @@ impl ModelId {
             ModelId::Trimmer => &weapons::trimmer::JOINTS,
             ModelId::Tamper => &weapons::tamper::JOINTS,
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::joints(self),
+            ModelId::Bolas | ModelId::Bulwark | ModelId::Lantern | ModelId::Kite => {
+                gear::joints(self)
+            }
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
             id if id.is_player_projectile() => projectiles::joints(self),
@@ -326,6 +348,9 @@ impl ModelId {
             ModelId::Trimmer => weapons::trimmer::build(),
             ModelId::Tamper => weapons::tamper::build(),
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::build(self),
+            ModelId::Bolas | ModelId::Bulwark | ModelId::Lantern | ModelId::Kite => {
+                gear::build(self)
+            }
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
             id if id.is_player_projectile() => projectiles::build(self),

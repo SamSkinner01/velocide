@@ -111,6 +111,21 @@ fn eye(game: &InGame) -> Option<Vec3> {
     Some(net.local_state()?.eye_position(t))
 }
 
+/// Feet of the living enemies, nearest first.
+fn enemy_feet(game: &InGame) -> Vec<Vec3> {
+    let (Some(net), Some(me)) = (game.net(), eye(game)) else {
+        return Vec::new();
+    };
+    let mut v: Vec<Vec3> = net
+        .remote_entities()
+        .iter()
+        .filter(|e| kind::is_enemy(e.kind) && e.flags & shared::protocol::enemy_flags::DYING == 0)
+        .map(|e| e.position)
+        .collect();
+    v.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
+    v
+}
+
 /// Nearest living enemy's chest (or head).
 fn nearest_enemy(game: &InGame, head: bool) -> Option<Vec3> {
     let net = game.net()?;
@@ -553,11 +568,7 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("arsenal_limpet_blast");
     h.frames(game, 40, still);
 
-    // A kite (placeholder look) and its blast.
-    fire(game, K::Kite, 0.0, 14.0, 9.0, 20.0);
-    h.frames(game, 20, still);
-    h.shot("arsenal_kite");
-    h.frames(game, 60, |g, _| hold(g, Buttons::NONE));
+    // The kite's blast (the kite itself: `gear_previews`).
     game.preview_arsenal(P::Blast {
         blast: Blast::Kite,
         position: ground + fwd * 4.0,
@@ -567,10 +578,7 @@ fn arsenal_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("arsenal_kite_blast");
     h.frames(game, 60, still);
 
-    // A bolas (placeholder look) thrown ahead; statuses on the Moulds.
-    fire(game, K::Bolas, 0.0, 10.0, 4.0, 8.0);
-    h.frames(game, 12, still);
-    h.shot("arsenal_bolas");
+    // Statuses on the Moulds.
     let moulds: Vec<_> = game
         .net()
         .map(|n| {
@@ -682,7 +690,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
 
     // The knacks, used for real.
     for (knack, name, after, settle) in [
-        ("kindle", "knack_use_flask", 4, 70),
+        ("kindle", "knack_use_drink", 18, 30),
         ("snare", "knack_use_snare", 4, 60),
         ("soot", "knack_use_soot", 40, 60),
         ("tallow", "knack_use_tallow", 20, 200),
@@ -700,7 +708,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
         h.shot(name);
         h.frames(game, settle, still);
         if knack == "kindle" {
-            h.shot("knack_use_kindle_pool");
+            h.shot("knack_use_haste");
         }
         if knack == "snare" {
             h.shot("knack_use_snare_armed");
@@ -714,9 +722,10 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
 /// Melee and knacks (docs/refit.md), staged client-side with `InGame::preview_melee` /
 /// `preview_knack` (`melee_*.png`, `knack_*.png`): slash trails, hits, the abilities' streak /
 /// ring / hurled pieces / launch, the flask and its pool, the snare arming and springing, the
-/// soot cloud hiding the Moulds, Tallow Skin's sheen and the Surge's lines.
+/// soot cloud hiding the Moulds, Tallow Skin's sheen and the Surge's lines. (The Kindle Flask
+/// is `kindle_previews`.)
 fn refit_previews(h: &mut Harness, game: &mut InGame) {
-    use client::ingame::combat::knacks::{KnackPreview as K, Thrown};
+    use client::ingame::combat::knacks::KnackPreview as K;
     use client::ingame::combat::melee::{MeleePreview as M, MeleeWeapon, SwingKind};
     let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
     game.send_chat("/killall");
@@ -814,20 +823,6 @@ fn refit_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("melee_upswing");
     h.frames(game, 40, still);
 
-    // Knacks: a flask lobbed ahead and its pool.
-    let lob = |side: f32| eye + fwd * 0.7 + right * side - Vec3::Y * 0.2;
-    game.preview_knack(K::Throw {
-        thing: Thrown::Flask,
-        from: lob(0.2),
-        velocity: fwd * 9.0 + Vec3::Y * 4.0,
-        gravity: 16.0,
-    });
-    h.frames(game, 8, still);
-    h.shot("knack_flask");
-    h.frames(game, 50, still);
-    h.shot("knack_kindle_pool");
-    h.frames(game, 200, still);
-
     // A snare thrown down, arming, armed, then sprung.
     game.preview_knack(K::Snare {
         position: floor + fwd * 3.5,
@@ -872,6 +867,350 @@ fn refit_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 30, still);
 }
 
+/// The Kindle Flask drunk (docs/rework.md §3), staged client-side with `InGame::preview_kindle`
+/// (`kindle_*.png`): the drink in first person, your haste's embers and edges while running,
+/// a heal tick, and another hasted Shrike's trail and wick embers running across the view.
+fn kindle_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::kindle::KindlePreview as K;
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    h.frames(game, 10, still);
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = eye - Vec3::Y * 1.6;
+    game.preview_kindle(K::Drink { seconds: 5.0 });
+    for (frames, name) in [
+        (5, "kindle_drink_raise"),
+        (8, "kindle_drink_tip"),
+        (10, "kindle_drink_away"),
+    ] {
+        h.frames(game, frames, still);
+        h.shot(name);
+    }
+    // Hasted: running forward (embers past the view, the edges streaming).
+    game.controls.override_move = Some((1.0, 0.0, Buttons::NONE));
+    h.frames(game, 40, |_, _| {});
+    h.shot("kindle_haste_run");
+    game.preview_kindle(K::Tick { amount: 8.0 });
+    h.frames(game, 6, |_, _| {});
+    h.shot("kindle_heal_tick");
+    hold(game, Buttons::NONE);
+    h.frames(game, 200, still);
+    // Another hasted Shrike running across the view.
+    let Some(eye) = self::eye(game) else {
+        return;
+    };
+    let floor = Vec3::new(eye.x, floor.y.min(eye.y - 1.6), eye.z);
+    game.preview_kindle(K::Runner {
+        from: floor + fwd * 7.0 - right * 6.0,
+        velocity: right * 14.0,
+        seconds: 1.2,
+    });
+    h.frames(game, 26, still);
+    h.shot("kindle_haste_other");
+    game.preview_kindle(K::Runner {
+        from: floor + fwd * 9.0 + right * 0.5,
+        velocity: -fwd * 3.0,
+        seconds: 2.0,
+    });
+    h.frames(game, 40, still);
+    h.shot("kindle_haste_other_slow");
+    h.frames(game, 90, still);
+}
+
+/// The rework's Scatter / Rapid / Explosive abilities and the Thorn relays (docs/rework.md),
+/// staged client-side with `InGame::preview_gear` (`gear_*.png`, `relay_*.png`).
+fn gear_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::gear::GearPreview as G;
+    use shared::loadout::WeaponKind;
+    use shared::sim::Attack;
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 90, still);
+    if let Some(t) = nearest_enemy(game, false) {
+        aim_at(game, t - Vec3::Y * 0.3);
+    }
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = Vec3::new(eye.x, eye.y - 1.6, eye.z);
+    let ahead = |d: f32, side: f32| floor + fwd * d + right * side;
+
+    // Bolas: thrown at the nearest Mould, the cord snapping on to the next one.
+    let moulds = enemy_feet(game);
+    let first = moulds.first().copied().unwrap_or(ahead(9.0, -1.2));
+    let second = moulds.get(1).copied().unwrap_or(ahead(10.0, 2.4));
+    game.preview_gear(G::Bolas {
+        from: eye + fwd * 0.6 + right * 0.2 - Vec3::Y * 0.2,
+        to: first,
+        height: 2.0,
+        link: Some(second),
+        seconds: 3.0,
+    });
+    h.frames(game, 9, still);
+    h.shot("gear_bolas_flight");
+    h.frames(game, 16, still);
+    h.shot("gear_bolas_bound");
+    h.frames(game, 40, still);
+    h.shot("gear_bolas_link");
+    h.frames(game, 160, still);
+
+    // Bulwark: yours, taking blows and cracking, then shattering.
+    game.preview_gear(G::Bulwark {
+        holder: None,
+        seconds: 3.0,
+        hits: 6,
+        shatter: true,
+    });
+    h.frames(game, 12, still);
+    h.shot("gear_bulwark_raised");
+    h.frames(game, 100, still);
+    h.shot("gear_bulwark_cracked");
+    h.frames(game, 46, still);
+    h.shot("gear_bulwark_shatter");
+    h.frames(game, 60, still);
+    // Another Shrike's, as its opponents see it.
+    game.preview_gear(G::Bulwark {
+        holder: Some((ahead(5.0, 0.5), game.controls.yaw + std::f32::consts::PI)),
+        seconds: 2.5,
+        hits: 3,
+        shatter: false,
+    });
+    h.frames(game, 100, still);
+    h.shot("gear_bulwark_other");
+    h.frames(game, 80, still);
+
+    // The wisp orbiting you, then flung; round another spot ahead.
+    game.preview_gear(G::Wisp {
+        around: None,
+        seconds: 2.0,
+        fling: Some(shared::input::look_dir(
+            game.controls.yaw,
+            game.controls.pitch,
+        )),
+    });
+    game.preview_gear(G::Wisp {
+        around: Some(ahead(6.0, -3.0)),
+        seconds: 3.0,
+        fling: None,
+    });
+    for (frames, name) in [
+        (30, "gear_wisp_orbit"),
+        (24, "gear_wisp_orbit_2"),
+        (70, "gear_wisp_flung"),
+    ] {
+        h.frames(game, frames, still);
+        h.shot(name);
+    }
+    h.frames(game, 100, still);
+
+    // Stoke: your weapon (the Arclash) stoked (early, late), then venting.
+    select(game, 2, 0);
+    game.preview_gear(G::Stoke {
+        stoke: 4.0,
+        vent: 1.5,
+    });
+    h.frames(game, 20, still);
+    h.shot("gear_stoke_early");
+    h.frames(game, 200, still);
+    h.shot("gear_stoke_late");
+    h.frames(game, 30, still);
+    h.shot("gear_stoke_vent");
+    h.frames(game, 80, still);
+
+    // Lanterns: an Arclash's, a Riveter's and a Kiln's, firing at a body ahead.
+    let target = nearest_enemy(game, false).unwrap_or(ahead(12.0, 0.0) + Vec3::Y);
+    for (k, carrier) in [WeaponKind::Arclash, WeaponKind::Riveter, WeaponKind::Kiln]
+        .into_iter()
+        .enumerate()
+    {
+        game.preview_gear(G::Lantern {
+            from: eye + fwd * 0.6 - Vec3::Y * 0.3,
+            to: ahead(3.5 + k as f32, -2.5 + 2.5 * k as f32),
+            carrier,
+            target,
+            seconds: 3.0,
+        });
+    }
+    h.frames(game, 40, still);
+    h.shot("gear_lantern_set");
+    h.frames(game, 50, still);
+    h.shot("gear_lantern_firing");
+    h.frames(game, 125, still);
+    h.shot("gear_lantern_out");
+    h.frames(game, 40, still);
+
+    // A kite steered round to the left, then bursting.
+    game.preview_gear(G::Kite {
+        from: eye + fwd * 0.8 - Vec3::Y * 0.2,
+        velocity: (fwd + Vec3::Y * 0.15) * 16.0,
+        steer: ahead(9.0, -4.0) + Vec3::Y * 1.5,
+        steer_for: 1.6,
+        seconds: 2.2,
+    });
+    h.frames(game, 40, still);
+    h.shot("gear_kite_steer");
+    h.frames(game, 50, still);
+    h.shot("gear_kite_free");
+    h.frames(game, 60, still);
+
+    // Thorn relays: a Bellows pellet ray, a rivet turning, a Trimmer slash batting it, a Kiln
+    // cone; each thorn ahead, relayed at a body to the side.
+    for (k, (attack, name)) in [
+        (Attack::Blast, "relay_ray"),
+        (Attack::Riveter, "relay_turn"),
+        (Attack::Trimmer, "relay_bat"),
+        (Attack::Kiln, "relay_blast"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let thorn = ahead(4.5, -3.2 + k as f32 * 0.3) + Vec3::Y * 1.2;
+        game.preview_gear(G::Relay {
+            attack,
+            turned: attack == Attack::Riveter,
+            from: eye - Vec3::Y * 0.2 + right * 0.2,
+            thorn,
+            to: target,
+        });
+        h.frames(game, 5, still);
+        h.shot(name);
+        h.frames(game, 40, still);
+    }
+}
+
+/// The rework's Scatter / Rapid / Explosive abilities and the Kindle Flask used for real
+/// (`/loadout ...`): the Bulwark held up, the Stoke and its overheat, a Lantern set down, a
+/// Kite steered, a Bolas thrown at the Moulds, the Wisp orbiting and flung, the drink
+/// (`gear_use_*.png`).
+fn gear_use_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let aim_mould = |g: &mut InGame| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t);
+        }
+    };
+    game.send_chat("/killall");
+    game.send_chat(
+        "/loadout bellows:gust,bulwark riveter:stoke,lantern cinderbox:limpet,kite \
+         thresher:bolas,flak knack:kindle",
+    );
+    spawn(game, 3);
+    h.frames(game, 90, still);
+
+    // The Bulwark held up (and its bar under the crosshair).
+    select(game, 0, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    h.frames(game, 40, |g, _| hold(g, Buttons::ALT_FIRE));
+    h.shot("gear_use_bulwark");
+    h.frames(game, 10, still);
+    h.frames(game, 60, still);
+
+    // The Riveter stoked, firing; then spent and venting.
+    select(game, 1, 0);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 70, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::FIRE)
+    });
+    h.shot("gear_use_stoke");
+    h.frames(game, 180, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::FIRE)
+    });
+    h.shot("gear_use_overheat");
+    h.frames(game, 100, still);
+    // Fresh Moulds for the rest.
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 90, still);
+
+    // A Lantern tossed ahead.
+    select(game, 1, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    game.controls.pitch -= 0.3;
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 20, still);
+    aim_mould(game);
+    h.frames(game, 60, still);
+    h.shot("gear_use_lantern");
+    h.frames(game, 60, still);
+
+    // A Kite launched and steered.
+    select(game, 2, 1);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    game.controls.yaw += 0.5;
+    game.controls.pitch += 0.1;
+    h.frames(game, 30, |g, _| {
+        g.controls.yaw -= 0.015;
+        hold(g, Buttons::ALT_FIRE)
+    });
+    h.shot("gear_use_kite");
+    h.frames(game, 60, still);
+
+    // A Bolas thrown at the Moulds.
+    select(game, 3, 0);
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 8, still);
+    h.shot("gear_use_bolas");
+    h.frames(game, 30, still);
+    h.shot("gear_use_bound");
+    h.frames(game, 60, still);
+
+    // The Wisp orbiting you, then flung.
+    game.send_chat("/loadout arclash:wisp,discharge");
+    h.frames(game, 20, |g, _| {
+        aim_mould(g);
+        hold(g, Buttons::NONE)
+    });
+    select(game, 0, 0);
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 45, still);
+    h.shot("gear_use_wisp");
+    hold(game, Buttons::ALT_FIRE);
+    h.frame(game);
+    h.frames(game, 6, still);
+    h.shot("gear_use_wisp_flung");
+    h.frames(game, 60, still);
+
+    // The Kindle Flask drunk.
+    hold(game, Buttons::THROW);
+    h.frame(game);
+    h.frames(game, 18, still);
+    h.shot("gear_use_drink");
+    h.frames(game, 40, still);
+    game.send_chat("/loadout quill bellows arclash tumbler knack:thorn");
+    game.send_chat("/killall");
+    h.frames(game, 30, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -912,6 +1251,16 @@ fn main() -> anyhow::Result<()> {
     game.send_chat("/notarget");
     spawn(&mut game, 4);
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
+
+    // The rework (docs/rework.md); `COMBAT_SHOTS=rework` stops after them (quick look).
+    kindle_previews(&mut h, &mut game);
+    gear_previews(&mut h, &mut game);
+    gear_use_shots(&mut h, &mut game);
+    if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
+        println!("{} screenshots in {}", h.shots.len(), h.out.display());
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return Ok(());
+    }
 
     // Melee and knacks; `COMBAT_SHOTS=refit` stops after them (quick look).
     refit_previews(&mut h, &mut game);

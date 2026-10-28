@@ -462,6 +462,10 @@ impl EntityView {
             }
         }
         for (e, time, offset) in f.projectiles() {
+            // An orbiting wisp is the gear's (gear.rs).
+            if super::gear::draws_entity(e) {
+                continue;
+            }
             self.update_projectile(e, time, offset, f, dt, effects, audio, rng, beams);
         }
         self.enemies.retain(|_, v| v.seen);
@@ -1036,7 +1040,7 @@ impl EntityView {
             }
         }
         for (e, time, offset) in f.projectiles() {
-            if e.flags & projectile_flags::PENDING != 0 {
+            if e.flags & projectile_flags::PENDING != 0 || super::gear::draws_entity(e) {
                 continue;
             }
             let Some(model) = projectile_model(e.kind) else {
@@ -1211,9 +1215,8 @@ pub fn projectile_look(k: u16, parried: bool) -> ProjectileLook {
         kind::BOLAS => look(1.0, 0.5, 0.15, 1.0, 0.04),
         kind::LANTERN_TOSS => look(1.0, 0.28, 0.2, 1.2, 0.04),
         // Melee and knacks (melee.rs, knacks.rs draw the pieces): the Hurl in its violet, the
-        // flask in kindling gold-green, the snare's amber lamp, the pot's spitting fuse.
+        // snare's amber lamp, the pot's spitting fuse.
         kind::HURL => look(0.78, 0.5, 1.0, 1.1, 0.06),
-        kind::KINDLE_FLASK => look(0.85, 1.0, 0.55, 0.9, 0.04),
         kind::SNARE => look(1.0, 0.72, 0.3, 0.55, 0.03),
         kind::SOOT_POT => look(1.0, 0.6, 0.25, 0.7, 0.04),
         _ => look(1.0, 0.85, 0.5, 0.8, 0.04),

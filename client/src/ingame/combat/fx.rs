@@ -926,24 +926,10 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 world_impact(ctx.effects, ctx.world, muzzle, end, 4);
             }
         }
-        Fx::Ricochet { points, .. } => {
+        // A relay off thorns, of any weapon (relay.rs).
+        Fx::Ricochet { attack, points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
-            for (i, w) in pts.windows(2).enumerate() {
-                let color = Vec4::new(1.6, 1.5, 0.9, 0.95);
-                ctx.beams
-                    .beam(w[0], w[1], 0.07 + 0.02 * i as f32, color, 0.35);
-            }
-            // Every point but the last is a shattering thorn.
-            for (i, p) in pts.iter().enumerate().take(pts.len().saturating_sub(1)) {
-                thorn_shatter(ctx, *p);
-                ctx.audio.play(
-                    Sfx::Ricochet,
-                    PlayParams::at(*p).with_pitch(1.0 + 0.18 * i as f32),
-                );
-            }
-            if let Some(last) = pts.last() {
-                ctx.effects.sparks(*last, Vec3::Y, 10);
-            }
+            super::relay::play(ctx, *attack, false, &pts);
         }
         // Ember bombs burst into embers rather than a fireball (enemy_fx.rs).
         Fx::Explosion {
@@ -992,9 +978,8 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             from,
         } => {
             let from = q(*from);
-            // A Kindle pool's steady trickle (knacks.rs).
-            if super::knacks::is_pool_heal(ctx.entities, from) {
-                super::knacks::pool_heal(ctx, *player, from, *amount_tenths as f32 / 10.0);
+            // A Kindle Flask's heal tick: from the drinker's own body (kindle.rs).
+            if super::kindle::play_heal(ctx, *player, from, *amount_tenths as f32 / 10.0) {
                 return;
             }
             let to = if Some(*player) == ctx.local {
@@ -1099,6 +1084,15 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.effects.glow(q(*from), lime, 1.0, 0.2);
             ctx.effects.glow(q(*to), lime, 1.2, 0.25);
         }
+        // A Bulwark's block (its slab's chips and cracks), the Bolas's bind and cord, the
+        // Lantern's shots: gear.rs, which knows the slabs, the bound bodies and the lanterns
+        // (`GearView::note_fx`).
+        Fx::GuardBlock {
+            ability: Ability::Bulwark,
+            ..
+        }
+        | Fx::BolasBound { .. }
+        | Fx::LanternShot { .. } => {}
         Fx::GuardBlock {
             position, broke, ..
         } => {
@@ -1106,23 +1100,6 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             ctx.effects.sparks(at, Vec3::Y, if *broke { 24 } else { 8 });
             ctx.effects
                 .glow(at, Vec4::new(1.0, 0.9, 0.6, 0.8), 0.6, 0.12);
-        }
-        Fx::BolasBound { positions } => {
-            let pts: Vec<Vec3> = positions.iter().map(|p| q(*p)).collect();
-            let cord = hot(ability_color(Ability::Bolas), 1.5);
-            for w in pts.windows(2) {
-                ctx.beams.beam(w[0], w[1], 0.025, cord, 0.4);
-            }
-            for p in &pts {
-                ctx.effects.glow(*p, cord, 0.7, 0.2);
-            }
-        }
-        Fx::LanternShot { origin, ends, .. } => {
-            let o = q(*origin);
-            let red = hot(ability_color(Ability::Lantern), 1.6);
-            for end in ends {
-                ctx.beams.beam(o, q(*end), 0.025, red, 0.12);
-            }
         }
         Fx::HurlCaught { .. } => {}
         // The Flak ring (or a Gust-deflected shell bursting): the arsenal's flak burst.

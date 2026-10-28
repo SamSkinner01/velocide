@@ -292,6 +292,12 @@ pub fn launches(
                 ),
                 Ability::Bolas => one(kind::BOLAS, safe(eye + aim * 0.5), aim * c.bolas.speed),
                 Ability::Kite => one(kind::KITE, safe(eye + aim * 0.6), aim * c.kite.speed),
+                // The Lantern's toss (gear.rs draws it).
+                Ability::Lantern => one(
+                    kind::LANTERN_TOSS,
+                    safe(eye + aim * 0.5),
+                    aim * c.lantern.toss_speed,
+                ),
                 Ability::Gravewell => one(
                     kind::GRAVEWELL,
                     eye,

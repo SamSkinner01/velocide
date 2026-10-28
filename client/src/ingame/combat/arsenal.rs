@@ -273,8 +273,7 @@ pub fn projectile_kind(k: u16) -> Option<ArsenalProjectile> {
         kind::CINDER_ROCKET => ArsenalProjectile::CinderRocket,
         kind::FLAK_SHELL => ArsenalProjectile::FlakShell,
         kind::LIMPET => ArsenalProjectile::Limpet,
-        kind::KITE => ArsenalProjectile::Kite,
-        kind::BOLAS => ArsenalProjectile::Bolas,
+        // The Bolas, the Kite and the tossed Lantern are drawn by `gear.rs` (client-b).
         _ => return None,
     })
 }
@@ -349,14 +348,10 @@ pub enum ArsenalProjectile {
     FlakShell,
     /// Limpet sticky charge.
     Limpet,
-    /// The ember kite (placeholder: the retired mortar shell's model; client-b).
-    Kite,
-    /// The bolas (placeholder: the retired flare's model; client-b).
-    Bolas,
 }
 
 impl ArsenalProjectile {
-    pub const ALL: [ArsenalProjectile; 10] = [
+    pub const ALL: [ArsenalProjectile; 8] = [
         ArsenalProjectile::Arrow,
         ArsenalProjectile::PinningArrow,
         ArsenalProjectile::BeaconArrow,
@@ -365,8 +360,6 @@ impl ArsenalProjectile {
         ArsenalProjectile::CinderRocket,
         ArsenalProjectile::FlakShell,
         ArsenalProjectile::Limpet,
-        ArsenalProjectile::Kite,
-        ArsenalProjectile::Bolas,
     ];
 
     pub fn model(self) -> ModelId {
@@ -378,8 +371,6 @@ impl ArsenalProjectile {
             ArsenalProjectile::CinderRocket => ModelId::CinderRocket,
             ArsenalProjectile::FlakShell => ModelId::FlakShell,
             ArsenalProjectile::Limpet => ModelId::Limpet,
-            ArsenalProjectile::Kite => ModelId::MortarShell,
-            ArsenalProjectile::Bolas => ModelId::Flare,
         }
     }
 
@@ -417,8 +408,6 @@ impl ArsenalProjectile {
             ArsenalProjectile::CinderRocket => (Vec3::new(2.0, 0.9, 0.3), 4.5),
             ArsenalProjectile::FlakShell => (Vec3::new(1.4, 0.6, 0.9), 3.0),
             ArsenalProjectile::Limpet => (Vec3::new(1.4, 1.3, 0.4), 2.5),
-            ArsenalProjectile::Kite => (Vec3::new(1.2, 0.8, 1.5), 4.0),
-            ArsenalProjectile::Bolas => (Vec3::new(1.4, 0.8, 0.3), 2.5),
         }
     }
 
@@ -481,10 +470,7 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
         (ArsenalProjectile::Rivet | ArsenalProjectile::CinderRocket, false) => {
             Quat::from_rotation_z(t * 18.0)
         }
-        (ArsenalProjectile::FlakShell | ArsenalProjectile::Bolas, false) => {
-            Quat::from_rotation_z(t * 9.0)
-        }
-        (ArsenalProjectile::Kite, false) => Quat::from_rotation_x(0.08 * (t * 7.0).sin()),
+        (ArsenalProjectile::FlakShell, false) => Quat::from_rotation_z(t * 9.0),
         (ArsenalProjectile::Limpet, false) => {
             Quat::from_rotation_x(t * 8.0) * Quat::from_rotation_y(t * 5.0)
         }
@@ -692,35 +678,6 @@ pub fn projectile_trail(
             }
         }
         ArsenalProjectile::Limpet => {}
-        ArsenalProjectile::Kite => {
-            if chance(rng, 45.0) {
-                effects.spawn(Particle {
-                    position: p.position + back * 0.35,
-                    gravity: -0.4,
-                    drag: 1.2,
-                    max_life: rng.range(0.6, 1.0),
-                    size: Vec2::splat(0.3),
-                    end_scale: 3.0,
-                    color: Vec4::new(0.4, 0.37, 0.38, 0.5),
-                    texture: FxTex::Smoke,
-                    rotation: rng.angle(),
-                    ..Default::default()
-                });
-            }
-            if chance(rng, 30.0) {
-                effects.spawn(Particle {
-                    position: p.position + dir * 0.27,
-                    velocity: rng.dir() * 1.5,
-                    max_life: 0.15,
-                    size: Vec2::splat(0.08),
-                    color: Vec4::new(1.0, 0.85, 0.55, 1.0),
-                    texture: FxTex::Spark,
-                    additive: true,
-                    ..Default::default()
-                });
-            }
-        }
-        ArsenalProjectile::Bolas => {}
     }
 }
 
@@ -785,7 +742,7 @@ pub enum Blast {
     Cinder,
     /// Limpets detonating.
     Limpet,
-    /// The ember kite (the biggest; the retired mortar's blast for now).
+    /// The ember kite bursting (the biggest): a rose shock ring and scraps of burning paper.
     Kite,
     /// A Waxwork bursting in hot wax (the retired Ember Arrow's flame burst for now).
     Waxwork,
@@ -813,7 +770,7 @@ impl Blast {
 }
 
 /// A blast of radius `radius` at `position`: flash, fireball, smoke, sparks, ring, light,
-/// scorch, shake and sound. The Kite adds a lilac shock ring and heavy debris; the Waxwork a
+/// scorch, shake and sound. The Kite adds a rose shock ring and burning paper; the Waxwork a
 /// fountain of embers that settle and keep glowing.
 pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     let r = radius.max(0.8);
@@ -856,36 +813,7 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     e.sparks(position, Vec3::Y, if kind == Blast::Kite { 26 } else { 12 });
     e.shockwave(position, r);
     match kind {
-        Blast::Kite => {
-            let lilac = ability_color(Ability::Kite);
-            ctx.beams.ring(
-                position + Vec3::Y * 0.2,
-                Vec3::Y,
-                0.5,
-                r * 1.1,
-                0.12,
-                (lilac.truncate() * 1.8).extend(0.9),
-                0.35,
-            );
-            for _ in 0..14 {
-                let v = ctx.rng.dir() * ctx.rng.range(6.0, 13.0) + Vec3::Y * 5.0;
-                ctx.effects.spawn(Particle {
-                    position,
-                    velocity: v,
-                    gravity: 18.0,
-                    drag: 0.6,
-                    max_life: ctx.rng.range(0.8, 1.4),
-                    size: Vec2::splat(0.18),
-                    color: Vec4::new(0.32, 0.3, 0.29, 1.0),
-                    end_alpha: 0.4,
-                    texture: FxTex::Shard,
-                    rotation: ctx.rng.angle(),
-                    spin: ctx.rng.range(-8.0, 8.0),
-                    collide: Some(OnHit::Bounce(0.3)),
-                    ..Default::default()
-                });
-            }
-        }
+        Blast::Kite => super::kite::burst_scraps(ctx, position, r),
         Blast::Waxwork => {
             for _ in 0..22 {
                 let v = ctx.rng.dir() * ctx.rng.range(2.0, 7.0) + Vec3::Y * 4.0;
@@ -1297,21 +1225,18 @@ impl ArsenalView {
         for (kind, at, normal, vel) in landed {
             match kind {
                 ArsenalProjectile::CinderRocket => self.blasts.push((Blast::Cinder, at, 2.6)),
-                ArsenalProjectile::Kite => self.blasts.push((Blast::Kite, at, 6.0)),
                 ArsenalProjectile::BeaconArrow => self.blasts.push((Blast::Waxwork, at, 3.0)),
                 ArsenalProjectile::FlakShell => self.flak.push((at, vel)),
                 _ => projectile_impact(effects, audio, rng, kind, at, normal),
             }
         }
-        // Bursting kinds and bolas that landed are gone; arrows, rivets and limpets stay.
+        // Bursting kinds that landed are gone; arrows, rivets and limpets stay.
         self.flying.retain(|f| {
             let gone = matches!(
                 f.view.kind,
                 ArsenalProjectile::CinderRocket
-                    | ArsenalProjectile::Kite
                     | ArsenalProjectile::BeaconArrow
                     | ArsenalProjectile::FlakShell
-                    | ArsenalProjectile::Bolas
             ) && f.view.stuck;
             !gone && f.view.age < 30.0
         });
@@ -1503,12 +1428,14 @@ mod tests {
             kind::CINDER_ROCKET,
             kind::FLAK_SHELL,
             kind::LIMPET,
-            kind::KITE,
-            kind::BOLAS,
         ] {
             assert!(projectile_kind(k).is_some(), "kind {k}");
         }
         assert_eq!(projectile_kind(kind::BOMB), None);
+        // The rework's Bolas, Kite and tossed Lantern are the gear's (gear.rs).
+        for k in [kind::KITE, kind::BOLAS, kind::LANTERN_TOSS] {
+            assert_eq!(projectile_kind(k), None, "kind {k}");
+        }
         for kind in ArsenalProjectile::ALL {
             for stuck in [false, true] {
                 let p = ProjectileView {
@@ -1579,7 +1506,7 @@ mod tests {
         let mut audio = Audio::disabled();
         let mut rng = Rng::default();
         view.preview(ArsenalPreview::Projectile {
-            kind: ArsenalProjectile::Kite,
+            kind: ArsenalProjectile::CinderRocket,
             from: Vec3::ZERO,
             velocity: Vec3::new(0.0, 5.0, -10.0),
             gravity: 20.0,
@@ -1610,7 +1537,7 @@ mod tests {
                 1.0 / 60.0,
             );
         }
-        // The kite timed out and is waiting to blast; the arrow (no level to stick in) is
+        // The rocket timed out and is waiting to blast; the arrow (no level to stick in) is
         // still around.
         assert_eq!(view.blasts.len(), 1);
         assert_eq!(view.flying.len(), 1);
