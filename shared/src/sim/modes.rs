@@ -710,6 +710,10 @@ impl SimWorld {
                     let HitTarget::Player(victim) = d.target else {
                         continue;
                     };
+                    // A Waxwork's double is nobody's stats (`abilities/waxwork.rs`).
+                    if super::abilities::waxwork::decoy_owner(victim).is_some() {
+                        continue;
+                    }
                     if d.blocked.is_none() && d.dealt > 0.0 {
                         self.mode.player(victim).stats.damage_taken += d.dealt;
                     }
