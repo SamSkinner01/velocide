@@ -150,30 +150,30 @@ impl Default for BalanceTuning {
             (WeaponKind::Trimmer, scale(0.84)),
             // Its abilities hit for a multiple of the swing: 59.5 keeps them under a one-shot.
             (WeaponKind::Tamper, scale(0.7)),
+            // A full focus: 70 to the body, 140 to the head (the allowed one-shot); two body
+            // shots in 1.6 s.
+            (
+                WeaponKind::Lamplighter,
+                BalanceScale {
+                    interval: 0.75,
+                    ..scale(0.54)
+                },
+            ),
         ]);
         let abilities = BTreeMap::from([
-            (Ability::BothBarrels, scale(0.25)),
             (Ability::Wisp, scale(0.5)),
             (Ability::Discharge, scale(0.9)),
             (Ability::Breach, scale(0.85)),
             (Ability::Gravewell, scale(0.75)),
-            (Ability::Skewer, scale(0.58)),
-            (Ability::Flurry, scale(0.6)),
             (Ability::Flak, scale(0.8)),
-            (Ability::Volley, scale(0.75)),
             (Ability::Limpet, scale(0.75)),
-            (
-                Ability::Mortar,
-                BalanceScale {
-                    radius: 0.85,
-                    ..scale(0.75)
-                },
-            ),
-            (Ability::TripleNock, scale(0.55)),
-            (Ability::EmberArrow, scale(0.5)),
+            // The counter is 2-3x the swing: on the Tamper (59.5) at most 98.
+            (Ability::Riposte, scale(0.55)),
         ]);
         let overrides = BTreeMap::from([
             ("quill.brand_multiplier".to_string(), 1.25),
+            // Three marks in PvP (docs/rework.md).
+            ("tally.max_targets".to_string(), 3.0),
             // Half damage for 3 s won every even duel.
             ("knacks.tallow_skin.damage_scale".to_string(), 0.7),
             ("knacks.tallow_skin.duration".to_string(), 2.0),
@@ -305,6 +305,13 @@ impl CombatTuning {
                 m.reach *= s.radius;
                 m.knockback *= s.knockback;
             }
+            WeaponKind::Lamplighter => {
+                let l = &mut self.lamplighter;
+                l.min_damage *= s.damage;
+                l.max_damage *= s.damage;
+                l.focus_time *= s.interval;
+                l.interval *= s.interval;
+            }
         }
     }
 
@@ -317,12 +324,13 @@ impl CombatTuning {
                 q.brand_damage *= s.damage;
                 q.brand_cooldown *= s.interval;
             }
-            Ability::Splinter => {
-                let q = &mut self.quill;
-                q.splinter_damage *= s.damage;
-                q.splinter_shard_damage *= s.damage;
-                q.splinter_cooldown *= s.interval;
-                q.splinter_range *= s.radius;
+            Ability::Wickline => {
+                let w = &mut self.wickline;
+                w.damage *= s.damage;
+                w.cooldown *= s.interval;
+                w.range *= s.radius;
+                w.yank_speed *= s.knockback;
+                w.zip_speed *= s.speed;
             }
             Ability::Gust => {
                 let b = &mut self.bellows;
@@ -332,10 +340,14 @@ impl CombatTuning {
                 b.gust_knockback *= s.knockback;
                 b.gust_up *= s.knockback;
             }
-            Ability::BothBarrels => {
-                let b = &mut self.bellows;
-                b.both_pellet_damage *= s.damage;
-                b.both_cooldown *= s.interval;
+            Ability::Bolas => {
+                // Its damage is what the cord shares.
+                let b = &mut self.bolas;
+                b.damage *= s.damage;
+                b.link_share *= s.damage;
+                b.cooldown *= s.interval;
+                b.link_range *= s.radius;
+                b.speed *= s.speed;
             }
             Ability::Wisp => {
                 let a = &mut self.arclash;
@@ -373,22 +385,26 @@ impl CombatTuning {
                 t.gravewell_knockback *= s.knockback;
                 t.gravewell_speed *= s.speed;
             }
-            Ability::Skewer => {
-                let k = &mut self.skewer;
-                k.min_damage *= s.damage;
-                k.max_damage *= s.damage;
+            Ability::Tally => {
+                let k = &mut self.tally;
+                k.damage *= s.damage;
                 k.cooldown *= s.interval;
+                k.range *= s.radius;
             }
-            Ability::Flurry => {
-                let f = &mut self.flurry;
-                f.damage_scale *= s.damage;
-                f.cooldown *= s.interval;
+            Ability::Waxwork => {
+                let w = &mut self.waxwork;
+                w.burst_damage *= s.damage;
+                w.cooldown *= s.interval;
+                w.burst_radius *= s.radius;
+                w.lure_range *= s.radius;
+                w.burst_knockback *= s.knockback;
             }
-            Ability::Slug => {
-                let g = &mut self.slug;
-                g.damage *= s.damage;
-                g.cooldown *= s.interval;
-                g.knockback *= s.knockback;
+            Ability::Bulwark => {
+                // Its "damage" is how much it absorbs.
+                let b = &mut self.bulwark;
+                b.absorb *= s.damage;
+                b.cooldown *= s.interval;
+                b.broken_cooldown *= s.interval;
             }
             Ability::Flak => {
                 let f = &mut self.flak;
@@ -397,17 +413,19 @@ impl CombatTuning {
                 f.pellet_range *= s.radius;
                 f.shell_speed *= s.speed;
             }
-            Ability::Volley => {
-                let v = &mut self.volley;
-                v.damage_scale *= s.damage;
-                v.cooldown *= s.interval;
+            Ability::Stoke => {
+                // The weapon's own shots, faster: "damage" is the rate.
+                let k = &mut self.stoke;
+                k.rate *= s.damage;
+                k.cooldown *= s.interval;
+                k.kiln_reach *= s.radius;
             }
-            Ability::Flare => {
-                let f = &mut self.flare;
-                f.burn_rate *= s.damage;
-                f.cooldown *= s.interval;
-                f.patch_radius *= s.radius;
-                f.speed *= s.speed;
+            Ability::Lantern => {
+                let l = &mut self.lantern;
+                l.damage_scale *= s.damage;
+                l.cooldown *= s.interval;
+                l.range *= s.radius;
+                l.kiln_range *= s.radius;
             }
             Ability::Limpet => {
                 let l = &mut self.limpet;
@@ -417,31 +435,29 @@ impl CombatTuning {
                 l.knockback *= s.knockback;
                 l.speed *= s.speed;
             }
-            Ability::Mortar => {
-                let m = &mut self.mortar;
-                m.damage *= s.damage;
-                m.cooldown *= s.interval;
-                m.explosion_radius *= s.radius;
-                m.knockback *= s.knockback;
-                m.speed *= s.speed;
+            Ability::Kite => {
+                let k = &mut self.kite;
+                k.damage *= s.damage;
+                k.cooldown *= s.interval;
+                k.explosion_radius *= s.radius;
+                k.knockback *= s.knockback;
+                k.speed *= s.speed;
             }
-            Ability::TripleNock => {
-                let t = &mut self.triple_nock;
-                t.damage_scale *= s.damage;
-                t.cooldown *= s.interval;
+            Ability::BlinkArrow => {
+                let b = &mut self.blink_arrow;
+                b.damage_scale *= s.damage;
+                b.cooldown *= s.interval;
             }
             Ability::PinningArrow => {
                 let p = &mut self.pinning_arrow;
                 p.damage_scale *= s.damage;
                 p.cooldown *= s.interval;
             }
-            Ability::EmberArrow => {
-                let e = &mut self.ember_arrow;
-                e.damage_scale *= s.damage;
-                e.damage *= s.damage;
-                e.cooldown *= s.interval;
-                e.explosion_radius *= s.radius;
-                e.knockback *= s.knockback;
+            Ability::BeaconArrow => {
+                let b = &mut self.beacon_arrow;
+                b.damage_scale *= s.damage;
+                b.cooldown *= s.interval;
+                b.radius *= s.radius;
             }
             Ability::Lunge => {
                 let l = &mut self.lunge;
@@ -461,15 +477,19 @@ impl CombatTuning {
             Ability::Hurl => {
                 let h = &mut self.hurl;
                 h.damage_scale *= s.damage;
+                h.return_damage_scale *= s.damage;
                 h.cooldown *= s.interval;
                 h.knockback *= s.knockback;
                 h.speed *= s.speed;
+                h.return_speed *= s.speed;
             }
-            Ability::Upswing => {
-                let u = &mut self.upswing;
-                u.damage_scale *= s.damage;
-                u.cooldown *= s.interval;
-                u.launch *= s.knockback;
+            Ability::Riposte => {
+                let r = &mut self.riposte;
+                r.damage_scale *= s.damage;
+                r.per_block *= s.damage;
+                r.max_scale *= s.damage;
+                r.cooldown *= s.interval;
+                r.knockback *= s.knockback;
             }
         }
     }
@@ -630,14 +650,14 @@ mod tests {
         let t: Tuning = ron::from_str(
             r#"(balance: (pvp: (
                 weapons: { Longwick: (damage: 0.9) },
-                abilities: { Mortar: (radius: 0.8, interval: 1.2) },
+                abilities: { Kite: (radius: 0.8, interval: 1.2) },
                 overrides: { "thorn.charges": 1 },
             )))"#,
         )
         .unwrap();
         assert_eq!(t.balance.pvp.weapons[&WeaponKind::Longwick].damage, 0.9);
         assert_eq!(t.balance.pvp.weapons[&WeaponKind::Longwick].speed, 1.0);
-        assert_eq!(t.balance.pvp.abilities[&Ability::Mortar].interval, 1.2);
+        assert_eq!(t.balance.pvp.abilities[&Ability::Kite].interval, 1.2);
         assert_eq!(t.for_mode(GameMode::Deathmatch).combat.thorn.charges, 1);
         assert_eq!(t.balance.pve, BalanceProfile::default());
     }

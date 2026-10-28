@@ -3,9 +3,9 @@
 //! blasts, hazards and status effects.
 //!
 //! Everything is keyed on small enums so the replicated kinds and flags map onto them in one
-//! place: [`ArsenalProjectile`] (arrows, rivets, cinder rockets, flak shells, limpets, mortar
-//! shells, flares), [`Blast`] (what a new explosion looks like), [`Hazard`] (burning patches)
-//! and [`Status`] (Burn, Pinned). [`ArsenalView`] keeps the per-entity bookkeeping (trails,
+//! place: [`ArsenalProjectile`] (arrows, rivets, cinder rockets, flak shells, limpets, and the
+//! rework's kites, bolas and arrows, drawn with the retired abilities' models for now),
+//! [`Blast`] (what a new explosion looks like) and [`Status`] (Burn, Pinned). [`ArsenalView`] keeps the per-entity bookkeeping (trails,
 //! blink timers, burn embers) and draws them.
 //!
 //! [`ArsenalPreview`] / `InGame::preview_arsenal` stage any of these client-side (no
@@ -98,7 +98,7 @@ impl InGame {
 /// What the local weapon feel remembers between frames.
 #[derive(Clone, Copy, Debug, Default)]
 struct LocalFeel {
-    /// The charge whine playing (Discharge / Skewer).
+    /// The charge whine playing (Discharge).
     charge_sfx: Option<Sfx>,
     drawing: bool,
     full_draw: bool,
@@ -202,8 +202,9 @@ impl ArsenalView {
         }
     }
 
-    /// Per frame, from the predicted weapon state: the charge glow and whine (Discharge,
-    /// Skewer), the bow's draw (creak while drawing, a ring and a bright glint at full draw,
+    /// Per frame, from the predicted weapon state: the charge glow and whine (Discharge;
+    /// a held Tally / Bulwark / Riposte counts its hold in `charge` too, but neither glows nor
+    /// whines), the bow's draw (the Lamplighter's focus borrows it for now) (creak while drawing, a ring and a bright glint at full draw,
     /// silence on release). Returns the bow's draw (0..1) and whether full draw was reached
     /// this frame (the caller zooms and flashes, `docs/feel.md`).
     pub fn local_feel(
@@ -216,11 +217,13 @@ impl ArsenalView {
     ) -> (f32, bool) {
         // Nothing carried (gun game's Fist tier): fists only.
         viewmodel.set_unarmed(s.is_unarmed());
-        viewmodel.set_charge(s.charge_fraction(t, tick_rate));
-        let whine = (s.charge > 0).then(|| match s.ability() {
-            Ability::Skewer => Sfx::SkewerCharge,
-            _ => Sfx::DischargeCharge,
+        let charging = s.ability().style() == shared::sim::weapons::AbilityStyle::Charge;
+        viewmodel.set_charge(if charging {
+            s.charge_fraction(t, tick_rate)
+        } else {
+            0.0
         });
+        let whine = (charging && s.charge > 0).then_some(Sfx::DischargeCharge);
         if whine != self.local.charge_sfx {
             if let Some(old) = self.local.charge_sfx {
                 audio.stop(old);
@@ -263,14 +266,15 @@ pub fn projectile_kind(k: u16) -> Option<ArsenalProjectile> {
     Some(match k {
         kind::ARROW => ArsenalProjectile::Arrow,
         kind::PIN_ARROW => ArsenalProjectile::PinningArrow,
-        kind::EMBER_ARROW => ArsenalProjectile::EmberArrow,
+        kind::BLINK_ARROW => ArsenalProjectile::Arrow,
+        kind::BEACON_ARROW => ArsenalProjectile::BeaconArrow,
         kind::BRAND_ARROW => ArsenalProjectile::BrandArrow,
         kind::RIVET => ArsenalProjectile::Rivet,
         kind::CINDER_ROCKET => ArsenalProjectile::CinderRocket,
         kind::FLAK_SHELL => ArsenalProjectile::FlakShell,
         kind::LIMPET => ArsenalProjectile::Limpet,
-        kind::MORTAR_SHELL => ArsenalProjectile::MortarShell,
-        kind::FLARE => ArsenalProjectile::Flare,
+        kind::KITE => ArsenalProjectile::Kite,
+        kind::BOLAS => ArsenalProjectile::Bolas,
         _ => return None,
     })
 }
@@ -330,10 +334,11 @@ pub fn surface_facing(world: Option<&CollisionWorld>, at: Vec3) -> Option<Vec3> 
 /// A projectile of the expansion arsenal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ArsenalProjectile {
-    /// Longwick taper arrow (also Triple Nock's three).
+    /// Longwick taper arrow (the Blink Arrow's too, for now).
     Arrow,
     PinningArrow,
-    EmberArrow,
+    /// The Beacon Arrow (placeholder: the retired Ember Arrow's model; client-a).
+    BeaconArrow,
     /// A Brand loosed from the Longwick (the taper arrow, glowing the brand's crimson).
     BrandArrow,
     /// Riveter hot rivet.
@@ -344,36 +349,37 @@ pub enum ArsenalProjectile {
     FlakShell,
     /// Limpet sticky charge.
     Limpet,
-    MortarShell,
-    /// Flare (lands and leaves a burning patch).
-    Flare,
+    /// The ember kite (placeholder: the retired mortar shell's model; client-b).
+    Kite,
+    /// The bolas (placeholder: the retired flare's model; client-b).
+    Bolas,
 }
 
 impl ArsenalProjectile {
     pub const ALL: [ArsenalProjectile; 10] = [
         ArsenalProjectile::Arrow,
         ArsenalProjectile::PinningArrow,
-        ArsenalProjectile::EmberArrow,
+        ArsenalProjectile::BeaconArrow,
         ArsenalProjectile::BrandArrow,
         ArsenalProjectile::Rivet,
         ArsenalProjectile::CinderRocket,
         ArsenalProjectile::FlakShell,
         ArsenalProjectile::Limpet,
-        ArsenalProjectile::MortarShell,
-        ArsenalProjectile::Flare,
+        ArsenalProjectile::Kite,
+        ArsenalProjectile::Bolas,
     ];
 
     pub fn model(self) -> ModelId {
         match self {
             ArsenalProjectile::Arrow | ArsenalProjectile::BrandArrow => ModelId::Arrow,
             ArsenalProjectile::PinningArrow => ModelId::PinningArrow,
-            ArsenalProjectile::EmberArrow => ModelId::EmberArrow,
+            ArsenalProjectile::BeaconArrow => ModelId::EmberArrow,
             ArsenalProjectile::Rivet => ModelId::Rivet,
             ArsenalProjectile::CinderRocket => ModelId::CinderRocket,
             ArsenalProjectile::FlakShell => ModelId::FlakShell,
             ArsenalProjectile::Limpet => ModelId::Limpet,
-            ArsenalProjectile::MortarShell => ModelId::MortarShell,
-            ArsenalProjectile::Flare => ModelId::Flare,
+            ArsenalProjectile::Kite => ModelId::MortarShell,
+            ArsenalProjectile::Bolas => ModelId::Flare,
         }
     }
 
@@ -385,7 +391,7 @@ impl ArsenalProjectile {
             ArsenalProjectile::Limpet | ArsenalProjectile::FlakShell => 2.4,
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
-            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 2.2,
             _ => 2.0,
         }
@@ -406,13 +412,13 @@ impl ArsenalProjectile {
             ArsenalProjectile::Arrow => (Vec3::new(1.2, 0.8, 0.4), 2.5),
             ArsenalProjectile::PinningArrow => (Vec3::new(0.6, 0.85, 1.4), 3.0),
             ArsenalProjectile::BrandArrow => (Vec3::new(1.6, 0.35, 0.7), 3.0),
-            ArsenalProjectile::EmberArrow => (Vec3::new(1.8, 0.7, 0.2), 4.0),
+            ArsenalProjectile::BeaconArrow => (Vec3::new(1.8, 0.7, 0.2), 4.0),
             ArsenalProjectile::Rivet => (Vec3::new(1.4, 0.5, 0.2), 2.0),
             ArsenalProjectile::CinderRocket => (Vec3::new(2.0, 0.9, 0.3), 4.5),
             ArsenalProjectile::FlakShell => (Vec3::new(1.4, 0.6, 0.9), 3.0),
             ArsenalProjectile::Limpet => (Vec3::new(1.4, 1.3, 0.4), 2.5),
-            ArsenalProjectile::MortarShell => (Vec3::new(1.2, 0.8, 1.5), 4.0),
-            ArsenalProjectile::Flare => (Vec3::new(2.6, 0.7, 0.45), 9.0),
+            ArsenalProjectile::Kite => (Vec3::new(1.2, 0.8, 1.5), 4.0),
+            ArsenalProjectile::Bolas => (Vec3::new(1.4, 0.8, 0.3), 2.5),
         }
     }
 
@@ -421,7 +427,7 @@ impl ArsenalProjectile {
         match self {
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
-            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 0.24,
             ArsenalProjectile::Rivet => 0.06,
             _ => 0.0,
@@ -435,7 +441,6 @@ impl ArsenalProjectile {
             ArsenalProjectile::PinningArrow => Some(Sfx::PinThunk),
             ArsenalProjectile::Rivet => Some(Sfx::RivetImpact),
             ArsenalProjectile::Limpet => Some(Sfx::LimpetStick),
-            ArsenalProjectile::Flare => Some(Sfx::FlareBurn),
             _ => None,
         }
     }
@@ -476,10 +481,10 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
         (ArsenalProjectile::Rivet | ArsenalProjectile::CinderRocket, false) => {
             Quat::from_rotation_z(t * 18.0)
         }
-        (ArsenalProjectile::FlakShell | ArsenalProjectile::Flare, false) => {
+        (ArsenalProjectile::FlakShell | ArsenalProjectile::Bolas, false) => {
             Quat::from_rotation_z(t * 9.0)
         }
-        (ArsenalProjectile::MortarShell, false) => Quat::from_rotation_x(0.08 * (t * 7.0).sin()),
+        (ArsenalProjectile::Kite, false) => Quat::from_rotation_x(0.08 * (t * 7.0).sin()),
         (ArsenalProjectile::Limpet, false) => {
             Quat::from_rotation_x(t * 8.0) * Quat::from_rotation_y(t * 5.0)
         }
@@ -498,7 +503,7 @@ pub fn projectile_transform(p: &ProjectileView, time: f64) -> Mat4 {
             ArsenalProjectile::Rivet => 0.12,
             ArsenalProjectile::Arrow
             | ArsenalProjectile::PinningArrow
-            | ArsenalProjectile::EmberArrow
+            | ArsenalProjectile::BeaconArrow
             | ArsenalProjectile::BrandArrow => 0.36,
             _ => 0.0,
         };
@@ -535,11 +540,6 @@ pub fn draw_projectile(
                 light.0 *= 0.25;
             }
         }
-        ArsenalProjectile::Flare => {
-            let sputter = 1.6 + 0.9 * ((time * 31.0 + p.seed as f64).sin() as f32).abs();
-            tint.glow = Vec4::splat(sputter);
-            light.0 *= 0.8 + 0.3 * sputter / 2.5;
-        }
         ArsenalProjectile::BrandArrow => {
             let b = super::fx::brand_color();
             tint.glow = (b.truncate() * (0.8 + 0.3 * flicker)).extend(1.0);
@@ -570,7 +570,7 @@ pub fn projectile_trail(
     let chance = |rng: &mut Rng, per_second: f32| rng.unit() < dt * per_second;
     if p.stuck {
         match p.kind {
-            ArsenalProjectile::Arrow | ArsenalProjectile::EmberArrow if chance(rng, 6.0) => {
+            ArsenalProjectile::Arrow | ArsenalProjectile::BeaconArrow if chance(rng, 6.0) => {
                 // The taper keeps burning where it stuck.
                 effects.spawn(Particle {
                     position: p.position - p.facing.normalize_or_zero() * 0.2,
@@ -593,10 +593,10 @@ pub fn projectile_trail(
     match p.kind {
         ArsenalProjectile::Arrow
         | ArsenalProjectile::PinningArrow
-        | ArsenalProjectile::EmberArrow
+        | ArsenalProjectile::BeaconArrow
         | ArsenalProjectile::BrandArrow => {
             // A thin streak of wick smoke, sparks from the flame.
-            let ember = p.kind == ArsenalProjectile::EmberArrow;
+            let ember = p.kind == ArsenalProjectile::BeaconArrow;
             if chance(rng, if ember { 50.0 } else { 30.0 }) {
                 effects.spawn(Particle {
                     position: p.position + back * rng.range(0.0, 0.4),
@@ -615,7 +615,7 @@ pub fn projectile_trail(
             let color = match p.kind {
                 ArsenalProjectile::PinningArrow => Vec4::new(0.7, 0.85, 1.0, 1.0),
                 ArsenalProjectile::BrandArrow => super::fx::brand_color(),
-                ArsenalProjectile::EmberArrow => Vec4::new(1.0, 0.5, 0.12, 1.0),
+                ArsenalProjectile::BeaconArrow => Vec4::new(1.0, 0.5, 0.12, 1.0),
                 _ => Vec4::new(1.0, 0.75, 0.35, 1.0),
             };
             if chance(rng, if ember { 60.0 } else { 20.0 }) {
@@ -692,7 +692,7 @@ pub fn projectile_trail(
             }
         }
         ArsenalProjectile::Limpet => {}
-        ArsenalProjectile::MortarShell => {
+        ArsenalProjectile::Kite => {
             if chance(rng, 45.0) {
                 effects.spawn(Particle {
                     position: p.position + back * 0.35,
@@ -720,39 +720,7 @@ pub fn projectile_trail(
                 });
             }
         }
-        ArsenalProjectile::Flare => {
-            // Sputtering sparks and a thick smoke tail.
-            for _ in 0..2 {
-                if chance(rng, 70.0) {
-                    effects.spawn(Particle {
-                        position: p.position + dir * 0.1,
-                        velocity: rng.dir() * 3.0 + back * 1.5,
-                        gravity: 9.0,
-                        max_life: rng.range(0.2, 0.45),
-                        size: Vec2::splat(0.08),
-                        color: Vec4::new(1.0, 0.45, 0.3, 1.0),
-                        texture: FxTex::Spark,
-                        additive: true,
-                        collide: Some(OnHit::Die),
-                        ..Default::default()
-                    });
-                }
-            }
-            if chance(rng, 40.0) {
-                effects.spawn(Particle {
-                    position: p.position,
-                    gravity: -0.8,
-                    drag: 1.0,
-                    max_life: rng.range(0.8, 1.3),
-                    size: Vec2::splat(0.25),
-                    end_scale: 3.5,
-                    color: Vec4::new(0.6, 0.45, 0.45, 0.45),
-                    texture: FxTex::Smoke,
-                    rotation: rng.angle(),
-                    ..Default::default()
-                });
-            }
-        }
+        ArsenalProjectile::Bolas => {}
     }
 }
 
@@ -800,10 +768,6 @@ pub fn projectile_impact(
         ArsenalProjectile::Limpet => {
             effects.sparks(position + n * 0.05, n, 5);
         }
-        ArsenalProjectile::Flare => {
-            effects.sparks(position + n * 0.05, n, 12);
-            effects.glow(position, Vec4::new(1.8, 0.5, 0.3, 1.0), 1.4, 0.3);
-        }
         _ => {}
     }
     if let Some(sfx) = kind.impact_sfx() {
@@ -821,10 +785,10 @@ pub enum Blast {
     Cinder,
     /// Limpets detonating.
     Limpet,
-    /// The mortar shell (the biggest).
-    Mortar,
-    /// An Ember Arrow bursting into flame.
-    EmberArrow,
+    /// The ember kite (the biggest; the retired mortar's blast for now).
+    Kite,
+    /// A Waxwork bursting in hot wax (the retired Ember Arrow's flame burst for now).
+    Waxwork,
 }
 
 impl Blast {
@@ -832,8 +796,8 @@ impl Blast {
         match self {
             Blast::Cinder => Sfx::CinderBlast,
             Blast::Limpet => Sfx::LimpetDetonate,
-            Blast::Mortar => Sfx::MortarBlast,
-            Blast::EmberArrow => Sfx::EmberArrowBurst,
+            Blast::Kite => Sfx::MortarBlast,
+            Blast::Waxwork => Sfx::EmberArrowBurst,
         }
     }
 
@@ -842,15 +806,15 @@ impl Blast {
         match self {
             Blast::Cinder => Vec4::new(1.0, 0.5, 0.18, 1.0),
             Blast::Limpet => Vec4::new(1.0, 0.85, 0.35, 1.0),
-            Blast::Mortar => Vec4::new(1.0, 0.65, 0.4, 1.0),
-            Blast::EmberArrow => Vec4::new(1.0, 0.45, 0.1, 1.0),
+            Blast::Kite => Vec4::new(1.0, 0.65, 0.4, 1.0),
+            Blast::Waxwork => Vec4::new(1.0, 0.45, 0.1, 1.0),
         }
     }
 }
 
 /// A blast of radius `radius` at `position`: flash, fireball, smoke, sparks, ring, light,
-/// scorch, shake and sound. The Mortar adds a lilac shock ring and heavy debris; the Ember
-/// Arrow a fountain of embers that settle and keep glowing.
+/// scorch, shake and sound. The Kite adds a lilac shock ring and heavy debris; the Waxwork a
+/// fountain of embers that settle and keep glowing.
 pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     let r = radius.max(0.8);
     let hot = kind.color();
@@ -867,7 +831,7 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
     });
     let puffs = match kind {
         Blast::Cinder => 6,
-        Blast::Mortar => 16,
+        Blast::Kite => 16,
         _ => 9,
     };
     for _ in 0..puffs {
@@ -888,16 +852,12 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
             ..Default::default()
         });
     }
-    e.smoke(position, if kind == Blast::Mortar { 12 } else { 5 });
-    e.sparks(
-        position,
-        Vec3::Y,
-        if kind == Blast::Mortar { 26 } else { 12 },
-    );
+    e.smoke(position, if kind == Blast::Kite { 12 } else { 5 });
+    e.sparks(position, Vec3::Y, if kind == Blast::Kite { 26 } else { 12 });
     e.shockwave(position, r);
     match kind {
-        Blast::Mortar => {
-            let lilac = ability_color(Ability::Mortar);
+        Blast::Kite => {
+            let lilac = ability_color(Ability::Kite);
             ctx.beams.ring(
                 position + Vec3::Y * 0.2,
                 Vec3::Y,
@@ -926,7 +886,7 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
                 });
             }
         }
-        Blast::EmberArrow => {
+        Blast::Waxwork => {
             for _ in 0..22 {
                 let v = ctx.rng.dir() * ctx.rng.range(2.0, 7.0) + Vec3::Y * 4.0;
                 ctx.effects.spawn(Particle {
@@ -969,11 +929,11 @@ pub fn blast(ctx: &mut FxCtx, kind: Blast, position: Vec3, radius: f32) {
         position + Vec3::Y * 0.5,
         hot.truncate() * 3.0,
         r * 3.0,
-        if kind == Blast::Mortar { 0.5 } else { 0.3 },
+        if kind == Blast::Kite { 0.5 } else { 0.3 },
     );
     let d = position.distance(ctx.listener);
     let strength = match kind {
-        Blast::Mortar => 1.0,
+        Blast::Kite => 1.0,
         Blast::Cinder => 0.35,
         _ => 0.6,
     };
@@ -1043,113 +1003,7 @@ pub fn flak_burst(ctx: &mut FxCtx, origin: Vec3, ends: &[Vec3]) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Hazards and status effects
-
-/// A lingering area effect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Hazard {
-    /// A Flare's burning patch (Burn to hostiles inside).
-    BurningPatch,
-}
-
-/// Per-frame particles of a hazard of `radius` at `position` (`left` = fraction of its life
-/// remaining: it dies down at the end).
-pub fn hazard_effects(
-    effects: &mut Effects,
-    rng: &mut Rng,
-    hazard: Hazard,
-    position: Vec3,
-    radius: f32,
-    left: f32,
-    dt: f32,
-) {
-    match hazard {
-        Hazard::BurningPatch => {
-            let r = radius.max(0.5);
-            let strength = left.clamp(0.0, 1.0).sqrt();
-            // Tongues of flame licking up all over the patch.
-            let flames = (dt * 70.0 * r / 3.0 * strength).max(0.0);
-            let mut budget = flames;
-            while budget > 0.0 {
-                if budget < 1.0 && rng.unit() > budget {
-                    break;
-                }
-                budget -= 1.0;
-                let a = rng.angle();
-                let d = rng.unit().sqrt() * r;
-                let at = position + Vec3::new(a.cos() * d, 0.05, a.sin() * d);
-                effects.spawn(Particle {
-                    position: at,
-                    velocity: Vec3::Y * rng.range(1.2, 2.6),
-                    drag: 1.0,
-                    max_life: rng.range(0.25, 0.5),
-                    size: Vec2::splat(rng.range(0.35, 0.6) * (0.6 + 0.4 * strength)),
-                    end_scale: 0.3,
-                    color: Vec4::new(1.0, rng.range(0.35, 0.6), 0.15, 1.0),
-                    texture: FxTex::MuzzleFlash,
-                    additive: true,
-                    rotation: rng.angle(),
-                    spin: rng.range(-2.0, 2.0),
-                    ..Default::default()
-                });
-            }
-            if rng.unit() < dt * 14.0 * r / 3.0 {
-                let a = rng.angle();
-                let at = position + Vec3::new(a.cos(), 0.1, a.sin()) * rng.range(0.0, r);
-                effects.spawn(Particle {
-                    position: at,
-                    velocity: Vec3::Y * rng.range(2.0, 4.0) + rng.dir() * 0.6,
-                    gravity: -0.5,
-                    max_life: rng.range(0.6, 1.2),
-                    size: Vec2::splat(0.07),
-                    color: Vec4::new(1.0, 0.6, 0.2, 1.0),
-                    texture: FxTex::Spark,
-                    additive: true,
-                    ..Default::default()
-                });
-            }
-            if rng.unit() < dt * 6.0 * strength {
-                let a = rng.angle();
-                let at = position + Vec3::new(a.cos(), 0.5, a.sin()) * rng.range(0.0, r * 0.7);
-                effects.spawn(Particle {
-                    position: at,
-                    velocity: Vec3::Y * 1.2,
-                    gravity: -0.4,
-                    drag: 0.8,
-                    max_life: rng.range(1.0, 1.6),
-                    size: Vec2::splat(0.4),
-                    end_scale: 3.0,
-                    color: Vec4::new(0.3, 0.27, 0.26, 0.45),
-                    texture: FxTex::Smoke,
-                    rotation: rng.angle(),
-                    ..Default::default()
-                });
-            }
-        }
-    }
-}
-
-/// The light a hazard casts.
-pub fn hazard_light(
-    hazard: Hazard,
-    position: Vec3,
-    radius: f32,
-    left: f32,
-    time: f64,
-) -> PointLight {
-    match hazard {
-        Hazard::BurningPatch => {
-            let flicker = 0.8
-                + 0.12 * ((time * 13.0).sin() as f32)
-                + 0.08 * ((time * 29.0 + 1.3).sin() as f32);
-            PointLight {
-                position: position + Vec3::Y * 0.6,
-                color: Vec3::new(2.4, 1.0, 0.3) * flicker * left.clamp(0.0, 1.0).sqrt(),
-                radius: radius * 2.2,
-            }
-        }
-    }
-}
+// Status effects
 
 /// A status effect shown on an enemy or a player.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1273,11 +1127,6 @@ pub enum ArsenalPreview {
         gravity: f32,
         life: f32,
     },
-    BurningPatch {
-        position: Vec3,
-        radius: f32,
-        seconds: f32,
-    },
     /// A status on a replicated entity (enemy or player).
     Status {
         entity: NetId,
@@ -1302,36 +1151,24 @@ struct Flying {
     life: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Patch {
-    position: Vec3,
-    radius: f32,
-    age: f32,
-    seconds: f32,
-}
-
 /// Arsenal visuals that need state from frame to frame: staged previews (projectiles,
-/// patches, statuses) and pending blasts.
+/// statuses) and pending blasts.
 #[derive(Default)]
 pub struct ArsenalView {
     flying: Vec<Flying>,
-    patches: Vec<Patch>,
     statuses: HashMap<(NetId, u8), (Status, f32)>,
     /// Blasts waiting for an `FxCtx` (staged, or a preview projectile that burst).
     blasts: Vec<(Blast, Vec3, f32)>,
     flak: Vec<(Vec3, Vec3)>,
     /// Seconds since the next burn sizzle per burning entity.
     sizzle: HashMap<NetId, f32>,
-    /// Replicated arsenal projectiles and burning patches seen last frame (impacts when one
-    /// vanishes, the catch when a patch appears).
+    /// Replicated arsenal projectiles seen last frame (impacts when one vanishes).
     tracked: HashMap<NetId, Tracked>,
-    /// Burning patches on screen this frame (position, radius, life left) for their lights.
-    live_patches: Vec<(Vec3, f32, f32)>,
     local: LocalFeel,
     time: f64,
 }
 
-/// Where a replicated projectile / patch was last frame.
+/// Where a replicated projectile was last frame.
 #[derive(Clone, Copy, Debug)]
 struct Tracked {
     kind: Option<ArsenalProjectile>,
@@ -1349,9 +1186,6 @@ pub struct ArsenalFrame<'a> {
     pub tick_rate: u32,
     pub tuning: &'a CombatTuning,
 }
-
-/// Burning-patch radius a Flare leaves (docs/expansion.md: 3 m).
-const FLARE_PATCH_RADIUS: f32 = 3.0;
 
 impl ArsenalView {
     pub fn new() -> Self {
@@ -1386,16 +1220,6 @@ impl ArsenalView {
                 gravity,
                 life,
             }),
-            ArsenalPreview::BurningPatch {
-                position,
-                radius,
-                seconds,
-            } => self.patches.push(Patch {
-                position,
-                radius,
-                age: 0.0,
-                seconds,
-            }),
             ArsenalPreview::Status {
                 entity,
                 status,
@@ -1413,8 +1237,8 @@ impl ArsenalView {
         }
     }
 
-    /// Advances the staged projectiles (sticking / bursting where they meet the level) and
-    /// patches, spawns trails, flames and status visuals.
+    /// Advances the staged projectiles (sticking / bursting where they meet the level), spawns
+    /// trails, flames and status visuals.
     #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
@@ -1473,51 +1297,25 @@ impl ArsenalView {
         for (kind, at, normal, vel) in landed {
             match kind {
                 ArsenalProjectile::CinderRocket => self.blasts.push((Blast::Cinder, at, 2.6)),
-                ArsenalProjectile::MortarShell => self.blasts.push((Blast::Mortar, at, 6.0)),
-                ArsenalProjectile::EmberArrow => self.blasts.push((Blast::EmberArrow, at, 3.0)),
+                ArsenalProjectile::Kite => self.blasts.push((Blast::Kite, at, 6.0)),
+                ArsenalProjectile::BeaconArrow => self.blasts.push((Blast::Waxwork, at, 3.0)),
                 ArsenalProjectile::FlakShell => self.flak.push((at, vel)),
-                ArsenalProjectile::Flare => {
-                    projectile_impact(effects, audio, rng, kind, at, normal);
-                    self.patches.push(Patch {
-                        position: at,
-                        radius: FLARE_PATCH_RADIUS,
-                        age: 0.0,
-                        seconds: 4.0,
-                    });
-                }
                 _ => projectile_impact(effects, audio, rng, kind, at, normal),
             }
         }
-        // Bursting kinds and flares that landed are gone; arrows, rivets and limpets stay.
+        // Bursting kinds and bolas that landed are gone; arrows, rivets and limpets stay.
         self.flying.retain(|f| {
             let gone = matches!(
                 f.view.kind,
                 ArsenalProjectile::CinderRocket
-                    | ArsenalProjectile::MortarShell
-                    | ArsenalProjectile::EmberArrow
+                    | ArsenalProjectile::Kite
+                    | ArsenalProjectile::BeaconArrow
                     | ArsenalProjectile::FlakShell
-                    | ArsenalProjectile::Flare
+                    | ArsenalProjectile::Bolas
             ) && f.view.stuck;
             !gone && f.view.age < 30.0
         });
-        for p in &mut self.patches {
-            if p.age == 0.0 {
-                effects.decal(p.position, Vec3::Y, p.radius * 0.9, DecalKind::Scorch);
-            }
-            p.age += dt;
-            let left = 1.0 - p.age / p.seconds.max(0.1);
-            hazard_effects(
-                effects,
-                rng,
-                Hazard::BurningPatch,
-                p.position,
-                p.radius,
-                left,
-                dt,
-            );
-        }
-        self.patches.retain(|p| p.age < p.seconds);
-        self.update_replicated(frame, effects, audio, rng, dt);
+        self.update_replicated(frame, effects, audio, rng);
         // Statuses: the replicated flags, and staged previews.
         let mut shown: Vec<(NetId, Status)> = entities
             .iter()
@@ -1553,50 +1351,18 @@ impl ArsenalView {
     }
 
     /// Replicated arsenal projectiles that vanished without a blast (arrows, rivets) leave
-    /// their impact where they were last seen; burning patches burn (a scorch and the catch
-    /// when one appears).
+    /// their impact where they were last seen.
     fn update_replicated(
         &mut self,
         frame: &ArsenalFrame,
         effects: &mut Effects,
         audio: &mut Audio,
         rng: &mut Rng,
-        dt: f32,
     ) {
         for t in self.tracked.values_mut() {
             t.seen = false;
         }
-        self.live_patches.clear();
-        let full = (frame.tuning.flare.patch_time * frame.tick_rate.max(1) as f32).max(1.0);
         for e in frame.entities {
-            if e.kind == kind::BURNING_PATCH {
-                let radius = (e.state as f32 / 10.0).max(0.5);
-                let left = ((e.aux as f64 - frame.render_tick) as f32 / full).clamp(0.0, 1.0);
-                if !self.tracked.contains_key(&e.id) {
-                    effects.decal(e.position, Vec3::Y, radius * 0.9, DecalKind::Scorch);
-                    audio.play(Sfx::FlareBurn, PlayParams::at(e.position));
-                }
-                self.tracked.insert(
-                    e.id,
-                    Tracked {
-                        kind: None,
-                        position: e.position,
-                        velocity: Vec3::ZERO,
-                        seen: true,
-                    },
-                );
-                hazard_effects(
-                    effects,
-                    rng,
-                    Hazard::BurningPatch,
-                    e.position,
-                    radius,
-                    left.max(0.15),
-                    dt,
-                );
-                self.live_patches.push((e.position, radius, left.max(0.15)));
-                continue;
-            }
             let Some(k) = projectile_kind(e.kind) else {
                 continue;
             };
@@ -1632,7 +1398,7 @@ impl ArsenalView {
                     | ArsenalProjectile::BrandArrow
                     | ArsenalProjectile::Rivet
             ) {
-                continue; // blasts come as Fx; a flare becomes its patch
+                continue; // blasts come as Fx
             }
             let dir = t.velocity.normalize_or_zero();
             let hit = frame
@@ -1678,29 +1444,6 @@ impl ArsenalView {
                 draw_projectile(lib, &f.view, self.time, draws, lights);
             }
         }
-        for (position, radius, left) in &self.live_patches {
-            if lights.len() < 48 {
-                lights.push(hazard_light(
-                    Hazard::BurningPatch,
-                    *position,
-                    *radius,
-                    *left,
-                    self.time,
-                ));
-            }
-        }
-        for p in &self.patches {
-            let left = 1.0 - p.age / p.seconds.max(0.1);
-            if lights.len() < 48 {
-                lights.push(hazard_light(
-                    Hazard::BurningPatch,
-                    p.position,
-                    p.radius,
-                    left,
-                    self.time,
-                ));
-            }
-        }
     }
 }
 
@@ -1743,7 +1486,8 @@ mod tests {
 
     #[test]
     fn every_projectile_has_its_own_model_and_a_sane_transform() {
-        // Every kind has its own model, except the brand arrow (a crimson taper arrow).
+        // Every kind has its own model, except the brand arrow (a crimson taper arrow; the
+        // blink arrow too, for now).
         let mut models: Vec<ModelId> = ArsenalProjectile::ALL.iter().map(|p| p.model()).collect();
         models.sort_unstable();
         models.dedup();
@@ -1752,14 +1496,15 @@ mod tests {
         for k in [
             kind::ARROW,
             kind::PIN_ARROW,
-            kind::EMBER_ARROW,
+            kind::BLINK_ARROW,
+            kind::BEACON_ARROW,
             kind::BRAND_ARROW,
             kind::RIVET,
             kind::CINDER_ROCKET,
             kind::FLAK_SHELL,
             kind::LIMPET,
-            kind::MORTAR_SHELL,
-            kind::FLARE,
+            kind::KITE,
+            kind::BOLAS,
         ] {
             assert!(projectile_kind(k).is_some(), "kind {k}");
         }
@@ -1834,7 +1579,7 @@ mod tests {
         let mut audio = Audio::disabled();
         let mut rng = Rng::default();
         view.preview(ArsenalPreview::Projectile {
-            kind: ArsenalProjectile::MortarShell,
+            kind: ArsenalProjectile::Kite,
             from: Vec3::ZERO,
             velocity: Vec3::new(0.0, 5.0, -10.0),
             gravity: 20.0,
@@ -1846,11 +1591,6 @@ mod tests {
             velocity: Vec3::new(0.0, 0.0, -60.0),
             gravity: 0.0,
             life: 0.2,
-        });
-        view.preview(ArsenalPreview::BurningPatch {
-            position: Vec3::ZERO,
-            radius: 3.0,
-            seconds: 1.0,
         });
         let tuning = CombatTuning::default();
         let frame = ArsenalFrame {
@@ -1870,22 +1610,10 @@ mod tests {
                 1.0 / 60.0,
             );
         }
-        // The mortar timed out and is waiting to blast; the arrow (no level to stick in) is
-        // still around; the patch burns.
+        // The kite timed out and is waiting to blast; the arrow (no level to stick in) is
+        // still around.
         assert_eq!(view.blasts.len(), 1);
         assert_eq!(view.flying.len(), 1);
-        assert_eq!(view.patches.len(), 1);
-        assert!(effects.particle_count() > 20, "trails and flames");
-        for _ in 0..60 {
-            view.update(
-                &frame,
-                &mut effects,
-                &mut beams,
-                &mut audio,
-                &mut rng,
-                1.0 / 60.0,
-            );
-        }
-        assert!(view.patches.is_empty(), "the patch burnt out");
+        assert!(effects.particle_count() > 20, "trails");
     }
 }

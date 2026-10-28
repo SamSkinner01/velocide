@@ -258,6 +258,64 @@ fn old_settings_files_keep_their_throw_binding() {
 }
 
 #[test]
+fn a_settings_file_naming_retired_abilities_still_loads() {
+    use shared::loadout::{Ability, Knack, WeaponKind};
+    // Saved before the rework (docs/rework.md): Splinter, Flare, Upswing, Triple Nock, Ember
+    // Arrow, Skewer, Flurry, Both Barrels and Mortar are gone.
+    let old = r#"(
+        fov: 95.0,
+        loadout: (
+            current: [
+                "Quill: Brand, Splinter",
+                "Kiln: Flare, Discharge",
+                "Tamper: Upswing, Whirl",
+                "Longwick: Triple Nock, Ember Arrow",
+                "Knack: Snare",
+            ],
+            presets: [
+                (name: "OLD", loadout: [
+                    "Lancet: Skewer, Flurry",
+                    "Bellows: Gust, Both Barrels",
+                    "-",
+                    "Cinderbox: Limpet, Mortar",
+                ]),
+            ],
+        ),
+    )"#;
+    let path = scratch("retired");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, old).unwrap();
+    for s in [Settings::from_ron(old).unwrap(), Settings::load(&path)] {
+        // The rest of the file survives.
+        assert_eq!(s.fov, 95.0);
+        let current = &s.loadout.current;
+        assert!(current.is_valid(), "{current:?}");
+        assert_eq!(current.knack, Knack::Snare);
+        // Each unknown name became that weapon's default for the slot (then repaired).
+        let abilities = |slot: u8| current.slot(slot).map(|b| b.abilities);
+        assert_eq!(abilities(0), Some([Ability::Brand, Ability::Wickline]));
+        assert_eq!(abilities(1), Some([Ability::Lantern, Ability::Discharge]));
+        assert_eq!(abilities(2), Some([Ability::Whirl, Ability::Riposte]));
+        assert_eq!(
+            abilities(3),
+            Some(WeaponKind::Longwick.default_build().abilities)
+        );
+        let preset = &s.loadout.presets[0];
+        assert_eq!(preset.name, "OLD");
+        assert!(preset.loadout.is_valid());
+        let abilities = |slot: u8| preset.loadout.slot(slot).map(|b| b.abilities);
+        assert_eq!(
+            abilities(0),
+            Some(WeaponKind::Lancet.default_build().abilities)
+        );
+        assert_eq!(abilities(1), Some([Ability::Gust, Ability::Bulwark]));
+        assert_eq!(abilities(2), None);
+        assert_eq!(abilities(3), Some([Ability::Limpet, Ability::Kite]));
+    }
+    let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn loadout_and_presets_round_trip_and_garbage_falls_back() {
     use client::settings::{LoadoutPreset, MAX_PRESETS};
     use shared::loadout::{Ability, Knack, Loadout, WeaponBuild, WeaponKind};
@@ -267,7 +325,7 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
         slots: [
             Some(WeaponBuild {
                 weapon: WeaponKind::Longwick,
-                abilities: [Ability::EmberArrow, Ability::Brand],
+                abilities: [Ability::BeaconArrow, Ability::Brand],
             }),
             None,
             Some(WeaponKind::Kiln.default_build()),
@@ -303,8 +361,8 @@ fn loadout_and_presets_round_trip_and_garbage_falls_back() {
     let text = s
         .to_ron()
         .replace("Longwick", "Railgun")
-        .replace("Kiln: Flare", "kiln: SPARKLER");
-    assert!(text.contains("Railgun") && text.contains("Ember Arrow"));
+        .replace("Kiln: Lantern", "kiln: SPARKLER");
+    assert!(text.contains("Railgun") && text.contains("Beacon Arrow"));
     let broken = Settings::from_ron(&text).unwrap();
     assert_eq!(broken.loadout.current.slot(0), None);
     assert_eq!(

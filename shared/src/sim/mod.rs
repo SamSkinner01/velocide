@@ -15,9 +15,9 @@
 //! 2. **projectiles** (sweeps, impacts, explosions, parry-delayed impacts), then open parry
 //!    windows are re-checked against the moved projectiles.
 //! 3. **enemies** (AI, attacks, movement), parry-delayed enemy hits.
-//! 4. **thorns**, **brands**, **status effects** (Burn, Pinned, burning patches),
-//!    **knacks** (pools, clouds, snares, Tallow Skin), **melee** (lunges), **ember bursts**,
-//!    **vitals** (hard damage recovery, respawns).
+//! 4. **thorns**, **brands**, **status effects** (Burn, Pinned), **knacks** (pools, clouds,
+//!    snares, Tallow Skin), **abilities** (the rework's: guards, decoys, lanterns, beacons...),
+//!    **melee** (lunges), **ember bursts**, **vitals** (hard damage recovery, respawns).
 //! 5. **world rules**: kill volumes / falling out of the level.
 //! 6. **game mode + style** ([`modes`], [`style`]): stats and style scored from the tick's
 //!    events, checkpoints, revives, the exit, deathmatch limits, the scoreboard.
@@ -29,6 +29,7 @@
 //! Replication: [`SimWorld::replicate`] writes every replicated entity into a
 //! [`NetFrame`]; new entity types add themselves there with their own [`kind`] constant.
 
+pub mod abilities; // the rework's abilities and the guard: docs/rework.md, docs/arsenal.md
 pub mod area; // Gust, Discharge, Breach
 pub mod brand;
 pub mod combat;
@@ -52,7 +53,7 @@ pub mod nav; // nav grid for ground enemies: docs/enemies.md
 pub mod parry;
 mod payload; // what the expansion's projectiles do on contact: docs/arsenal.md
 pub mod projectiles;
-pub mod status; // Burn, Pinned, burning patches: docs/arsenal.md
+pub mod status; // Burn, Pinned: docs/arsenal.md
 pub mod style;
 pub mod thorn;
 pub mod trail;
@@ -66,6 +67,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+pub use abilities::AbilityPhase;
 pub use brand::Brand;
 pub use combat::{
     Attack, Blocked, CombatRules, DamageEvent, DamageFlags, DamageInfo, KillInfo, Owner,
@@ -245,10 +247,21 @@ impl SimPlayer {
             e.flags |= player_flags::PARRY;
         }
         if w.charge > 0 {
-            e.flags |= player_flags::CHARGING;
+            // A held Tally is TALLYING, a raised guard GUARDING (`abilities/guard.rs`).
+            match w.held().map(|b| b.ability(w.mode)) {
+                Some(Ability::Tally) => e.flags |= player_flags::TALLYING,
+                Some(Ability::Bulwark | Ability::Riposte) => {}
+                _ => e.flags |= player_flags::CHARGING,
+            }
         }
         if w.draw > 0 {
             e.flags |= player_flags::DRAWING;
+        }
+        if w.is_stoked() {
+            e.flags |= player_flags::STOKED;
+        }
+        if w.is_overheated() {
+            e.flags |= player_flags::OVERHEATED;
         }
         if c.protection > 0 || c.god {
             e.flags |= player_flags::PROTECTED;
@@ -368,12 +381,6 @@ pub enum SimEvent {
         shooter: Owner,
         attack: Attack,
         points: Vec<Vec3>,
-    },
-    /// A Splinter shot burst into secondary traces at `origin` (end of each).
-    Splinters {
-        shooter: PlayerId,
-        origin: Vec3,
-        ends: Vec<Vec3>,
     },
     /// A projectile burst into secondary rays at `origin` (the Flak ring): the end of each.
     Burst {
@@ -519,7 +526,7 @@ pub enum SimEvent {
         index: u32,
     },
     // ---- refit: melee and knacks (docs/arsenal.md) ----
-    /// A melee swing: a Trimmer / Tamper primary, a Whirl, an Upswing or the start of a Lunge
+    /// A melee swing: a Trimmer / Tamper primary, a Whirl, a Riposte counter or the start of a Lunge
     /// (`attack`); `hits` = targets it struck.
     Swing {
         player: PlayerId,
@@ -543,6 +550,48 @@ pub enum SimEvent {
         owner: PlayerId,
         target: HitTarget,
         position: Vec3,
+    },
+    // ---- rework (docs/rework.md): the new abilities ----
+    /// A Wickline from `from` to `to`; `anchored` = it caught the level.
+    Wickline {
+        player: PlayerId,
+        from: Vec3,
+        to: Vec3,
+        anchored: bool,
+    },
+    /// A Tally's release: a ray from `origin` to each end.
+    TallyFired {
+        shooter: PlayerId,
+        origin: Vec3,
+        ends: Vec<Vec3>,
+    },
+    /// A Blink Arrow step from `from` to `to`.
+    Blink {
+        player: PlayerId,
+        from: Vec3,
+        to: Vec3,
+    },
+    /// A guard (Bulwark, Riposte) caught a hit at `position`; `broke` = it shattered.
+    GuardBlock {
+        player: PlayerId,
+        ability: Ability,
+        position: Vec3,
+        broke: bool,
+    },
+    /// A Bolas bound what is at `positions` (one or two).
+    BolasBound {
+        owner: PlayerId,
+        positions: Vec<Vec3>,
+    },
+    /// Lantern `lantern` fired from `origin` (the end of each ray).
+    LanternShot {
+        lantern: NetId,
+        origin: Vec3,
+        ends: Vec<Vec3>,
+    },
+    /// A thrown Hurl came back to `player`'s hand.
+    HurlCaught {
+        player: PlayerId,
     },
 }
 
@@ -602,10 +651,11 @@ pub struct SimWorld {
     pub enemy_hazards: BTreeMap<NetId, enemy::SlagLine>,
     /// Burn / Pinned status effects, keyed by the target (`status.rs`).
     pub statuses: BTreeMap<HitTarget, status::Status>,
-    /// Burning patches on the ground (Flare, `status.rs`).
-    pub fire_patches: BTreeMap<NetId, status::FirePatch>,
     /// Kindle pools, soot clouds, Tallow Skin (`knacks.rs`).
     pub knacks: knacks::KnackWorld,
+    /// The rework's abilities between ticks: guards, Waxworks, Lanterns, beacons, tallies...
+    /// (`abilities/`).
+    pub abilities: abilities::AbilityWorld,
     /// Lunges in progress (`melee.rs`).
     pub melee: melee::MeleeWorld,
     /// The loadout each player asked for (`loadouts.rs`). The server carries it over to every
@@ -675,8 +725,8 @@ impl SimWorld {
             embers: BTreeMap::new(),
             enemy_hazards: BTreeMap::new(),
             statuses: BTreeMap::new(),
-            fire_patches: BTreeMap::new(),
             knacks: knacks::KnackWorld::default(),
+            abilities: abilities::AbilityWorld::default(),
             melee: melee::MeleeWorld::default(),
             loadout_requests: BTreeMap::new(),
             forced_loadouts: BTreeMap::new(),
@@ -718,8 +768,8 @@ impl SimWorld {
             + self.thorns.len()
             + self.embers.len()
             + self.enemy_hazards.len()
-            + self.fire_patches.len()
-            + self.knacks.len();
+            + self.knacks.len()
+            + self.abilities.len();
         // Of `live + 1` consecutive candidates at least one is free.
         for _ in 0..=live.min(span - 1) {
             let id = NetId(self.next_dynamic_id);
@@ -743,8 +793,8 @@ impl SimWorld {
             || self.thorns.contains_key(&id)
             || self.embers.contains_key(&id)
             || self.enemy_hazards.contains_key(&id)
-            || self.fire_patches.contains_key(&id)
             || self.knacks.holds(id)
+            || self.abilities.holds(id)
     }
 
     /// Most player `id`'s view may be rewound for lag compensation and parries (ticks):
@@ -788,9 +838,8 @@ impl SimWorld {
         self.brands
             .retain(|target, b| b.owner != id && *target != HitTarget::Player(id));
         self.statuses.remove(&HitTarget::Player(id));
-        self.fire_patches
-            .retain(|_, p| p.owner != Owner::Player(id));
         self.knacks.forget(id);
+        self.abilities.forget(id);
         self.melee.forget(id);
         self.cancel_pending_for_victim(id);
         for e in self.enemies.values_mut() {
@@ -836,8 +885,8 @@ impl SimWorld {
         self.embers.clear();
         self.enemy_hazards.clear();
         self.statuses.clear();
-        self.fire_patches.clear();
         self.knacks.clear();
+        self.abilities.clear();
         self.melee.clear();
         self.pending_hits.clear();
         // Encounters go back to idle (doors are reset just below).
@@ -978,6 +1027,8 @@ impl SimWorld {
                 for intent in intents {
                     self.resolve_intent(tuning, history, *id, input, intent);
                 }
+                // Held abilities that look where the player aims every tick (the Tally).
+                self.abilities_after_input(tuning, history, *id, input);
             }
         }
 
@@ -997,6 +1048,7 @@ impl SimWorld {
         self.step_brands();
         self.step_statuses(tuning);
         self.step_knacks(tuning);
+        self.step_abilities(tuning);
         self.step_melee(tuning);
         self.step_embers(tuning);
         self.tick_vitals(tuning);
@@ -1112,6 +1164,8 @@ impl SimWorld {
             if self.has_tallow(p.id) {
                 e.flags |= player_flags::TALLOW;
             }
+            // The rework's abilities: GUARDING, REVEALED, BOUND (abilities/).
+            self.decorate_player_abilities(tuning, &mut e);
             frame.insert(&e);
         }
         for door in &self.level.doors {
@@ -1141,6 +1195,7 @@ impl SimWorld {
             if self.is_pinned(target) {
                 state.flags |= crate::protocol::enemy_flags::PINNED;
             }
+            self.decorate_enemy_abilities(e.id, &mut state);
             frame.insert(&state);
         }
         for p in self.projectiles.values() {
@@ -1160,15 +1215,14 @@ impl SimWorld {
         for h in self.enemy_hazards.values() {
             frame.insert(&h.entity_state(self.tick));
         }
-        for p in self.fire_patches.values() {
-            frame.insert(&p.entity_state());
-        }
         for p in self.knacks.pools.values() {
             frame.insert(&p.entity_state());
         }
         for c in self.knacks.clouds.values() {
             frame.insert(&c.entity_state());
         }
+        // The rework's abilities' own entities (Waxworks, Lanterns).
+        self.replicate_abilities(tuning, frame);
         // Encounter state (HUD: wave, enemies left).
         self.replicate_encounters(frame);
     }

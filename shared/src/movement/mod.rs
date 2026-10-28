@@ -103,6 +103,13 @@ pub struct MoveState {
     /// ground / air / dash / slide speeds are scaled by `slow_scale`. Set by the server.
     pub slow_time: f32,
     pub slow_scale: f32,
+    /// Seconds left of a raised guard's slow (Bulwark, Riposte: `docs/rework.md`): speeds
+    /// scaled by `guard_scale` as well (with a slow: both, multiplied). Set by the server when
+    /// the guard goes up (for its longest hold) and cleared when it drops.
+    #[serde(default)]
+    pub guard_time: f32,
+    #[serde(default)]
+    pub guard_scale: f32,
 }
 
 /// A slam hit the ground: the server applies a shockwave here.
@@ -269,11 +276,19 @@ pub fn step(
     if !state.velocity.is_finite() {
         state.velocity = Vec3::ZERO;
     }
-    // Slowed: every speed scaled while it lasts.
+    // Slowed (Pinned, a raised guard): every speed scaled while it lasts.
     let slowed_tuning;
-    let t = if state.slow_time > 0.0 {
+    let mut scale = None;
+    if state.slow_time > 0.0 {
         state.slow_time = (state.slow_time - dt).max(0.0);
-        slowed_tuning = slowed(t, state.slow_scale);
+        scale = Some(state.slow_scale);
+    }
+    if state.guard_time > 0.0 {
+        state.guard_time = (state.guard_time - dt).max(0.0);
+        scale = Some(scale.unwrap_or(1.0) * state.guard_scale);
+    }
+    let t = if let Some(k) = scale {
+        slowed_tuning = slowed(t, k);
         &slowed_tuning
     } else {
         t
