@@ -652,10 +652,36 @@ reached the thorn (`relay::relayed`):
 | Lantern (`lantern.rs`) | lamplight gold | `ModelId::Lantern` tumbling, set down with dust and a glow; its cage turns and tilts to its target (`lantern::aim`), the lens in the carrier's primary colour flaring on each shot: an Arclash's jagged zap, a Riveter's rivet streak (the rivet itself is the replicated projectile), a Kiln's ember cone; a warm light round it; the taper gutters in its last fifth, then smoke (destroyed: glass and brass shards) | | `LanternSet`, the carrier's primary sound (quieter), `LanternOut` |
 | Kite (`kite.rs`) | rose | `ModelId::Kite` nose first, banking into its turns (the roll follows the heading's swing), its heart pulsing; a ribbon of its path over the last half second (brighter while steered), embers falling off; the burst: the fireball with a ring of rose embers and burning paper | | `KiteLaunch`, `KiteFlutter` (while it flies), the explosion |
 
+**From the wire** (`gear/net.rs`; "The rework on the wire" above). The `BOLAS`, `KITE` and
+`LANTERN_TOSS` projectiles are the gear's, not the arsenal pipeline's (`arsenal::projectile_kind`
+leaves them out), drawn from `EntityFrame::projectiles` so own stand-ins (`stand_in.rs`: the
+bolas, the kite, the toss) and handovers come along; a kite's bank and ribbon are kept per id; a
+`GUIDED` kite of yours draws the steering marker where your crosshair meets the level. An
+`ORBITING` `WISP` (the entity drawer skips it: `gear::draws_entity`) is drawn on its circle
+(`arclash.wisp_orbit_*`) at the angle the server has it at, round where its owner is drawn
+(you: your predicted feet), humming. A `LANTERN` sets down on first sight, shoots on
+`Fx::LanternShot` (its `state` says the carrier; the shot's end gives the cage's tilt, `yaw`
+its turn), burns out at `aux` (gone well before: destroyed). A player `GUARDING` with the
+Bulwark gets the slab in front of their eye (`bulwark::slab_transform_for`: the tuning's
+distance, pitch limit and size), its cracks from `aux` bits 12–15; yours stands while your
+predicted `WeaponState::charge` holds the Bulwark up, its strength from your entity, with raise
+/ lower / shatter as slabs appear, vanish or break (`Fx::GuardBlock { broke }`); a block chips
+the face where the hit's point projects onto it (`bulwark::block_point`), a new crack stage
+adds `BulwarkCrack`. Every `BOUND` body (enemy bit 17, player bit 22) wears the wound cord and
+weights; `Fx::BolasBound` binds at its positions and, with two, links the bodies nearest them
+for `bolas.link_time` (while both stay bound), a pulse running along the cord and
+`BolasShare` whenever either's health drops. Your Stoke comes from `WeaponState::stoke` /
+`overheat` of the slot in hand (`StokeIgnite` / `StokeVent` as any slot catches or is spent);
+others' `STOKED` weapons glow hotter (their `charge` glow) and spit embers, `OVERHEATED` ones
+vent steam from their muzzles. The `HASTE` flag holds your haste and draws others'. Local
+sounds: the bolas' and the kite's throws, the lantern's toss (`attack_style`), the Wisp's fling
+(a `Recast`, `GearView::local_intent`).
+
 `InGame::preview_kindle(KindlePreview)` / `preview_gear(GearPreview)` stage any of it
-client-side for tools; `combat_shots` shoots them (`kindle_*`, `gear_*`, `relay_*`;
-`COMBAT_SHOTS=rework` stops after them) and `models_view` the models (`gear_*`,
-`vm_drink_*`).
+client-side for tools; `combat_shots` shoots them (`kindle_*`, `gear_*`, `relay_*`) and the
+real thing after `/loadout ...` (`gear_use_*`; `COMBAT_SHOTS=rework` stops after them);
+`models_view` the models (`gear_*`, `vm_drink_*`); `client_shots` the Scatter pool's picker
+(`menu_loadout_ability_scatter`).
 
 ## Tuning and balance per mode
 
