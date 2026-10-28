@@ -927,6 +927,12 @@ impl InGame {
                         }
                         viewmodel.fire(style.kick);
                         camera.punch(style.kick * style.kick);
+                        // A stoked weapon's shot throws embers off the muzzle (stoke.rs).
+                        if combat.gear.heat().stoked.is_some()
+                            && matches!(intent, FireIntent::Primary { .. })
+                        {
+                            stoke::stoked_shot(effects, &mut combat.rng, muzzle, aim);
+                        }
                         if attack == Attack::Tumble {
                             viewmodel.turn_drum();
                         }
