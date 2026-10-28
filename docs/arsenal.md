@@ -142,11 +142,11 @@ numbers are `combat.thorn`, the others' `combat.knacks.*`).
 | id | weapon | class | primary (PvE numbers) |
 |---|---|---|---|
 | 0 | Quill | Precision | unchanged (`docs/roster.md`): 24 dmg hitscan, 0.28 s, ricochets off Thorns |
-| 1 | Bellows | Scatter | unchanged: 12 × 8, 8°, 0.8 s |
+| 1 | Bellows | Scatter | 12 × 11 dmg in a fixed pattern (a centre pellet, 5 at half the cone, 6 on its 8° edge, ±0.5° jitter), 60 m, 0.8 s; pellets hitting within 3 m deal ×1.25 (×1 at 4 m); a blast landing 4+ pellets on a light Mould staggers it 0.35 s (the shotguns pass, `docs/balance.md`; was 12 × 8, uniformly random) |
 | 2 | Arclash | Rapid | as `docs/roster.md`: 7 dmg zaps every 0.1 s (was 6, `docs/balance.md`), chaining |
 | 3 | Tumbler | Explosive | as `docs/roster.md`: bouncing bombs, r 4.5 m, 72 dmg (was 65), 0.85 s |
 | 4 | Lancet | Precision | hitscan needle, 14 dmg, 0.15 s; each shot heats it (+0.25 s, cap 0.6 s, drains in real time) and the spread grows to 3° at full heat — the first shot is exact, sustained fire settles at 2.25° |
-| 5 | Thresher | Scatter | 7 × 7.5 dmg, 11°, 45 m, 0.42 s, automatic while held |
+| 5 | Thresher | Scatter | 8 × 10 dmg in a fixed pattern (a centre pellet, 3 at half the cone, 4 on its 10° edge, ±0.6° jitter), 45 m, 0.42 s, automatic while held; a blast landing 3+ pellets on a light Mould staggers it 0.2 s (was 7 × 7.5, 11°, uniformly random) |
 | 6 | Riveter | Rapid | rivet projectile 90 m/s, gravity 6, 7 dmg, 1.2° spread, 0.09 s (5 ticks: 12/s at 60 Hz; 11/s is not a whole number of ticks) |
 | 7 | Cinderbox | Explosive | a pull fires 3 rockets 0.08 s apart (5 ticks), 42 m/s, 2.5° spread, r 2.6 m, 32 dmg, kb 14; 1.3 s per salvo |
 | 8 | Longwick | Draw | hold to draw (0.62 s to full), release: arrow 55–135 m/s, 22–105 dmg by draw, gravity 10, 0.25 s before the next draw; a tap looses a weak, slow arrow (handling: `docs/feel.md`) |
@@ -473,7 +473,11 @@ settings files that call it `ThrowThorn` or `ThrowPrism` still load).
 `assets/tuning.ron` `combat` holds every weapon's and ability's base numbers: the old four
 weapons' sections (plus `ability_power`, and `bellows.both_pellet_damage` so Both Barrels no
 longer borrows the primary's pellet damage), then `lancet`, `thresher`, `riveter`, `cinderbox`,
-`longwick`, `kiln`, one section per new ability (`skewer` … `ember_arrow`) and `burn`.
+`longwick`, `kiln`, one section per new ability (`skewer` … `ember_arrow`) and `burn`. The
+scatterguns' sections (`bellows`, `thresher`) also hold their blast's fixed pattern
+(`cone_degrees` is its outer ring, `pattern_jitter_degrees`), the point-blank multiplier
+(`point_blank_range` / `_end` / `_multiplier`) and the stagger (`stagger_fraction` of the
+pellets on a light Mould, `stagger_time`): `shared::sim::scatter`, `docs/balance.md`.
 
 The `balance` section has two profiles; `pve` applies to campaign and grind (and warm-ups
 before them), `pvp` to deathmatch and gun game. Each scales `combat` per weapon (primary) and
@@ -502,9 +506,10 @@ numbers, not a profile. Difficulty and player-count scaling of the Moulds are th
 **PvP** is tuned for players killing players: 100 HP, headshots ×2 (`player_head_multiplier`)
 for everything that isn't explosive, a time to kill of **0.8–1.6 s** for a skilled player at
 the weapon's range, and **one-shots only from a full-draw bow headshot, a Slug headshot and a
-full-charge Skewer headshot** — plus a Bellows blast to the head inside 5 m, the scattergun's
-point-blank reward (from 5 m on it no longer kills). No Thorns (the knack rule: the Thorn isn't
-`pvp_allowed` and applies as Surge; it used to be a `"thorn.charges": 0` override) and a brand multiplies by 1.25 instead of
+full-charge Skewer headshot** — plus the scattergun's point-blank reward, the stated
+exceptions: a Bellows blast to the head inside 5 m, and a **full Bellows blast to the body at
+point blank (≤ 3 m)** (`"bellows.point_blank_multiplier": 1.6`; from 5 m on neither kills).
+No Thorns (the knack rule: the Thorn isn't `pvp_allowed` and applies as Surge; it used to be a `"thorn.charges": 0` override) and a brand multiplies by 1.25 instead of
 1.35 (in a free-for-all a brand invites everyone, the extra was too much on top of a third
 party). Times to kill and per-pull damage below are measured in play by the balance harness
 (`cargo run -p shared --release --example balance_report -- pvp oneshots`).
@@ -513,8 +518,8 @@ party). Times to kill and per-pull damage below are measured in play by the bala
 |---|---|---|---|
 | Quill | 1.0 | 24 / 0.28 s | 5 hits: 1.13 s (3 heads: 0.57 s). The reference precision weapon |
 | Lancet | damage 0.85 | 11.9 / 0.15 s | 9 hits: 1.2 s; raw it out-damaged the Quill at range despite the bloom |
-| Bellows | damage 0.6 | 12 × 4.8 = 58 a blast | 2 blasts: 0.8 s; at 0.7 (67) a blast at the head one-shot at 5 m (106), now 91 at 5 m and 115 only inside it |
-| Thresher | damage 0.75 | 7 × 5.6 = 39 a blast | 3 blasts: 0.83 s (PvE pellets went 7 → 7.5: the same 5.6 here) |
+| Bellows | damage 0.52; point blank ×1.6; knockback 2.0 a pellet (override) | 12 × 5.72 = 69 a blast; 110 inside 3 m | 2 blasts: 0.8 s (3 through Tallow Skin); a full blast at point blank kills a body (the exception), at 5 m 69 body / 80 head (the shotguns pass: PvE pellets 8 → 11; it was 0.6 → 58 / 91) |
+| Thresher | damage 0.49; knockback 1.5 a pellet (override) | 8 × 4.9 = 39 a blast | 3 blasts on the body: 0.83 s; 2 on the head up close (74 at 3 m). PvE went 7 × 7.5 → 8 × 10: the same 39 here, the pattern lands more of it (head blast at 5 m 28 → 49) |
 | Arclash | 1.0 | 7 / 0.1 s | 15 zaps: 1.4 s (PvE zaps went 6 → 7 and PvP follows: at 1.6 s the tracking beam was the slowest hitscan) |
 | Riveter | 1.0 | 7 / 5 ticks | 15 rivets: 1.2 s at 5 m, 1.32 s at 15 m; projectiles at 90 m/s already cost aim |
 | Kiln | damage 0.9 | 3.6 / 5 ticks + 15 dps burn | 1.75 s inside 13 m, and the 3 s burn keeps going (45) — the counterplay is breaking contact (PvE spray went 3 → 4: the same 3.6 here) |

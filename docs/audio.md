@@ -193,7 +193,10 @@ its index, so generation is deterministic.
     with a rubbing minor second). `SplinterFire` is a lower, heavier crack after a glassy
     pre-tick; `SplinterBurst` (at the impact) is a spray of 16 tiny glass pings.
   - **Bellows.** `BellowsBlast` is a breathy low "whumpf" (low-passed noise 2.6 kHz→280 Hz
-    over a 150→40 Hz body) with a short crack, then the bellows refilling: a reedy in-draw
+    over a 150→40 Hz body; core weight 1.15 since the shotguns pass, `docs/balance.md`) with a
+    short crack and the pellets crunching out (1.4 kHz→600 Hz), a clean 90→30 Hz sub boom
+    under the distortion (−10 LU, was −11 without the crunch and the sub), then the bellows
+    refilling: a reedy in-draw
     through a sweeping formant with a leather creak. `BellowsGust` has no crack at all: a
     pressure pop, then a band-passed rush of air that swells for 45 ms and keeps blowing
     (half its energy above 250 Hz, against 93 % below for the blast). `BothBarrels` is the
@@ -227,8 +230,9 @@ its index, so generation is deterministic.
   metal, the Cinderbox fizzing clay rockets, the Longwick wood and string, the Kiln fire.
   - **Lancet.** `LancetFire` (0.09 s) is a tight band-passed "tsik" (9→5 kHz), a 3.3 kHz steel
     ping and a small high thump: thinner and higher than the Quill's crack.
-  - **Thresher.** `ThresherFire` is a shorter Bellows core (weight 0.8) with a crack and the
-    pellets rattling, then two ratchet clicks at 0.09 / 0.13 s, the drum turning one shell.
+  - **Thresher.** `ThresherFire` is a shorter Bellows core (weight 0.95, was 0.8) with a crack
+    and the pellets rattling, then two ratchet clicks at 0.09 / 0.13 s, the drum turning one
+    shell, over a short clean 110→40 Hz sub (−11 LU, was −12).
   - **Riveter.** `RiveterFire` (0.07 s, 8 voices, for eleven a second) is a burst of high-passed
     air and a hard 1.45 kHz "tak" over a knock; `RivetImpact` (2 variants) a bright clink and a
     short sizzle.
@@ -423,8 +427,8 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 
 | family | target (LU, 50 ms) |
 |--------|--------------------|
-| Parry, Explosion, Both Barrels, Gaoler bash | −10 |
-| Gaoler bash wind-up (parry cue), Gaoler death, sweep, Bellows blast, Breach, Discharge release, Gravewell implosion | −11 … −12 |
+| Parry, Explosion, Both Barrels, Gaoler bash, Bellows blast | −10 |
+| Gaoler bash wind-up (parry cue), Gaoler death, sweep, Breach, Discharge release, Gravewell implosion | −11 … −12 |
 | Harrier shriek / swat, Heron lock / needle, Gaoler chain / rush | −12 … −13 |
 | Slam impact, death | −12 |
 | Quill shots, Gust, launchers (bomb, wisp, gravewell), deflect, punch hit, wave/match stingers | −13 … −15 |
