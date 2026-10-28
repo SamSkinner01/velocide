@@ -1,0 +1,51 @@
+# VELOCIDE dedicated server (docs/hosting.md), deployed by CI with the online service
+# (docs/rendezvous.md "Deploying"). Installed by `setup-vps.sh --with-server`.
+#
+# Runs the release /opt/velocide/deploy/current points at, as a throwaway user in a sandbox.
+# After a deploy it keeps the running match going and exits once nobody is connected; systemd
+# then starts the new binary (players on the new version can't join an old server anyway).
+# --online lists it in the server browser through the service built into the release
+# (repository variable VELOCIDE_RENDEZVOUS): remove it if the builds have none.
+[Unit]
+Description=VELOCIDE dedicated server
+After=network-online.target velocide-rendezvous.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/opt/velocide/deploy/current/velocide-server --port 47420 --online --exit-when-replaced /opt/velocide/deploy/current/velocide-server
+Restart=always
+RestartSec=3
+DynamicUser=yes
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+MemoryMax=1G
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

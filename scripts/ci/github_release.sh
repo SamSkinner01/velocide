@@ -27,6 +27,7 @@ ASSETS=(
     velocide-linux-x86_64
     velocide-server-windows-x86_64.exe
     velocide-server-linux-x86_64
+    velocide-rendezvous-linux-x86_64
     PLAY.txt
 )
 
@@ -57,7 +58,7 @@ These links always fetch the newest version, to bookmark or pass on:
 - Windows: $latest/velocide-windows-x86_64.exe
 - Linux: $latest/velocide-linux-x86_64
 
-**Most people only need the game.** The \`velocide-server-…\` files are the dedicated server, for running games on a machine nobody plays on ([hosting guide]($page/blob/$SHA/docs/hosting.md)). \`PLAY.txt\` has the controls and how to host and join.
+**Most people only need the game.** The \`velocide-server-…\` files are the dedicated server, for running games on a machine nobody plays on ([hosting guide]($page/blob/$SHA/docs/hosting.md)), and \`velocide-rendezvous-linux-x86_64\` is the online service behind join codes and the server browser ([docs/rendezvous.md]($page/blob/$SHA/docs/rendezvous.md)). \`PLAY.txt\` has the controls and how to host and join.
 EOF
 }
 

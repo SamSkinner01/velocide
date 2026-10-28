@@ -6,6 +6,7 @@
 #
 #   scripts/build_dist.sh linux     dist/velocide-linux-x86_64
 #                                   dist/velocide-server-linux-x86_64
+#                                   dist/velocide-rendezvous-linux-x86_64 (the online service)
 #   scripts/build_dist.sh windows   dist/velocide-windows-x86_64.exe
 #                                   dist/velocide-server-windows-x86_64.exe
 #
@@ -19,6 +20,9 @@
 #   VELOCIDE_COMMIT    the full 40-hex commit; default `git rev-parse HEAD`
 #   VELOCIDE_REPO      owner/name the game checks for updates; default $GITHUB_REPOSITORY when
 #                      set, else the game's own default
+#   VELOCIDE_RENDEZVOUS  host:port of the online service built into the game and the server
+#                      (docs/rendezvous.md); unset or empty: none, online play needs one set in
+#                      the settings
 #
 # With a commit and a version these are release builds, which check for updates. Everyone in a
 # game, the server included, must run the same version.
@@ -79,13 +83,26 @@ else
     exit 1
 fi
 if [ -n "$VELOCIDE_REPO" ]; then export VELOCIDE_REPO; else unset VELOCIDE_REPO; fi
+VELOCIDE_RENDEZVOUS=${VELOCIDE_RENDEZVOUS:-}
+if [ -z "$VELOCIDE_RENDEZVOUS" ]; then
+    unset VELOCIDE_RENDEZVOUS
+elif [[ "$VELOCIDE_RENDEZVOUS" =~ ^[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]]; then
+    export VELOCIDE_RENDEZVOUS
+else
+    echo "error: VELOCIDE_RENDEZVOUS must be host or host:port, not '$VELOCIDE_RENDEZVOUS'" >&2
+    exit 1
+fi
 
 echo "==> building the $WHAT binaries on $(uname -m)"
 echo "    VELOCIDE_VERSION=$VELOCIDE_VERSION"
 echo "    VELOCIDE_COMMIT=${VELOCIDE_COMMIT:-(unset)}"
 echo "    VELOCIDE_REPO=${VELOCIDE_REPO:-(unset: the default of shared::build_info)}"
+echo "    VELOCIDE_RENDEZVOUS=${VELOCIDE_RENDEZVOUS:-(unset: no built-in online service)}"
 cargo build "${CARGO_FLAGS[@]}" --target "$TARGET" -p client --bin velocide
 cargo build "${CARGO_FLAGS[@]}" --target "$TARGET" -p server --bin velocide-server
+if [ "$WHAT" = linux ]; then
+    cargo build "${CARGO_FLAGS[@]}" --target "$TARGET" -p rendezvous --bin velocide-rendezvous
+fi
 
 out="$TARGET_DIR/$TARGET/release"
 game="dist/velocide-$WHAT-x86_64$EXE"
@@ -94,9 +111,14 @@ mkdir -p dist
 cp "$out/velocide$EXE" "$game"
 cp "$out/velocide-server$EXE" "$server"
 chmod 755 "$game" "$server"
+if [ "$WHAT" = linux ]; then
+    cp "$out/velocide-rendezvous" dist/velocide-rendezvous-linux-x86_64
+    chmod 755 dist/velocide-rendezvous-linux-x86_64
+fi
 play=$(<scripts/PLAY.txt)
 play=${play//@VERSION@/"$VELOCIDE_VERSION"}
 printf '%s\n' "${play//@REPO@/"${VELOCIDE_REPO:-SamSkinner01/velocide}"}" >dist/PLAY.txt
 echo "==> $game"
 echo "==> $server"
+if [ "$WHAT" = linux ]; then echo "==> dist/velocide-rendezvous-linux-x86_64"; fi
 echo "==> dist/PLAY.txt"

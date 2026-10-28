@@ -3,6 +3,7 @@
 #
 #   dist/velocide-linux-x86_64                 the game, standalone
 #   dist/velocide-server-linux-x86_64          the dedicated server, standalone
+#   dist/velocide-rendezvous-linux-x86_64      the online service (docs/rendezvous.md)
 #   dist/velocide-windows-x86_64.exe           the game, standalone
 #   dist/velocide-server-windows-x86_64.exe    the dedicated server, standalone
 #   dist/PLAY.txt                              how to play, host and join
@@ -46,6 +47,7 @@ IDENTITY=(
     -e VELOCIDE_COMMIT="${VELOCIDE_COMMIT:-$(git rev-parse HEAD 2>/dev/null || true)}"
 )
 [ -z "${VELOCIDE_REPO:-}" ] || IDENTITY+=(-e VELOCIDE_REPO="$VELOCIDE_REPO")
+[ -z "${VELOCIDE_RENDEZVOUS:-}" ] || IDENTITY+=(-e VELOCIDE_RENDEZVOUS="$VELOCIDE_RENDEZVOUS")
 REGISTRY="${CARGO_HOME:-$HOME/.cargo}/registry"
 mkdir -p dist "$REGISTRY"
 
