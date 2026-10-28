@@ -1011,7 +1011,7 @@ fn rework_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 20, still);
 
     // The wax double: as its side sees it, as an opponent does, then slumping and bursting.
-    let double = floor + fwd * 4.0 + right * 1.2;
+    let double = floor + fwd * 3.6 - right * 0.9;
     let facing = yaw + std::f32::consts::PI - 0.5;
     game.preview_tricks(T::Waxwork {
         feet: double,
@@ -1020,7 +1020,7 @@ fn rework_previews(h: &mut Harness, game: &mut InGame) {
         seconds: 0.6,
     });
     game.preview_tricks(T::Waxwork {
-        feet: double - right * 2.6,
+        feet: double - right * 2.2 + fwd * 0.8,
         yaw: facing + 0.6,
         waxy: false,
         seconds: 0.6,
