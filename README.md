@@ -62,6 +62,10 @@ cargo run -p server --release --bin velocide-server -- --mode grind --level furn
 cargo run -p server --release --bin velocide-server -- --mode gungame --level wickmarket
 ```
 
+Without the source code, download the server from a release instead
+(`velocide-server-linux-x86_64` or `velocide-server-windows-x86_64.exe`, see below) and give it
+the same flags.
+
 Modes: `campaign`, `deathmatch`, `gungame`, `grind`. Difficulty (co-op modes): `easy`, `normal`,
 `hard`, `brutal`, `inferno`. `--no-warmup` keeps players in a menu-style lobby instead of the
 Vestry.
@@ -74,29 +78,39 @@ single-player they are always available, and on a listen server only the host ca
 
 ## Sharing the game with friends
 
-You don't need to send friends the source code. Build ready-to-run packages:
+Friends don't need the source code or any tools. Send them the link for their system:
+
+- Windows: <https://github.com/SamSkinner01/velocide/releases/latest/download/velocide-windows-x86_64.exe>
+- Linux: <https://github.com/SamSkinner01/velocide/releases/latest/download/velocide-linux-x86_64>
+
+These always fetch the newest release from the
+[Releases page](https://github.com/SamSkinner01/velocide/releases). The game is that one file,
+with everything it needs built in: nothing to unpack, no folder to keep next to it. On Windows,
+the first launch shows a SmartScreen warning because the exe isn't signed ("More info" → "Run
+anyway"); on Linux, make the file executable first (`chmod +x velocide-linux-x86_64`). It runs
+on any Linux distro with glibc 2.31 or newer, so about 2020 or newer. Each release also has a
+`PLAY.txt` with the controls and how to host and join. There is no macOS build; it would have
+to be built on a Mac.
+
+Everyone in a game, the server included, must run the same version (the release's name, such
+as `build-42`). The game checks for a newer release when it starts and offers to update itself
+from the main menu (`docs/distribution.md`), so friends download it by hand only once.
+
+The releases are made by CI: every push to `main` becomes a release `build-<n>`, and every `v*`
+tag a release under its name, once fmt, clippy, the tests and both builds pass
+(`.github/workflows/release.yml`, `docs/hosting.md` "Releases from CI"). Pull requests get the
+same checks and builds, without a release.
+
+To build the same files yourself:
 
 ```sh
 scripts/package.sh            # or: scripts/package.sh linux / scripts/package.sh windows
 ```
 
 The builds run in containers via podman or docker, so no extra toolchains are needed. The
-output lands in `dist/`:
-
-- `velocide-<version>-windows-x86_64.zip`: `velocide.exe`, `velocide-server.exe`, `assets\`,
-  `PLAY.txt`.
-- `velocide-<version>-linux-x86_64.tar.gz`: the same for Linux. It runs on any distro with
-  glibc ≥ 2.30, so about 2020 or newer.
-
-You don't have to do this by hand: every push to `main` (and every `v*` tag) makes the Forgejo
-instance build both packages and publish them as a release (`.forgejo/workflows/release.yml`,
-`docs/hosting.md` "Releases from CI"); `/sam/velocide/releases/latest` is always the newest.
-
-Friends unzip the package and run `velocide` (or `velocide.exe`). `PLAY.txt` inside explains
-the controls and how to join. `<version>` is the git commit, and everyone, including the
-server, must run the same one. On Windows, the first launch shows a SmartScreen warning
-because the exe isn't signed ("More info" → "Run anyway"). There is no macOS build; it would
-have to be built on a Mac.
+output lands in `dist/`: `velocide-windows-x86_64.exe`, `velocide-linux-x86_64`, the dedicated
+servers `velocide-server-windows-x86_64.exe` and `velocide-server-linux-x86_64`, and `PLAY.txt`.
+Their version is the git commit (`-dirty` with uncommitted changes).
 
 ## Controls (rebindable in Settings → Controls)
 
@@ -257,4 +271,5 @@ over parryable enemies, +/− health popups).
   `/loadout longwick:pinning,ember kiln trimmer knack:snare`, `/needle` or `/ember` (parry practice),
   `/encounter 1`, `/goto exit`, `/goto checkpoint 3`, `/tp x y z`, `/help`.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which
-  must stay at zero warnings.
+  must stay at zero warnings. CI runs both, and `cargo fmt --check`, on every pull request and
+  push to `main`.

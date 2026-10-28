@@ -1,35 +1,48 @@
 # Hosting a dedicated server (e.g. a DigitalOcean droplet)
 
-The dedicated server is one statically linked binary plus the `assets/` folder. It needs no
-GPU, no audio and no Rust toolchain on the machine it runs on.
+The dedicated server is one file: the levels, enemy definitions and tuning are built into it.
+It needs no GPU, no audio, no `assets/` folder and no Rust toolchain on the machine it runs on.
 
-## 1. Build the server (on your own PC)
+## 1. Get the server
 
-**Easiest:** if you already ran `scripts/package.sh linux` to share the game, the
-`velocide-server` binary and the `assets/` folder in that package work on the server as is.
-They need nothing beyond the C library. Copy the unpacked folder's contents to
-`/opt/velocide/` and skip to step 3.
+**Easiest:** download it from the newest release, straight onto the server:
 
-**Or** build just the server as a fully static binary:
+```sh
+ssh root@SERVER_IP
+mkdir -p /opt/velocide && cd /opt/velocide
+curl -L -o velocide-server https://github.com/SamSkinner01/velocide/releases/latest/download/velocide-server-linux-x86_64
+chmod +x velocide-server
+```
+
+It needs glibc 2.31 or newer (Ubuntu 20.04, Debian 11 and anything later), so it runs on any
+current droplet. Skip to step 3. For a particular release instead of the newest, use
+`https://github.com/SamSkinner01/velocide/releases/download/build-42/velocide-server-linux-x86_64`
+(the tag is the version; the Releases page lists them).
+
+**Or** build it yourself. `scripts/package.sh linux` makes
+`dist/velocide-server-linux-x86_64`, the same file a release carries. Or build just the server
+as a fully static binary:
 
 ```sh
 rustup target add x86_64-unknown-linux-musl        # one time
 cargo build --release -p server --bin velocide-server --target x86_64-unknown-linux-musl
 ```
 
-The output is `target/x86_64-unknown-linux-musl/release/velocide-server`, about 6 MB. It is a
-static binary, so it runs on any x86-64 Linux, including Ubuntu and Debian droplets.
+The output is `target/x86_64-unknown-linux-musl/release/velocide-server`. It is a static
+binary, so it runs on any x86-64 Linux, including Ubuntu and Debian droplets.
 
-## 2. Copy it to the server
+## 2. Copy it to the server (if you built it yourself)
 
 ```sh
 ssh root@SERVER_IP 'mkdir -p /opt/velocide'
 scp target/x86_64-unknown-linux-musl/release/velocide-server root@SERVER_IP:/opt/velocide/
-scp -r assets root@SERVER_IP:/opt/velocide/
+# or the one scripts/package.sh made:
+scp dist/velocide-server-linux-x86_64 root@SERVER_IP:/opt/velocide/velocide-server
 ```
 
-The server looks for `assets/` next to its binary. You can also point it elsewhere with the
-`VELOCIDE_ASSETS` environment variable.
+An `assets/` folder next to the binary (or wherever `VELOCIDE_ASSETS` points) still takes
+precedence over the built-in files, one file at a time. You only need one to change gameplay
+numbers live (see "Updating" below).
 
 ## 3. Open the UDP port
 
@@ -107,82 +120,97 @@ How a session runs:
 
 ## Updating
 
-Everyone (the server and every player) must run the same version of the game. After pulling or
-changing code:
+Everyone (the server and every player) must run the same version of the game. The game offers
+players each new release by itself; the server you update by hand. To the newest release:
+
+```sh
+ssh root@SERVER_IP
+cd /opt/velocide
+curl -L -o velocide-server.new https://github.com/SamSkinner01/velocide/releases/latest/download/velocide-server-linux-x86_64
+chmod +x velocide-server.new && mv velocide-server.new velocide-server
+systemctl restart velocide
+```
+
+Download to a new name and `mv` it over the old one: writing straight into the running binary
+fails ("Text file busy"), but renaming over it is fine, and the restart starts the new one.
+
+If you build the server yourself, after pulling or changing code:
 
 ```sh
 cargo build --release -p server --bin velocide-server --target x86_64-unknown-linux-musl
-ssh root@SERVER_IP 'systemctl stop velocide'
-scp target/x86_64-unknown-linux-musl/release/velocide-server root@SERVER_IP:/opt/velocide/
-scp -r assets root@SERVER_IP:/opt/velocide/
-ssh root@SERVER_IP 'chown -R velocide:velocide /opt/velocide && systemctl start velocide'
+scp target/x86_64-unknown-linux-musl/release/velocide-server root@SERVER_IP:/opt/velocide/velocide-server.new
+ssh root@SERVER_IP 'cd /opt/velocide && mv velocide-server.new velocide-server && systemctl restart velocide'
 ```
 
-Stop the service before copying, otherwise the binary is busy and won't be replaced.
-
-Gameplay numbers can be changed live: edit `/opt/velocide/assets/tuning.ron` on the server. It
-is reloaded on save and pushed to every connected player.
-
-Or take the server from a CI release (below): the Linux package holds `velocide-server` and
-`assets/` already.
-
-```sh
-TAG=build-42   # the release to run, e.g. the newest one on the Releases page
-curl -LO http://192.168.0.100:3000/sam/velocide/releases/download/$TAG/velocide-$TAG-linux-x86_64.tar.gz
-```
+Gameplay numbers can be changed live: copy `assets/tuning.ron` from the repository (at the
+server's version) to `/opt/velocide/assets/tuning.ron`, (re)start the server, and edit the file
+there. It is reloaded on save and pushed to every connected player; everything else still comes
+from inside the binary. Delete it when you update the server, or the old numbers keep
+overriding the new version's.
 
 ## Releases from CI
 
-`.forgejo/workflows/release.yml` builds and publishes the packages on the Forgejo instance, so
-nobody has to run `scripts/package.sh` by hand:
+`.github/workflows/release.yml` (GitHub Actions, on GitHub's own runners) checks every change
+and publishes the releases at <https://github.com/SamSkinner01/velocide/releases>, so nobody
+has to run `scripts/package.sh` by hand. `docs/distribution.md` is the contract it keeps with
+the game's update check.
 
-| trigger | release |
-|---|---|
-| a push to `main` | `build-<n>` (`<n>`: the run number), titled with the commit; the newest 10 are kept |
-| a `v*` tag (`git tag v1.0 && git push origin v1.0`) | under that tag, kept |
-| *Run workflow* on the Actions page | as a push to `main` |
+| trigger | runs | release |
+|---|---|---|
+| a pull request (and each push to it) | check, linux, windows | none; the files stay on the run's page for 14 days (*Artifacts*) |
+| a push to `main` | check, linux, windows, release | `build-<n>` (`<n>`: the run number), titled with the commit; the newest 10 are kept |
+| a `v*` tag (`git tag v1.0 && git push origin v1.0`) | the same | under that tag, kept |
+| *Run workflow* on the Actions page | the same, for the branch you pick | only for `main` |
 
-Every release carries `velocide-<version>-linux-x86_64.tar.gz` and
-`velocide-<version>-windows-x86_64.zip`, where `<version>` is the release's tag (it is also what
-`PLAY.txt` shows: everyone must run the same one). `/sam/velocide/releases/latest` always opens
-the newest.
+Every release carries the same five files: `velocide-windows-x86_64.exe` and
+`velocide-linux-x86_64` (the game), `velocide-server-windows-x86_64.exe` and
+`velocide-server-linux-x86_64` (the dedicated server), and `PLAY.txt`. Each new release is
+marked *latest*, and the names carry no version, so
+`https://github.com/SamSkinner01/velocide/releases/latest/download/<name>` always fetches the
+newest: those are the links to give friends. The release's tag is the version the game shows
+(`build-42`, `v1.0.0`; also in `PLAY.txt`), and the release points at the full commit it was
+built from, which the game compares with its own to offer updates.
 
-A run has five stages, each a job in a fresh Ubuntu container on a runner labelled `docker`:
+The jobs:
 
-1. **check**: `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test --workspace`.
-   Nothing is released unless they pass.
-2. **draft**: a draft release for the version.
-3. **linux** (Ubuntu 20.04, for glibc 2.31) and **windows** (Ubuntu 24.04, MinGW): build their
-   package with `scripts/build_dist.sh` and attach it to the draft.
-4. **publish**: the draft becomes the release (its tag is created at the built commit), then
-   old `build-*` releases are pruned.
-5. **discard** (only after a failure): deletes the draft, so a failed run leaves nothing half
-   done.
+1. **check** (Ubuntu 24.04): `cargo fmt --check`, `cargo clippy -D warnings` and
+   `cargo test --workspace`.
+2. **linux** (an Ubuntu 20.04 container, for glibc 2.31) and **windows** (Ubuntu 24.04, MinGW):
+   `scripts/ci/setup.sh` and `scripts/build_dist.sh`, with the version and the commit built in.
+   They run next to check, not after it, and keep their files as the run's artifacts.
+3. **release** (pushes to `main` and `v*` tags, only when the other three passed):
+   `scripts/ci/github_release.sh` creates the release with `gh` at the built commit, marks it
+   latest, then deletes the `build-*` releases beyond the newest 10, with their tags. `gh`
+   uploads the files to a draft and publishes it once all are up, so nobody sees a half-filled
+   release. This is the only job that may write to the repository (`contents: write` for the
+   run's own token); the others only read.
+
+A newer push to `main` (or to a pull request) cancels the checks and builds of an older run that
+is still going, which then releases nothing. A tag's run is never cancelled, and neither is a
+release job once it has started. A failed run releases nothing; *Re-run failed jobs* keeps its
+version and replaces the release's files if it already got that far.
 
 How it is built:
 
-- Every step is a script in the repo (`scripts/ci/setup.sh`: packages + rustup;
-  `scripts/build_dist.sh`: build + archive; `scripts/ci/forgejo_release.sh`: the release API),
-  so the workflow needs no actions from a registry: the runner only needs Ubuntu's archive,
-  rustup and crates.io. `scripts/package.sh` runs the same two build scripts in local
-  containers, so a local package and a CI one are built the same way.
-- The packages are always x86_64, on an x86_64 or an arm64 runner. A Mac's Docker runs arm64
-  Linux containers, so there the Linux package is cross-compiled (`gcc-x86-64-linux-gnu` and the amd64 builds of ALSA, udev and
-  D-Bus from Ubuntu's amd64 archive); MinGW cross-compiles to Windows from either.
+- The compiling jobs install with `scripts/ci/setup.sh` (packages and rustup; on a runner itself
+  through `sudo`) and build with `scripts/build_dist.sh`. `scripts/package.sh` runs the same two
+  scripts in local containers, so a local build and a CI one are made the same way.
 - The toolchain is pinned by `RUST_VERSION` at the top of the workflow; bump it with the
   machine you develop on.
-- The jobs use the run's automatic token (repository write: checkout, releases, tags). If an
-  instance restricts it, add a repository secret `RELEASE_TOKEN` (an access token with
-  repository write) and the workflow uses that instead.
-- Each run compiles from scratch (there's no cache): a few minutes per job on the Mac Studio.
-  With two `docker` runners free (or one with capacity 2), `linux` and `windows` build at the
-  same time.
-- Memory: cargo runs one build job per GB the container has free, at most one per CPU
-  (`setup.sh` sets it; the Toolchain step's log shows the count). Cargo's default of one job per
-  CPU ran a Mac's Docker VM out of memory: the test build takes about 0.6 GB per job. The tests
-  also build with line tables only instead of full debug info, which cuts the build's memory by
-  a third and its disk use by two thirds. On a runner with only a few GB free, the jobs are
-  slow but they finish; give Docker more memory to speed them up.
+- Each compiling job keeps its compiled dependencies and crate downloads in GitHub's cache
+  (`Swatinem/rust-cache`), saved only by runs on `main`; pull requests and tags start from
+  `main`'s. A new cache is saved when `Cargo.lock` or the toolchain changes. GitHub keeps 10 GB
+  of caches per repository and drops the least recently used beyond that.
+- Disk: a runner has about 14–20 GB free. The check job builds without debug info, which keeps
+  its `target/` at about 4 GB (with line tables, as before, it was about 13 GB); its last step
+  logs the disk use. A release build's `target/` is about 1.5 GB. The caches stay well under
+  the 10 GB: rust-cache keeps the dependencies only, about 3.3 GB of the check job's and 1.2 GB
+  of each build's before compression.
+- The binaries are always x86_64. On an arm64 machine (a Mac's Docker runs arm64 Linux
+  containers) `setup.sh` and `build_dist.sh` cross-compile the Linux binaries
+  (`gcc-x86-64-linux-gnu` and the amd64 builds of ALSA, udev and D-Bus from Ubuntu's amd64
+  archive); MinGW cross-compiles to Windows from either. CI doesn't need this; `package.sh` on a
+  Mac does.
 
 ## Notes
 

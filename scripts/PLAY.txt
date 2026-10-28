@@ -2,25 +2,35 @@ VELOCIDE  (version @VERSION@)
 ==========================
 
 START THE GAME
-  Windows: double-click velocide.exe
+  The game is a single file: keep it wherever you like (the Desktop, a Games folder).
+  Windows: double-click velocide-windows-x86_64.exe
     If Windows shows "Windows protected your PC", click "More info" and then "Run anyway".
     This happens because the game isn't code-signed.
     A black console window opens next to the game. It shows the game's log; you can ignore it,
     but if something goes wrong, send a screenshot of it.
-  Linux:   run ./velocide from this folder
-    You need a working Vulkan driver (on Debian/Ubuntu: mesa-vulkan-drivers, or the NVIDIA
-    driver).
+  Linux:   make the file executable once, then run it:
+             chmod +x velocide-linux-x86_64
+             ./velocide-linux-x86_64
+    (Or in the file manager: Properties -> Permissions -> "Allow executing file as program",
+    then double-click it.) You need a working Vulkan driver (on Debian/Ubuntu:
+    mesa-vulkan-drivers, or the NVIDIA driver).
 
-  Keep the "assets" folder next to the game. The game won't find its levels without it.
+UPDATES
+  The game checks for a new version each time it starts. When there is one, the main menu
+  offers it: "Update now" downloads it and restarts the game, "Later" asks again next launch.
+  If it can't update itself, it offers to open the download page instead. The newest version
+  is always at https://github.com/@REPO@/releases/latest
+  (The "Check for updates" setting turns the check off.)
 
 PLAY WITH FRIENDS
   Join:  Main menu -> JOIN GAME -> type the address you were given, e.g. 203.0.113.7:47420
   Host:  Main menu -> HOST GAME. Your friends need your IP address, and port 47420 must be
-         forwarded on your router (UDP). Using a dedicated server avoids all of that.
+         forwarded on your router (UDP). A dedicated server avoids all of that: it is the
+         velocide-server file on the same download page (most players don't need it).
   While everyone gathers you can run around the warm-up hall. Tab opens the lobby panel,
   F1 readies you up. LOADOUT picks your weapons, abilities and knack, CUSTOMISE your look.
-  Everyone must use the same build (the version above). After an update, everyone downloads
-  the new one.
+  Everyone in a game, the server too, must run the same version (the one above). When the
+  game offers an update, everyone takes it.
 
 CONTROLS (rebind them in Settings -> Controls)
   WASD move        Mouse look       Space jump / wall jump     Shift dash
