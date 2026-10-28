@@ -2,7 +2,8 @@
 //! hostile projectiles around), the Arclash **Discharge** (radial nova around the shooter),
 //! the Tumbler **Breach** (point-blank explosion) and the **Kiln**'s ember spray (a short
 //! cone). All resolve instantly on the server from the input that fired them, against the
-//! hitboxes the shooter saw (lag compensation), with hit assist.
+//! hitboxes the shooter saw (lag compensation), with hit assist. A live thorn in a cone or a
+//! nova is flung on at its per-hit damage, one in a blast at `thorn.relay_damage` (`thorn.rs`).
 
 use engine::physics::MASK_SHOTS;
 use glam::Vec3;
@@ -106,6 +107,9 @@ impl SimWorld {
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        // The thorns in the cone are blown on (thorn.rs).
+        let cone = (b.gust_range, b.gust_cone_degrees);
+        self.relay_cone(t, id, input, cone, b.gust_damage, Attack::Gust);
         for pid in deflect {
             let kind = self.projectiles.get(&pid).map(|p| p.kind);
             let Some(position) = self.redirect_projectile(
@@ -198,12 +202,14 @@ impl SimWorld {
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        // The thorns in the nova are flung on (thorn.rs).
+        self.relay_nova(t, id, input, center, radius, damage, Attack::Discharge);
     }
 
     /// Kiln spray: `kiln.damage` and `kiln.burn_stacks` Burn stacks to every hostile whose
     /// (padded) shape is within `kiln.range` inside the `kiln.cone_degrees` cone along the aim
-    /// (line of sight from the eye). Embers don't ricochet and have no weak-point bonus. Emits
-    /// a `Shot` (no ray ends) for the remote spray.
+    /// (line of sight from the eye). Embers have no weak-point bonus (a thorn in the spray is
+    /// flung on as a ray, `thorn.rs`). Emits a `Shot` (no ray ends) for the remote spray.
     pub(crate) fn kiln_spray(
         &mut self,
         t: &Tuning,
@@ -243,6 +249,15 @@ impl SimWorld {
             self.apply_damage(t, target, info);
             self.apply_burn(t, me, Attack::Kiln, target, k.burn_stacks);
         }
+        // The thorns in the spray are flung on (thorn.rs).
+        self.relay_cone(
+            t,
+            id,
+            input,
+            (k.range, k.cone_degrees),
+            k.damage,
+            Attack::Kiln,
+        );
         self.push_fired(id, Attack::Kiln, eye);
     }
 

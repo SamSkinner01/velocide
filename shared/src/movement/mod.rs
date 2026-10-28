@@ -103,6 +103,11 @@ pub struct MoveState {
     /// ground / air / dash / slide speeds are scaled by `slow_scale`. Set by the server.
     pub slow_time: f32,
     pub slow_scale: f32,
+    /// Seconds left of a haste (the Kindle Flask, `docs/arsenal.md`): while it lasts, ground /
+    /// air / slide speeds and accelerations and the dash are scaled by `haste_scale` (with a
+    /// slow too, both apply, multiplied). Set by the server.
+    pub haste_time: f32,
+    pub haste_scale: f32,
 }
 
 /// A slam hit the ground: the server applies a shockwave here.
@@ -234,13 +239,20 @@ fn volume_overlaps(v: &Volume, lo: Vec3, hi: Vec3) -> bool {
     lo.cmple(v.max).all() && hi.cmpge(v.min).all()
 }
 
-/// `t` with its speeds scaled by `k` (0..=1): a slowed player.
-fn slowed(t: &MovementTuning, k: f32) -> MovementTuning {
-    let k = if k.is_finite() {
-        k.clamp(0.0, 1.0)
+/// `t` with its speeds scaled by `slow` (0..=1, a slowed player) and `haste` (1..=3, a hasted
+/// one) and its accelerations by `haste`.
+fn scaled(t: &MovementTuning, slow: f32, haste: f32) -> MovementTuning {
+    let slow = if slow.is_finite() {
+        slow.clamp(0.0, 1.0)
     } else {
         1.0
     };
+    let haste = if haste.is_finite() {
+        haste.clamp(1.0, 3.0)
+    } else {
+        1.0
+    };
+    let k = slow * haste;
     MovementTuning {
         ground_speed: t.ground_speed * k,
         air_max_speed: t.air_max_speed * k,
@@ -248,6 +260,8 @@ fn slowed(t: &MovementTuning, k: f32) -> MovementTuning {
         dash_end_speed: t.dash_end_speed * k,
         slide_min_speed: t.slide_min_speed * k,
         slide_max_speed: t.slide_max_speed * k,
+        ground_accel: t.ground_accel * haste,
+        air_accel: t.air_accel * haste,
         ..t.clone()
     }
 }
@@ -269,12 +283,22 @@ pub fn step(
     if !state.velocity.is_finite() {
         state.velocity = Vec3::ZERO;
     }
-    // Slowed: every speed scaled while it lasts.
-    let slowed_tuning;
-    let t = if state.slow_time > 0.0 {
-        state.slow_time = (state.slow_time - dt).max(0.0);
-        slowed_tuning = slowed(t, state.slow_scale);
-        &slowed_tuning
+    // Slowed and / or hasted: every speed scaled while it lasts (the accelerations too by a
+    // haste).
+    let scaled_tuning;
+    let t = if state.slow_time > 0.0 || state.haste_time > 0.0 {
+        let mut slow = 1.0;
+        if state.slow_time > 0.0 {
+            state.slow_time = (state.slow_time - dt).max(0.0);
+            slow = state.slow_scale;
+        }
+        let mut haste = 1.0;
+        if state.haste_time > 0.0 {
+            state.haste_time = (state.haste_time - dt).max(0.0);
+            haste = state.haste_scale;
+        }
+        scaled_tuning = scaled(t, slow, haste);
+        &scaled_tuning
     } else {
         t
     };

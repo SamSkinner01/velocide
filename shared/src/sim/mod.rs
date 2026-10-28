@@ -363,11 +363,14 @@ pub enum SimEvent {
     },
     /// A player fired (hitscan: `ends` = end of each ray; projectile weapons: empty).
     Shot(ShotEvent),
-    /// A Quill shot bounced off thorns: thorn positions, then the final end point.
+    /// An attack relayed off thorns (`thorn.rs`): thorn positions, then the final end point. A
+    /// ray (or the ray a swing / cone / nova / blast flung a thorn as) flew that path;
+    /// `projectile`: that projectile turned at the first thorn and flies at the last point.
     Ricochet {
         shooter: Owner,
         attack: Attack,
         points: Vec<Vec3>,
+        projectile: Option<NetId>,
     },
     /// A Splinter shot burst into secondary traces at `origin` (end of each).
     Splinters {
@@ -604,7 +607,7 @@ pub struct SimWorld {
     pub statuses: BTreeMap<HitTarget, status::Status>,
     /// Burning patches on the ground (Flare, `status.rs`).
     pub fire_patches: BTreeMap<NetId, status::FirePatch>,
-    /// Kindle pools, soot clouds, Tallow Skin (`knacks.rs`).
+    /// Soot clouds, Tallow Skin, Kindle Flasks being drunk (`knacks.rs`).
     pub knacks: knacks::KnackWorld,
     /// Lunges in progress (`melee.rs`).
     pub melee: melee::MeleeWorld,
@@ -1112,6 +1115,10 @@ impl SimWorld {
             if self.has_tallow(p.id) {
                 e.flags |= player_flags::TALLOW;
             }
+            // The Kindle Flask's haste (knacks.rs) lives in the movement state.
+            if p.movement.haste_time > 0.0 && !p.combat.dead {
+                e.flags |= player_flags::HASTE;
+            }
             frame.insert(&e);
         }
         for door in &self.level.doors {
@@ -1161,9 +1168,6 @@ impl SimWorld {
             frame.insert(&h.entity_state(self.tick));
         }
         for p in self.fire_patches.values() {
-            frame.insert(&p.entity_state());
-        }
-        for p in self.knacks.pools.values() {
             frame.insert(&p.entity_state());
         }
         for c in self.knacks.clouds.values() {

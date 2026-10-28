@@ -6,7 +6,7 @@
 //! | knack | what it does |
 //! |---|---|
 //! | Thorn | the relay spike (`thorn.rs`). PvE only |
-//! | Kindle Flask | a lobbed flask; where it lands a [`KindlePool`] heals the Shrikes inside |
+//! | Kindle Flask | drunk at once: a few seconds of haste and a heal over time ([`KindleDraught`]) |
 //! | Snare | a wax trap thrown to the floor; armed, it pins the first hostile close by |
 //! | Soot Pot | bursts into a [`SootCloud`]: Moulds can't see into, out of or through it |
 //! | Tallow Skin | a few seconds of half damage and no knockback (`TALLOW` player flag) |
@@ -15,11 +15,13 @@
 //! In a PvP world a knack that isn't `Knack::pvp_allowed` is replaced by `Knack::PVP_FALLBACK`
 //! when the loadout applies (`SimWorld::fit_loadout`, `loadouts.rs`).
 //!
-//! * **Kindle pool**: every [`POOL_HEAL_STEP`] it heals each living Shrike whose feet are
-//!   inside (and at most 2 m above it) `heal_rate` × the step through `PlayerCombat::heal`
-//!   (the normal rules: never above the effective max, so hard damage still caps it) —
-//!   everyone in co-op, only the thrower in a PvP world. `SimEvent::Healed` with
-//!   `HealSource::KindleFlask`.
+//! * **Kindle Flask**: drinking it (instant, nothing thrown) hastes the drinker for `duration`
+//!   — `MoveState::haste_time` / `haste_scale`, next to the Pinned slow, so the owning client
+//!   predicts it like the rest of its movement (it learns of it through reconciliation, like
+//!   the slow) — and heals them `heal_rate` × `heal_interval` every `heal_interval` through
+//!   `PlayerCombat::heal` (the normal rules: never above the effective max, so hard damage
+//!   still caps it), the first step one interval after drinking. Only the drinker, in every
+//!   mode. `SimEvent::Healed` with `HealSource::KindleFlask`. Death ends it.
 //! * **Snare**: it lies `STUCK` where it settled on the floor (`payload.rs`); `arm_time` after
 //!   landing it is armed, and the nearest hostile whose feet come within `trigger_radius` of it
 //!   (and at most 2 m above) springs it: `damage` as `Attack::Snare` and Pinned
@@ -30,11 +32,11 @@
 //!   hidden this way is lost and a Heron's laser wind-up breaks off (`enemy/ai.rs`). Players'
 //!   shots pass through (the cloud only hides).
 //!
-//! Replication: the flask, snare and pot fly as projectiles (`kind::KINDLE_FLASK`, `SNARE`,
-//! `SOOT_POT`; an armed snare carries `projectile_flags::ARMED`); pools and clouds are
-//! `kind::KINDLE_POOL` / `SOOT_CLOUD` entities; Tallow Skin is the `TALLOW` player flag; every
-//! use but the Thorn's is a [`SimEvent::KnackUsed`] (`Fx::Knack` for the others), a sprung
-//! snare a [`SimEvent::SnareSprung`].
+//! Replication: the snare and pot fly as projectiles (`kind::SNARE`, `SOOT_POT`; an armed snare
+//! carries `projectile_flags::ARMED`); clouds are `kind::SOOT_CLOUD` entities; Tallow Skin is
+//! the `TALLOW` player flag, the Kindle Flask's haste `HASTE` (and the drinker's own
+//! `MoveState`); every use but the Thorn's is a [`SimEvent::KnackUsed`] (`Fx::Knack` for the
+//! others), a sprung snare a [`SimEvent::SnareSprung`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,7 +44,7 @@ use glam::Vec3;
 
 use super::combat::{Attack, DamageInfo, Owner, secs_to_ticks};
 use super::projectiles::ProjectileKind;
-use super::{HealSource, HitPart, HitTarget, PlayerId, SimEvent, SimWorld};
+use super::{HealSource, HitPart, PlayerId, SimEvent, SimWorld};
 use crate::input::PlayerInput;
 use crate::loadout::Knack;
 use crate::protocol::{EntityState, NetId, kind, owner_code};
@@ -76,37 +78,18 @@ impl Knack {
     }
 }
 
-/// Kindle pools heal in steps this far apart (seconds): fewer heal events than every tick.
-pub const POOL_HEAL_STEP: f32 = 0.25;
-
-/// A Kindle Flask's healing pool on the ground.
+/// A Kindle Flask being drunk: its heal over time (the haste is in the drinker's
+/// `MoveState`).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct KindlePool {
-    pub id: NetId,
-    pub owner: PlayerId,
-    /// Centre, on the ground.
-    pub position: Vec3,
-    pub radius: f32,
-    /// HP per second.
-    pub heal_rate: f32,
-    pub expire_tick: u32,
+pub struct KindleDraught {
+    /// HP per heal step.
+    pub heal: f32,
+    /// Ticks between heal steps.
+    pub step: u32,
     /// Next heal step.
     pub next_heal: u32,
-}
-
-impl KindlePool {
-    /// Replicated state: `state` = radius (dm), `aux` = tick it dries up, `owner` = thrower.
-    pub fn entity_state(&self) -> EntityState {
-        EntityState {
-            id: self.id,
-            kind: kind::KINDLE_POOL,
-            owner: owner_code(Owner::Player(self.owner)),
-            position: self.position,
-            state: radius_dm(self.radius),
-            aux: self.expire_tick,
-            ..Default::default()
-        }
-    }
+    /// Tick of the last heal step.
+    pub last_heal: u32,
 }
 
 /// A Soot Pot's cloud.
@@ -141,8 +124,9 @@ fn radius_dm(radius: f32) -> u16 {
 /// What the knacks leave in the world ([`SimWorld::knacks`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct KnackWorld {
-    pub pools: BTreeMap<NetId, KindlePool>,
     pub clouds: BTreeMap<NetId, SootCloud>,
+    /// Kindle Flasks being drunk, per player.
+    pub kindle: BTreeMap<PlayerId, KindleDraught>,
     /// Tallow Skin: the tick it wears off, per player.
     pub tallow: BTreeMap<PlayerId, u32>,
     /// Snares (projectiles) armed and waiting: replicated as `projectile_flags::ARMED`.
@@ -152,11 +136,11 @@ pub struct KnackWorld {
 impl KnackWorld {
     /// Live entities (for the id allocator).
     pub(crate) fn len(&self) -> usize {
-        self.pools.len() + self.clouds.len()
+        self.clouds.len()
     }
 
     pub(crate) fn holds(&self, id: NetId) -> bool {
-        self.pools.contains_key(&id) || self.clouds.contains_key(&id)
+        self.clouds.contains_key(&id)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -165,9 +149,9 @@ impl KnackWorld {
 
     /// Forgets everything of player `id` (they left).
     pub(crate) fn forget(&mut self, id: PlayerId) {
-        self.pools.retain(|_, p| p.owner != id);
         self.clouds.retain(|_, c| c.owner != id);
         self.tallow.remove(&id);
+        self.kindle.remove(&id);
     }
 }
 
@@ -198,12 +182,7 @@ impl SimWorld {
                 // Its own event (`ThornThrown`), not `KnackUsed`.
                 return;
             }
-            Knack::KindleFlask => {
-                let f = &k.kindle_flask;
-                let dir = super::weapons::lob_dir(aim, f.angle_degrees);
-                let start = self.safe_launch_point(eye, eye + aim * 0.5);
-                self.spawn_projectile(t, ProjectileKind::KindleFlask, owner, start, dir * f.speed);
-            }
+            Knack::KindleFlask => self.drink_kindle(t, id),
             Knack::Snare => {
                 let s = &k.snare;
                 // At most `max_live` out: the oldest goes.
@@ -249,26 +228,25 @@ impl SimWorld {
             .is_some_and(|until| self.tick < *until)
     }
 
-    /// A Kindle Flask landed at `at` (on the ground below it, none over a pit): its pool.
-    pub(crate) fn spawn_kindle_pool(&mut self, t: &Tuning, owner: PlayerId, at: Vec3) {
-        let Some(floor) = self.floor_below(at, 50.0) else {
-            return;
-        };
-        let Some(id) = self.alloc_net_id() else {
-            return;
-        };
+    /// Player `id` drinks a Kindle Flask: hasted (their `MoveState`) and healing over time
+    /// (see the module docs). A second one while the first lasts starts over.
+    fn drink_kindle(&mut self, t: &Tuning, id: PlayerId) {
         let f = &t.combat.knacks.kindle_flask;
-        let expire_tick = self.tick + secs_to_ticks(f.duration, self.tick_rate, 1) as u32;
-        self.knacks.pools.insert(
+        let rate = self.tick_rate;
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        p.movement.haste_time = f.duration;
+        p.movement.haste_scale = f.haste;
+        let step = secs_to_ticks(f.heal_interval, rate, 1) as u32;
+        let steps = (f.duration / f.heal_interval.max(1e-3)).round().max(1.0) as u32;
+        self.knacks.kindle.insert(
             id,
-            KindlePool {
-                id,
-                owner,
-                position: floor,
-                radius: f.radius,
-                heal_rate: f.heal_rate,
-                expire_tick,
-                next_heal: self.tick,
+            KindleDraught {
+                heal: f.heal_rate * step as f32 / rate as f32,
+                step,
+                next_heal: self.tick + step,
+                last_heal: self.tick + step * steps,
             },
         );
     }
@@ -302,56 +280,48 @@ impl SimWorld {
             .any(|c| now < c.expire_tick && segment_meets_sphere(a, b, c.position, c.radius))
     }
 
-    /// Per tick (pipeline step 4): pools, clouds and Tallow Skin wear off, pools heal, snares
+    /// Per tick (pipeline step 4): clouds and Tallow Skin wear off, Kindle Flasks heal, snares
     /// arm and spring.
     pub(crate) fn step_knacks(&mut self, t: &Tuning) {
         let now = self.tick;
-        self.knacks.pools.retain(|_, p| now < p.expire_tick);
         self.knacks.clouds.retain(|_, c| now < c.expire_tick);
         self.knacks.tallow.retain(|_, until| now < *until);
-        self.heal_in_pools();
+        self.heal_kindle(t);
         self.step_snares(t);
     }
 
-    /// Every pool due a heal step heals the Shrikes inside it (see the module docs).
-    fn heal_in_pools(&mut self) {
+    /// Every Kindle Flask due a heal step heals its drinker (see the module docs); a dead
+    /// drinker's or a finished one is gone.
+    fn heal_kindle(&mut self, t: &Tuning) {
         let now = self.tick;
-        let rate = self.tick_rate;
-        let step = secs_to_ticks(POOL_HEAL_STEP, rate, 1) as u32;
-        let due: Vec<KindlePool> = self
+        let players = &self.players;
+        self.knacks.kindle.retain(|id, d| {
+            d.next_heal <= d.last_heal && players.get(id).is_some_and(|p| !p.combat.dead)
+        });
+        let due: Vec<(PlayerId, f32)> = self
             .knacks
-            .pools
-            .values_mut()
-            .filter(|p| now >= p.next_heal)
-            .map(|p| {
-                p.next_heal = now + step;
-                *p
+            .kindle
+            .iter_mut()
+            .filter(|(_, d)| now >= d.next_heal)
+            .map(|(id, d)| {
+                d.next_heal += d.step;
+                (*id, d.heal)
             })
             .collect();
-        // In PvP the pool is the thrower's own.
-        let pvp = self.pvp_world();
-        for pool in due {
-            let amount = pool.heal_rate * step as f32 / rate as f32;
-            let inside = self.targets_in_patch(pool.position, pool.radius);
-            for target in inside {
-                let HitTarget::Player(id) = target else {
-                    continue;
-                };
-                if pvp && id != pool.owner {
-                    continue;
-                }
-                let healed = self
-                    .players
-                    .get_mut(&id)
-                    .map_or(0.0, |p| p.combat.heal(amount));
-                if healed > 0.0 {
-                    self.events.push(SimEvent::Healed {
-                        player: id,
-                        amount: healed,
-                        source: HealSource::KindleFlask(pool.id),
-                        position: pool.position,
-                    });
-                }
+        for (id, amount) in due {
+            let Some(p) = self.players.get_mut(&id) else {
+                continue;
+            };
+            let healed = p.combat.heal(amount);
+            if healed > 0.0 {
+                // From the drinker's own wick.
+                let (position, _, _) = p.movement.capsule(&t.movement);
+                self.events.push(SimEvent::Healed {
+                    player: id,
+                    amount: healed,
+                    source: HealSource::KindleFlask,
+                    position,
+                });
             }
         }
     }

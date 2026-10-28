@@ -142,8 +142,8 @@ pub mod kind {
     /// Hurl (melee ability): the thrown blade / hammer-head, gravity `hurl.gravity`; `state` =
     /// the carrier's `WeaponKind` id (Trimmer: a blade, Tamper: a hammer-head).
     pub const HURL: u16 = 77;
-    /// Kindle Flask (knack): lobbed (`knacks.kindle_flask.gravity`); a `KINDLE_POOL` where it
-    /// lands.
+    /// Retired (the Kindle Flask is drunk now, docs/rework.md §3): never sent. The id is free
+    /// once nothing draws it any more.
     pub const KINDLE_FLASK: u16 = 78;
     /// Snare (knack): thrown (`knacks.snare.gravity`); `STUCK` once it lies on the floor
     /// (`position` current), [`super::projectile_flags::ARMED`] once armed. Sprung or expired:
@@ -171,8 +171,8 @@ pub mod kind {
     /// A burning patch (Flare): `position` = centre on the ground, `owner` = player,
     /// `state` = radius (dm), `aux` = tick it burns out. Burns hostiles inside.
     pub const BURNING_PATCH: u16 = 136;
-    /// A Kindle Flask's healing pool: `position` = centre on the ground, `owner` = thrower,
-    /// `state` = radius (dm), `aux` = tick it dries up.
+    /// Retired (the Kindle Flask's pool is gone, docs/rework.md §3): never sent. The id is
+    /// free once nothing draws it any more.
     pub const KINDLE_POOL: u16 = 137;
     /// A Soot Pot's cloud: `position` = centre, `owner` = thrower, `state` = radius (dm), `aux`
     /// = tick it clears. Moulds can't see into, out of or through it; draw it dense.
@@ -251,9 +251,12 @@ pub mod player_flags {
     pub const DRAWING: u32 = 1 << 14;
     /// Branded by a Brand shot: takes extra damage, draws a sigil (weapons area).
     pub const BRANDED: u32 = 1 << 15;
-    // Bit 16: the refit's knacks (arsenal, docs/arsenal.md).
+    // Bits 16, 17: the knacks (arsenal, docs/arsenal.md).
     /// Tallow Skin (knack) active: half damage, no knockback (a waxy sheen).
     pub const TALLOW: u32 = 1 << 16;
+    /// Hasted by a Kindle Flask (knack): faster, healing over time (embers off the wick, a
+    /// speed trail). The drinker's own `MoveState::haste_time` says how long.
+    pub const HASTE: u32 = 1 << 17;
 }
 
 /// Flag bits of enemy entities.
@@ -340,6 +343,9 @@ pub mod projectile_flags {
     pub const ENEMY: u32 = 1 << 3;
     /// A Snare lying on the floor has armed: the next hostile close by springs it.
     pub const ARMED: u32 = 1 << 4;
+    /// Turned at a thorn (a relay, `sim::thorn`): flies straight (no gravity) at what the
+    /// thorn picked.
+    pub const RELAYED: u32 = 1 << 5;
 }
 
 /// Flag bits of ember bursts.

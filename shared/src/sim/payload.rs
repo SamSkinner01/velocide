@@ -67,12 +67,6 @@ impl SimWorld {
                 self.ember_burst(t, p, Some(target));
                 Some(false)
             }
-            ProjectileKind::KindleFlask => {
-                // Breaks on whoever it hit: the pool at their feet.
-                let feet = self.target_origin(target).unwrap_or(p.position);
-                self.knack_lands(t, p, feet);
-                Some(false)
-            }
             ProjectileKind::SootPot => {
                 self.knack_lands(t, p, p.position);
                 Some(false)
@@ -118,7 +112,7 @@ impl SimWorld {
                 self.ember_burst(t, p, None);
                 Some(false)
             }
-            ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
+            ProjectileKind::SootPot => {
                 let at = p.position + hit.normal * 0.05;
                 self.knack_lands(t, p, at);
                 Some(false)
@@ -160,7 +154,7 @@ impl SimWorld {
                 self.ember_burst(t, p, None);
                 true
             }
-            ProjectileKind::KindleFlask | ProjectileKind::SootPot => {
+            ProjectileKind::SootPot => {
                 self.knack_lands(t, p, p.position);
                 true
             }
@@ -168,14 +162,12 @@ impl SimWorld {
         }
     }
 
-    /// A Kindle Flask / Soot Pot broke at `at`: the pool (on the ground below) or the cloud.
+    /// A Soot Pot broke at `at`: the cloud.
     fn knack_lands(&mut self, t: &Tuning, p: &Projectile, at: Vec3) {
-        if let Owner::Player(owner) = p.owner {
-            match p.kind {
-                ProjectileKind::KindleFlask => self.spawn_kindle_pool(t, owner, at),
-                ProjectileKind::SootPot => self.spawn_soot_cloud(t, owner, at),
-                _ => {}
-            }
+        if let Owner::Player(owner) = p.owner
+            && p.kind == ProjectileKind::SootPot
+        {
+            self.spawn_soot_cloud(t, owner, at);
         }
         self.events.push(SimEvent::ProjectileImpact {
             id: p.id,
@@ -200,7 +192,8 @@ impl SimWorld {
             let side = right * a.cos() + up * a.sin();
             let dir = (axis * cos + side * sin).normalize_or(axis);
             let spec = ShotSpec::new(origin, dir, f.pellet_range, p.damage, p.attack);
-            let r = self.trace_shot(t, p.owner, &boxes, None, &spec, 0);
+            // A relayed shell's pellets are ricochet hits too.
+            let r = self.trace_shot(t, p.owner, &boxes, None, &spec, p.ricochets);
             ends.push(r.end);
         }
         self.events.push(SimEvent::Burst {

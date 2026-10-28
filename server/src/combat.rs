@@ -181,12 +181,14 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
                 shooter,
                 attack,
                 points,
+                projectile,
             } => fx.push(
                 tick,
                 Fx::Ricochet {
                     shooter: shared::protocol::owner_code(*shooter),
                     attack: *attack,
                     points: points.iter().map(|p| QPos::from(*p)).collect(),
+                    projectile: *projectile,
                 },
                 None,
             ),
@@ -216,7 +218,7 @@ pub fn route_events(events: &[SimEvent], world: &SimWorld, fx: &mut FxLog) -> Ro
             SimEvent::Healed {
                 player,
                 amount,
-                source: HealSource::Embers(_) | HealSource::KindleFlask(_),
+                source: HealSource::Embers(_) | HealSource::KindleFlask,
                 position,
             } => fx.push(
                 tick,

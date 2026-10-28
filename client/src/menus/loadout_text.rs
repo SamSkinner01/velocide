@@ -183,14 +183,13 @@ pub fn ability_text(a: Ability, weapon: WeaponKind) -> &'static str {
 pub fn knack_text(k: Knack) -> &'static str {
     match k {
         Knack::Thorn => {
-            "A barbed glass spike that plants itself where it lands. A Quill shot passing a live \
-             Thorn ricochets off it into the next target (another Thorn first), harder each \
-             bounce. Throw it at a Mould: it hurts and drops, still live."
+            "A barbed glass spike that plants itself where it lands. Any attack that reaches a \
+             live Thorn shatters it and is relayed into the next target (another Thorn first), \
+             harder each bounce. Throw it at a Mould: it hurts and drops, still live."
         }
         Knack::KindleFlask => {
-            "Lob a flask of kindling: where it breaks, a pool heals the Shrikes standing in it \
-             for a few seconds (in PvP only you). Throw it where your team holds, or at your \
-             own feet."
+            "Drink a flask of kindling: for a few seconds you run, slide and dash faster and \
+             heal a little every second. It's yours only, in every mode."
         }
         Knack::Snare => {
             "Throw a wax trap to the floor. Once armed, the first hostile that comes close is \
@@ -216,7 +215,7 @@ pub fn knack_text(k: Knack) -> &'static str {
 pub fn knack_input(k: Knack) -> &'static str {
     match k {
         Knack::Thorn | Knack::SootPot => "KNACK: THROWS IT ALONG YOUR AIM",
-        Knack::KindleFlask => "KNACK: LOBS IT A LITTLE HIGH",
+        Knack::KindleFlask => "KNACK: AT ONCE, ON YOU",
         Knack::Snare => "KNACK: THROWS IT TO THE FLOOR",
         Knack::TallowSkin => "KNACK: AT ONCE, ON YOU",
         Knack::Surge => "KNACK: AT ONCE, ALONG YOUR LOOK",
@@ -249,7 +248,10 @@ pub fn knack_stats(k: Knack, tuning: &Tuning, pvp: bool) -> Vec<Stat> {
             let f = &n.kindle_flask;
             vec![
                 ("HEALS", format!("{}/S", num(f.heal_rate, 1))),
-                ("POOL", format!("{} {}", radius(f.radius), secs(f.duration))),
+                (
+                    "HASTE",
+                    format!("X{} {}", num(f.haste, 2), secs(f.duration)),
+                ),
             ]
         }
         Knack::Snare => {

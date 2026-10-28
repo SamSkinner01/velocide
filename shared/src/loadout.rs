@@ -372,10 +372,11 @@ impl Ability {
 )]
 #[repr(u8)]
 pub enum Knack {
-    /// The relay spike: Quill shots ricochet off it (PvE only).
+    /// The relay spike: every attack that reaches it is relayed to the nearest hostile (PvE
+    /// only).
     #[default]
     Thorn = 0,
-    /// A lobbed flask: a pool that heals the Shrikes standing in it.
+    /// A flask drunk at once: a few seconds of haste and a heal over time.
     KindleFlask = 1,
     /// A wax trap: the first hostile to come close is pinned.
     Snare = 2,
@@ -423,8 +424,8 @@ impl Knack {
     /// One-line description (menus).
     pub fn blurb(self) -> &'static str {
         match self {
-            Knack::Thorn => "relay spike: Quill shots ricochet off it",
-            Knack::KindleFlask => "lobbed flask: a pool that heals you and your team",
+            Knack::Thorn => "relay spike: any attack that reaches it is relayed",
+            Knack::KindleFlask => "drink it: a few seconds of haste and healing",
             Knack::Snare => "wax trap: pins the first hostile that steps close",
             Knack::SootPot => "soot cloud: Moulds can't see into or through it",
             Knack::TallowSkin => "half damage and no knockback for a few seconds",

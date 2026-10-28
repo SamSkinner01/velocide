@@ -392,9 +392,9 @@ fn knacks(base: &Tuning) {
     println!("## Knacks in a PvP duel\n");
     println!(
         "Real 100 HP: every primary held at the opponent's body at its range; the opponent \
-         uses its knack on the first tick (the Kindle Flask at its own feet, standing in the \
-         pool). Seconds to the kill. Snare, Soot Pot and Surge don't act in a standing duel \
-         (a trap, Moulds' sight, mobility).\n"
+         uses its knack on the first tick (the Kindle Flask drunk: its heal over time; its \
+         haste doesn't act standing). Seconds to the kill. Snare, Soot Pot and Surge don't act \
+         in a standing duel (a trap, Moulds' sight, mobility).\n"
     );
     header(&[
         "attacker",

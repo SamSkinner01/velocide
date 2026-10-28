@@ -54,10 +54,14 @@ fn trajectories_reproduce_server_positions() {
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.world.players.get_mut(&p).unwrap().notarget = true;
     a.ticks(3);
-    // A Gravewell canister (gravity) and a thorn, lobbed / thrown up and forward.
+    // A Gravewell canister (gravity) and a thorn, lobbed / thrown up and forward (apart: a
+    // canister reaching the thorn would be relayed off it).
     a.select(p, 3, 1);
     a.held.get_mut(&p).unwrap().pitch = 0.4;
-    a.set_buttons(p, Buttons::ALT_FIRE | Buttons::THROW);
+    a.set_buttons(p, Buttons::THROW);
+    a.tick();
+    a.held.get_mut(&p).unwrap().yaw = 1.2;
+    a.set_buttons(p, Buttons::ALT_FIRE);
     a.tick();
     a.set_buttons(p, Buttons::NONE);
     let well = *a.world.projectiles.keys().next().unwrap();

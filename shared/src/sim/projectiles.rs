@@ -7,7 +7,8 @@
 //! the [`ProjectileKind`]: needles deal direct damage, ember bombs explode, Tumbler bombs
 //! bounce off the level and explode on their last contact, on a hostile or when the fuse runs
 //! out, the Gravewell sticks to the level, pulls hostiles in and implodes, the Wisp drifts
-//! through targets zapping the nearest one and pops on the level.
+//! through targets zapping the nearest one and pops on the level. A player's projectile that
+//! reaches a live thorn turns there at a hostile (`thorn.rs`, [`Projectile::ricochets`]).
 //!
 //! **Parryable hits are delayed**: when a parryable projectile (enemy ember bombs / needles)
 //! touches a player it freezes in a *pending impact* for
@@ -68,8 +69,6 @@ pub enum ProjectileKind {
     // ---- refit (docs/arsenal.md): melee and knacks ----
     /// Hurl (melee ability): a spinning blade / hammer-head, direct damage.
     Hurl,
-    /// Kindle Flask (knack): lobbed, leaves a healing pool where it lands.
-    KindleFlask,
     /// Snare (knack): thrown to the floor, lies there as a trap (`sim::knacks`).
     Snare,
     /// Soot Pot (knack): thrown, bursts into a soot cloud.
@@ -77,7 +76,7 @@ pub enum ProjectileKind {
 }
 
 impl ProjectileKind {
-    pub const ALL: [ProjectileKind; 19] = [
+    pub const ALL: [ProjectileKind; 18] = [
         ProjectileKind::Bomb,
         ProjectileKind::Gravewell,
         ProjectileKind::Wisp,
@@ -94,7 +93,6 @@ impl ProjectileKind {
         ProjectileKind::EmberArrow,
         ProjectileKind::BrandArrow,
         ProjectileKind::Hurl,
-        ProjectileKind::KindleFlask,
         ProjectileKind::Snare,
         ProjectileKind::SootPot,
     ];
@@ -117,7 +115,6 @@ impl ProjectileKind {
             ProjectileKind::EmberArrow => kind::EMBER_ARROW,
             ProjectileKind::BrandArrow => kind::BRAND_ARROW,
             ProjectileKind::Hurl => kind::HURL,
-            ProjectileKind::KindleFlask => kind::KINDLE_FLASK,
             ProjectileKind::Snare => kind::SNARE,
             ProjectileKind::SootPot => kind::SOOT_POT,
         }
@@ -152,7 +149,6 @@ impl ProjectileKind {
             ProjectileKind::MortarShell => t.mortar.gravity,
             ProjectileKind::Flare => t.flare.gravity,
             ProjectileKind::Hurl => t.hurl.gravity,
-            ProjectileKind::KindleFlask => t.knacks.kindle_flask.gravity,
             ProjectileKind::Snare => t.knacks.snare.gravity,
             ProjectileKind::SootPot => t.knacks.soot_pot.gravity,
             _ => 0.0,
@@ -174,7 +170,6 @@ impl ProjectileKind {
             ProjectileKind::Limpet => t.limpet.projectile_radius,
             ProjectileKind::MortarShell => t.mortar.projectile_radius,
             ProjectileKind::Hurl => t.hurl.projectile_radius,
-            ProjectileKind::KindleFlask => t.knacks.kindle_flask.projectile_radius,
             ProjectileKind::Snare => t.knacks.snare.projectile_radius,
             ProjectileKind::SootPot => t.knacks.soot_pot.projectile_radius,
             _ => t.flare.projectile_radius,
@@ -197,7 +192,6 @@ impl ProjectileKind {
             ProjectileKind::Limpet => t.limpet.fuse,
             ProjectileKind::MortarShell => t.mortar.flight_time,
             ProjectileKind::Hurl => t.hurl.flight_time,
-            ProjectileKind::KindleFlask => t.knacks.kindle_flask.flight_time,
             // Thrown and lying on the floor: the trap's whole life.
             ProjectileKind::Snare => t.knacks.snare.lifetime,
             ProjectileKind::SootPot => t.knacks.soot_pot.flight_time,
@@ -245,8 +239,8 @@ impl ProjectileKind {
             ProjectileKind::BrandArrow => Attack::Brand,
             ProjectileKind::Hurl => Attack::Hurl,
             ProjectileKind::Snare => Attack::Snare,
-            // They deal no damage.
-            ProjectileKind::KindleFlask | ProjectileKind::SootPot => Attack::World,
+            // It deals no damage.
+            ProjectileKind::SootPot => Attack::World,
         }
     }
 
@@ -370,6 +364,9 @@ pub struct Projectile {
     /// Per-target re-hit timers (target, tick it may be damaged again) for kinds that touch
     /// targets repeatedly; cleared by a deflection.
     pub contacts: Vec<(HitTarget, u32)>,
+    /// Thorns it was relayed off (`thorn.rs`): it flies straight, and its hits and blasts deal
+    /// × `thorn.damage_multiplier` per relay and count as ricochets.
+    pub ricochets: u8,
 }
 
 impl Projectile {
@@ -398,6 +395,9 @@ impl Projectile {
         }
         if matches!(self.original_owner, Owner::Enemy(_)) {
             flags |= projectile_flags::ENEMY;
+        }
+        if self.ricochets > 0 {
+            flags |= projectile_flags::RELAYED;
         }
         EntityState {
             id: self.id,
@@ -478,6 +478,7 @@ impl SimWorld {
             pending: None,
             trail: Trail::new(),
             contacts: Vec::new(),
+            ricochets: 0,
         };
         self.projectiles.insert(id, p);
         Some(id)
@@ -552,6 +553,11 @@ impl SimWorld {
             .cast_sphere(p.position, p.radius, motion, MASK_SHOTS);
         let world_f = world_hit.map_or(1.0, |h| h.fraction);
         let dir = motion.normalize_or(p.velocity.normalize_or(Vec3::NEG_Z));
+
+        // A live thorn on the way turns it (thorn.rs).
+        if self.relay_projectile(t, p, motion, world_f, boxes) {
+            return true;
+        }
 
         if p.kind.hits_targets() {
             // Player projectiles are fatter against targets than against the level
@@ -658,11 +664,18 @@ impl SimWorld {
         } else {
             part
         };
-        let mut info = DamageInfo::new(p.damage, p.owner, p.attack)
+        // Relayed off thorns: × the multiplier per relay, a ricochet hit.
+        let mut damage = p.damage;
+        if p.ricochets > 0 {
+            flags.insert(DamageFlags::RICOCHET);
+            damage *= t.combat.thorn.damage_multiplier.powi(p.ricochets as i32);
+        }
+        let mut info = DamageInfo::new(damage, p.owner, p.attack)
             .at(p.position, dir)
             .part(part)
             .flags(flags);
         info.projectile = Some(p.id);
+        info.ricochets = p.ricochets;
         self.apply_damage(t, target, info);
     }
 
@@ -840,7 +853,7 @@ impl SimWorld {
         if p.parried {
             flags.insert(DamageFlags::PARRIED);
         }
-        self.explode(
+        self.explode_relayed(
             t,
             p.position,
             spec,
@@ -850,6 +863,7 @@ impl SimWorld {
             Some(p.id),
             direct,
             p.original_owner,
+            p.ricochets,
         )
     }
 
@@ -857,7 +871,8 @@ impl SimWorld {
     /// knockback away from the centre (with an upward bias) to everything in the radius —
     /// including the owner (self-damage fraction, full knockback: blast jumps) and co-op
     /// teammates (knockback only). Player-owned explosions measure the distance to the
-    /// shapes inflated by the hit assist. Returns every target the blast reached.
+    /// shapes inflated by the hit assist. Returns every target the blast reached. A player's
+    /// blast flings the live thorns in its radius (`thorn.rs`).
     #[allow(clippy::too_many_arguments)]
     pub fn explode(
         &mut self,
@@ -871,6 +886,40 @@ impl SimWorld {
         direct: Option<HitTarget>,
         original_owner: Owner,
     ) -> Vec<HitTarget> {
+        self.explode_relayed(
+            t,
+            center,
+            spec,
+            owner,
+            attack,
+            flags,
+            projectile,
+            direct,
+            original_owner,
+            0,
+        )
+    }
+
+    /// [`SimWorld::explode`] of a projectile relayed off `ricochets` thorns: its damage × the
+    /// thorn multiplier per relay, ricochet hits.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn explode_relayed(
+        &mut self,
+        t: &Tuning,
+        center: Vec3,
+        mut spec: Explosive,
+        owner: Owner,
+        attack: Attack,
+        mut flags: DamageFlags,
+        projectile: Option<NetId>,
+        direct: Option<HitTarget>,
+        original_owner: Owner,
+        ricochets: u8,
+    ) -> Vec<HitTarget> {
+        if ricochets > 0 {
+            flags.insert(DamageFlags::RICOCHET);
+            spec.damage *= t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+        }
         self.events.push(SimEvent::Explosion {
             position: center,
             radius: spec.radius,
@@ -940,12 +989,15 @@ impl SimWorld {
                 info.flags.insert(DamageFlags::RETURNED);
             }
             info.projectile = projectile;
+            info.ricochets = ricochets;
             hits.push((h.target, info));
         }
         let reached = hits.iter().map(|(target, _)| *target).collect();
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        // The thorns it reached fling on (thorn.rs).
+        self.relay_blast(t, owner, attack, center, spec.radius);
         reached
     }
 
@@ -989,8 +1041,8 @@ pub fn projectile_target_pad(t: &Tuning, owner: Owner) -> f32 {
 /// `time_ticks` (fractional server ticks, e.g. the render tick). Other kinds: `position`.
 ///
 /// `position`/`velocity` are the state at launch tick `aux`; gravity is the kind's (thorns:
-/// `thorn.gravity`), 0 for `PARRIED` projectiles; `STUCK`/`PENDING` projectiles and `PLANTED`
-/// thorns are at `position`.
+/// `thorn.gravity`), 0 for `PARRIED` and `RELAYED` projectiles; `STUCK`/`PENDING` projectiles
+/// and `PLANTED` thorns are at `position`.
 pub fn replicated_position(
     e: &EntityState,
     time_ticks: f64,
@@ -1006,7 +1058,7 @@ pub fn replicated_position(
         if e.flags & (projectile_flags::STUCK | projectile_flags::PENDING) != 0 {
             return e.position;
         }
-        if e.flags & projectile_flags::PARRIED != 0 {
+        if e.flags & (projectile_flags::PARRIED | projectile_flags::RELAYED) != 0 {
             0.0
         } else {
             k.gravity(t)

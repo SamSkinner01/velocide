@@ -206,11 +206,6 @@ pub fn launches(
             let k = &c.knacks;
             let start = safe(eye + aim * 0.5);
             match knack {
-                Knack::KindleFlask => one(
-                    kind::KINDLE_FLASK,
-                    start,
-                    lob_dir(aim, k.kindle_flask.angle_degrees) * k.kindle_flask.speed,
-                ),
                 Knack::Snare => one(kind::SNARE, start, aim * k.snare.speed),
                 Knack::SootPot => one(kind::SOOT_POT, start, aim * k.soot_pot.speed),
                 _ => Vec::new(),
