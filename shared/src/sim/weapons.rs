@@ -4,28 +4,38 @@
 //!
 //! * [`step_weapons`] — a **pure, deterministic** function of `(WeaponState, PlayerInput,
 //!   alive, tuning)` that decides *what* fires this input (cooldowns, charges, the Longwick's
-//!   draw, bursts, punch, knack charges) and returns [`FireIntent`]s. All timers are integer
-//!   ticks, so the owning client can run the same function on its predicted inputs (muzzle
-//!   flash, sound and viewmodel recoil without waiting a round trip) and compare its
-//!   prediction bit-exactly with the authoritative `OwnState::combat.weapons`.
+//!   draw and the Lamplighter's focus, salvos, held and live abilities, the Stoke, punch, knack
+//!   charges) and returns [`FireIntent`]s. All timers are integer ticks, so the owning client
+//!   can run the same function on its predicted inputs (muzzle flash, sound and viewmodel recoil
+//!   without waiting a round trip) and compare its prediction bit-exactly with the
+//!   authoritative `OwnState::combat.weapons`.
 //! * [`SimWorld::resolve_intent`] (server) — turns an intent into hitscan traces (`hitscan.rs`),
-//!   area attacks (`area.rs`), projectiles (`projectiles.rs`), melee swings (`melee.rs`), a
-//!   punch/parry or a knack (`knacks.rs`; the Thorn: `thorn.rs`).
+//!   area attacks (`area.rs`), projectiles (`projectiles.rs`), melee swings (`melee.rs`), the
+//!   rework's abilities (`abilities/`, one file each), a punch/parry or a knack (`knacks.rs`;
+//!   the Thorn: `thorn.rs`).
 //!
 //! The player carries a [`Loadout`] (`WeaponState::loadout`, set by the server: `loadouts.rs`):
 //! up to four [`WeaponBuild`]s on the slot keys. `PlayerInput::weapon` is the slot (an empty
 //! slot or an out-of-range value keeps the current weapon); `PlayerInput::weapon_mode` 0 / 1
 //! picks the build's ability A / B (others → A). `FIRE` (held) = primary: automatic, a salvo
-//! (Cinderbox) or hold-to-draw / release (Longwick); `ALT_FIRE` = the selected ability: held
-//! and automatic, hold-to-charge / release (Discharge, Skewer), a burst (Flurry), press-only
-//! (Limpet), or on the bow it arms the next release; `PUNCH` (press) = fist/parry; `THROW`
+//! (Cinderbox), hold-to-draw / release (Longwick) or hold-to-focus / release (Lamplighter);
+//! `ALT_FIRE` = the selected ability ([`AbilityStyle`]: held and automatic, hold-to-charge /
+//! release, tap / hold, held for a while (a channel), press-only; a live ability answers a
+//! second press; on the bow it arms the next release); `PUNCH` (press) = fist/parry; `THROW`
 //! (press, the KNACK control) = the loadout's [`Knack`] while it has a charge.
+//!
+//! Some abilities' cooldowns depend on what happened on the server (a Wickline that missed, a
+//! Tally with nothing tallied, a shattered Bulwark, a Waxwork destroyed early, a caught Hurl):
+//! the server changes the owner's `WeaponState` then, and their client re-bases on it like on
+//! any reconciliation.
 
 use std::borrow::Cow;
 
 use glam::{Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
+use super::abilities::AbilityCast;
+pub use super::abilities::AbilityPhase;
 use super::combat::{Attack, DamageFlags, Owner, secs_to_ticks};
 use super::hitscan::ShotSpec;
 use super::projectiles::ProjectileKind;
@@ -47,6 +57,9 @@ pub enum PrimaryStyle {
     Salvo,
     /// Hold to draw, release to loose (Longwick).
     Draw,
+    /// Hold to focus, release to fire one hitscan beam (Lamplighter): the bow's draw, as a ray
+    /// (`WeaponState::draw` holds the focus).
+    Focus,
 }
 
 /// How an ability fires.
@@ -54,13 +67,19 @@ pub enum PrimaryStyle {
 pub enum AbilityStyle {
     /// Automatic while held, once per cooldown.
     Instant,
-    /// Hold to charge (once off cooldown), fires on release (Discharge, Skewer).
+    /// Hold to charge (once off cooldown), fires on release (Discharge).
     Charge,
-    /// A burst of shots over several ticks (Flurry).
-    Burst,
     /// Tap or hold (Limpet): released before the hold time it fires with `charge` 0 (throw),
     /// held to it with `charge` 1 (detonate).
     Hold,
+    /// Held for a while (Tally, Bulwark, Riposte): the press (off cooldown) is its use, holding
+    /// keeps it up for at most its `charge_time` (`WeaponState::charge` counts), letting go
+    /// (or the limit, or switching away) is its release (`AbilityPhase::Release`); the
+    /// cooldown starts then.
+    Channel,
+    /// Fires on the press only, once per cooldown (Kite: holding it steers; the Wisp: a
+    /// second press while it is live flings it).
+    Press,
 }
 
 impl WeaponKind {
@@ -73,7 +92,17 @@ impl WeaponKind {
         match self {
             WeaponKind::Cinderbox => PrimaryStyle::Salvo,
             WeaponKind::Longwick => PrimaryStyle::Draw,
+            WeaponKind::Lamplighter => PrimaryStyle::Focus,
             _ => PrimaryStyle::Auto,
+        }
+    }
+
+    /// Seconds to a full draw (Longwick) or focus (Lamplighter); `None` for the others.
+    pub fn draw_time(self, t: &CombatTuning) -> Option<f32> {
+        match self {
+            WeaponKind::Longwick => Some(t.longwick.draw_time),
+            WeaponKind::Lamplighter => Some(t.lamplighter.focus_time),
+            _ => None,
         }
     }
 
@@ -92,6 +121,7 @@ impl WeaponKind {
             WeaponKind::Kiln => t.kiln.interval,
             WeaponKind::Trimmer => t.trimmer.interval,
             WeaponKind::Tamper => t.tamper.interval,
+            WeaponKind::Lamplighter => t.lamplighter.interval,
         }
     }
 
@@ -110,11 +140,12 @@ impl WeaponKind {
             WeaponKind::Kiln => t.kiln.ability_power,
             WeaponKind::Trimmer => t.trimmer.ability_power,
             WeaponKind::Tamper => t.tamper.ability_power,
+            WeaponKind::Lamplighter => t.lamplighter.ability_power,
         }
     }
 
     /// Damage of one primary shot (a pellet, a zap, a rivet, a rocket, an un-drawn arrow, a
-    /// swing).
+    /// swing, an un-focused beam).
     pub fn primary_damage(self, t: &CombatTuning) -> f32 {
         match self {
             WeaponKind::Quill => t.quill.damage,
@@ -129,6 +160,7 @@ impl WeaponKind {
             WeaponKind::Kiln => t.kiln.damage,
             WeaponKind::Trimmer => t.trimmer.damage,
             WeaponKind::Tamper => t.tamper.damage,
+            WeaponKind::Lamplighter => t.lamplighter.min_damage,
         }
     }
 }
@@ -151,69 +183,122 @@ impl Ability {
 
     pub fn style(self) -> AbilityStyle {
         match self {
-            Ability::Discharge | Ability::Skewer => AbilityStyle::Charge,
-            Ability::Flurry => AbilityStyle::Burst,
+            Ability::Discharge => AbilityStyle::Charge,
             Ability::Limpet => AbilityStyle::Hold,
+            Ability::Tally | Ability::Bulwark | Ability::Riposte => AbilityStyle::Channel,
+            Ability::Kite | Ability::Wisp => AbilityStyle::Press,
             _ => AbilityStyle::Instant,
         }
     }
 
-    /// Seconds before it can be used again.
+    /// Seconds before it can be used again (a live ability: from its end).
     pub fn cooldown(self, t: &CombatTuning) -> f32 {
         match self {
             Ability::Brand => t.quill.brand_cooldown,
-            Ability::Splinter => t.quill.splinter_cooldown,
+            Ability::Wickline => t.wickline.cooldown,
             Ability::Gust => t.bellows.gust_cooldown,
-            Ability::BothBarrels => t.bellows.both_cooldown,
+            Ability::Bolas => t.bolas.cooldown,
             Ability::Wisp => t.arclash.wisp_cooldown,
             Ability::Discharge => t.arclash.discharge_cooldown,
             Ability::Breach => t.tumbler.breach_cooldown,
             Ability::Gravewell => t.tumbler.gravewell_cooldown,
-            Ability::Skewer => t.skewer.cooldown,
-            Ability::Flurry => t.flurry.cooldown,
-            Ability::Slug => t.slug.cooldown,
+            Ability::Tally => t.tally.cooldown,
+            Ability::Waxwork => t.waxwork.cooldown,
+            Ability::Bulwark => t.bulwark.cooldown,
             Ability::Flak => t.flak.cooldown,
-            Ability::Volley => t.volley.cooldown,
-            Ability::Flare => t.flare.cooldown,
+            Ability::Stoke => t.stoke.cooldown,
+            Ability::Lantern => t.lantern.cooldown,
             Ability::Limpet => t.limpet.cooldown,
-            Ability::Mortar => t.mortar.cooldown,
-            Ability::TripleNock => t.triple_nock.cooldown,
+            Ability::Kite => t.kite.cooldown,
+            Ability::BlinkArrow => t.blink_arrow.cooldown,
             Ability::PinningArrow => t.pinning_arrow.cooldown,
-            Ability::EmberArrow => t.ember_arrow.cooldown,
+            Ability::BeaconArrow => t.beacon_arrow.cooldown,
             Ability::Lunge => t.lunge.cooldown,
             Ability::Whirl => t.whirl.cooldown,
             Ability::Hurl => t.hurl.cooldown,
-            Ability::Upswing => t.upswing.cooldown,
+            Ability::Riposte => t.riposte.cooldown,
         }
     }
 
-    /// Seconds to a full charge (charging abilities, the Limpet's hold; 1 s for the others).
+    /// Seconds to a full charge (Discharge), the Limpet's hold, the longest a held ability
+    /// stays up (Tally, Bulwark, Riposte); 1 s for the others.
     pub fn charge_time(self, t: &CombatTuning) -> f32 {
         match self {
-            Ability::Skewer => t.skewer.charge_time,
             Ability::Discharge => t.arclash.discharge_charge_time,
             Ability::Limpet => t.limpet.detonate_hold,
+            Ability::Tally => t.tally.hold_time,
+            Ability::Bulwark => t.bulwark.hold_time,
+            Ability::Riposte => t.riposte.hold_time,
             _ => 1.0,
         }
     }
 
-    /// Made of the carrying weapon's own shots (Flurry, Volley): their damage comes from its
-    /// primary, so `ability_power` doesn't scale them again.
+    /// Seconds a live ability lasts after its use (0: not live). While it is live
+    /// (`WeaponState::live`) it can't be used again — a second press recasts it if it
+    /// [`recasts`] —, the build's other ability stays usable on the shared cooldown, and its
+    /// cooldown starts when it ends (the server may end it early). The Blink Arrow's is the
+    /// arrow's whole flight plus its window (the server shortens it once the arrow sticks).
+    ///
+    /// [`recasts`]: Ability::recasts
+    pub fn live_time(self, t: &CombatTuning) -> f32 {
+        match self {
+            Ability::Wisp => t.arclash.wisp_orbit_time,
+            Ability::Waxwork => t.waxwork.duration,
+            Ability::BlinkArrow => t.longwick.arrow_lifetime + t.blink_arrow.window,
+            _ => 0.0,
+        }
+    }
+
+    /// A second press while it is live is its [`AbilityPhase::Recast`] (the Wisp flung, the
+    /// Blink Arrow's step).
+    pub fn recasts(self) -> bool {
+        matches!(self, Ability::Wisp | Ability::BlinkArrow)
+    }
+
+    /// The cooldown a recast starts (the flung Wisp's flight counts: its cooldown runs from
+    /// when it is gone).
+    pub fn recast_cooldown(self, t: &CombatTuning) -> f32 {
+        match self {
+            Ability::Wisp => t.arclash.wisp_lifetime + t.arclash.wisp_cooldown,
+            _ => self.cooldown(t),
+        }
+    }
+
+    /// Made of the carrying weapon's own shots (Stoke's faster fire, the Lantern's copies):
+    /// their damage comes from its primary, so `ability_power` doesn't scale them again.
     pub fn uses_primary(self) -> bool {
-        matches!(self, Ability::Flurry | Ability::Volley)
+        matches!(self, Ability::Stoke | Ability::Lantern)
+    }
+
+    /// One of the rework's abilities (`abilities/`; the Wisp's twist included): resolved by
+    /// [`SimWorld::cast_ability`].
+    pub fn is_rework(self) -> bool {
+        matches!(
+            self,
+            Ability::Wickline
+                | Ability::Tally
+                | Ability::Waxwork
+                | Ability::Bolas
+                | Ability::Bulwark
+                | Ability::Wisp
+                | Ability::Stoke
+                | Ability::Lantern
+                | Ability::Kite
+                | Ability::BlinkArrow
+                | Ability::BeaconArrow
+                | Ability::Riposte
+        )
     }
 }
 
-/// A burst in progress: shots still to fire over the next ticks (the Cinderbox salvo,
-/// Flurry). Switching weapon, dying or a new loadout cancels it.
+/// A salvo in progress: rockets still to fire over the next ticks (the Cinderbox). Switching
+/// weapon, dying or a new loadout cancels it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Burst {
     /// Shots left (0 = no burst).
     pub left: u8,
     /// Ticks to the next one.
     pub next: u16,
-    /// The ability firing it (`None` = the weapon's primary).
-    pub ability: Option<Ability>,
 }
 
 /// Weapons, fist and knack state of one player. Everything is in ticks/integers so client
@@ -237,9 +322,10 @@ pub struct WeaponState {
     pub primary_cooldown: [u16; LOADOUT_SLOTS],
     /// Ticks until each slot's abilities can fire again (a build's two abilities share it).
     pub alt_cooldown: [u16; LOADOUT_SLOTS],
-    /// Hold-to-charge abilities (Discharge, Skewer): ticks the alt button has been held.
+    /// Ticks the alt button has been held: the Discharge's charge, the Limpet's hold, a held
+    /// ability (Tally, Bulwark, Riposte) while it is up (0 = none).
     pub charge: u16,
-    /// Longwick: ticks the primary has been drawn (0 = not drawing).
+    /// Longwick: ticks the primary has been drawn; Lamplighter: focused (0 = not drawing).
     pub draw: u16,
     /// Longwick: the ability armed for the next release (0 = none, 1 = A, 2 = B).
     pub armed: u8,
@@ -254,6 +340,16 @@ pub struct WeaponState {
     pub knack_used: u8,
     /// Ticks accumulated towards the next knack charge.
     pub knack_recharge: u16,
+    // ---- rework (docs/rework.md) ----
+    /// Per slot: ticks a live ability ([`Ability::live_time`]) has left (0 = none); while it
+    /// lasts it can only be recast, and its cooldown starts when it ends.
+    pub live: [u16; LOADOUT_SLOTS],
+    /// Per slot: the mode (0 / 1) whose ability is live.
+    pub live_mode: [u8; LOADOUT_SLOTS],
+    /// Per slot: Stoke ticks left (the primary at `stoke.rate` × its rate) ...
+    pub stoke: [u16; LOADOUT_SLOTS],
+    /// ... then overheated for this many (no primary).
+    pub overheat: [u16; LOADOUT_SLOTS],
 }
 
 /// A [`Loadout`] as one `u64`: 16 bits per slot (slot 0 lowest): weapon id + 1 (bits 0–4,
@@ -315,12 +411,14 @@ pub enum FireIntent {
         weapon: WeaponKind,
         charge: f32,
     },
-    /// An ability of the held weapon. `charge` (0..=1): the Discharge / Skewer charge, the
-    /// Longwick's draw for an armed arrow; 0 for the others.
+    /// An ability of the held weapon. `charge` (0..=1): the Discharge charge, the Longwick's
+    /// draw for an armed arrow, how long a held ability was held (its release); 0 for the
+    /// others. `phase`: its use, a held ability's release or a live one's recast.
     Ability {
         weapon: WeaponKind,
         ability: Ability,
         charge: f32,
+        phase: AbilityPhase,
     },
     Punch,
     /// The loadout's knack (a charge was spent).
@@ -459,12 +557,68 @@ impl WeaponState {
 
     /// Ticks to a full Longwick draw.
     pub fn draw_ticks(t: &CombatTuning, tick_rate: u32) -> u16 {
-        secs_to_ticks(t.longwick.draw_time, tick_rate, 1)
+        Self::draw_ticks_of(WeaponKind::Longwick, t, tick_rate)
     }
 
-    /// Longwick draw fraction (0..=1).
+    /// Ticks to a full draw (Longwick) / focus (Lamplighter) of `weapon` (1 for the others).
+    pub fn draw_ticks_of(weapon: WeaponKind, t: &CombatTuning, tick_rate: u32) -> u16 {
+        secs_to_ticks(weapon.draw_time(t).unwrap_or(0.0), tick_rate, 1)
+    }
+
+    /// Draw (Longwick) / focus (Lamplighter) fraction of the weapon in hand (0..=1).
     pub fn draw_fraction(&self, t: &CombatTuning, tick_rate: u32) -> f32 {
-        (self.draw as f32 / Self::draw_ticks(t, tick_rate) as f32).min(1.0)
+        let full = Self::draw_ticks_of(self.current(), t, tick_rate);
+        (self.draw as f32 / full as f32).min(1.0)
+    }
+
+    /// The selected slot's weapon is stoked (`stoke` ticks left).
+    pub fn is_stoked(&self) -> bool {
+        self.stoke.get(self.slot as usize).is_some_and(|s| *s > 0)
+    }
+
+    /// The selected slot's weapon is overheated after a Stoke (no primary).
+    pub fn is_overheated(&self) -> bool {
+        self.overheat
+            .get(self.slot as usize)
+            .is_some_and(|s| *s > 0)
+    }
+
+    /// The live ability of `slot` (`None` while nothing is live there).
+    pub fn live_ability(&self, slot: u8) -> Option<Ability> {
+        let i = slot as usize;
+        if *self.live.get(i)? == 0 {
+            return None;
+        }
+        Some(self.loadout.slot(slot)?.ability(self.live_mode[i]))
+    }
+
+    /// Server side: ends the live ability of `slot` now (a Waxwork destroyed, a wisp gone):
+    /// its cooldown starts. The owner's client re-bases on the change.
+    pub fn end_live(&mut self, slot: u8, t: &CombatTuning, tick_rate: u32) {
+        if let Some(ability) = self.live_ability(slot) {
+            let i = slot as usize;
+            self.live[i] = 0;
+            let cd = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+            self.alt_cooldown[i] = self.alt_cooldown[i].max(cd);
+        }
+    }
+
+    /// Server side: shortens the live ability of `slot` to at most `secs` more (the Blink
+    /// Arrow stuck: its window).
+    pub fn shorten_live(&mut self, slot: u8, secs: f32, tick_rate: u32) {
+        if let Some(live) = self.live.get_mut(slot as usize)
+            && *live > 0
+        {
+            *live = (*live).min(secs_to_ticks(secs, tick_rate, 1));
+        }
+    }
+
+    /// Server side: the selected slot's ability cooldown becomes `secs` (a refund or a longer
+    /// one: a Wickline that missed, a Tally with nothing tallied, a caught Hurl).
+    pub fn set_alt_cooldown(&mut self, slot: u8, secs: f32, tick_rate: u32) {
+        if let Some(cd) = self.alt_cooldown.get_mut(slot as usize) {
+            *cd = secs_to_ticks(secs, tick_rate, 0);
+        }
     }
 
     /// The ability armed for the bow's next release.
@@ -486,7 +640,8 @@ impl WeaponState {
         )
     }
 
-    /// Replicated charge level 0..=255: the draw while drawing, else the ability charge.
+    /// Replicated charge level 0..=255: the draw / focus while drawing, else the ability
+    /// charge (a held ability: how long it has been up).
     pub fn charge_level(&self, t: &CombatTuning, tick_rate: u32) -> u8 {
         let f = if self.draw > 0 {
             self.draw_fraction(t, tick_rate)
@@ -496,7 +651,7 @@ impl WeaponState {
         (f * 255.0).round() as u8
     }
 
-    /// Drops everything in progress (charge, draw, arming, burst).
+    /// Drops everything in progress (charge, draw, arming, salvo).
     fn cancel(&mut self) {
         self.charge = 0;
         self.draw = 0;
@@ -542,6 +697,7 @@ pub fn step_weapons(
     s.bloom = s.bloom.saturating_sub(1);
     s.punch_cooldown = s.punch_cooldown.saturating_sub(1);
     s.parry = s.parry.saturating_sub(1);
+    step_slot_timers(s, t, tick_rate);
     let knack = s.knack();
     if s.knack_used > 0 {
         s.knack_recharge = s.knack_recharge.saturating_add(1);
@@ -557,8 +713,8 @@ pub fn step_weapons(
         return out;
     }
 
-    // Selection (instant; switching weapon or mode cancels a charge, switching weapon a draw
-    // or burst too). Empty slots are ignored.
+    // Selection (instant; switching weapon or mode cancels a charge — a held ability is let
+    // go first —, switching weapon a draw or salvo too). Empty slots are ignored.
     let mode = if input.weapon_mode < ALT_MODES {
         input.weapon_mode
     } else {
@@ -568,6 +724,7 @@ pub fn step_weapons(
         s.slot = s.loadout.first_slot().unwrap_or(0);
     }
     if s.loadout.slot(input.weapon).is_some() && (input.weapon != s.slot || mode != s.mode) {
+        end_channel(s, t, tick_rate, &mut out);
         s.charge = 0;
         if input.weapon != s.slot {
             s.cancel();
@@ -575,6 +732,7 @@ pub fn step_weapons(
         s.slot = input.weapon;
     }
     if mode != s.mode {
+        end_channel(s, t, tick_rate, &mut out);
         s.charge = 0;
         s.armed = 0;
         s.mode = mode;
@@ -601,11 +759,106 @@ pub fn step_weapons(
     out
 }
 
-/// Ticks between the shots of a burst by `ability` (`None`: the primary salvo).
-fn burst_gap(ability: Option<Ability>, t: &CombatTuning, tick_rate: u32) -> u16 {
-    match ability {
-        None => secs_to_ticks(t.cinderbox.salvo_gap, tick_rate, 1),
-        Some(_) => secs_to_ticks(t.flurry.gap, tick_rate, 1),
+/// The per-slot timers of the rework: live abilities run out (their cooldown starts), a
+/// Stoke runs into its overheat, the overheat cools.
+fn step_slot_timers(s: &mut WeaponState, t: &CombatTuning, tick_rate: u32) {
+    for i in 0..LOADOUT_SLOTS {
+        if s.live[i] > 0 {
+            s.live[i] -= 1;
+            if s.live[i] == 0
+                && let Some(build) = s.loadout.slot(i as u8)
+            {
+                let ability = build.ability(s.live_mode[i]);
+                let cd = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+                s.alt_cooldown[i] = s.alt_cooldown[i].max(cd);
+            }
+        }
+        if s.stoke[i] > 0 {
+            s.stoke[i] -= 1;
+            if s.stoke[i] == 0 {
+                s.overheat[i] = secs_to_ticks(t.stoke.overheat, tick_rate, 0);
+            }
+        } else {
+            s.overheat[i] = s.overheat[i].saturating_sub(1);
+        }
+    }
+}
+
+/// Lets go of a held ability (Tally, Bulwark, Riposte) of the selected build before the
+/// selection changes: its release fires and its cooldown starts.
+fn end_channel(s: &mut WeaponState, t: &CombatTuning, tick_rate: u32, out: &mut Vec<FireIntent>) {
+    let Some(build) = s.held() else {
+        return;
+    };
+    let ability = build.ability(s.mode);
+    if ability.style() == AbilityStyle::Channel && s.charge > 0 {
+        release_channel(s, build.weapon, ability, t, tick_rate, out);
+    }
+}
+
+/// A held ability's release: the intent, the cooldown, the charge cleared.
+fn release_channel(
+    s: &mut WeaponState,
+    weapon: WeaponKind,
+    ability: Ability,
+    t: &CombatTuning,
+    tick_rate: u32,
+    out: &mut Vec<FireIntent>,
+) {
+    let max = secs_to_ticks(ability.charge_time(t), tick_rate, 1);
+    out.push(FireIntent::Ability {
+        weapon,
+        ability,
+        charge: (s.charge as f32 / max as f32).min(1.0),
+        phase: AbilityPhase::Release,
+    });
+    s.charge = 0;
+    s.alt_cooldown[s.slot as usize] = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+}
+
+/// Ticks between the rockets of a salvo.
+fn burst_gap(t: &CombatTuning, tick_rate: u32) -> u16 {
+    secs_to_ticks(t.cinderbox.salvo_gap, tick_rate, 1)
+}
+
+/// Ticks between primary shots of `w` (stoked: `stoke.rate` × faster).
+fn primary_interval_ticks(w: WeaponKind, stoked: bool, t: &CombatTuning, tick_rate: u32) -> u16 {
+    let mut secs = w.primary_interval(t);
+    if stoked {
+        secs /= t.stoke.rate.max(0.1);
+    }
+    secs_to_ticks(secs, tick_rate, 1)
+}
+
+/// An ability's use: the intent, then its cooldown (or, live, its live time: the cooldown
+/// starts when it ends).
+fn use_ability(
+    s: &mut WeaponState,
+    weapon: WeaponKind,
+    ability: Ability,
+    charge: f32,
+    t: &CombatTuning,
+    tick_rate: u32,
+    out: &mut Vec<FireIntent>,
+) {
+    out.push(FireIntent::Ability {
+        weapon,
+        ability,
+        charge,
+        phase: AbilityPhase::Use,
+    });
+    let si = s.slot as usize;
+    let live = ability.live_time(t);
+    if live > 0.0 {
+        s.live[si] = secs_to_ticks(live, tick_rate, 1);
+        s.live_mode[si] = s.mode;
+    } else {
+        s.alt_cooldown[si] = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+    }
+    if ability == Ability::Stoke {
+        // The weapon in this slot is stoked (`step_slot_timers` runs it into its overheat).
+        s.stoke[si] = secs_to_ticks(t.stoke.duration, tick_rate, 1);
+        s.overheat[si] = 0;
     }
 }
 
@@ -622,41 +875,35 @@ fn step_build(
     let held = input.buttons;
     let w = build.weapon;
     let si = s.slot as usize;
-    let interval = secs_to_ticks(w.primary_interval(t), tick_rate, 1);
+    let interval = primary_interval_ticks(w, s.stoke[si] > 0, t, tick_rate);
 
-    // A burst in progress fires its next shot when due.
+    // A salvo in progress fires its next rocket when due.
     if s.burst.left > 0 {
         s.burst.next = s.burst.next.saturating_sub(1);
         if s.burst.next == 0 {
             s.burst.left -= 1;
-            s.burst.next = burst_gap(s.burst.ability, t, tick_rate);
-            out.push(match s.burst.ability {
-                None => FireIntent::Primary {
-                    weapon: w,
-                    charge: 0.0,
-                },
-                Some(ability) => FireIntent::Ability {
-                    weapon: w,
-                    ability,
-                    charge: 0.0,
-                },
+            s.burst.next = burst_gap(t, tick_rate);
+            out.push(FireIntent::Primary {
+                weapon: w,
+                charge: 0.0,
             });
         }
     }
 
-    // Both Barrels and Volley are the primary's shot fired another way: they wait for it to be
-    // ready and use it up, so the primary doesn't also fire that tick (both at once was a body
-    // one-shot in PvP).
+    // The Whirl is the melee weapon's swing spun round: it waits for the swing to be ready and
+    // uses it up, so the primary doesn't also swing that tick (a Tamper's swing and a Whirl on
+    // one tick were 132 to a PvP body).
     let ability = build.ability(s.mode);
     let takes_shot = takes_primary_shot(ability);
     let ability_takes_shot = takes_shot
         && w.class() != WeaponClass::Draw
         && held.contains(Buttons::ALT_FIRE)
+        && s.live[si] == 0
         && s.alt_cooldown[si] == 0
         && s.primary_cooldown[si] == 0;
 
-    // Primary.
-    let fire = held.contains(Buttons::FIRE);
+    // Primary (none while overheated after a Stoke).
+    let fire = held.contains(Buttons::FIRE) && s.overheat[si] == 0;
     match w.primary_style() {
         PrimaryStyle::Auto => {
             if fire && !ability_takes_shot && s.primary_cooldown[si] == 0 {
@@ -680,13 +927,12 @@ fn step_build(
                 let rockets = t.cinderbox.rockets.clamp(1, u8::MAX as u32) as u8;
                 s.burst = Burst {
                     left: rockets - 1,
-                    next: burst_gap(None, t, tick_rate),
-                    ability: None,
+                    next: burst_gap(t, tick_rate),
                 };
             }
         }
-        PrimaryStyle::Draw => {
-            let max = WeaponState::draw_ticks(t, tick_rate);
+        PrimaryStyle::Draw | PrimaryStyle::Focus => {
+            let max = WeaponState::draw_ticks_of(w, t, tick_rate);
             if fire {
                 if s.draw > 0 || s.primary_cooldown[si] == 0 {
                     s.draw = (s.draw + 1).min(max);
@@ -694,20 +940,11 @@ fn step_build(
             } else {
                 if held.released(prev, Buttons::FIRE) && s.draw > 0 {
                     let charge = s.draw_fraction(t, tick_rate);
-                    let armed = s.armed_ability();
-                    // Triple Nock needs a real draw; below it the release is a plain arrow and
-                    // the arming stays.
-                    let usable = armed
-                        .filter(|a| *a != Ability::TripleNock || charge >= t.triple_nock.min_draw);
-                    match usable {
+                    match s.armed_ability() {
+                        // The bow's armed arrow rides the release.
                         Some(ability) => {
-                            out.push(FireIntent::Ability {
-                                weapon: w,
-                                ability,
-                                charge,
-                            });
                             s.armed = 0;
-                            s.alt_cooldown[si] = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+                            use_ability(s, w, ability, charge, t, tick_rate, out);
                         }
                         None => out.push(FireIntent::Primary { weapon: w, charge }),
                     }
@@ -720,10 +957,27 @@ fn step_build(
 
     // Ability.
     let alt_held = held.contains(Buttons::ALT_FIRE);
-    let alt_cd = secs_to_ticks(ability.cooldown(t), tick_rate, 1);
+    let alt_pressed = held.pressed(prev, Buttons::ALT_FIRE);
+    // The live ability itself (selected): a second press recasts it if it can. (The build's
+    // other ability stays usable meanwhile, on the shared cooldown.)
+    if s.live[si] > 0 && s.live_mode[si] == s.mode {
+        if alt_pressed && ability.recasts() {
+            out.push(FireIntent::Ability {
+                weapon: w,
+                ability,
+                charge: 0.0,
+                phase: AbilityPhase::Recast,
+            });
+            s.live[si] = 0;
+            let cd = secs_to_ticks(ability.recast_cooldown(t), tick_rate, 1);
+            s.alt_cooldown[si] = s.alt_cooldown[si].max(cd);
+        }
+        return;
+    }
+    let ready = s.alt_cooldown[si] == 0;
     if w.class() == WeaponClass::Draw {
         // Bow abilities arm the next release (pressing again disarms).
-        if held.pressed(prev, Buttons::ALT_FIRE) && s.alt_cooldown[si] == 0 {
+        if alt_pressed && ready {
             s.armed = if s.armed == s.mode + 1 { 0 } else { s.mode + 1 };
         }
         return;
@@ -732,35 +986,15 @@ fn step_build(
         AbilityStyle::Charge => {
             let max = s.charge_ticks(t, tick_rate);
             if alt_held {
-                if s.alt_cooldown[si] == 0 {
+                if ready {
                     s.charge = (s.charge + 1).min(max);
                 }
             } else {
                 if held.released(prev, Buttons::ALT_FIRE) && s.charge > 0 {
-                    out.push(FireIntent::Ability {
-                        weapon: w,
-                        ability,
-                        charge: (s.charge as f32 / max as f32).min(1.0),
-                    });
-                    s.alt_cooldown[si] = alt_cd;
+                    let charge = (s.charge as f32 / max as f32).min(1.0);
+                    use_ability(s, w, ability, charge, t, tick_rate, out);
                 }
                 s.charge = 0;
-            }
-        }
-        AbilityStyle::Burst => {
-            if alt_held && s.alt_cooldown[si] == 0 && s.burst.left == 0 {
-                out.push(FireIntent::Ability {
-                    weapon: w,
-                    ability,
-                    charge: 0.0,
-                });
-                s.alt_cooldown[si] = alt_cd;
-                let shots = t.flurry.shots.clamp(1, u8::MAX as u32) as u8;
-                s.burst = Burst {
-                    left: shots - 1,
-                    next: burst_gap(Some(ability), t, tick_rate),
-                    ability: Some(ability),
-                };
             }
         }
         AbilityStyle::Hold => {
@@ -773,6 +1007,7 @@ fn step_build(
                             weapon: w,
                             ability,
                             charge: 1.0,
+                            phase: AbilityPhase::Use,
                         });
                     }
                 }
@@ -780,28 +1015,43 @@ fn step_build(
                 if held.released(prev, Buttons::ALT_FIRE)
                     && s.charge > 0
                     && s.charge < hold
-                    && s.alt_cooldown[si] == 0
+                    && ready
                 {
-                    out.push(FireIntent::Ability {
-                        weapon: w,
-                        ability,
-                        charge: 0.0,
-                    });
-                    s.alt_cooldown[si] = alt_cd;
+                    use_ability(s, w, ability, 0.0, t, tick_rate, out);
                 }
                 s.charge = 0;
             }
         }
-        AbilityStyle::Instant => {
-            if alt_held && s.alt_cooldown[si] == 0 && (!takes_shot || s.primary_cooldown[si] == 0) {
+        AbilityStyle::Channel => {
+            let max = s.charge_ticks(t, tick_rate);
+            if s.charge > 0 {
+                // Up: held on until let go or its limit.
+                if alt_held && s.charge < max {
+                    s.charge += 1;
+                }
+                if !alt_held || s.charge >= max {
+                    release_channel(s, w, ability, t, tick_rate, out);
+                }
+            } else if alt_pressed && ready {
                 out.push(FireIntent::Ability {
                     weapon: w,
                     ability,
                     charge: 0.0,
+                    phase: AbilityPhase::Use,
                 });
-                s.alt_cooldown[si] = alt_cd;
+                s.charge = 1;
+            }
+        }
+        AbilityStyle::Press => {
+            if alt_pressed && ready {
+                use_ability(s, w, ability, 0.0, t, tick_rate, out);
+            }
+        }
+        AbilityStyle::Instant => {
+            if alt_held && ready && (!takes_shot || s.primary_cooldown[si] == 0) {
+                use_ability(s, w, ability, 0.0, t, tick_rate, out);
                 if takes_shot {
-                    // It was the primary's shot: the primary waits its interval.
+                    // It was the primary's swing: the primary waits its interval.
                     s.primary_cooldown[si] = interval;
                 }
             }
@@ -809,15 +1059,10 @@ fn step_build(
     }
 }
 
-/// Abilities that are the primary's shot fired another way (Both Barrels: both barrels at
-/// once; Volley: ten of its shots at once; Whirl and Upswing: the melee weapon's swing, spun
-/// round or rising). They need the primary ready and use it up: a Tamper's swing and a Whirl
-/// on one tick were 132 to a PvP body.
+/// Abilities that are the primary's shot fired another way (the Whirl: the melee weapon's
+/// swing spun round). They need the primary ready and use it up.
 fn takes_primary_shot(ability: Ability) -> bool {
-    matches!(
-        ability,
-        Ability::BothBarrels | Ability::Volley | Ability::Whirl | Ability::Upswing
-    )
+    matches!(ability, Ability::Whirl)
 }
 
 /// Deterministic pseudo-random numbers for spread (splitmix64 of a seed).
@@ -868,11 +1113,6 @@ pub(crate) fn lob_dir(aim: Vec3, degrees: f32) -> Vec3 {
     if lob.y < aim.y { aim } else { lob }
 }
 
-/// Salt of the splinter spread (distinct from the Bellows pellets of the same input).
-pub(crate) const SPLINTER_SALT: u32 = 0x5911_7E00;
-/// Salt of ability spreads (Volley, Flurry, Triple Nock) — distinct from the primary's.
-const ABILITY_SALT: u32 = 0xAB11_0000;
-
 /// The tuning an ability fired from `weapon` uses: its damage scaled by the carrier's
 /// `ability_power` relative to the ability's home weapon, never above the listed numbers
 /// (unchanged on the home weapon, on a weapon at least as powerful and for abilities made of
@@ -912,9 +1152,24 @@ impl SimWorld {
                 weapon,
                 ability,
                 charge,
+                phase,
             } => {
                 let t = ability_tuning(t, weapon, ability);
-                self.fire_ability(&t, history, id, input, weapon, ability, charge);
+                if ability.is_rework() {
+                    // One file each (`abilities/`).
+                    self.cast_ability(&AbilityCast {
+                        t: &t,
+                        history,
+                        id,
+                        input,
+                        weapon,
+                        ability,
+                        charge,
+                        phase,
+                    });
+                } else {
+                    self.fire_ability(&t, history, id, input, weapon, ability, charge);
+                }
             }
         }
     }
@@ -1014,16 +1269,50 @@ impl SimWorld {
                 self.push_fired(id, attack, eye);
             }
             WeaponKind::Longwick => {
-                self.loose_arrows(t, id, eye, aim, charge, ProjectileKind::Arrow, attack, 1.0)
+                self.loose_arrows(t, id, eye, aim, charge, ProjectileKind::Arrow, attack, 1.0);
             }
             WeaponKind::Kiln => self.kiln_spray(t, history, id, input),
             WeaponKind::Trimmer | WeaponKind::Tamper => {
                 self.melee_swing(t, history, id, input, weapon)
             }
+            WeaponKind::Lamplighter => self.lamplighter_beam(t, history, id, input, charge),
         }
     }
 
-    /// An ability (`t` is already scaled for the carrying weapon, see [`ability_tuning`]).
+    /// The Lamplighter's beam at focus `focus` (0..=1): exact hitscan, damage by the focus; a
+    /// full focus pierces the first target into `lamplighter.pierce` − 1 more behind it.
+    fn lamplighter_beam(
+        &mut self,
+        t: &Tuning,
+        history: Option<&dyn HitboxHistory>,
+        id: PlayerId,
+        input: &PlayerInput,
+        focus: f32,
+    ) {
+        let Some(p) = self.players.get(&id) else {
+            return;
+        };
+        let eye = p.movement.eye_position(&t.movement);
+        let l = &t.combat.lamplighter;
+        let k = focus.clamp(0.0, 1.0);
+        let damage = l.min_damage + (l.max_damage - l.min_damage) * k;
+        let attack = Attack::Lamplighter;
+        let shot = ShotSpec::new(
+            eye,
+            input.look_dir(),
+            t.combat.hitscan_range,
+            damage,
+            attack,
+        );
+        if k >= 1.0 && l.pierce > 1 {
+            self.fire_piercing(t, history, id, input, &shot, l.pierce, l.pierce_falloff);
+        } else {
+            self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
+        }
+    }
+
+    /// One of the kept abilities (`t` is already scaled for the carrying weapon, see
+    /// [`ability_tuning`]); the rework's go to `abilities/` ([`SimWorld::cast_ability`]).
     #[allow(clippy::too_many_arguments)]
     fn fire_ability(
         &mut self,
@@ -1042,7 +1331,6 @@ impl SimWorld {
         let aim = input.look_dir();
         let owner = Owner::Player(id);
         let c = &t.combat;
-        let tick = self.tick;
         let attack = ability.attack();
         // Only the Quill's shots ricochet off thorns (its identity), whichever ability.
         let ricochet = weapon == WeaponKind::Quill;
@@ -1050,28 +1338,10 @@ impl SimWorld {
         if weapon.class() == WeaponClass::Draw {
             let (kind, scale) = match ability {
                 Ability::PinningArrow => (ProjectileKind::PinArrow, c.pinning_arrow.damage_scale),
-                Ability::EmberArrow => (ProjectileKind::EmberArrow, c.ember_arrow.damage_scale),
                 Ability::Brand => (ProjectileKind::BrandArrow, 1.0),
-                _ => (ProjectileKind::Arrow, c.triple_nock.damage_scale),
+                _ => (ProjectileKind::Arrow, 1.0),
             };
-            if ability == Ability::TripleNock {
-                let tn = &c.triple_nock;
-                let n = tn.arrows.max(1);
-                let (right, _) = aim_basis(aim);
-                for i in 0..n {
-                    let f = if n == 1 {
-                        0.0
-                    } else {
-                        i as f32 / (n - 1) as f32 - 0.5
-                    };
-                    let yaw = (tn.fan_degrees * f).to_radians();
-                    let up = right.cross(aim).normalize_or(Vec3::Y);
-                    let dir = Quat::from_axis_angle(up, yaw) * aim;
-                    self.loose_arrows(t, id, eye, dir, charge, kind, attack, scale);
-                }
-            } else {
-                self.loose_arrows(t, id, eye, aim, charge, kind, attack, scale);
-            }
+            self.loose_arrows(t, id, eye, aim, charge, kind, attack, scale);
             return;
         }
         match ability {
@@ -1086,54 +1356,7 @@ impl SimWorld {
                     }
                 }
             }
-            Ability::Splinter => {
-                let shot =
-                    ShotSpec::new(eye, aim, c.hitscan_range, c.quill.splinter_damage, attack)
-                        .ricochet(ricochet);
-                let (view, results) =
-                    self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
-                let mut rng = SpreadRng::new(tick, id, input.seq ^ SPLINTER_SALT);
-                for impact in results.iter().filter_map(|r| r.impact) {
-                    self.splinter_burst(t, id, &view.hitboxes, impact, &mut rng);
-                }
-            }
-            Ability::Skewer => {
-                // Pierces instead of ricocheting.
-                let k = &c.skewer;
-                let damage = k.min_damage + (k.max_damage - k.min_damage) * charge.clamp(0.0, 1.0);
-                let shot = ShotSpec::new(eye, aim, c.hitscan_range, damage, attack);
-                self.fire_piercing(t, history, id, input, &shot, k.pierce, k.pierce_falloff);
-            }
-            Ability::Flurry => {
-                let f = &c.flurry;
-                let mut rng = SpreadRng::new(tick, id, input.seq ^ ABILITY_SALT);
-                let dir = spread_dir(aim, f.spread_degrees, &mut rng);
-                let damage = weapon.primary_damage(c) * f.damage_scale;
-                let shot =
-                    ShotSpec::new(eye, dir, c.hitscan_range, damage, attack).ricochet(ricochet);
-                self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
-            }
             Ability::Gust => self.gust(t, history, id, input),
-            Ability::BothBarrels => {
-                let b = &c.bellows;
-                let mut rng = SpreadRng::new(tick, id, input.seq);
-                let shots: Vec<ShotSpec> = (0..b.both_pellets.max(1))
-                    .map(|_| {
-                        let dir = spread_dir(aim, b.both_cone_degrees, &mut rng);
-                        ShotSpec::new(eye, dir, b.pellet_range, b.both_pellet_damage, attack)
-                            .knockback(b.pellet_knockback)
-                    })
-                    .collect();
-                self.fire_hitscan_group(t, history, id, input, attack, &shots);
-                // Recoil (server-side impulse; the client reconciles): blast-jump.
-                self.apply_impulse(id, -aim * b.both_recoil);
-            }
-            Ability::Slug => {
-                let g = &c.slug;
-                let shot = ShotSpec::new(eye, aim, c.hitscan_range, g.damage, attack)
-                    .knockback(g.knockback);
-                self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
-            }
             Ability::Flak => {
                 let f = &c.flak;
                 let start = self.safe_launch_point(eye, eye + aim * 0.5);
@@ -1148,26 +1371,7 @@ impl SimWorld {
                 );
                 self.push_fired(id, attack, eye);
             }
-            Ability::Wisp => {
-                let start = self.safe_launch_point(eye, eye + aim * 0.6);
-                self.spawn_projectile(
-                    t,
-                    ProjectileKind::Wisp,
-                    owner,
-                    start,
-                    aim * c.arclash.wisp_speed,
-                );
-                self.push_fired(id, attack, eye);
-            }
             Ability::Discharge => self.discharge(t, history, id, input, charge),
-            Ability::Volley => self.volley(t, history, id, input, weapon),
-            Ability::Flare => {
-                let f = &c.flare;
-                let dir = lob_dir(aim, f.angle_degrees);
-                let start = self.safe_launch_point(eye, eye + aim * 0.5);
-                self.spawn_projectile(t, ProjectileKind::Flare, owner, start, dir * f.speed);
-                self.push_fired(id, attack, eye);
-            }
             Ability::Breach => self.breach(t, history, id, input),
             Ability::Gravewell => {
                 let tb = &c.tumbler;
@@ -1185,23 +1389,17 @@ impl SimWorld {
                 let start = self.safe_launch_point(eye, eye + aim * 0.5);
                 self.limpet(t, id, charge, start, aim * c.limpet.speed);
             }
-            Ability::Mortar => {
-                let m = &c.mortar;
-                let dir = lob_dir(aim, m.angle_degrees);
-                self.spawn_projectile(t, ProjectileKind::MortarShell, owner, eye, dir * m.speed);
-                self.push_fired(id, attack, eye);
-            }
-            Ability::Lunge | Ability::Whirl | Ability::Hurl | Ability::Upswing => {
+            Ability::Lunge | Ability::Whirl | Ability::Hurl => {
                 self.melee_ability(t, history, id, input, weapon, ability)
             }
-            // Bow-only abilities never reach here (handled above).
-            Ability::TripleNock | Ability::PinningArrow | Ability::EmberArrow => {}
+            // Bow-only and the rework's abilities never reach here (above, `abilities/`).
+            _ => {}
         }
     }
 
     /// Arclash zaps along `dirs` (one hitscan group), each chaining from what it hits.
     #[allow(clippy::too_many_arguments)]
-    fn arc_zaps(
+    pub(crate) fn arc_zaps(
         &mut self,
         t: &Tuning,
         history: Option<&dyn HitboxHistory>,
@@ -1236,72 +1434,25 @@ impl SimWorld {
         }
     }
 
-    /// Volley: `volley.shots` of the weapon's primary at once in a cone.
-    fn volley(
+    /// The bow's armed rework arrows (Blink, Beacon): an arrow of `kind` with the release's
+    /// draw (`c.charge`), its hit `damage_scale` × a plain arrow's.
+    pub(crate) fn loose_ability_arrow(
         &mut self,
-        t: &Tuning,
-        history: Option<&dyn HitboxHistory>,
-        id: PlayerId,
-        input: &PlayerInput,
-        weapon: WeaponKind,
-    ) {
-        let Some(p) = self.players.get(&id) else {
-            return;
-        };
-        let eye = p.movement.eye_position(&t.movement);
-        let aim = input.look_dir();
-        let c = &t.combat;
-        let v = &c.volley;
-        let attack = Attack::Volley;
-        let mut rng = SpreadRng::new(self.tick, id, input.seq ^ ABILITY_SALT);
-        let dirs: Vec<Vec3> = (0..v.shots.max(1))
-            .map(|_| spread_dir(aim, v.cone_degrees, &mut rng))
-            .collect();
-        let damage = weapon.primary_damage(c) * v.damage_scale;
-        match weapon {
-            WeaponKind::Riveter => {
-                let start = self.safe_launch_point(eye, eye + aim * 0.4);
-                for dir in dirs {
-                    self.spawn_player_projectile(
-                        t,
-                        ProjectileKind::Rivet,
-                        id,
-                        start,
-                        dir * c.riveter.rivet_speed,
-                        damage,
-                        attack,
-                    );
-                }
-                self.push_fired(id, attack, eye);
-            }
-            WeaponKind::Arclash => {
-                self.arc_zaps(t, history, id, input, &dirs, v.damage_scale, attack)
-            }
-            _ => {
-                let kiln = weapon == WeaponKind::Kiln;
-                let range = if kiln { c.kiln.range } else { c.hitscan_range };
-                let shots: Vec<ShotSpec> = dirs
-                    .iter()
-                    .map(|d| ShotSpec::new(eye, *d, range, damage, attack))
-                    .collect();
-                let (_, results) = self.fire_hitscan_group(t, history, id, input, attack, &shots);
-                if kiln {
-                    // Ember rays set what they hit alight like the spray.
-                    for impact in results.iter().filter_map(|r| r.impact) {
-                        if let Some((target, _)) = impact.target {
-                            let stacks = c.kiln.burn_stacks;
-                            self.apply_burn(t, Owner::Player(id), attack, target, stacks);
-                        }
-                    }
-                }
-            }
-        }
+        c: &AbilityCast,
+        kind: ProjectileKind,
+        damage_scale: f32,
+    ) -> Option<crate::protocol::NetId> {
+        let p = self.players.get(&c.id)?;
+        let eye = p.movement.eye_position(&c.t.movement);
+        let aim = c.input.look_dir();
+        let attack = c.ability.attack();
+        self.loose_arrows(c.t, c.id, eye, aim, c.charge, kind, attack, damage_scale)
     }
 
     /// Looses an arrow of `kind` along `dir` at draw `draw` (0..=1): speed and damage by the
     /// draw (Longwick), damage × `damage_scale`.
     #[allow(clippy::too_many_arguments)]
-    fn loose_arrows(
+    pub(crate) fn loose_arrows(
         &mut self,
         t: &Tuning,
         id: PlayerId,
@@ -1311,19 +1462,20 @@ impl SimWorld {
         kind: ProjectileKind,
         attack: Attack,
         damage_scale: f32,
-    ) {
+    ) -> Option<crate::protocol::NetId> {
         let l = &t.combat.longwick;
         let k = draw.clamp(0.0, 1.0);
         let speed = l.min_speed + (l.max_speed - l.min_speed) * k;
         let damage = (l.min_damage + (l.max_damage - l.min_damage) * k) * damage_scale;
         let start = self.safe_launch_point(eye, eye + dir * 0.4);
-        self.spawn_player_projectile(t, kind, id, start, dir * speed, damage, attack);
+        let arrow = self.spawn_player_projectile(t, kind, id, start, dir * speed, damage, attack);
         self.push_fired(id, attack, eye);
+        arrow
     }
 
     /// A player projectile dealing `damage` on a direct hit as `attack`.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_player_projectile(
+    pub(crate) fn spawn_player_projectile(
         &mut self,
         t: &Tuning,
         kind: ProjectileKind,
@@ -1332,12 +1484,13 @@ impl SimWorld {
         velocity: Vec3,
         damage: f32,
         attack: Attack,
-    ) {
+    ) -> Option<crate::protocol::NetId> {
         let spawned = self.spawn_projectile(t, kind, Owner::Player(id), position, velocity);
         if let Some(p) = spawned.and_then(|pid| self.projectiles.get_mut(&pid)) {
             p.damage = damage;
             p.attack = attack;
         }
+        spawned
     }
 
     /// Projectile weapons: "shooter fired" event for remote muzzle flashes / sounds.
@@ -1452,83 +1605,308 @@ mod tests {
         assert_eq!(s.charge, 0);
     }
 
+    fn ability(weapon: WeaponKind, ability: Ability, phase: AbilityPhase) -> FireIntent {
+        FireIntent::Ability {
+            weapon,
+            ability,
+            charge: 0.0,
+            phase,
+        }
+    }
+
     #[test]
-    fn both_barrels_also_holds_the_primary() {
+    fn the_whirl_takes_the_swing() {
         let t = CombatTuning::default();
-        let mut s = WeaponState::default();
-        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 1), true, &t, 60);
+        let tamper = || WeaponState::new(Loadout::single(WeaponKind::Tamper.default_build()));
+        let mut s = tamper();
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
         assert_eq!(
             out,
-            vec![FireIntent::Ability {
-                weapon: WeaponKind::Bellows,
-                ability: Ability::BothBarrels,
-                charge: 0.0
-            }]
+            vec![ability(
+                WeaponKind::Tamper,
+                Ability::Whirl,
+                AbilityPhase::Use
+            )]
         );
         assert_eq!(
-            s.primary_cooldown[1],
-            secs_to_ticks(t.bellows.interval, 60, 1)
+            s.primary_cooldown[0],
+            secs_to_ticks(t.tamper.interval, 60, 1)
         );
-        assert!(step_weapons(&mut s, &input(Buttons::FIRE, 1, 1), true, &t, 60).is_empty());
-        // Both buttons on one tick: the ability takes the shot, the primary doesn't also fire.
+        assert!(step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60).is_empty());
+        // Both buttons on one tick: the Whirl takes the swing, the primary doesn't also swing.
         let both = Buttons::FIRE | Buttons::ALT_FIRE;
-        let out = step_weapons(
-            &mut WeaponState::default(),
-            &input(both, 1, 1),
-            true,
-            &t,
-            60,
-        );
+        let out = step_weapons(&mut tamper(), &input(both, 0, 0), true, &t, 60);
         assert!(
             matches!(
                 out[..],
                 [FireIntent::Ability {
-                    ability: Ability::BothBarrels,
+                    ability: Ability::Whirl,
                     ..
                 }]
             ),
             "{out:?}"
         );
-        let mut s = WeaponState::new(Loadout::single(WeaponBuild {
-            weapon: WeaponKind::Riveter,
-            abilities: [Ability::Volley, Ability::Wisp],
-        }));
+        // It waits for the swing: a swing, then the Whirl only once the swing's interval is
+        // over (even with its own cooldown ready long before).
+        let mut s = tamper();
+        let out = step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+        assert!(matches!(out[..], [FireIntent::Primary { .. }]));
+        let interval = secs_to_ticks(t.tamper.interval, 60, 1);
+        for _ in 1..interval {
+            let out = step_weapons(&mut s, &input(both, 0, 0), true, &t, 60);
+            assert!(out.is_empty(), "{out:?}");
+        }
         let out = step_weapons(&mut s, &input(both, 0, 0), true, &t, 60);
         assert!(
             matches!(
                 out[..],
                 [FireIntent::Ability {
-                    ability: Ability::Volley,
+                    ability: Ability::Whirl,
                     ..
                 }]
             ),
             "{out:?}"
         );
-        // It waits for the primary: a blast, then the ability only once the blast's interval
-        // is over (even with its own cooldown ready long before).
+        // The Lunge doesn't.
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Trimmer.default_build()));
+        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        assert_eq!(s.primary_cooldown[0], 0);
+    }
+
+    #[test]
+    fn held_abilities_use_on_the_press_and_release_on_letting_go() {
+        let t = CombatTuning::default();
+        // The Bellows' Bulwark (mode 1): the press raises it, holding keeps it up.
         let mut s = WeaponState::default();
-        let out = step_weapons(&mut s, &input(Buttons::FIRE, 1, 1), true, &t, 60);
-        assert!(matches!(out[..], [FireIntent::Primary { .. }]));
-        let interval = secs_to_ticks(t.bellows.interval, 60, 1);
-        for _ in 1..interval {
-            let out = step_weapons(&mut s, &input(both, 1, 1), true, &t, 60);
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 1), true, &t, 60);
+        assert_eq!(
+            out,
+            vec![ability(
+                WeaponKind::Bellows,
+                Ability::Bulwark,
+                AbilityPhase::Use
+            )]
+        );
+        for _ in 0..30 {
+            let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 1), true, &t, 60);
             assert!(out.is_empty(), "{out:?}");
         }
-        let out = step_weapons(&mut s, &input(both, 1, 1), true, &t, 60);
+        assert_eq!(s.charge, 31);
+        assert_eq!(s.alt_cooldown[1], 0, "the cooldown waits for the release");
+        // Letting go is the release (how long it was held), and the cooldown starts.
+        let out = step_weapons(&mut s, &input(Buttons::NONE, 1, 1), true, &t, 60);
+        let held = 31.0 / secs_to_ticks(t.bulwark.hold_time, 60, 1) as f32;
+        assert_eq!(
+            out,
+            vec![FireIntent::Ability {
+                weapon: WeaponKind::Bellows,
+                ability: Ability::Bulwark,
+                charge: held,
+                phase: AbilityPhase::Release,
+            }]
+        );
+        assert_eq!(s.charge, 0);
+        assert_eq!(s.alt_cooldown[1], secs_to_ticks(t.bulwark.cooldown, 60, 1));
+        // Held to its limit: released there (holding on doesn't raise it again).
+        let tamper = Loadout::single(WeaponKind::Tamper.default_build());
+        let mut s = WeaponState::new(tamper);
+        let limit = secs_to_ticks(t.riposte.hold_time, 60, 1);
+        let mut fired = Vec::new();
+        for _ in 0..limit + 30 {
+            fired.extend(step_weapons(
+                &mut s,
+                &input(Buttons::ALT_FIRE, 0, 1),
+                true,
+                &t,
+                60,
+            ));
+        }
+        assert_eq!(fired.len(), 2, "{fired:?}");
+        assert!(matches!(
+            fired[1],
+            FireIntent::Ability { ability: Ability::Riposte, phase: AbilityPhase::Release, charge, .. }
+                if charge == 1.0
+        ));
+        // Switching away lets go of it too (the server drops the guard).
+        let mut s = WeaponState::default();
+        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 1), true, &t, 60);
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 1), true, &t, 60);
+        assert!(
+            matches!(
+                out.first(),
+                Some(FireIntent::Ability {
+                    ability: Ability::Bulwark,
+                    phase: AbilityPhase::Release,
+                    ..
+                })
+            ),
+            "{out:?}"
+        );
+        assert!(s.alt_cooldown[1] > 0 && s.charge == 0);
+        // The Tally replicates as TALLYING, a guard as neither CHARGING nor TALLYING (the
+        // guard itself says GUARDING).
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Lancet.default_build()));
+        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        assert_eq!(s.ability(), Ability::Tally);
+        assert!(s.charge > 0);
+    }
+
+    #[test]
+    fn live_abilities_wait_recast_and_start_their_cooldown_at_the_end() {
+        let t = CombatTuning::default();
+        // The Arclash's Wisp (mode 0): a press, then live for its orbit.
+        let mut s = WeaponState::default();
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 0), true, &t, 60);
+        assert_eq!(
+            out,
+            vec![ability(
+                WeaponKind::Arclash,
+                Ability::Wisp,
+                AbilityPhase::Use
+            )]
+        );
+        let orbit = secs_to_ticks(t.arclash.wisp_orbit_time, 60, 1);
+        assert_eq!((s.live[2], s.alt_cooldown[2]), (orbit, 0));
+        assert_eq!(s.live_ability(2), Some(Ability::Wisp));
+        // Holding on does nothing; the build's other ability stays usable meanwhile (on the
+        // shared cooldown).
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 0), true, &t, 60);
+        assert!(out.is_empty(), "{out:?}");
+        for _ in 0..10 {
+            step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 1), true, &t, 60);
+        }
+        let out = step_weapons(&mut s, &input(Buttons::NONE, 2, 1), true, &t, 60);
         assert!(
             matches!(
                 out[..],
                 [FireIntent::Ability {
-                    ability: Ability::BothBarrels,
+                    ability: Ability::Discharge,
                     ..
                 }]
             ),
             "{out:?}"
         );
-        // Gust doesn't.
+        assert!(s.alt_cooldown[2] > 0 && s.live[2] > 0);
+        // A second press (in its mode) flings it: the recast, and the cooldown counts the
+        // flight.
+        step_weapons(&mut s, &input(Buttons::NONE, 2, 0), true, &t, 60);
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 0), true, &t, 60);
+        assert_eq!(
+            out,
+            vec![ability(
+                WeaponKind::Arclash,
+                Ability::Wisp,
+                AbilityPhase::Recast
+            )]
+        );
+        assert_eq!(s.live[2], 0);
+        assert_eq!(
+            s.alt_cooldown[2],
+            secs_to_ticks(t.arclash.wisp_lifetime + t.arclash.wisp_cooldown, 60, 1)
+        );
+        // Left alone it runs out and the cooldown starts then.
         let mut s = WeaponState::default();
-        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 1, 0), true, &t, 60);
-        assert_eq!(s.primary_cooldown[1], 0);
+        step_weapons(&mut s, &input(Buttons::ALT_FIRE, 2, 0), true, &t, 60);
+        for _ in 0..orbit {
+            step_weapons(&mut s, &input(Buttons::NONE, 2, 0), true, &t, 60);
+        }
+        assert_eq!(s.live[2], 0);
+        assert_eq!(
+            s.alt_cooldown[2],
+            secs_to_ticks(t.arclash.wisp_cooldown, 60, 1)
+        );
+        // The server can end one early (a Waxwork destroyed): the cooldown starts.
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Lancet.default_build()));
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 1), true, &t, 60);
+        assert!(matches!(
+            out[..],
+            [FireIntent::Ability {
+                ability: Ability::Waxwork,
+                ..
+            }]
+        ));
+        assert!(s.live[0] > 0);
+        // No recast for the Waxwork: a second press does nothing.
+        step_weapons(&mut s, &input(Buttons::NONE, 0, 1), true, &t, 60);
+        assert!(step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 1), true, &t, 60).is_empty());
+        s.end_live(0, &t, 60);
+        assert_eq!(
+            (s.live[0], s.alt_cooldown[0]),
+            (0, secs_to_ticks(t.waxwork.cooldown, 60, 1))
+        );
+    }
+
+    #[test]
+    fn stoke_speeds_the_primary_then_overheats_it() {
+        let t = CombatTuning::default();
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Riveter.default_build()));
+        let count = |s: &mut WeaponState, b: Buttons, ticks: u32| -> usize {
+            (0..ticks)
+                .map(|_| {
+                    step_weapons(s, &input(b, 0, 0), true, &t, 60)
+                        .iter()
+                        .filter(|f| matches!(f, FireIntent::Primary { .. }))
+                        .count()
+                })
+                .sum()
+        };
+        let normal = count(&mut s.clone(), Buttons::FIRE, 60);
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        assert!(matches!(
+            out[..],
+            [FireIntent::Ability {
+                ability: Ability::Stoke,
+                ..
+            }]
+        ));
+        assert!(s.is_stoked());
+        let stoked = count(&mut s, Buttons::FIRE, 60);
+        assert!(
+            stoked as f32 >= normal as f32 * 1.5,
+            "stoked {stoked} vs {normal} a second"
+        );
+        // Run the stoke out: then overheated, no primary, and it cools.
+        let stoke = secs_to_ticks(t.stoke.duration, 60, 1) as u32;
+        count(&mut s, Buttons::NONE, stoke - 60);
+        assert!(s.is_overheated() && !s.is_stoked());
+        let overheat = secs_to_ticks(t.stoke.overheat, 60, 1) as u32;
+        assert_eq!(count(&mut s, Buttons::FIRE, overheat - 1), 0);
+        assert!(count(&mut s, Buttons::FIRE, 10) > 0);
+        assert!(!s.is_overheated());
+        // From the use: 10 s.
+        assert!(s.alt_cooldown[0] > 0);
+    }
+
+    #[test]
+    fn the_lamplighter_focuses_and_fires_on_release() {
+        let t = CombatTuning::default();
+        let mut s = WeaponState::new(Loadout::single(WeaponKind::Lamplighter.default_build()));
+        let full = WeaponState::draw_ticks_of(WeaponKind::Lamplighter, &t, 60);
+        assert_eq!(full, secs_to_ticks(t.lamplighter.focus_time, 60, 1));
+        for _ in 0..full + 10 {
+            assert!(step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60).is_empty());
+        }
+        assert_eq!((s.draw, s.charge_level(&t, 60)), (full, 255));
+        let out = step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+        assert_eq!(
+            out,
+            vec![FireIntent::Primary {
+                weapon: WeaponKind::Lamplighter,
+                charge: 1.0
+            }]
+        );
+        // The next focus waits its interval; a tap fires at the minimum.
+        let interval = secs_to_ticks(t.lamplighter.interval, 60, 1);
+        for _ in 1..interval {
+            step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+            assert_eq!(s.draw, 0);
+        }
+        step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
+        step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+        match step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60).as_slice() {
+            [FireIntent::Primary { charge, .. }] => assert!(*charge < 0.05),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -1637,7 +2015,7 @@ mod tests {
         }
         let out = step_weapons(&mut s, &input(Buttons::FIRE, 3, 1), true, &t, 60);
         assert_eq!(s.current(), WeaponKind::Lancet);
-        assert_eq!(s.ability(), Ability::Flurry);
+        assert_eq!(s.ability(), Ability::Waxwork);
         assert_eq!(out, vec![primary(WeaponKind::Lancet)]);
         // Respawning with a loadout that lacks the slot falls back to the first weapon.
         let s = s.respawned(Loadout::single(WeaponKind::Kiln.default_build()));
@@ -1685,7 +2063,7 @@ mod tests {
     }
 
     #[test]
-    fn salvo_and_flurry_fire_over_several_ticks() {
+    fn the_salvo_fires_over_several_ticks() {
         let t = CombatTuning::default();
         let mut s = WeaponState::new(Loadout::single(WeaponKind::Cinderbox.default_build()));
         let mut ticks = Vec::new();
@@ -1697,21 +2075,17 @@ mod tests {
         }
         // 3 rockets 0.08 s (5 ticks) apart.
         assert_eq!(ticks, vec![0, 5, 10]);
-        // Switching weapon cancels the rest of a burst.
-        let lancet = WeaponBuild {
-            weapon: WeaponKind::Lancet,
-            abilities: [Ability::Flurry, Ability::Brand],
-        };
+        // Switching weapon cancels the rest of a salvo.
         let mut s = WeaponState::new(Loadout {
             slots: [
-                Some(lancet),
+                Some(WeaponKind::Cinderbox.default_build()),
                 Some(WeaponKind::Quill.default_build()),
                 None,
                 None,
             ],
             ..Default::default()
         });
-        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        let out = step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
         assert_eq!(out.len(), 1);
         assert_eq!(s.burst.left, 2);
         step_weapons(&mut s, &input(Buttons::NONE, 1, 0), true, &t, 60);
@@ -1743,7 +2117,8 @@ mod tests {
             vec![FireIntent::Ability {
                 weapon: WeaponKind::Longwick,
                 ability: Ability::PinningArrow,
-                charge: 1.0
+                charge: 1.0,
+                phase: AbilityPhase::Use,
             }]
         );
         assert_eq!((s.draw, s.armed), (0, 0));
@@ -1757,14 +2132,41 @@ mod tests {
             [FireIntent::Primary { charge, .. }] => assert!(*charge < 0.05),
             other => panic!("{other:?}"),
         }
-        // Triple Nock below its minimum draw: a plain arrow, still armed.
+        // The Blink Arrow (mode 0) rides a release, then stays live: ALT steps to it (the
+        // press arms nothing meanwhile), and its cooldown starts then.
         let mut s = WeaponState::new(Loadout::single(WeaponKind::Longwick.default_build()));
         step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
-        assert_eq!(s.armed_ability(), Some(Ability::TripleNock));
-        step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+        assert_eq!(s.armed_ability(), Some(Ability::BlinkArrow));
+        for _ in 0..20 {
+            step_weapons(&mut s, &input(Buttons::FIRE, 0, 0), true, &t, 60);
+        }
         let out = step_weapons(&mut s, &input(Buttons::NONE, 0, 0), true, &t, 60);
-        assert!(matches!(out.as_slice(), [FireIntent::Primary { .. }]));
-        assert_eq!(s.armed_ability(), Some(Ability::TripleNock));
+        assert!(matches!(
+            out.as_slice(),
+            [FireIntent::Ability {
+                ability: Ability::BlinkArrow,
+                phase: AbilityPhase::Use,
+                ..
+            }]
+        ));
+        assert!(s.live[0] > 0 && s.alt_cooldown[0] == 0 && s.armed == 0);
+        // The arrow stuck (the server shortens the window), then ALT: the step.
+        s.shorten_live(0, t.blink_arrow.window, 60);
+        assert_eq!(s.live[0], secs_to_ticks(t.blink_arrow.window, 60, 1));
+        let out = step_weapons(&mut s, &input(Buttons::ALT_FIRE, 0, 0), true, &t, 60);
+        assert_eq!(
+            out,
+            vec![ability(
+                WeaponKind::Longwick,
+                Ability::BlinkArrow,
+                AbilityPhase::Recast
+            )]
+        );
+        assert_eq!(s.armed, 0);
+        assert_eq!(
+            s.alt_cooldown[0],
+            secs_to_ticks(t.blink_arrow.cooldown, 60, 1)
+        );
     }
 
     #[test]
@@ -1795,25 +2197,42 @@ mod tests {
         for a in Ability::ALL {
             assert!(a.fits(a.home()), "{a:?}");
         }
-        assert_eq!(Ability::Wisp.home(), WeaponKind::Arclash);
-        assert_eq!(Ability::Volley.home(), WeaponKind::Riveter);
+        // The contract's homes (docs/rework.md): the first weapon whose default has it.
+        let homes = [
+            (Ability::Wisp, WeaponKind::Arclash),
+            (Ability::Wickline, WeaponKind::Quill),
+            (Ability::Tally, WeaponKind::Lancet),
+            (Ability::Waxwork, WeaponKind::Lancet),
+            (Ability::Bulwark, WeaponKind::Bellows),
+            (Ability::Bolas, WeaponKind::Thresher),
+            (Ability::Stoke, WeaponKind::Riveter),
+            (Ability::Lantern, WeaponKind::Riveter),
+            (Ability::Kite, WeaponKind::Cinderbox),
+            (Ability::BlinkArrow, WeaponKind::Longwick),
+            (Ability::BeaconArrow, WeaponKind::Longwick),
+            (Ability::Riposte, WeaponKind::Tamper),
+        ];
+        for (a, home) in homes {
+            assert_eq!(a.home(), home, "{a:?}");
+        }
         let mut t = Tuning::default();
         // At home, and made of the weapon's own shots: unchanged.
         assert!(matches!(
-            ability_tuning(&t, WeaponKind::Quill, Ability::Splinter),
+            ability_tuning(&t, WeaponKind::Quill, Ability::Wickline),
             Cow::Borrowed(_)
         ));
         assert!(matches!(
-            ability_tuning(&t, WeaponKind::Kiln, Ability::Volley),
+            ability_tuning(&t, WeaponKind::Kiln, Ability::Lantern),
             Cow::Borrowed(_)
         ));
         t.combat.lancet.ability_power = 0.5;
-        let scaled = ability_tuning(&t, WeaponKind::Lancet, Ability::Splinter);
-        assert_eq!(scaled.combat.quill.splinter_damage, 10.0);
-        assert_eq!(scaled.combat.quill.splinter_cooldown, 1.1);
+        let scaled = ability_tuning(&t, WeaponKind::Lancet, Ability::Wickline);
+        assert_eq!(scaled.combat.wickline.damage, 5.0);
+        assert_eq!(scaled.combat.wickline.cooldown, 4.0);
         // The other way round: never above the listed numbers.
+        t.combat.lancet.ability_power = 0.85;
         assert!(matches!(
-            ability_tuning(&t, WeaponKind::Quill, Ability::Skewer),
+            ability_tuning(&t, WeaponKind::Lamplighter, Ability::Tally),
             Cow::Borrowed(_)
         ));
     }

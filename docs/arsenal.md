@@ -2,17 +2,25 @@
 
 The third-generation arsenal (`docs/expansion.md` is the contract it implements; the
 second-generation weapons and their as-built notes are in `docs/roster.md`), with the refit's
-melee class and knacks (`docs/refit.md`). Twelve weapons in six classes, twenty-three abilities,
+melee class and knacks (`docs/refit.md`) and the rework (`docs/rework.md`: new abilities, the
+Lamplighter, the drunk Kindle Flask). Thirteen weapons in six classes, twenty-three abilities,
 six knacks on Q, loadouts of up to four builds, the Burn and Pinned status effects, and separate
 balance for PvE and PvP. Everything a weapon decides is integer-tick and predicted by its owner;
 the server stays authoritative for everything else.
+
+> **Rework in progress** (`docs/rework.md`, `PROTOCOL_VERSION` 11). Eleven abilities retired
+> (Splinter, Skewer, Flurry, Both Barrels, Slug, Volley, Flare and its burning patches, Mortar,
+> Triple Nock, Ember Arrow, Upswing). The sections below that still describe them, and the PvP
+> balance tables, are rewritten by the areas as they land; the ids, kinds and flags every
+> area builds against are in **"The rework on the wire"** below.
 
 ## Code map
 
 | where | what |
 |---|---|
-| `shared::loadout` | `WeaponKind` (12), `WeaponClass` (6), `Ability` (23), `Knack` (6), `WeaponBuild`, `Loadout`: ids, names, pools, defaults, `sanitized()`, `Knack::pvp_allowed` (plain data) |
-| `shared::sim::weapons` | `WeaponState`, `step_weapons` (predicted), `FireIntent`, firing styles, `SimWorld::resolve_intent` (what every primary and ability does), `ability_tuning` |
+| `shared::loadout` | `WeaponKind` (13), `WeaponClass` (6), `Ability` (23), `Knack` (6), `WeaponBuild` (reading a retired ability's name from RON gives the weapon's default), `Loadout`: ids, names, pools, defaults, `sanitized()`, `Knack::pvp_allowed` (plain data) |
+| `shared::sim::weapons` | `WeaponState`, `step_weapons` (predicted), `FireIntent` (with its `AbilityPhase`), firing styles, `SimWorld::resolve_intent` (every primary, the kept abilities; the rework's go to `abilities/`), `ability_tuning` |
+| `shared::sim::abilities` | the rework's abilities, one file each (`wickline.rs` … `riposte.rs`), dispatched by `SimWorld::cast_ability` with an `AbilityCast`; their state between ticks (`SimWorld::abilities`), per-tick steps, replication; the shared **guard** (`guard.rs`) |
 | `shared::sim::loadouts` | `SimWorld::request_loadout` / `force_loadout` / `loadout` / `spawn_loadout`: when loadouts apply; `pvp_world` / `fit_loadout`: the knack rule |
 | `shared::sim::melee` | the Trimmer and Tamper swings (`in_arc`), Lunge / Whirl / Hurl / Upswing, lunges in progress (`SimWorld::melee`) |
 | `shared::sim::knacks` | `Knack::charges` / `recharge_time`, `SimWorld::use_knack`, Kindle pools, snares, soot clouds (`soot_blocks`), Tallow Skin (`SimWorld::knacks`) |
@@ -38,12 +46,18 @@ Quill, Bellows, Arclash, Tumbler with their second-generation abilities).
 
 | class | weapons | ability pool (menu order) |
 |---|---|---|
-| Precision | Quill, Lancet | Brand, Splinter, Skewer, Flurry |
-| Scatter | Bellows, Thresher | Gust, Both Barrels, Slug, Flak |
-| Rapid | Arclash, Riveter, Kiln | Wisp, Discharge, Volley, Flare |
-| Explosive | Tumbler, Cinderbox | Breach, Gravewell, Limpet, Mortar |
-| Draw | Longwick | Brand, Triple Nock, Pinning Arrow, Ember Arrow |
-| Melee | Trimmer, Tamper | Lunge, Whirl, Hurl, Upswing |
+| Precision | Quill, Lancet, Lamplighter | Brand, Wickline, Tally, Waxwork |
+| Scatter | Bellows, Thresher | Gust, Bolas, Bulwark, Flak |
+| Rapid | Arclash, Riveter, Kiln | Wisp, Discharge, Stoke, Lantern |
+| Explosive | Tumbler, Cinderbox | Breach, Gravewell, Limpet, Kite |
+| Draw | Longwick | Brand, Blink Arrow, Pinning Arrow, Beacon Arrow |
+| Melee | Trimmer, Tamper | Lunge, Whirl, Hurl, Riposte |
+
+Defaults (`WeaponKind::default_build`, also the home weapons for `ability_power`): Quill
+Brand / Wickline, Lancet Tally / Waxwork, Lamplighter Wickline / Waxwork, Bellows Gust /
+Bulwark, Thresher Bolas / Flak, Arclash Wisp / Discharge, Riveter Stoke / Lantern, Kiln
+Lantern / Discharge, Tumbler Breach / Gravewell, Cinderbox Limpet / Kite, Longwick Blink
+Arrow / Pinning Arrow, Trimmer Lunge / Hurl, Tamper Whirl / Riposte.
 
 The loadout also holds the **knack** on Q (`Loadout::knack`, the Thorn by default; below).
 
@@ -105,13 +119,15 @@ name prefix, missing ones = the weapon's defaults) sets the loadout **now** (and
 | `slot`, `mode` | selected slot (always one holding a weapon) and ability (0 / 1) |
 | `prev_buttons` | edge detection |
 | `primary_cooldown[4]`, `alt_cooldown[4]` | per slot; a build's two abilities share one |
-| `charge` | hold-to-charge abilities (Discharge, Skewer) and the Limpet's hold: ticks held |
-| `draw` | Longwick: ticks drawn (0 = not drawing) |
+| `charge` | the Discharge's charge, the Limpet's hold, a held ability (Tally, Bulwark, Riposte) while it is up: ticks held |
+| `draw` | Longwick: ticks drawn; Lamplighter: ticks focused (0 = not drawing) |
 | `armed` | Longwick: ability armed for the next release (0 none, 1 A, 2 B) |
 | `bloom` | Lancet heat (ticks) |
 | `burst` | a burst in progress: shots left, ticks to the next, which ability (`None` = the primary salvo) |
 | `punch_cooldown`, `parry` | fist and parry window (unchanged) |
 | `knack_used`, `knack_recharge` | knack charges spent and ticks towards the next (were `thorns_used` / `thorn_recharge`) |
+| `live[4]`, `live_mode[4]` | per slot: ticks a live ability has left and which mode (rework: Wisp, Waxwork, Blink Arrow); its cooldown starts when it ends |
+| `stoke[4]`, `overheat[4]` | per slot: Stoke ticks left, then the overheat (no primary) |
 
 Selection: `PlayerInput::weapon` picks a slot; an empty slot or an out-of-range value keeps
 the current weapon. Switching weapon cancels the charge, the draw, the arming and a burst;
@@ -119,21 +135,29 @@ switching ability cancels the charge and the arming.
 
 | primary style | weapons | rule |
 |---|---|---|
-| automatic | Quill, Bellows, Arclash, Tumbler, Lancet, Thresher, Riveter, Kiln, Trimmer, Tamper | while `FIRE` is held, one shot (swing) per interval |
+| automatic | Quill, Bellows, Arclash, Tumbler, Lancet, Thresher, Riveter, Kiln, Trimmer, Tamper | while `FIRE` is held, one shot (swing) per interval (stoked: `stoke.rate` × faster; overheated: none) |
 | salvo | Cinderbox | a pull fires `cinderbox.rockets` rockets `salvo_gap` apart (a `burst`) |
 | draw | Longwick | hold to draw (only once off its interval), release looses (`charge` = draw 0..1) |
+| focus | Lamplighter | the draw as a hitscan beam: hold to focus (`lamplighter.focus_time` to full, only once off its interval), release fires (`charge` = focus 0..1) |
 
 | ability style | abilities | rule |
 |---|---|---|
-| instant | most | while `ALT_FIRE` is held, once per cooldown. Both Barrels, Volley, Whirl and Upswing are the primary's shot (or swing) fired another way: they also wait for the primary to be ready, take its shot (the primary doesn't fire that tick) and put it on its interval |
-| charge | Discharge, Skewer | hold to charge once off cooldown, fires on release (`charge` 0..1) |
-| burst | Flurry | `flurry.shots` shots `flurry.gap` apart |
+| instant | most | while `ALT_FIRE` is held, once per cooldown. The Whirl is the primary's swing fired another way: it also waits for the primary to be ready, takes its swing (the primary doesn't swing that tick) and puts it on its interval |
+| charge | Discharge | hold to charge once off cooldown, fires on release (`charge` 0..1) |
 | hold | Limpet | a tap (released before `limpet.detonate_hold`) fires with `charge` 0 = throw, off cooldown; holding to it fires once with `charge` 1 = detonate (any time) |
-| armed (any ability on a Draw weapon) | Brand, Triple Nock, Pinning Arrow, Ember Arrow on the Longwick | pressing `ALT_FIRE` (off cooldown) arms it, pressing again disarms; the next release fires it with the draw, and starts its cooldown. Triple Nock below `min_draw` looses a plain arrow and stays armed |
+| channel | Tally, Bulwark, Riposte | the press (off cooldown) is its `Use` (`charge` counts from 1), holding keeps it up for at most its `charge_time` (`tally.hold_time`, `bulwark.hold_time`, `riposte.hold_time`), letting go — or the limit, or switching weapon / ability — is its `Release` (`charge` = how long it was held); the cooldown starts at the release |
+| press | Kite, Wisp | fires on the press only, once per cooldown (holding the Kite steers it) |
+| live | Wisp, Waxwork, Blink Arrow | after its use the ability lives `Ability::live_time` (`WeaponState::live`): its build's abilities wait, a second press is its `Recast` if it `recasts()` (the Wisp flung, the Blink Arrow's step: cooldown `recast_cooldown`), and when it runs out its cooldown starts. The server may end or shorten it (`WeaponState::end_live` / `shorten_live`) |
+| armed (any ability on a Draw weapon) | Brand, Blink Arrow, Pinning Arrow, Beacon Arrow on the Longwick | pressing `ALT_FIRE` (off cooldown) arms it, pressing again disarms; the next release fires it with the draw, and starts its cooldown (the Blink Arrow: its live time) |
 
-`FireIntent::{Primary { weapon, charge }, Ability { weapon, ability, charge }, Punch,
-Knack(knack)}`: `charge` is the draw (Longwick), the bloom (Lancet: the first shot is exact,
-sustained fire settles at 75 % of `bloom_degrees`) or the ability charge. THROW (KNACK) fires
+`FireIntent::{Primary { weapon, charge }, Ability { weapon, ability, charge, phase }, Punch,
+Knack(knack)}`: `charge` is the draw (Longwick) / focus (Lamplighter), the bloom (Lancet: the
+first shot is exact, sustained fire settles at 75 % of `bloom_degrees`) or the ability charge;
+`phase` (`AbilityPhase`) is `Use` (every ability's one intent, a held one's press, the bow's
+armed release), `Release` (a held ability let go) or `Recast` (a live one pressed again).
+Server-decided cooldown changes (a Wickline miss, a Tally with nothing tallied, a shattered
+Bulwark, a caught Hurl, a Waxwork destroyed early, a Blink Arrow that stuck) are written into the
+owner's `WeaponState` by the server; the owner's client re-bases on them. THROW (KNACK) fires
 the loadout's knack while it has a charge; one recharges every `recharge_time` (the Thorn's
 numbers are `combat.thorn`, the others' `combat.knacks.*`).
 
@@ -384,6 +408,92 @@ the default loadout), and `OwnState::movement` the slow (8 B).
   `HealSource::KindleFlask(pool)` → `Fx::Heal` (from the pool to the lantern).
 * The replay records the local player's own swings and knacks as the same `Fx` the others
   receive (`client/src/ingame/replay.rs`).
+
+## The rework on the wire (`PROTOCOL_VERSION` 11)
+
+The groundwork every rework area builds against (`docs/rework.md`; arsenal-a M1). Kept
+abilities kept their ids, the new ones took the retired ids.
+
+**`Ability` ids** (`state` bits 4–8 of a player, the packed loadout, the lobby):
+
+| id | ability | id | ability | id | ability |
+|---|---|---|---|---|---|
+| 0 | Brand | 8 | Tally | 16 | Blink Arrow |
+| 1 | Wickline | 9 | Waxwork | 17 | Pinning Arrow |
+| 2 | Gust | 10 | Bulwark | 18 | Beacon Arrow |
+| 3 | Bolas | 11 | Flak | 19 | Lunge |
+| 4 | Wisp | 12 | Stoke | 20 | Whirl |
+| 5 | Discharge | 13 | Lantern | 21 | Hurl |
+| 6 | Breach | 14 | Limpet | 22 | Riposte |
+| 7 | Gravewell | 15 | Kite | | |
+
+**`WeaponKind`**: `Lamplighter` = 12 (Precision, `lamplighter.ability_power` 1.0,
+`PrimaryStyle::Focus`). `Attack` gains `Lamplighter`, `Wickline`, `Tally`, `Waxwork`, `Bolas`,
+`Bulwark`, `Stoke` (the Burn a stoked hit sets), `Lantern`, `Kite`, `BlinkArrow`, `BeaconArrow`,
+`Riposte`; `StyleKey` the same (41 keys). `DamageFlags::REVEALED` (bit 18): a Beacon's ×1.15.
+`Blocked::Guarded`: a guard caught it.
+
+**Entity kinds** (freed: 69 `MORTAR_SHELL`, 70 `FLARE`, 75 `EMBER_ARROW`, 136 `BURNING_PATCH`):
+
+| kind | name | what |
+|---|---|---|
+| 69 | `BOLAS` | projectile, gravity `bolas.gravity`; gone once it binds |
+| 70 | `KITE` | projectile, no gravity; `GUIDED` while steered (re-launched every tick it turns) |
+| 74 | `WISP` | as before; `ORBITING` while it orbits its owner (`position` current, `aux` = orbit start tick) |
+| 75 | `BLINK_ARROW` | arrow gravity; `STUCK` once it sticks in the level |
+| 77 | `HURL` | as before; `GUIDED` + `RETURNING` on the way back |
+| 97 | `BEACON_ARROW` | arrow gravity; `STUCK` where it lit (rides along in a target) |
+| 98 | `LANTERN_TOSS` | a Lantern being tossed, gravity `lantern.gravity`; `state` = the carrier's weapon id |
+| 136 | `WAXWORK` | the decoy: `position` = feet, `yaw` / `pitch` = the look it was cast with, `owner` = the player it copies (draw their Shrike, cosmetics, name), `state` = their weapon / ability as `pack_player_weapon`, `flags` = the pose's player flags + `waxwork_flags::SLUMPING` (bit 24), `health`, `aux` = the tick it slumps |
+| 139 | `LANTERN` | a Lantern on the floor: `owner`, `state` = the carrier's weapon id, `health`, `aux` = the tick it goes out, `yaw` = where it last aimed |
+| 99–103, 144–151 | reserved for the arsenal | (`kind::is_arsenal_thing`: 136–139, 144–151) |
+
+**Flags**:
+
+| flags | bit | meaning |
+|---|---|---|
+| player `HASTE` | 17 | the drunk Kindle Flask's haste (arsenal-b sets it) |
+| player `REVEALED` | 18 | lit by a Beacon Arrow |
+| player `GUARDING` | 19 | a guard is up (the held ability says Bulwark or Riposte); `aux` bits 12–15 = strength left, sixteenths (15 = whole) |
+| player `STOKED` / `OVERHEATED` | 20 / 21 | the held weapon is stoked / overheated (from `WeaponState`) |
+| player `BOUND` | 22 | bound by a Bolas cord |
+| player `TALLYING` | 23 | holding a Tally (`state`'s level = how long) |
+| player `DRAWING` | 14 | also the Lamplighter's focus (level in `state`, like the bow's draw) |
+| enemy `REVEALED` / `BOUND` / `LURED` | 16 / 17 / 18 | lit by a beacon / bound / targeting a Waxwork |
+| projectile `GUIDED` / `RETURNING` / `ORBITING` | 5 / 6 / 7 | see the kinds; `replicated_position`: `GUIDED` flies without gravity, `ORBITING` is at `position` |
+
+**Own state**: `WeaponState` gains `live[4]`, `live_mode[4]`, `stoke[4]`, `overheat[4]`;
+`PlayerCombat::tallied: [Option<NetId>; 4]` (the Tally's marks, players as `NetId::player`);
+`MoveState::guard_time` / `guard_scale` (a raised guard's slow, server-set).
+
+**Effects** (`Fx`, everyone unless said): `Wickline { player, from, to, anchored }`,
+`TallyFired { shooter, origin, ends }`, `Blink { player, from, to }`, `GuardBlock { player,
+ability, position, broke }`, `BolasBound { positions }`, `LanternShot { lantern, origin, ends }`,
+`HurlCaught { player }` (from the `SimEvent`s of the same names). `Fx::Splinters` is gone.
+
+**Hooks for the abilities' files** (so each area edits only its own): `SimWorld::cast_ability`
+(every intent), `step_abilities` (per tick), `abilities_after_input` (every input, with the
+lag-compensation history: the Tally), `abilities_after_damage` (every damage instance that went
+through: the Bolas cord, the Stoke's Burn), `payload.rs` (`bolas_hit_*`, `lantern_hit_world`,
+`blink_arrow_hit_*`, `beacon_arrow_hit_*`, `payload_tick` → `wisp_tick` / `kite_tick` /
+`hurl_tick`), `guard_meets_projectile` (`projectiles.rs`, before a hit on a guarded player:
+`riposte_meets_projectile` / `bulwark_meets_projectile`), `damage_waxwork` (`apply_damage`,
+before the player pipeline), `is_revealed` / `is_bound` / `is_lured` (replication),
+`replicate_waxworks` / `replicate_lanterns`.
+
+**The guard** (`abilities/guard.rs`): `Guard { ability, weapon, slot, facing, half_angle,
+absorb_left, absorb, until, blocks, absorbed, pitch_limit }`, one per player
+(`SimWorld::raise_guard` / `drop_guard` / `guard`). `damage_player` asks `guard_covers`: a
+hostile hit flagged `HITSCAN` / `PROJECTILE` / `EXPLOSIVE` / `MELEE` / `SLAM` (never `BURN`, the
+world, floor hazards or your own blasts) travelling from inside the cone (back along
+`DamageInfo::dir`, else from its source) is absorbed whole: `Blocked::Guarded`, no damage, no
+knockback; `guard_absorbed` books it (`absorb_left`, `blocks`), calls `bulwark_blocked` /
+`riposte_blocked` and emits `SimEvent::GuardBlock`. The guard faces the owner's current aim
+(the Bulwark's pitch clamped), slows them (`MoveState::guard_*`), drops when its ability is let
+go (`AbilityPhase::Release`), at `until`, or when its owner dies or stops holding it.
+
+**The Waxwork's decoy id**: a double stands in for its owner as `HitTarget::Player(owner | 0x80)`
+in Mould targeting and hit tests (`abilities/waxwork.rs`); player ids stay below 128.
 
 ## Client: melee and knacks (refit, area arsenal-client)
 

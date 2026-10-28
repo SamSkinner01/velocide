@@ -40,7 +40,7 @@ pub enum SwingKind {
     Whirl,
     /// A throw: the arm winds back and flings.
     Hurl,
-    /// From the floor up past the head.
+    /// From the floor up past the head (the retired Upswing's; the Riposte's counter for now).
     Upswing,
 }
 

@@ -133,16 +133,16 @@ fn the_ability_picker_swaps_and_replaces() {
     // Slot card → (Right) CHANGE WEAPON → (Down) ability box A → its picker on Brand.
     s.press(&[Right, Down, Enter]);
     assert_eq!(s.menu.picking_ability(), Some(0));
-    // Right: Splinter, already ability B: picking it for A swaps the two.
+    // Right: Wickline, already ability B: picking it for A swaps the two.
     let r = s.press(&[Right, Enter]);
     assert!(r.changed);
     assert_eq!(s.menu.picking_ability(), None, "picking closes it");
     let quill = s.loadout().slots[0].unwrap();
-    assert_eq!(quill.abilities, [Ability::Splinter, Ability::Brand]);
-    // The focus is back on box A: open it again (on Splinter), Down to Skewer, pick.
+    assert_eq!(quill.abilities, [Ability::Wickline, Ability::Brand]);
+    // The focus is back on box A: open it again (on Wickline), Down to Tally, pick.
     s.press(&[Enter, Down, Enter]);
     let quill = s.loadout().slots[0].unwrap();
-    assert_eq!(quill.abilities, [Ability::Skewer, Ability::Brand]);
+    assert_eq!(quill.abilities, [Ability::Tally, Ability::Brand]);
     assert!(s.loadout().is_valid());
 }
 
@@ -242,14 +242,14 @@ fn the_mouse_selects_slots_and_opens_the_boxes() {
     let lay = s.layout();
     s.click(lay.slot_card(2).center());
     assert_eq!(s.menu.slot(), 2);
-    // Box B of the Arclash: Discharge's picker, then pick Volley (the third of the pool).
+    // Box B of the Arclash: Discharge's picker, then pick Stoke (the third of the pool).
     s.click(lay.boxes[1].center());
     assert_eq!(s.menu.picking_ability(), Some(1));
     let cells = lay.grid();
     let r = s.click(cells[2].center());
     assert!(r.changed);
     let arclash = s.loadout().slots[2].unwrap();
-    assert_eq!(arclash.abilities, [Ability::Wisp, Ability::Volley]);
+    assert_eq!(arclash.abilities, [Ability::Wisp, Ability::Stoke]);
     // The knack card opens the knack picker; a tile picks (Surge, the last).
     s.click(lay.slot_card(4).center());
     assert!(s.menu.is_picking_knack());

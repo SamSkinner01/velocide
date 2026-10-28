@@ -42,7 +42,10 @@ pub const PROTOCOL_ID: u64 = 0x5645_4C4F_4349_4445;
 /// 5: style & game modes (OwnState::style, GameEvent::Style / GameEvent::Mode, DOWNED).
 /// 7: second-generation roster (docs/roster.md): weapons, thorns, brands, hit assist, enemies.
 /// 10: Moulds getting there (docs/enemies.md): `AiState::{Leap, Melt, Reform}` (9–11).
-pub const PROTOCOL_VERSION: u32 = 10;
+/// 11: the rework (docs/rework.md): new abilities on the retired ids, the Lamplighter, their
+/// kinds / flags / effects, the Stoke and live abilities in `WeaponState`, the tally in
+/// `PlayerCombat`.
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Reliable-ordered channel id (both directions).
 pub const CHANNEL_RELIABLE: u8 = 0;

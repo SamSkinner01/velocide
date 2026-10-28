@@ -105,7 +105,7 @@ fn bow_and_kiln() -> Loadout {
         slots: [
             Some(WeaponBuild {
                 weapon: WeaponKind::Longwick,
-                abilities: [Ability::EmberArrow, Ability::PinningArrow],
+                abilities: [Ability::BeaconArrow, Ability::PinningArrow],
             }),
             None,
             Some(WeaponKind::Kiln.default_build()),

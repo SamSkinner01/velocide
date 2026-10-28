@@ -131,10 +131,10 @@ fn ricochets_pick_branded_targets_first() {
 }
 
 #[test]
-fn brand_and_splinter_ricochet_but_blast_and_arc_do_not() {
+fn brand_ricochets_but_blast_and_arc_do_not() {
     let (mut a, p) = setup();
     let d = dummy(&mut a, Vec3::new(9.0, 0.0, -6.0), -PI / 2.0, 100_000.0);
-    let behind = dummy(&mut a, Vec3::new(10.6, 0.0, -6.0), -PI / 2.0, 100_000.0);
+    dummy(&mut a, Vec3::new(10.6, 0.0, -6.0), -PI / 2.0, 100_000.0);
     let thorn = thorn_at(&mut a, p, Vec3::new(0.0, 1.6, -6.0));
     a.ticks(5);
     a.aim(p, Vec3::new(0.0, 1.6, -6.0));
@@ -150,31 +150,6 @@ fn brand_and_splinter_ricochet_but_blast_and_arc_do_not() {
     let ev = a.tap(p, Buttons::ALT_FIRE, 1);
     assert_eq!(ricochet_paths(&ev).len(), 1);
     assert!(a.world.is_branded(HitTarget::Entity(d)));
-    // A Splinter (after the Quill's alt cooldown) bounces, then bursts from the target into
-    // the one behind it.
-    a.ticks(150);
-    thorn_at(&mut a, p, Vec3::new(0.0, 1.6, -6.0));
-    a.select(p, 0, 1);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 1);
-    assert_eq!(ricochet_paths(&ev).len(), 1);
-    assert!(ev.iter().any(|e| matches!(e, SimEvent::Splinters { .. })));
-    let main = ev
-        .iter()
-        .find_map(|e| match e {
-            SimEvent::Damage(dm) if dm.target == HitTarget::Entity(d) => Some(*dm),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(main.info.attack, Attack::Splinter);
-    assert!(
-        main.info
-            .flags
-            .contains(DamageFlags::RICOCHET | DamageFlags::BRANDED)
-    );
-    assert!(
-        damage_to(&ev, HitTarget::Entity(behind)) > 0.0,
-        "splinters continue past it"
-    );
 }
 
 #[test]

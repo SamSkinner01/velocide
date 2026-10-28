@@ -185,7 +185,7 @@ fn unarmed_players_punch_and_their_prediction_stays_exact() {
     // the default build an unarmed state falls back to.
     let bow = WeaponBuild {
         weapon: WeaponKind::Longwick,
-        abilities: [Ability::Brand, Ability::TripleNock],
+        abilities: [Ability::Brand, Ability::BlinkArrow],
     };
     a.world.force_loadout(p, Some(Loadout::single(bow)));
     a.world.force_loadout(p, Some(Loadout::unarmed()));
@@ -269,7 +269,7 @@ fn the_player_entity_carries_weapon_ability_and_draw() {
     a.select(p, 2, 0);
     a.tick();
     let (weapon, ability, _) = player_weapon(player_entity(&a, p).state);
-    assert_eq!((weapon, ability), (WeaponKind::Lancet, Ability::Skewer));
+    assert_eq!((weapon, ability), (WeaponKind::Lancet, Ability::Tally));
 }
 
 /// The attack showed up as a shot, damage, an explosion or a nova.
@@ -318,11 +318,15 @@ fn every_weapon_and_ability_fires_in_a_live_world() {
                 events.extend(a.tick());
             }
             assert!(seen(&events, w.primary()), "{w:?} primary");
-            assert!(seen(&events, ability.attack()), "{w:?} {ability:?}");
             assert!(
                 damage_to(&events, shared::sim::HitTarget::Entity(target)) > 0.0,
                 "{w:?} {ability:?} hit nothing"
             );
+            // The rework's abilities (docs/rework.md) have their own tests (`combat_rework.rs`;
+            // several deal no damage of their own: guards, the decoy, the reveal).
+            if !ability.is_rework() {
+                assert!(seen(&events, ability.attack()), "{w:?} {ability:?}");
+            }
         }
     }
 }
@@ -334,7 +338,7 @@ fn kills_name_the_weapon_that_fired_a_shared_ability() {
     let p = a.player(0, Vec3::ZERO, 0.0);
     let build = WeaponBuild {
         weapon: WeaponKind::Longwick,
-        abilities: [Ability::Brand, Ability::EmberArrow],
+        abilities: [Ability::Brand, Ability::BeaconArrow],
     };
     a.world.request_loadout(p, Loadout::single(build));
     let target = dummy(&mut a, Vec3::new(0.0, 0.0, -12.0), 0.0, 40.0);

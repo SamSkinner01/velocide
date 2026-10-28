@@ -10,7 +10,7 @@
 //!
 //! Combat hooks: [`Viewmodel::fire`] (recoil kick), [`Viewmodel::punch`],
 //! [`Viewmodel::throw_thorn`] / [`Viewmodel::throw_item`] (a knack), [`Viewmodel::swing`] (a
-//! melee move), [`Viewmodel::set_charge`] (Discharge / Skewer charge),
+//! melee move), [`Viewmodel::set_charge`] (Discharge charge),
 //! [`Viewmodel::turn_drum`] (a Tumbler or Thresher shot), [`Viewmodel::set_draw`] (Longwick
 //! draw), [`Viewmodel::salvo`] (a Cinderbox salvo), [`Viewmodel::spray`] (the Kiln firing)
 //! and [`Viewmodel::last_draw`] (view-space muzzle / fist for tracers and sparks).
@@ -126,7 +126,7 @@ impl Viewmodel {
         self.drum.kick();
     }
 
-    /// Alt charge 0..1 (Arclash Discharge, Skewer).
+    /// Alt charge 0..1 (Arclash Discharge).
     pub fn set_charge(&mut self, charge: f32) {
         self.anim.alt_charge = charge.clamp(0.0, 1.0);
     }

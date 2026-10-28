@@ -1010,10 +1010,10 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
             },
         ),
         (
-            "LANCET SKEWER CHARGED",
+            "LANCET TALLY",
             ViewmodelAnim {
                 alt_charge: 1.0,
-                ..with(WeaponKind::Lancet, Ability::Skewer)
+                ..with(WeaponKind::Lancet, Ability::Tally)
             },
         ),
         ("THRESHER REST", x(WeaponKind::Thresher)),
@@ -1052,7 +1052,7 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
             "CINDERBOX SALVO: 3RD TUBE",
             ViewmodelAnim {
                 salvo: Some(0.17),
-                ..with(WeaponKind::Cinderbox, Ability::Mortar)
+                ..with(WeaponKind::Cinderbox, Ability::Kite)
             },
         ),
         ("LONGWICK REST", x(WeaponKind::Longwick)),
@@ -1074,7 +1074,7 @@ fn viewmodel_shots(lib: &ModelLibrary) -> Vec<(String, String, Shot)> {
             "LONGWICK RELEASE",
             ViewmodelAnim {
                 fire_kick: 0.9,
-                ..with(WeaponKind::Longwick, Ability::EmberArrow)
+                ..with(WeaponKind::Longwick, Ability::BeaconArrow)
             },
         ),
         ("KILN REST", x(WeaponKind::Kiln)),
