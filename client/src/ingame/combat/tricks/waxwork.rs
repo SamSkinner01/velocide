@@ -18,7 +18,7 @@ use super::super::fx::Beams;
 use crate::models::{ModelLibrary, PlayerAnim, Tint};
 
 /// The tallow the double is poured from.
-pub const WAX: Vec4 = Vec4::new(0.96, 0.9, 0.74, 1.0);
+pub const WAX: Vec4 = Vec4::new(1.0, 0.9, 0.68, 1.0);
 /// How much brighter than the tallow itself the figure is drawn: the greyscale copies carry
 /// the parts' dark leather and baked shading, and wax reads pale.
 const WAX_GAIN: f32 = 1.55;

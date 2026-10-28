@@ -8,6 +8,7 @@
 //! * [`waxwork`]: the wax double, its slump and its burst.
 //! * [`blink`]: the Blink Arrow's step (afterimage, streak, arrival) and its prompt.
 //! * [`beacon`]: the lit beacon and the revealed hostiles' silhouettes through walls.
+//! * [`riposte`]: the guard on the HUD, the sparks off a block, the counter's crescent.
 //!
 //! [`Tricks`] holds their per-frame memory; the glue in `combat/mod.rs` calls it like the
 //! other views (`arsenal`, `melee`, `knacks`): [`Tricks::update`] once a frame (effects,
@@ -18,6 +19,7 @@
 pub mod beacon;
 pub mod blink;
 pub mod lamplighter;
+pub mod riposte;
 pub mod tally;
 pub mod waxwork;
 pub mod wickline;

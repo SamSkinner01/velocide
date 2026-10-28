@@ -451,21 +451,21 @@ pub fn tell(
     // The glint: strongest when the lens looks at you.
     let to_eye = (camera - f.muzzle).normalize_or(Vec3::Y);
     let facing = aim.dot(to_eye).max(0.0).powi(6);
-    let flare = (0.18 + 1.2 * e) * (0.45 + 0.55 * facing) * strobe;
+    let flare = (0.3 + 2.0 * e) * (0.4 + 0.6 * facing) * strobe;
     let distance = camera.distance(f.muzzle).max(1.0);
     // Far away it keeps a minimum size on screen, so a sniper can be spotted across the map.
-    let size = flare.max(distance * 0.012 * (0.3 + e));
+    let size = flare.max(distance * 0.025 * (0.3 + e));
     effects.billboard(
         f.muzzle,
         size,
-        fade(pal.effect(WHITE_HOT, pal.aim_laser, 1.0), 0.5 + 0.5 * e),
+        fade(pal.effect(WICK_GOLD, pal.aim_laser, 1.0), 0.45 + 0.4 * e),
         FxTex::Glow,
         0.0,
     );
     effects.billboard(
         f.muzzle,
-        size * 0.45,
-        Vec4::new(1.8, 1.7, 1.5, 1.0),
+        size * 0.4,
+        Vec4::new(2.0, 1.9, 1.7, 1.0),
         FxTex::Glow,
         0.0,
     );
