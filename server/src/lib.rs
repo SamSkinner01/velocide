@@ -646,8 +646,15 @@ impl Server {
         self.transport.set_listing(info);
     }
 
-    /// Kicks a player (online: and bans them from coming back to this game).
+    /// Kicks a player (online: and bans them from coming back to this game). For the server's
+    /// owner (console, listen server host); see [`Server::kick_player`].
     pub fn kick(&mut self, player: PlayerId, reason: &str) {
+        self.kick_player(player, reason, true);
+    }
+
+    /// Kicks a player; with `ban`, online hosting also keeps them out of this game. Only the
+    /// server's owner bans: on a dedicated server the lobby host is just whoever came first.
+    pub(crate) fn kick_player(&mut self, player: PlayerId, reason: &str, ban: bool) {
         if self.bots.remove(&player).is_some() {
             self.world.remove_player(player);
             self.broadcast(&ServerMessage::PlayerLeft { id: player });
@@ -661,7 +668,9 @@ impl Server {
         else {
             return;
         };
-        self.transport.ban(id);
+        if ban {
+            self.transport.ban(id);
+        }
         self.reject(id, reason);
     }
 

@@ -19,7 +19,7 @@
 //! [`crate::Server::with_transport`]. The client side mirrors this with
 //! `client::net::ClientTransport`.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
@@ -41,6 +41,77 @@ use shared::protocol::{
 use crate::netsim::{NetSim, NetSimConfig};
 
 const _: () = assert!(CONNECT_USER_DATA_BYTES == NETCODE_USER_DATA_BYTES);
+
+/// The receive buffer: bigger than any datagram of ours (netcode's 1400 bytes, a relayed one's
+/// 1414), so a bigger one can't be mistaken for a shorter one; it is dropped.
+const RECEIVE_BUFFER_BYTES: usize = 2048;
+
+/// A netcode connection request: prefix byte 0, version (13), protocol id, token expiry (both
+/// u64), nonce (24), the encrypted private token (1024).
+const CONNECT_REQUEST_BYTES: usize = 1 + 13 + 8 + 8 + 24 + 1024;
+const CONNECT_REQUEST_EXPIRY_AT: usize = 1 + 13 + 8;
+/// Our clients' connect tokens expire 300 s after they are made (renetcode's unsecure client);
+/// two more minutes allow for clocks that differ.
+pub const MAX_CONNECT_TOKEN_SECS: u64 = 300 + 120;
+/// Connection handshakes under way per source IP, and in all.
+pub const MAX_HANDSHAKES_PER_IP: usize = 8;
+pub const MAX_HANDSHAKES: usize = 2048;
+/// A connected client that sends nothing for this long is dropped. (netcode itself uses the
+/// timeout the client wrote into its own token, and none at all if that is 0 or less.)
+pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Keeps strangers from filling netcode's table of handshakes under way.
+///
+/// In unsecure mode a client writes its own connect token, expiry included, and netcode keeps
+/// an entry per address that sent a request until that expiry, up to 4096, after which it
+/// refuses everyone. The guard lets a request through only if its token expires within
+/// [`MAX_CONNECT_TOKEN_SECS`], for at most [`MAX_HANDSHAKES_PER_IP`] addresses of one IP and
+/// [`MAX_HANDSHAKES`] in all at once; an address leaves the guard when its handshake completes
+/// or its token expires. (Spoofed sources can still use up the [`MAX_HANDSHAKES`] for as long as
+/// they keep at it on a server without the online gate; docs/rendezvous.md "Security".)
+#[derive(Default)]
+struct ConnectGuard {
+    /// Address → when its token expires (Unix seconds).
+    pending: HashMap<SocketAddr, u64>,
+    refused: u64,
+}
+
+impl ConnectGuard {
+    fn allow(&mut self, now_unix: u64, from: SocketAddr, data: &[u8]) -> bool {
+        // Only connection requests make netcode keep state for a stranger.
+        if data.first() != Some(&0) {
+            return true;
+        }
+        let expiry = data
+            .get(CONNECT_REQUEST_EXPIRY_AT..CONNECT_REQUEST_EXPIRY_AT + 8)
+            .and_then(|b| <[u8; 8]>::try_from(b).ok())
+            .map(u64::from_le_bytes);
+        let allowed = match expiry {
+            _ if data.len() != CONNECT_REQUEST_BYTES => false,
+            None => false,
+            Some(e) if e > now_unix.saturating_add(MAX_CONNECT_TOKEN_SECS) => false,
+            Some(_) if self.pending.contains_key(&from) || from.ip().is_loopback() => true,
+            Some(e) => {
+                self.pending.retain(|_, expiry| *expiry >= now_unix);
+                let same_ip = self.pending.keys().filter(|a| a.ip() == from.ip()).count();
+                let room = same_ip < MAX_HANDSHAKES_PER_IP && self.pending.len() < MAX_HANDSHAKES;
+                if room {
+                    self.pending.insert(from, e);
+                }
+                room
+            }
+        };
+        if !allowed {
+            self.refused += 1;
+        }
+        allowed
+    }
+
+    /// The handshake from `addr` is over (connected, or refused).
+    fn done(&mut self, addr: SocketAddr) {
+        self.pending.remove(&addr);
+    }
+}
 
 /// Datagrams [`UdpLink::receive`] reads per call (per server / client update); the rest wait
 /// in the socket buffer for the next update, so a packet flood can't stall the update loop
@@ -166,7 +237,7 @@ pub struct UdpLink {
     stats: TransportStats,
     sent_rate: RateMeter,
     recv_rate: RateMeter,
-    buffer: Box<[u8; NETCODE_MAX_PACKET_BYTES]>,
+    buffer: Box<[u8; RECEIVE_BUFFER_BYTES]>,
     /// The last receive stopped at its datagram limit.
     backlog: bool,
 }
@@ -197,7 +268,7 @@ impl UdpLink {
             stats: TransportStats::default(),
             sent_rate: RateMeter::default(),
             recv_rate: RateMeter::default(),
-            buffer: Box::new([0; NETCODE_MAX_PACKET_BYTES]),
+            buffer: Box::new([0; RECEIVE_BUFFER_BYTES]),
             backlog: false,
         })
     }
@@ -285,6 +356,10 @@ impl UdpLink {
             }
             read += 1;
             match self.socket.recv_from(&mut self.buffer[..]) {
+                Ok((len, _)) if len > NETCODE_MAX_PACKET_BYTES + 14 => {
+                    // Bigger than anything we send (and maybe cut to fit the buffer).
+                    self.stats.packets_received += 1;
+                }
                 Ok((len, addr)) => {
                     self.stats.bytes_received += len as u64;
                     self.stats.packets_received += 1;
@@ -298,7 +373,12 @@ impl UdpLink {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => break,
                 // Windows reports ICMP port unreachable from earlier sends this way.
                 Err(e) if e.kind() == io::ErrorKind::ConnectionReset => continue,
-                Err(e) => return Err(e),
+                // Errors about one datagram (Windows: one bigger than the buffer, WSAEMSGSIZE)
+                // drop that datagram, not the connection.
+                Err(e) => {
+                    log::debug!("UDP receive: {e}");
+                    continue;
+                }
             }
         }
         if let Some(sim) = &mut self.incoming {
@@ -427,6 +507,7 @@ pub struct NetcodeServerTransport {
     netcode: NetcodeServer,
     scratch: Vec<(SocketAddr, Vec<u8>)>,
     online: Option<Online>,
+    guard: ConnectGuard,
 }
 
 impl NetcodeServerTransport {
@@ -450,6 +531,7 @@ impl NetcodeServerTransport {
             netcode,
             scratch: Vec::new(),
             online: None,
+            guard: ConnectGuard::default(),
         })
     }
 
@@ -484,6 +566,7 @@ fn handle_result(
     link: &mut UdpLink,
     mut online: Option<&mut Online>,
     server: &mut RenetServer,
+    guard: &mut ConnectGuard,
     refused: &mut Vec<ClientId>,
 ) {
     match result {
@@ -502,6 +585,7 @@ fn handle_result(
             payload,
             ..
         } => {
+            guard.done(addr);
             if let Some(o) = online.as_deref_mut()
                 && !o.agent.admit(client_id, addr)
             {
@@ -557,12 +641,16 @@ impl ServerTransport for NetcodeServerTransport {
                     Inbound::Drop => continue,
                 },
             };
+            if !self.guard.allow(netcode_time().as_secs(), from, data) {
+                continue;
+            }
             let result = self.netcode.process_packet(from, data);
             handle_result(
                 result,
                 &mut self.link,
                 self.online.as_mut(),
                 server,
+                &mut self.guard,
                 &mut refused,
             );
         }
@@ -570,12 +658,22 @@ impl ServerTransport for NetcodeServerTransport {
         self.scratch = packets;
 
         for client_id in self.netcode.clients_id() {
+            if self
+                .netcode
+                .time_since_last_received_packet(client_id)
+                .is_some_and(|t| t > CLIENT_TIMEOUT)
+            {
+                log::info!("client {client_id} sent nothing for {CLIENT_TIMEOUT:?}: disconnecting");
+                refused.push(client_id);
+                continue;
+            }
             let result = self.netcode.update_client(client_id);
             handle_result(
                 result,
                 &mut self.link,
                 self.online.as_mut(),
                 server,
+                &mut self.guard,
                 &mut refused,
             );
         }
@@ -590,6 +688,7 @@ impl ServerTransport for NetcodeServerTransport {
                 &mut self.link,
                 self.online.as_mut(),
                 server,
+                &mut self.guard,
                 &mut refused,
             );
         }
@@ -689,6 +788,47 @@ impl ServerTransport for NetcodeServerTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A netcode connection request whose token expires at `expiry`.
+    fn connect_request(expiry: u64) -> Vec<u8> {
+        let mut data = vec![0u8; CONNECT_REQUEST_BYTES];
+        data[CONNECT_REQUEST_EXPIRY_AT..CONNECT_REQUEST_EXPIRY_AT + 8]
+            .copy_from_slice(&expiry.to_le_bytes());
+        data
+    }
+
+    #[test]
+    fn the_connect_guard_bounds_handshakes() {
+        let now = 1_900_000_000u64;
+        let mut g = ConnectGuard::default();
+        let a: SocketAddr = "198.51.100.1:5000".parse().unwrap();
+        // Other packets pass; malformed requests and far-future tokens don't.
+        assert!(g.allow(now, a, &[0x12, 1, 2, 3]));
+        assert!(!g.allow(now, a, &[0, 1, 2]));
+        assert!(!g.allow(now, a, &connect_request(now + 10 * 365 * 86_400)));
+        // Our own clients' tokens (300 s) do, and retries from one address are one handshake.
+        let ok = connect_request(now + 300);
+        assert!(g.allow(now, a, &ok));
+        assert!(g.allow(now, a, &ok));
+        // At most 8 addresses of one IP at once; another IP is unaffected.
+        for port in 1..MAX_HANDSHAKES_PER_IP as u16 {
+            assert!(g.allow(now, SocketAddr::new(a.ip(), 5000 + port), &ok));
+        }
+        assert!(!g.allow(now, SocketAddr::new(a.ip(), 6000), &ok));
+        assert!(g.allow(now, "198.51.100.2:5000".parse().unwrap(), &ok));
+        // A finished handshake makes room; so does an expired token.
+        g.done(a);
+        assert!(g.allow(now, SocketAddr::new(a.ip(), 6000), &ok));
+        assert!(g.allow(
+            now + 301,
+            SocketAddr::new(a.ip(), 6001),
+            &connect_request(now + 600)
+        ));
+        // Loopback (the host's own client) is never limited.
+        for port in 0..20 {
+            assert!(g.allow(now, SocketAddr::from(([127, 0, 0, 1], 7000 + port)), &ok));
+        }
+    }
 
     #[test]
     fn rate_meter_window() {

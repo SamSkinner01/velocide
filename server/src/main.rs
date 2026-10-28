@@ -7,7 +7,7 @@
 //!                 [--no-warmup]
 //!                 [--tick-rate 60] [--snapshot-rate 30] [--netsim 100,20,2] [--tuning PATH]
 //!                 [--no-watch] [--no-delta] [--name NAME] [--dev-commands]
-//!                 [--online] [--rendezvous HOST:PORT] [--private] [--relay-only] [--online-only]
+//!                 [--online] [--rendezvous HOST:PORT] [--private] [--relay-only] [--allow-direct]
 //!                 [--exit-when-replaced PATH]
 //! ```
 //!
@@ -64,8 +64,9 @@ OPTIONS:
     --rendezvous <HOST:PORT> the online service to use (implies --online)
     --private                online, but not in the browser: only the join code finds it
     --relay-only             online joiners always go through the relay (hides addresses)
-    --online-only            refuse joins by address from the internet: only joiners the
-                             online service introduces get in (the LAN still can)
+    --allow-direct           online: also let anyone in by address (by default only joiners
+                             the online service introduces get in from the internet; the
+                             LAN still can)
     --exit-when-replaced <PATH>
                              exit once PATH points at another file and nobody is connected
                              (a deploy swapped the binary; systemd starts the new one)
@@ -88,7 +89,7 @@ fn parse_args() -> Result<Options, String> {
     let mut port = config.bind.port();
     let mut online = false;
     let mut service = rendezvous::BUILT_IN_SERVICE.to_string();
-    let (mut private, mut relay_only, mut online_only) = (false, false, false);
+    let (mut private, mut relay_only, mut allow_direct) = (false, false, false);
     let mut exit_when_replaced = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -163,7 +164,7 @@ fn parse_args() -> Result<Options, String> {
             }
             "--private" => private = true,
             "--relay-only" => relay_only = true,
-            "--online-only" => online_only = true,
+            "--allow-direct" => allow_direct = true,
             "--exit-when-replaced" => {
                 exit_when_replaced = Some(PathBuf::from(value("--exit-when-replaced")?))
             }
@@ -190,11 +191,11 @@ fn parse_args() -> Result<Options, String> {
         config.online = Some(OnlineConfig {
             public: !private,
             relay_only,
-            gate: online_only,
+            gate: !allow_direct,
             ..OnlineConfig::new(&service)
         });
-    } else if private || relay_only || online_only {
-        return Err("--private, --relay-only and --online-only need --online".into());
+    } else if private || relay_only || allow_direct {
+        return Err("--private, --relay-only and --allow-direct need --online".into());
     }
     Ok(Options {
         config,
