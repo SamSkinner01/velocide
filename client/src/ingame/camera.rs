@@ -56,6 +56,9 @@ pub struct CameraRig {
     /// little: 0.1 = tan(fov/2) × 0.9) and its target.
     zoom_in: f32,
     zoom_in_target: f32,
+    /// Extra horizontal degrees of field of view (the Kindle Flask's haste) and its target.
+    fov_boost: f32,
+    fov_boost_target: f32,
 }
 
 /// What the camera needs from the current frame.
@@ -121,6 +124,16 @@ impl CameraRig {
         };
     }
 
+    /// Extra horizontal field of view (degrees) to ease towards on top of the speed kick: the
+    /// Kindle Flask's haste (`combat::kindle`).
+    pub fn set_fov_boost(&mut self, degrees: f32) {
+        self.fov_boost_target = if degrees.is_finite() {
+            degrees.clamp(0.0, 15.0)
+        } else {
+            0.0
+        };
+    }
+
     /// Current view punch (radians, >= 0).
     pub fn view_punch(&self) -> f32 {
         self.punch
@@ -178,6 +191,7 @@ impl CameraRig {
             (self.punch, self.punch_velocity) = (0.0, 0.0);
         }
         self.zoom_in = approach(self.zoom_in, self.zoom_in_target, ZOOM_RATE, dt);
+        self.fov_boost = approach(self.fov_boost, self.fov_boost_target, ZOOM_RATE, dt);
 
         let rotation = Camera::rotation_from_angles(
             f.yaw + f.shake.angles.x,
@@ -187,7 +201,7 @@ impl CameraRig {
         let position =
             f.feet + Vec3::Y * (eye + self.step_offset + self.dip) + rotation * f.shake.offset;
         // Zoom narrows the view: tan(fov/2) scales by `zoom`.
-        let fov = f.settings.vertical_fov(self.fov_kick);
+        let fov = f.settings.vertical_fov(self.fov_kick + self.fov_boost);
         let fov_y_degrees = if self.zoom_in > 0.001 {
             let k = 1.0 - self.zoom_in;
             2.0 * ((fov * 0.5).to_radians().tan() * k).atan().to_degrees()

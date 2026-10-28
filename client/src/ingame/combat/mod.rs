@@ -23,6 +23,8 @@ pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
 pub mod hud;
+/// The Kindle Flask drunk: the drink, the haste, its heal ticks (docs/rework.md).
+pub mod kindle;
 pub mod knacks;
 pub mod melee;
 pub mod stand_in;
@@ -1406,6 +1408,8 @@ impl InGame {
         let rate_k = if target > combat.music { 1.5 } else { 0.25 };
         combat.music += (target - combat.music) * (1.0 - (-rate_k * vdt.max(0.0)).exp());
         common.audio.set_music_intensity(combat.music);
+        // The Kindle Flask's haste, its previews and heal ticks (kindle.rs).
+        self.combat_kindle(common, vdt);
     }
 
     /// Combat entities and tracers.
@@ -1504,10 +1508,11 @@ impl InGame {
                 } else {
                     0.0
                 },
-                active: if k == knacks::Knack::TallowSkin {
-                    tallow
-                } else {
-                    0.0
+                active: match k {
+                    knacks::Knack::TallowSkin => tallow,
+                    // The haste draining (kindle.rs).
+                    knacks::Knack::KindleFlask => self.combat.knacks.kindle.shown(),
+                    _ => 0.0,
                 },
             })
         };

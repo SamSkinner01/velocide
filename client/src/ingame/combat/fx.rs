@@ -992,9 +992,8 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
             from,
         } => {
             let from = q(*from);
-            // A Kindle pool's steady trickle (knacks.rs).
-            if super::knacks::is_pool_heal(ctx.entities, from) {
-                super::knacks::pool_heal(ctx, *player, from, *amount_tenths as f32 / 10.0);
+            // A Kindle Flask's heal tick: from the drinker's own body (kindle.rs).
+            if super::kindle::play_heal(ctx, *player, from, *amount_tenths as f32 / 10.0) {
                 return;
             }
             let to = if Some(*player) == ctx.local {

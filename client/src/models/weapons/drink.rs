@@ -24,8 +24,8 @@ const RAISED: f32 = 0.28;
 const TIP: (f32, f32) = (0.24, 0.66);
 /// Dropped away from here.
 const AWAY: f32 = 0.7;
-/// The flask's drawn scale in view space (the throw's: the fist's scale x 0.5).
-const FLASK_SCALE: f32 = VIEWMODEL_SCALE * 0.5;
+/// The flask's drawn scale in view space (a little under the throw's: the fist's x 0.42).
+const FLASK_SCALE: f32 = VIEWMODEL_SCALE * 0.42;
 
 /// How far the hand is raised (0 below the screen .. 1 up).
 fn raise(p: f32) -> f32 {

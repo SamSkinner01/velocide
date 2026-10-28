@@ -685,7 +685,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
 
     // The knacks, used for real.
     for (knack, name, after, settle) in [
-        ("kindle", "knack_use_flask", 4, 70),
+        ("kindle", "knack_use_drink", 18, 30),
         ("snare", "knack_use_snare", 4, 60),
         ("soot", "knack_use_soot", 40, 60),
         ("tallow", "knack_use_tallow", 20, 200),
@@ -703,7 +703,7 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
         h.shot(name);
         h.frames(game, settle, still);
         if knack == "kindle" {
-            h.shot("knack_use_kindle_pool");
+            h.shot("knack_use_haste");
         }
         if knack == "snare" {
             h.shot("knack_use_snare_armed");
@@ -717,9 +717,10 @@ fn melee_weapon_shots(h: &mut Harness, game: &mut InGame) {
 /// Melee and knacks (docs/refit.md), staged client-side with `InGame::preview_melee` /
 /// `preview_knack` (`melee_*.png`, `knack_*.png`): slash trails, hits, the abilities' streak /
 /// ring / hurled pieces / launch, the flask and its pool, the snare arming and springing, the
-/// soot cloud hiding the Moulds, Tallow Skin's sheen and the Surge's lines.
+/// soot cloud hiding the Moulds, Tallow Skin's sheen and the Surge's lines. (The Kindle Flask
+/// is `kindle_previews`.)
 fn refit_previews(h: &mut Harness, game: &mut InGame) {
-    use client::ingame::combat::knacks::{KnackPreview as K, Thrown};
+    use client::ingame::combat::knacks::KnackPreview as K;
     use client::ingame::combat::melee::{MeleePreview as M, MeleeWeapon, SwingKind};
     let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
     game.send_chat("/killall");
@@ -817,20 +818,6 @@ fn refit_previews(h: &mut Harness, game: &mut InGame) {
     h.shot("melee_upswing");
     h.frames(game, 40, still);
 
-    // Knacks: a flask lobbed ahead and its pool.
-    let lob = |side: f32| eye + fwd * 0.7 + right * side - Vec3::Y * 0.2;
-    game.preview_knack(K::Throw {
-        thing: Thrown::Flask,
-        from: lob(0.2),
-        velocity: fwd * 9.0 + Vec3::Y * 4.0,
-        gravity: 16.0,
-    });
-    h.frames(game, 8, still);
-    h.shot("knack_flask");
-    h.frames(game, 50, still);
-    h.shot("knack_kindle_pool");
-    h.frames(game, 200, still);
-
     // A snare thrown down, arming, armed, then sprung.
     game.preview_knack(K::Snare {
         position: floor + fwd * 3.5,
@@ -875,6 +862,60 @@ fn refit_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 30, still);
 }
 
+/// The Kindle Flask drunk (docs/rework.md §3), staged client-side with `InGame::preview_kindle`
+/// (`kindle_*.png`): the drink in first person, your haste's embers and edges while running,
+/// a heal tick, and another hasted Shrike's trail and wick embers running across the view.
+fn kindle_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::kindle::KindlePreview as K;
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    h.frames(game, 10, still);
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = eye - Vec3::Y * 1.6;
+    game.preview_kindle(K::Drink { seconds: 5.0 });
+    for (frames, name) in [
+        (5, "kindle_drink_raise"),
+        (8, "kindle_drink_tip"),
+        (10, "kindle_drink_away"),
+    ] {
+        h.frames(game, frames, still);
+        h.shot(name);
+    }
+    // Hasted: running forward (embers past the view, the edges streaming).
+    game.controls.override_move = Some((1.0, 0.0, Buttons::NONE));
+    h.frames(game, 40, |_, _| {});
+    h.shot("kindle_haste_run");
+    game.preview_kindle(K::Tick { amount: 8.0 });
+    h.frames(game, 6, |_, _| {});
+    h.shot("kindle_heal_tick");
+    hold(game, Buttons::NONE);
+    h.frames(game, 200, still);
+    // Another hasted Shrike running across the view.
+    let Some(eye) = self::eye(game) else {
+        return;
+    };
+    let floor = Vec3::new(eye.x, floor.y.min(eye.y - 1.6), eye.z);
+    game.preview_kindle(K::Runner {
+        from: floor + fwd * 7.0 - right * 6.0,
+        velocity: right * 14.0,
+        seconds: 1.2,
+    });
+    h.frames(game, 26, still);
+    h.shot("kindle_haste_other");
+    game.preview_kindle(K::Runner {
+        from: floor + fwd * 9.0 + right * 0.5,
+        velocity: -fwd * 3.0,
+        seconds: 2.0,
+    });
+    h.frames(game, 40, still);
+    h.shot("kindle_haste_other_slow");
+    h.frames(game, 90, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -915,6 +956,14 @@ fn main() -> anyhow::Result<()> {
     game.send_chat("/notarget");
     spawn(&mut game, 4);
     h.frames(&mut game, 60, |g, _| hold(g, Buttons::NONE));
+
+    // The rework (docs/rework.md); `COMBAT_SHOTS=rework` stops after them (quick look).
+    kindle_previews(&mut h, &mut game);
+    if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
+        println!("{} screenshots in {}", h.shots.len(), h.out.display());
+        game.shutdown(&mut h.renderer, &mut h.common);
+        return Ok(());
+    }
 
     // Melee and knacks; `COMBAT_SHOTS=refit` stops after them (quick look).
     refit_previews(&mut h, &mut game);
