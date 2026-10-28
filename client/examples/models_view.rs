@@ -1601,6 +1601,110 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     shots
 }
 
+/// The rework (docs/rework.md, area client-a): the Lamplighter at real scale through its focus.
+fn rework_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
+    use client::models::weapons::lamplighter;
+    let mut shots = Vec::new();
+    let pose = |focus: f32, kick: f32| {
+        let held = HeldWeapon {
+            ability: Ability::Brand,
+            draw: focus,
+            kick,
+            time: t,
+            ..HeldWeapon::default()
+        };
+        let (mut glow, mut color) = (0.9, client::models::ability_color(held.ability).truncate());
+        let mut pose = lamplighter::pose(&held, &mut glow, &mut color);
+        pose.glow = (color * glow).extend(1.0);
+        if std::env::var("HIDE_GLASS").is_ok() {
+            pose.hide(lamplighter::GLASS);
+        }
+        pose
+    };
+    for (name, title, cam, yaw) in [
+        (
+            "lamp_side",
+            "LAMPLIGHTER (SIDE): REST, HALF FOCUS, FULL FOCUS, SHOT",
+            Vec3::new(-0.3, 1.2, 1.9),
+            std::f32::consts::FRAC_PI_2,
+        ),
+        (
+            "lamp_34",
+            "LAMPLIGHTER (3/4 FRONT)",
+            Vec3::new(-0.3, 1.5, 1.7),
+            2.4,
+        ),
+    ] {
+        let mut shot = Shot::new(look_at(cam, Vec3::new(-0.3, 1.1, 0.0), 50.0));
+        for (i, (focus, kick, label)) in [
+            (0.0, 0.0, "REST"),
+            (0.5, 0.0, "FOCUS .5"),
+            (1.0, 0.0, "FULL FOCUS"),
+            (0.0, 0.8, "SHOT"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let pos = Vec3::new(0.0, 1.62 - i as f32 * 0.36, 0.0);
+            let root = Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), pos);
+            lib.get(ModelId::Lamplighter).draw(
+                &pose(focus, kick),
+                root,
+                &Tint::default(),
+                &mut shot.draws,
+            );
+            shot.labels
+                .push((pos + Vec3::new(0.0, -0.1, 0.0), label.to_string()));
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
+    // Close on the lantern chamber and on the lens.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(-0.05, 1.07, 0.5),
+        Vec3::new(-0.05, 1.0, 0.0),
+        40.0,
+    ));
+    for (y, focus) in [(1.1f32, 0.0f32), (0.9, 1.0)] {
+        let root = Mat4::from_rotation_translation(
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            Vec3::new(0.12, y, 0.0),
+        );
+        lib.get(ModelId::Lamplighter).draw(
+            &pose(focus, 0.0),
+            root,
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    shots.push((
+        "lamp_close".into(),
+        "LAMPLIGHTER CHAMBER: REST / FULL FOCUS".into(),
+        shot,
+    ));
+
+    // The rework's arrows beside the plain and the pinning arrow.
+    let arrows = [
+        (ModelId::Arrow, "ARROW"),
+        (ModelId::PinningArrow, "PINNING"),
+        (ModelId::BlinkArrow, "BLINK"),
+        (ModelId::BeaconArrow, "BEACON"),
+    ];
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 1.3, 1.9),
+        Vec3::new(0.0, 1.0, 0.0),
+        50.0,
+    ));
+    for ((id, name), pos) in arrows.iter().zip(row(arrows.len(), 0.55)) {
+        let rot = Quat::from_rotation_y(-1.2) * Quat::from_rotation_x(0.3);
+        let root = Mat4::from_rotation_translation(rot, pos + Vec3::new(0.0, 1.0, 0.0));
+        lib.draw_model(*id, root, &Tint::default(), &mut shot.draws);
+        shot.labels
+            .push((pos + Vec3::new(0.0, 0.72, 0.0), name.to_string()));
+    }
+    shots.push(("rework_arrows".into(), "THE REWORK'S ARROWS".into(), shot));
+    shots
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
     let mut out = PathBuf::from("target/models_view");
@@ -1825,6 +1929,7 @@ fn main() -> anyhow::Result<()> {
     shots.extend(viewmodel_shots(&lib));
     shots.extend(prop_shots(&lib, 2.0));
     shots.extend(melee_shots(&lib, 2.0));
+    shots.extend(rework_shots(&lib, 2.0));
 
     for (name, title, shot) in &shots {
         if only.as_ref().is_some_and(|o| !name.starts_with(o.as_str())) {

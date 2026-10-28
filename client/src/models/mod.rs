@@ -25,6 +25,8 @@ pub mod projectiles;
 pub mod props;
 pub mod rig;
 pub mod shrike;
+/// The rework's arrows (docs/rework.md): the Blink and Beacon arrows.
+pub mod tricks;
 pub mod weapons;
 
 #[cfg(test)]
@@ -82,6 +84,9 @@ pub enum ModelId {
     Trimmer,
     /// Foundry ramming hammer.
     Tamper,
+    // The rework (docs/rework.md).
+    /// The Lamplighter: a lamplighter's long pole turned rifle (the sniper).
+    Lamplighter,
     /// First-person right forearm + gloved hand that grips every weapon.
     ArmRight,
     /// First-person left forearm + fist (punch / parry, Thorn throw).
@@ -135,10 +140,15 @@ pub enum ModelId {
     SootPot,
     /// The wax puddle a stranded Mould melts into and re-forms out of.
     WaxPuddle,
+    // The rework's arrows (docs/rework.md).
+    /// Blink Arrow: the arrow you step to.
+    BlinkArrow,
+    /// Beacon Arrow: the arrow that lights a beacon where it sticks.
+    BeaconArrow,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 53] = [
+    pub const ALL: [ModelId; 56] = [
         ModelId::Shrike,
         ModelId::ShrikeKit,
         ModelId::Gnawer,
@@ -162,6 +172,7 @@ impl ModelId {
         ModelId::Kiln,
         ModelId::Trimmer,
         ModelId::Tamper,
+        ModelId::Lamplighter,
         ModelId::ArmRight,
         ModelId::Fist,
         ModelId::Bomb,
@@ -192,6 +203,8 @@ impl ModelId {
         ModelId::Snare,
         ModelId::SootPot,
         ModelId::WaxPuddle,
+        ModelId::BlinkArrow,
+        ModelId::BeaconArrow,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -225,6 +238,7 @@ impl ModelId {
             ModelId::Kiln => "weapon_kiln.gltf",
             ModelId::Trimmer => "weapon_trimmer.gltf",
             ModelId::Tamper => "weapon_tamper.gltf",
+            ModelId::Lamplighter => "weapon_lamplighter.gltf",
             ModelId::ArmRight => "vm_arm.gltf",
             ModelId::Fist => "vm_fist.gltf",
             ModelId::Bomb => "proj_bomb.gltf",
@@ -255,6 +269,8 @@ impl ModelId {
             ModelId::Snare => "prop_snare.gltf",
             ModelId::SootPot => "prop_soot_pot.gltf",
             ModelId::WaxPuddle => "fx_wax_puddle.gltf",
+            ModelId::BlinkArrow => "proj_arrow_blink.gltf",
+            ModelId::BeaconArrow => "proj_arrow_beacon.gltf",
         }
     }
 
@@ -287,7 +303,9 @@ impl ModelId {
             ModelId::Kiln => &weapons::kiln::JOINTS,
             ModelId::Trimmer => &weapons::trimmer::JOINTS,
             ModelId::Tamper => &weapons::tamper::JOINTS,
+            ModelId::Lamplighter => &weapons::lamplighter::JOINTS,
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::joints(self),
+            ModelId::BlinkArrow | ModelId::BeaconArrow => tricks::joints(self),
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
             id if id.is_player_projectile() => projectiles::joints(self),
@@ -325,7 +343,9 @@ impl ModelId {
             ModelId::Kiln => weapons::kiln::build(),
             ModelId::Trimmer => weapons::trimmer::build(),
             ModelId::Tamper => weapons::tamper::build(),
+            ModelId::Lamplighter => weapons::lamplighter::build(),
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::build(self),
+            ModelId::BlinkArrow | ModelId::BeaconArrow => tricks::build(self),
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
             id if id.is_player_projectile() => projectiles::build(self),

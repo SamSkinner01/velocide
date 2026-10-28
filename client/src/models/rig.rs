@@ -104,6 +104,10 @@ pub struct Tint {
     pub primary: Vec4,
     pub secondary: Vec4,
     pub flame: Vec4,
+    /// Draws every part that has a greyscale copy (the Shrike and its kit: the Waxwork's double,
+    /// docs/rework.md) in this one colour, lit, its shading kept: a figure poured in wax.
+    /// `None` = the model's own colours.
+    pub flat: Option<Vec4>,
 }
 
 /// The Shrikes' default colour (single-player / co-op): ember red.
@@ -126,6 +130,7 @@ impl Default for Tint {
             primary: paint(look.primary_rgb()),
             secondary: paint(look.secondary_rgb()),
             flame: paint(look.flame_rgb()),
+            flat: None,
         }
     }
 }
@@ -357,6 +362,18 @@ impl Rig {
         let Some(part) = self.parts.get(i) else {
             return;
         };
+        // One flat colour for the whole figure (a wax double): the greyscale copy, lit.
+        if let (Some(flat), Some(mesh)) = (tint.flat, part.recolour_mesh) {
+            out.push(DrawItem {
+                mesh,
+                texture: part.texture,
+                transform: world,
+                tint: (flat.truncate() * tint.body.truncate())
+                    .extend(flat.w * tint.body.w * part.base_color.w),
+                unlit: false,
+            });
+            return;
+        }
         // Palette recolouring (colour-blind modes): a greyscale copy in the role colour.
         let recolour = match part.shade {
             Shade::Glow => tint

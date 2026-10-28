@@ -17,6 +17,8 @@ pub mod bellows;
 pub mod cinderbox;
 pub mod fist;
 pub mod kiln;
+/// The Lamplighter (docs/rework.md §2): the sniper's long pole, lens and focusing wick.
+pub mod lamplighter;
 pub mod lancet;
 pub mod longwick;
 /// Melee (docs/refit.md): how the Trimmer and the Tamper are held and swung.

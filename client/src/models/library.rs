@@ -142,9 +142,11 @@ impl ModelLibrary {
                 (renderer.create_mesh(mesh), texture, *color)
             });
             // Telegraph glows and weak points can be recoloured by the colour-blind palettes
-            // (`Tint::glow_color` / `core_color`): upload a greyscale copy of each.
+            // (`Tint::glow_color` / `core_color`): upload a greyscale copy of each. The Shrike
+            // and its kit get one of every part (`Tint::flat`: the Waxwork's wax double).
+            let figure = matches!(id, ModelId::Shrike | ModelId::ShrikeKit);
             for (part, (mesh, _, _)) in rig.parts.iter_mut().zip(&parts) {
-                if matches!(part.shade, Shade::Glow | Shade::Core) {
+                if figure || matches!(part.shade, Shade::Glow | Shade::Core) {
                     part.recolour_mesh = Some(renderer.create_mesh(&neutral_mesh(mesh)));
                 }
             }
