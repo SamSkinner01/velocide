@@ -8,11 +8,12 @@ six knacks on Q, loadouts of up to four builds, the Burn and Pinned status effec
 balance for PvE and PvP. Everything a weapon decides is integer-tick and predicted by its owner;
 the server stays authoritative for everything else.
 
-> **Rework in progress** (`docs/rework.md`, `PROTOCOL_VERSION` 11). Eleven abilities retired
+> **The rework** (`docs/rework.md`, `PROTOCOL_VERSION` 11) retired eleven abilities
 > (Splinter, Skewer, Flurry, Both Barrels, Slug, Volley, Flare and its burning patches, Mortar,
-> Triple Nock, Ember Arrow, Upswing). The sections below that still describe them, and the PvP
-> balance tables, are rewritten by the areas as they land; the ids, kinds and flags every
-> area builds against are in **"The rework on the wire"** below.
+> Triple Nock, Ember Arrow, Upswing); the older sections below that still describe them are
+> history. The ids, kinds and flags are in **"The rework on the wire"**; the rework's numbers,
+> as balanced, in **"The rework's numbers"** and the PvP table under "Balance profiles"
+> (`docs/balance.md` has the measurements).
 
 ## Code map
 
@@ -531,21 +532,61 @@ re-bases as `WeaponPredictor::server_cooldowns`, not as mispredictions).
 
 | ability / weapon | as built |
 |---|---|
-| Lamplighter (primary) | `PrimaryStyle::Focus`: the draw's code path (`WeaponState::draw`, weapon-aware `draw_ticks_of` / `draw_fraction`), replicated `DRAWING` + the level like the bow. Release: `lamplighter_beam` — `min_damage`→`max_damage` linear in the focus, exact, `hitscan_range`; at a full focus `fire_piercing` through `pierce` (2) targets, ×`pierce_falloff` (0.7) for the second (`PIERCED`). PvP ×0.54 damage, ×0.75 interval: 70 body / 140 head at full focus, two body shots in 1.6 s |
+| Lamplighter (primary) | `PrimaryStyle::Focus`: the draw's code path (`WeaponState::draw`, weapon-aware `draw_ticks_of` / `draw_fraction`), replicated `DRAWING` + the level like the bow. Release: `lamplighter_beam` — `min_damage`→`max_damage` linear in the focus, exact, `hitscan_range`; at a full focus `fire_piercing` through `pierce` (2) targets, ×`pierce_falloff` (0.7) for the second (`PIERCED`). PvP ×0.4 damage, ×0.75 interval: 52 body / 104 head at full focus (the one-shot; 96 at 90 %), two body shots in 1.6 s |
 | Wickline | instant; a lag-compensated ray to 34 m (`first_target_on_ray` with hit assist, then the level). The level first: a zip (what of the velocity runs against the line is dropped, +24 m/s along it, at least 4 m/s up). A light hostile (base health < 300, any PvP player): 10 dmg (`Attack::Wickline`, a hitscan hit) and a yank towards the caster (16 m/s with a little lift, enemies × their knockback scale, PvP ×0.5). A heavy one: the caster zips to it, no damage. Nothing in range: half the cooldown (server-side). `Fx::Wickline` |
-| Tally | channel (up to 1.2 s). The press starts the tally; after every input (`abilities_after_input`, with the history) each hostile whose padded shapes (+ distance × tan 0.75°) the crosshair ray meets within 45 m, in sight, is marked with the part it met (a later weak point / head upgrades a body mark), up to 4 (PvP 3: an override). The marks are `PlayerCombat::tallied` (`NetId`s; players as `NetId::player`) and `TALLYING`. The release: one ray per mark still hittable and in sight, aimed at the marked part of what the caster sees at the release, 30 dmg each (`Attack::Tally`, through `trace_shot`: what is in the way takes it); `Fx::TallyFired`. No marks: no shot, a quarter of the cooldown (server-side) |
+| Tally | channel (up to 1.2 s). The press starts the tally; after every input (`abilities_after_input`, with the history) each hostile whose padded shapes (+ distance × tan 0.75°) the crosshair ray meets within 45 m, in sight, is marked with the part it met (a later weak point / head upgrades a body mark), up to 4 (PvP 3: an override). The marks are `PlayerCombat::tallied` (`NetId`s; players as `NetId::player`) and `TALLYING`. The release: one ray per mark still hittable and in sight, aimed at the marked part of what the caster sees at the release, 40 dmg each (was 30, cooldown 6 → 4 s: `docs/balance.md`) (`Attack::Tally`, through `trace_shot`: what is in the way takes it); `Fx::TallyFired`. No marks: no shot, a quarter of the cooldown (server-side) |
 | Waxwork | instant, live 5 s (cooldown 10 s from its end). A double where its owner stands (their `MoveState`, look, pose flags and weapon state): 60 HP, `kind::WAXWORK`. It stands in as `HitTarget::Player(owner | 0x80)` (`decoy_id`): a player's hit shapes in `SimWorld::hitboxes` (lag compensation records it), `can_hit` / `is_hostile` / explosions treat it as its owner (their own and co-op teammates' shots pass), `apply_damage` hands its damage to `damage_waxwork` (head ×2 unless explosive; a `SimEvent::Damage` for hit markers; modes' stats skip it). Moulds see it as a player view; `select_target` takes the nearest double within 25 m in sight (soot hides it) before anyone (`LURED`). Destroyed: it bursts at once and the owner's cooldown starts (`end_live`); at its end it slumps for 0.4 s (`SLUMPING`) and bursts: up to 30 dmg (explosion falloff, line of sight, never its owner) and 1 Burn stack to everything hostile within 3.5 m (`Attack::Waxwork`) |
 | Blink Arrow | armed; the release looses `BLINK_ARROW` (0.8 × an arrow's hit) and makes it live for its flight + 1.5 s. It sticks in the level (`STUCK`, window 1.5 s: `shorten_live`) or strikes a target (its hit, then gone, window 1.5 s). The recast steps to the arrow where its owner saw it (`SimWorld::projectile_seen`: arrows are lag-compensated, the owner draws theirs a round trip and an interpolation delay behind the server's — some 28 m at 100 ms on a full draw): the feet go where the body's middle is just in front of the spot (stuck: in front of the surface; on a floor: on it; seen still flying: where it was seen), else the nearest point back along its kept path (0.25 m steps, also 0.4 m up) where a standing or crouched capsule fits (`intersects_capsule`); speed 6 m/s along the flight; `Fx::Blink`. No recast in time: the cooldown runs, the arrow goes |
-| Beacon Arrow | armed; `BEACON_ARROW` (0.6 × an arrow's hit) sticks where it lands — in the level, or in what it struck (rides along) — and lights for 6 s. `is_revealed(target)`: within 16 m of a lit beacon and hostile to its owner (never the owner) → `REVEALED` on the entity, ×1.15 from every player's damage (`DamageFlags::REVEALED`; the world's isn't). Unstuck, it lights nothing |
-| Hurl (twist) | `hits_targets` is off: `hurl_tick` sweeps its own motion every tick (current shapes, hit assist, the body only) striking each hostile once per leg: ×1.5 out, ×1.0 back (`return_damage_scale`). It turns back at 14 m from the hand or at the level (`GUIDED | RETURNING`, no gravity, homing on the chest at 30 m/s, re-launched every tick). The Trimmer's blade passes through; the Tamper's head turns at the first target (which the way back skips). Within 1 m of the chest: caught, 40 % of the cooldown back (server-side), `Fx::HurlCaught`. The level on the way back: gone |
+| Beacon Arrow | armed; `BEACON_ARROW` (a full arrow's hit; was 0.6) sticks where it lands — in the level, or in what it struck (rides along) — and lights for 6 s. `is_revealed(target)`: within 16 m of a lit beacon and hostile to its owner (never the owner) → `REVEALED` on the entity, ×1.35 from every player's damage (PvP ×1.15; was 1.15 everywhere; `DamageFlags::REVEALED`; the world's isn't). Unstuck, it lights nothing |
+| Hurl (twist) | `hits_targets` is off: `hurl_tick` sweeps its own motion every tick (current shapes, hit assist, the body only) striking each hostile once per leg: ×1.5 out, ×0.5 back (`return_damage_scale`; ×1.0 and a 40 % refund made it twice the Lunge). It turns back at 14 m from the hand or at the level (`GUIDED | RETURNING`, no gravity, homing on the chest at 30 m/s, re-launched every tick). The Trimmer's blade passes through; the Tamper's head turns at the first target (which the way back skips). Within 1 m of the chest: caught, 25 % of the cooldown back (server-side), `Fx::HurlCaught`. The level on the way back: gone |
 | Riposte | channel (up to 1.0 s), 0.6 speed; the guard (120°, no limit). A blocked blow from a Mould staggers it (after the Moulds' step: `riposte.stagger`); an enemy's parryable projectile reaching it from the front is turned back like a parry (`redirect_projectile`, the parry multipliers and auto-aim), any other is destroyed — both count as blocks. The first block heals like a parry (`parry_reward`, `HealSource::Parry`). The release with blocks: a counter-swing in the carrier's arc (lag-compensated) at ×(2.0 + 0.5 per further block, ≤ 3.0) its swing, `MELEE`, `Swing { attack: Riposte }`; without: nothing. Cooldown 4 s from the release. PvP ×0.55 |
 | the guard | `guard.rs` (see "The rework on the wire"); shared with arsenal-b's Bulwark |
 
-Measured (`balance_report -- abilities pvp oneshots`, PvP): Lamplighter 70.2 / 140 a full
-focus, 1.60 s body TTK; Wickline 10 / 20; Tally 30 / 60 a shot; Blink Arrow 42 / 84 and Beacon
-Arrow 31.5 / 63 at a full draw; Hurl 75.6 on the Trimmer (both legs), 89.2 on the Tamper (it
-turns at its target). Riposte and Waxwork read 0 there (the harness's targets don't attack; the
-burst comes at 5 s).
+Measured as balanced (`balance_report -- abilities fights pvp oneshots`; "The rework's
+numbers" below): PvP, the Lamplighter 52 / 104 a full focus (96 at 90 %), 1.60 s body TTK;
+Wickline 10 / 20; Tally 40 / 80 a shot; Blink Arrow 42 / 84 and Beacon Arrow 52.5 / 105 at a
+full draw; Hurl 60.5 on the Trimmer (both legs), 89.2 on the Tamper (it turns at its target).
+The Riposte and the Waxwork are measured in fights (Moulds that attack; the shooter walks off
+its double).
+
+## The rework's numbers
+
+The pools as balanced (`docs/balance.md`, "The rework's abilities"): each class holds a move,
+a control or defend, a set-up and a damage tool, and each is judged by its job
+(`combat_balance.rs::no_ability_dominates_its_class_and_none_is_dead_weight`). PvE on its home
+weapon: the DPS it adds to the primary on one Gnawer (build gain) and in the fights (three
+Gnawers rushing / two Censers and a Heron shooting from 18–30 m, the shooter strafing), and its
+job's own measure.
+
+| class | ability (home) | job | adds, one Gnawer | adds, rush / volley | its job |
+|---|---|---|---|---|---|
+| Precision | Brand (Quill) | damage | 35 | 17 / 21 | everything hits the brand ×1.35 (PvP 1.25) |
+| | Wickline (Quill) | move | 2.5 | 4 / 2.5 | a zip or a yank: 6.2 m in 1.5 s |
+| | Tally (Lancet) | set up | 10 | 38 / 24 | 40 a mark, 4 marks (PvP 3), 4 s |
+| | Waxwork (Lancet) | defend | — | 6 / — | spares 19 % / 30 % (the Moulds go for the double) |
+| Scatter | Gust (Bellows) | control | 4 | −16 / — | spares 70 % of a rush (the push) |
+| | Bolas (Thresher) | control | 7.5 (pack 70) | 48 / 36 | holds 15–16 % of the foes' time, the cord ×0.4 |
+| | Bulwark (Bellows) | defend | — | — | spares 25 % / 34 % |
+| | Flak (Thresher) | damage | 63 | 66 / 6 | |
+| Rapid | Wisp (Arclash) | set up | 26 | 28.5 / 7 | an orbit of zaps, then flung |
+| | Discharge (Arclash) | control | 27 (pack 160) | 29 / — | spares 63 % of a rush |
+| | Stoke (Riveter) | damage | 27.5 | 32 / 28 | |
+| | Lantern (Riveter) | set up | 14.5 | 17.5 / 16 | 8 s of half-rate 0.6 × shots |
+| Explosive | Breach (Tumbler) | move | 56 (point blank) | 16 / — | a blast-jump: 7.6 m; spares 84 % of a rush |
+| | Gravewell (Tumbler) | control | 27 | 47 / 19 | holds 30 % of a rush's time |
+| | Limpet (Cinderbox) | set up | 39 | 20 / 0 | |
+| | Kite (Cinderbox) | damage | 35 | 23 / 17 | steered: it finds the Censers that strafe |
+| Draw | Brand (Longwick) | damage | 40 | 20 / 24 | |
+| | Blink Arrow (Longwick) | move | −3.5 | −4 / −3 | the step: 8.8 m |
+| | Pinning Arrow (Longwick) | control | 0 | 5 / — | holds 18 % of the foes' time |
+| | Beacon Arrow (Longwick) | set up | 28 | 31 / 26 | ×1.35 on everything within 16 m for 6 s (PvP 1.15) |
+| Melee | Lunge (Trimmer / Tamper) | move | 21 / 43 | 11 / — | 4.6 m |
+| | Whirl (Tamper) | control | 11 | 25 / — | the spin |
+| | Hurl (Trimmer / Tamper) | damage | 42 / 74 | 89 / — | ×1.5 out, ×0.5 back |
+| | Riposte (Tamper) | defend | — | 23 / — | spares 15 % (its counter: 2–3 × the swing) |
+
+The Kindle Flask (drunk): 8 HP a second for 5 s and haste ×1.3 (PvP ×1.15: at ×1.3 it ran
+19 m further in 4 s than without, Surge's two charges 6, on top of its 40 HP; now 9.5).
 
 ## The rework's abilities, as built (arsenal-b)
 
@@ -554,17 +595,18 @@ rate and overheat: `step_weapons`); the contract's starting numbers (`assets/tun
 
 | ability | as built |
 |---|---|
-| Bolas | instant; `BOLAS` (30 m/s, gravity 8, r 0.35 m, 2 s). On the first hostile it touches (hit assist): its own `bolas.damage` (0) and a bind — `apply_pin` (the Pinning Arrow's times: a Mould 1.4 s, heavies 0.6 s, a player slowed to half for 1 s) and `BOUND` for as long. The nearest other hostile whose padded shape is within 6 m of the first's centre, in sight of it, is bound too and the two are on a **cord** for 4 s (`BOUND` that long): what either takes (its `dealt`, after every rule) is dealt × 0.6 to the other — the same source and attack (kill credit is the attacker's), on the body, no knockback, no flags; never shared again (`BolasWorld::sharing`), never to the one who dealt it, never stoking a Burn. One cord per target (the newest); it goes slack with time or when an end dies. Waxwork doubles are never bound. Off the level it just drops. `Fx::BolasBound { positions }` (one or two) |
+| Bolas | instant; `BOLAS` (30 m/s, gravity 8, r 0.35 m, 2 s). On the first hostile it touches (hit assist): its own `bolas.damage` (0) and a bind — `apply_pin` (the Pinning Arrow's times: a Mould 1.4 s, heavies 0.6 s, a player slowed to half for 1 s) and `BOUND` for as long. The nearest other hostile whose padded shape is within 6 m of the first's centre, in sight of it, is bound too and the two are on a **cord** for 4 s (`BOUND` that long): what either takes (its `dealt`, after every rule) is dealt × 0.4 to the other (was 0.6) — the same source and attack (kill credit is the attacker's), on the body, no knockback, no flags; never shared again (`BolasWorld::sharing`), never to the one who dealt it, never stoking a Burn. One cord per target (the newest); it goes slack with time or when an end dies. Waxwork doubles are never bound. Off the level it just drops. `Fx::BolasBound { positions }` (one or two) |
 | Bulwark | channel (up to 4 s), the guard (110°, 150 absorb, pitch clamped ±30°, 0.75 speed: arsenal-a's groundwork). The **slab** (`bulwark_slab`): a 2.2 × 1.8 m rectangle 1.2 m out from the chest (eye − 0.4 m), facing the guard. A hostile projectile about to hit its holder from inside the cone is destroyed at the slab (no blast, no parry delay; a `ProjectileImpact` there) and its damage (direct, or its blast's) is absorbed; a hostile ray (another player's) crossing it from the front before anything else ends there (`slab_on_ray`, asked by `trace_leg`), absorbed — so nothing behind the slab is hit either. Both book through `guard_absorbed` (strength, `GuardBlock`, the shatter into 9 s). Blasts centred in front and blows are the guard's ordinary cover. Your own and teammates' shots pass; from behind it doesn't help |
 | Wisp (twist) | press, live 6 s (`wisp_orbit_time`). The use spawns the `WISP` orbiting its caster: 1.6 m out at 1.2 m above the feet, 240°/s, pulled in short of a wall, velocity 0, `ORBITING` (`position` current, `aux` = the orbit's start); it zaps the nearest hostile within 7 m (padded, in sight) every 0.25 s for 9 (`Attack::Wisp`), never touches anything, never relays off a thorn. At the orbit's end (or its owner's death) it is gone without a pop and the 4 s cooldown starts (`end_live`). The recast flings it along the aim at 18 m/s (no gravity): the first hostile its sweep meets before the level is a direct hit of the pop (r 4 m, 35, kb 8), the level or 2 s pop it where it is; the cooldown then runs 4 s from the pop (`set_alt_cooldown`: a flight shorter than 2 s re-bases the predicted `lifetime + cooldown`). A wisp a Gust turns is just a projectile of its new owner's |
 | Stoke | instant; `step_weapons` stokes the slot for 4 s (the primary's interval ÷ 1.6, `primary_interval_ticks`), then 1.5 s overheated (no primary), cooldown 10 s from the use, `STOKED` / `OVERHEATED` (all predicted). Server: `stoke_after_damage` — every hit of the stoked weapon's primary that went through (rays, rivets, zaps and their chains, relayed shots; judged when it lands) sets 1 Burn stack as `Attack::Stoke` from the shooter; not a Burn tick, a cord's share, a Waxwork double, nor the Kiln's — the Kiln's spray (and the thorns it flings) reaches 1.3 × `kiln.range` instead (`kiln_reach`) |
 | Lantern | instant, cooldown 12 s. `LANTERN_TOSS` (10 m/s, gravity 20; it falls past bodies). Where it ends — the level, the end of its flight — the lantern stands on the floor below (within 50 m; none: over a pit, it's lost), replacing its owner's old one: `kind::LANTERN`, 80 HP, 8 s. From 0.5 m above its foot it fires, whenever due and something is in range, at the nearest hostile whose padded shape is within 18 m, in sight of its centre (current shapes): the carrier's primary every interval ÷ 0.5, × 0.6 its damage, as `Attack::Lantern` (not scaled by `ability_power`) — the Arclash a zap (`trace_shot`, then `arc_chain`), the Riveter a rivet (its spread), the Kiln a `kiln_cone` 8 m long. `Fx::LanternShot { ends }`: the zap's end, the Kiln cone's far end, the rivet's aim point. Hostile blasts (Moulds', PvP opponents') hurt it like a body at its centre (`blast_lanterns`); at 0 it is gone |
-| Kite | press, cooldown 5 s; `KITE` (16 m/s, no gravity, 7 s), `GUIDED` while steered. Each tick before it moves (`kite_tick`), while its owner holds ALT with the Kite selected (their latest input, `SimPlayer::last_input`), for at most 4 s, it turns towards the point under their crosshair — the first hostile (current shapes, hit assist) or the level along the look, else `hitscan_range` out — by at most 120°/s, speed kept, re-launched every tick it turns. Let go (or switched away, dead, the time up, relayed off a thorn) and it flies straight for good (`GUIDED` cleared). It explodes on contact (r 4.5 m, 75, kb 18) or where it is at 7 s |
+| Kite | press, cooldown 3.5 s (was 5); `KITE` (16 m/s, no gravity, 7 s), `GUIDED` while steered. Each tick before it moves (`kite_tick`), while its owner holds ALT with the Kite selected (their latest input, `SimPlayer::last_input`), for at most 4 s, it turns towards the point under their crosshair — the first hostile (current shapes, hit assist) or the level along the look, else `hitscan_range` out — by at most 120°/s, speed kept, re-launched every tick it turns. Let go (or switched away, dead, the time up, relayed off a thorn) and it flies straight for good (`GUIDED` cleared). It explodes on contact (r 4.5 m, 110 (was 75), kb 18) or where it is at 7 s |
 
-Measured (`balance_report -- abilities`, PvE on Gnawers): Bolas build gain 7.5 DPS alone,
-~100 in a pack (the cord carries pellets onto a second body); Wisp 144 a use on the
-Arclash (16 zaps of an orbit, no fling: the harness never recasts), Stoke a build gain of 27.5
-(Riveter) to 60 (Kiln, in a pack), Lantern 63–83 a use, Kite 71.5 (346 in a pack).
+Measured as balanced (`balance_report -- abilities fights`, PvE on Gnawers): the Bolas
+adds 7.5 DPS alone, 70 in a pack (101 at a 0.6 share), 48 / 36 in the rush / volley fights;
+the Wisp 207 a use on the Arclash (an orbit, then flung), 26 DPS; Stoke 27.5 (Riveter) to 60
+(Kiln, in a pack); the Lantern 164–228 a use (8 s of shots); the Kite 105 a use, 35 DPS (it
+was 18). The Bulwark spares 18–25 % of what a rush deals, 34–41 % of a volley's.
 
 ## Client: melee and knacks (refit, area arsenal-client)
 
@@ -833,10 +875,12 @@ numbers, not a profile. Difficulty and player-count scaling of the Moulds are th
 
 **PvP** is tuned for players killing players: 100 HP, headshots ×2 (`player_head_multiplier`)
 for everything that isn't explosive, a time to kill of **0.8–1.6 s** for a skilled player at
-the weapon's range, and **one-shots only from a full-draw bow headshot, a Slug headshot and a
-full-charge Skewer headshot** — plus the scattergun's point-blank reward, the stated
-exceptions: a Bellows blast to the head inside 5 m, and a **full Bellows blast to the body at
-point blank (≤ 3 m)** (`"bellows.point_blank_multiplier": 1.6`; from 5 m on neither kills).
+the weapon's range, and **one-shots only from a full-draw bow headshot and a full-focus
+Lamplighter headshot** (not at 90 %: 97 and 96) — plus the scattergun's point-blank reward, the
+stated exceptions: a Bellows blast to the head inside 5 m, and a **full Bellows blast to the body
+at point blank (≤ 3 m)** (`"bellows.point_blank_multiplier": 1.6`; from 5 m on neither kills).
+An ability is judged by what it lands within 1 s (a Lantern's or an orbiting Wisp's whole life
+is not a one-shot).
 No Thorns (the knack rule: the Thorn isn't `pvp_allowed` and applies as Surge; it used to be a `"thorn.charges": 0` override) and a brand multiplies by 1.25 instead of
 1.35 (in a free-for-all a brand invites everyone, the extra was too much on top of a third
 party). Times to kill and per-pull damage below are measured in play by the balance harness
@@ -854,30 +898,32 @@ party). Times to kill and per-pull damage below are measured in play by the bala
 | Tumbler | damage 0.9 | 65 a direct bomb | 2 direct: 0.98 s at 5 m; splash kills take three (PvE bombs went 65 → 72: the same 65 here) |
 | Cinderbox | damage 0.75 | 3 × 24 = 72 a salvo | 2 salvos: 1.47 s at 5 m, 1.7 s at 15 m; three 32s (96) were a body one-shot in 0.16 s with any brand |
 | Longwick | damage 0.5, interval 0.85 | 11–52.5 by draw, 0.53 s draw | a full-draw headshot (105) is the one-shot; 90 % draw (97) is not; body: 2 full draws, 1.30 s at 5 m, 1.38 s at 15 m with the flight (feel's 0.62 s draw, 55–135 m/s) |
-| Both Barrels | damage 0.25 | 24 × 2 = 48 (96 to the head) | at 0.4 (77) a 5° cone at the head was a one-shot (154), and fired on the same tick as a blast it was a body one-shot (144) — it now takes the blast's shot; it stays the blast-jump |
+| Lamplighter | damage 0.4, interval 0.75 | 14–52 by focus | a full-focus headshot (104) is the one-shot, 90 % (96) is not; body: 2 full focuses, 1.60 s. At 0.54 (70 / 140) the linear focus curve killed a head from 61 % on |
 | Wisp | damage 0.5 | 5.5 a zap | it aims itself: 40 dps of free damage was too much (PvE zaps went 8 → 11: about the same 5.6 as before here) |
 | Discharge | damage 0.9 | 22.5–72 | no one-shot even with a hit before it |
 | Breach | damage 0.85 | 59.5 | the panic button, not a kill button |
 | Gravewell | damage 0.75 | 60 | players are pulled at half strength; the implosion still punishes staying |
-| Skewer | damage 0.58 | 17–52 (on the Lancet) | full charge to the head (104) is the one-shot, 90 % (97) is not; it still pierces a line of players |
-| Flurry | damage 0.6 | Quill: 3 × 14.4 | three Quill heads in 0.13 s (115) were a one-shot (PvE went 0.8 → 1.0 of the primary: the same 14.4 here) |
 | Flak | damage 0.8 | 10 × 7.2 | a contact burst landing every pellet stays under 100 |
-| Volley | damage 0.75 | Riveter / Arclash: 10 × 4.46 (0.85 of the shot × 0.75) | ten rivets at once (70, more with heads) was an instant kill up close; ten 7-dmg zaps at 0.7 put 98 on a head, now 89 |
 | Limpet | damage 0.75 | 30 a charge | three charges on one player (88) is a kill only with a hit before it (PvE went 50 → 40 a charge: the same 30 here; 0.9 s between throws in both) |
-| Mortar | damage 0.75, radius 0.85 | 64, r 5.1 m | a huge blast is area denial in PvE but a free kill on a corner in PvP |
-| Triple Nock | damage 0.55 | 3 × 17 (a third of an arrow each) | at 0.5 three heads at a 90 % draw (144) one-shot: now 95, and a full draw's three heads (104) is the bow's one-shot; the fan is a forgiving shot, not more damage |
-| Ember Arrow | damage 0.5 | 0.45 × the arrow + an 18 burst + 2 Burn stacks | at 1.0 a 90 % draw to the head with its burst and burn (124) one-shot; now 89 (93 at a full draw) |
-| Tamper | damage 0.7 | 59.5 a swing | 2 swings: 0.85 s; its abilities are multiples of the swing: Lunge, Whirl, Hurl 89, Upswing 83 (at 1.0 a 1.5 × Lunge or Hurl was a body one-shot; the Hurl to a head was 180 before it struck the body only) |
-| Trimmer | damage 0.84 | 30 / 0.32 s | 4 slashes: 0.95 s (no headshots: melee); its Lunge, Whirl, Hurl hit 45, Upswing 42 (PvE slashes went 30 → 36: the same 30 here) |
-| everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Splinter, Slug (55: its headshot is the allowed one-shot), Flare (burn), Pinning / Brand arrows (they ride the bow's 0.5) |
+| Kite | damage 0.65 | 71.5 a direct hit | PvE went 75 → 110 (it was the Explosive pool's weakest damage): the same 71.5 here |
+| Riposte | damage 0.55 | 2–3 × the swing × 0.55 | on the Tamper at most 98 (three blocks) |
+| Beacon Arrow | override `damage_multiplier` 1.15 | a full arrow, revealed ×1.15 | PvE ×1.35 for everything near the beacon; in a free-for-all ×1.15 |
+| Tally | override `max_targets` 3 | 40 a mark (80 to a head) | three marks; PvE went 30 → 40 |
+| Kindle Flask | override `haste_scale` 1.15 | 40 HP over 5 s, ×1.15 speed | ×1.3 out-ran Surge's two charges by three times on top of the heal; the duel's average time to kill ×1.11 (Tallow Skin ×1.55) |
+| Tamper | damage 0.7 | 59.5 a swing | 2 swings: 0.85 s; its abilities are multiples of the swing: Lunge, Whirl, Hurl 89 (at 1.0 a 1.5 × Lunge or Hurl was a body one-shot; the Hurl to a head was 180 before it struck the body only) |
+| Trimmer | damage 0.84 | 30 / 0.32 s | 4 slashes: 0.95 s (no headshots: melee); its Lunge and Whirl hit 45, the Hurl 60.5 out and back (at ×1.0 back, 75.6: with a slash a kill in 0.1 s; now 0.32 s) |
+| everything else | 1.0 | | Gust (6 dmg, the knockback is the point), Brand (10), Wickline (10), Bolas (the bind; the cord's share), Bulwark, Waxwork's burst, Stoke and the Lantern (the weapon's own shots), the arrows (they ride the bow's 0.5) |
 
 `shared/tests/combat_arsenal.rs::pvp_profile_keeps_the_one_shot_rules_and_the_time_to_kill_band`
 recomputes these from the effective tuning: no body one-shot from any trigger pull or ability
-use, exactly the allowed headshot one-shots, and every weapon's all-body time to kill inside
-0.8–1.8 s. `pvp_one_shots_and_times_to_kill_measured_in_play` measures the same in the
-simulation (every pull and every ability use on every carrier at 3, 5 and 10 m, body and head,
-the bow at a full and a 90 % draw, both buttons on one tick, every primary's time to kill at
-its range).
+use (but the point-blank Bellows), exactly the allowed headshot one-shots (the bow and the
+Lamplighter at full, not at 90 %), and every weapon's all-body time to kill inside 0.8–1.8 s.
+`pvp_one_shots_and_times_to_kill_measured_in_play` measures the same in the simulation (every
+pull and every ability use on every carrier at 3, 5 and 10 m, body and head, what an ability
+lands within 1 s, the bow and the Lamplighter at a full and a 90 % draw / focus, both buttons
+on one tick, every primary's time to kill at its range); `pvp_knacks_are_choices_not_a_must_pick`
+the knacks (Tallow Skin at most ×1.6 on average, the Kindle Flask less than Tallow Skin and at
+most twice Surge's run).
 
 ## As-built notes
 

@@ -201,9 +201,9 @@ Their version is the git commit (`-dirty` with uncommitted changes).
   stun it, or swat a diving **Harrier** out of the air.
 - **Knacks** (Q). Pick one in the loadout:
   - *Thorn* (solo and co-op only; in PvP you carry Surge instead): a relay spike that plants
-    itself in a wall or floor. Shoot it with the Quill and the shot jumps to the nearest enemy
-    (branded ones first); chaining thorns multiplies the damage.
-  - *Kindle Flask*: a healing pool for you and your teammates.
+    itself in a wall or floor. Whatever reaches it (a shot, a pellet, a rocket, a blow) is
+    relayed to the nearest enemy (branded ones first); chaining thorns multiplies the damage.
+  - *Kindle Flask*: drink it for a few seconds of haste and healing.
   - *Snare*: a wax trap that pins and hurts the first enemy to step on it.
   - *Soot Pot*: a cloud Moulds can't see through.
   - *Tallow Skin*: take much less damage and no knockback for a few seconds.
@@ -223,31 +223,37 @@ keeps your knack.
 
 | class | weapons | ability pool |
 |---|---|---|
-| Precision | **Quill** (spike-caster, shots ricochet off Thorns), **Lancet** (rapid needle pistol) | Brand, Splinter, Skewer, Flurry |
-| Scatter | **Bellows** (twin-barrel blast cannon), **Thresher** (drum-fed auto-scattergun) | Gust, Both Barrels, Slug, Flak |
-| Rapid | **Arclash** (chaining arc caster), **Riveter** (hot-rivet driver), **Kiln** (ember sprayer, sets targets alight) | Wisp, Discharge, Volley, Flare |
-| Explosive | **Tumbler** (bouncing bombs), **Cinderbox** (three-rocket salvo) | Breach, Gravewell, Limpet, Mortar |
-| Draw | **Longwick** (recurve bow: hold to draw, release to loose) | Brand, Triple Nock, Pinning Arrow, Ember Arrow |
-| Melee | **Trimmer** (hooked wick-shears: fast slashes that also deflect projectiles), **Tamper** (foundry ramming hammer: slow, heavy, wide) | Lunge, Whirl, Hurl, Upswing |
+| Precision | **Quill** (spike-caster), **Lancet** (rapid needle pistol), **Lamplighter** (lens rifle: hold to focus, release one beam) | Brand, Wickline, Tally, Waxwork |
+| Scatter | **Bellows** (twin-barrel blast cannon), **Thresher** (drum-fed auto-scattergun) | Gust, Bolas, Bulwark, Flak |
+| Rapid | **Arclash** (chaining arc caster), **Riveter** (hot-rivet driver), **Kiln** (ember sprayer, sets targets alight) | Wisp, Discharge, Stoke, Lantern |
+| Explosive | **Tumbler** (bouncing bombs), **Cinderbox** (three-rocket salvo) | Breach, Gravewell, Limpet, Kite |
+| Draw | **Longwick** (recurve bow: hold to draw, release to loose) | Brand, Blink Arrow, Pinning Arrow, Beacon Arrow |
+| Melee | **Trimmer** (hooked wick-shears: fast slashes that also deflect projectiles), **Tamper** (foundry ramming hammer: slow, heavy, wide) | Lunge, Whirl, Hurl, Riposte |
 
-The abilities: *Brand* (the target takes extra damage from everyone), *Splinter* (shrapnel that
-reflects off walls), *Skewer* (hold to charge a piercing shot), *Flurry* (three-shot burst),
-*Gust* (air blast that turns projectiles around), *Both Barrels* (double blast, blast-jump),
-*Slug* (one heavy accurate shot), *Flak* (airbursts into a ring of pellets), *Wisp* (ball
-lightning), *Discharge* (charged shock nova), *Volley* (ten shots at once), *Flare* (burning patch
-on the ground), *Breach* (point-blank blast-jump), *Gravewell* (pulls enemies in, implodes),
-*Limpet* (sticky charges: tap to throw, hold to detonate), *Mortar* (heavy lobbed shell), *Triple
-Nock* (three arrows), *Pinning Arrow* (pins enemies, slows players), *Ember Arrow* (bursts into
-flame), *Lunge* (a low leap that strikes the first thing you reach), *Whirl* (a spin that hits
-everything around you), *Hurl* (throws a spinning blade or hammer head), *Upswing* (launches
-what it hits into the air). **Burn** stacks damage over time; **Pinned** roots a Mould for a
-moment.
+Every pool holds a way to move, one to control or defend, one to set up and one to deal
+damage. The abilities: *Brand* (the target takes extra damage from everyone), *Wickline* (a
+thread that zips you to a surface or yanks a target to you), *Tally* (hold to mark targets,
+release to shoot each one), *Waxwork* (a wax double the Moulds go for, then it bursts), *Gust*
+(air blast that shoves enemies and turns projectiles around), *Bolas* (binds an enemy and ties
+a second one to it: they share the hits), *Bulwark* (hold up a wax slab that soaks shots and
+blows from the front), *Flak* (airbursts into a ring of pellets), *Wisp* (ball lightning that
+orbits you; press again to fling it), *Discharge* (charged shock nova), *Stoke* (fire faster
+and set things alight, then overheat), *Lantern* (a lantern that fires your weapon at the
+nearest enemy), *Breach* (point-blank blast-jump), *Gravewell* (pulls enemies in, implodes),
+*Limpet* (sticky charges: tap to throw, hold to detonate), *Kite* (an ember kite you steer with
+your crosshair), *Blink Arrow* (step to your arrow), *Pinning Arrow* (pins enemies, slows
+players), *Beacon Arrow* (reveals what's near it; they take more damage), *Lunge* (a low leap
+that strikes the first thing you reach), *Whirl* (a spin that hits everything around you),
+*Hurl* (throws a spinning blade or hammer head that comes back), *Riposte* (guard, then counter
+what you blocked). **Burn** stacks damage over time; **Pinned** roots a Mould for a moment.
 
 PvP and PvE are balanced separately for every weapon and ability (`docs/arsenal.md`,
-`docs/balance.md`): in PvP a skilled player kills in about 0.8–1.8 s, and only headshots with a
-fully drawn bow, a Slug, a fully charged Skewer or a point-blank Bellows blast kill in one hit.
+`docs/balance.md`): in PvP a skilled player kills in about 0.8–1.8 s, and only a fully drawn
+bow or a fully focused Lamplighter to the head, or a point-blank Bellows blast, kills in one
+hit.
 `cargo run -p shared --release --example balance_report` prints every weapon's damage, DPS and
-time to kill against each Mould and a PvP player, measured in the real simulation.
+time to kill against each Mould and a PvP player, and what every ability does in a fight,
+measured in the real simulation.
 
 ### The Moulds
 

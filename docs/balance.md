@@ -10,16 +10,20 @@ weapon / ability / melee / knack / "Balance profiles" tables that match them.
 Two passes: **phase 1** (the ten guns and their nineteen abilities, then re-checked against
 **pve**'s bigger Mould hit shapes and **feel**'s projectile hit pad and bow), **phase 2** (the
 Trimmer and the Tamper, Lunge / Whirl / Hurl / Upswing, the knacks). Then the rework
-(`docs/rework.md`): **the shotguns pass** (its own section at the end: why the Bellows and the
-Thresher felt weak in play, the fixed pellet pattern, point blank, the stagger, the feedback).
-The Bellows / Thresher rows of the tables in between are from before it.
+(`docs/rework.md`), with a section each at the end: **the shotguns pass** (why the Bellows and
+the Thresher felt weak in play, the fixed pellet pattern, point blank, the stagger, the
+feedback) and **the rework's abilities** (every new and changed ability judged by its job, the
+Lamplighter, the drunk Kindle Flask, the PvP one-shot rule). The tables in between are from
+before the rework: their Bellows / Thresher rows and the retired abilities' (Splinter, Skewer,
+Flurry, Both Barrels, Slug, Volley, Flare, Mortar, Triple Nock, Ember Arrow, Upswing) are
+history.
 
 ## The harness
 
 ```text
 cargo run -p shared --release --example balance_report                    # all of it (~15 s)
 cargo run -p shared --release --example balance_report -- pvp oneshots    # sections: primaries
-                              ttk swarm pvp oneshots abilities knacks healing shotguns
+                              ttk swarm pvp oneshots abilities fights knacks healing shotguns
 cargo run -p shared --release --example balance_report -- --tuning other.ron   # another file
 ```
 
@@ -35,8 +39,9 @@ numbers ahead of a merge).
   cooldowns, the shared ability cooldown, knack charges), pellet and spread RNG, hit assist and
   the projectile hit pad, weak points, the Gaoler's armour, PvP head multipliers, projectile
   flight and gravity, explosion falloff and line of sight, chains, splinters, pierce, burns,
-  brands, patches, Limpets sticking, melee arcs and lunges, `ability_power`, Tallow Skin, Kindle
-  pools, ember healing.
+  brands, Limpets sticking, melee arcs and lunges, `ability_power`, Tallow Skin, the Kindle
+  Flask's heal and haste, ember healing; the rework's guards, doubles, cords, orbits, lanterns,
+  steered kites and recasts.
 * **Idealised**: the aim. Every tick the crosshair is on the aim point (body centre, weak point,
   head); for anything with gravity or a lob the low ballistic arc is solved (the harness steps a
   copy of the weapon state to know what is about to fire). Targets stand still: position,
@@ -53,11 +58,12 @@ numbers ahead of a merge).
   damage, whether it staggered the Mould).
 * **Ranges** (feet to feet): 5 / 15 / 30 m; melee at contact (a Mould's hit radius + 1.2 m, a
   player 2 m); "at its range": scatterguns and the Kiln 5 m, melee 2 m, the rest 15 m.
-* **Policies**: a primary is held (the bow: full draws); an ability is used whenever it is ready
-  (charges released full, Flurry held, the Limpet: three charges thrown, all stuck, held to
-  detonate; on the bow it is armed for every draw it can ride). *Build gain* = primary + ability
-  minus the primary alone over 12 s: what taking the ability adds, cost included (Both Barrels,
-  Volley, Whirl and Upswing use up the primary's shot or swing). *Duels* use real 100 HP and the
+* **Policies**: a primary is held (the bow: full draws, the Lamplighter: full focuses); an
+  ability is used whenever it is ready (charges released full, the Limpet: three charges
+  thrown, all stuck, held to detonate; on the bow it is armed for every draw it can ride), the
+  rework's as a good player would (below: "The rework's abilities"). *Build gain* = primary +
+  ability minus the primary alone over 12 s: what taking the ability adds, cost included (the
+  Whirl uses up the swing). *Duels* use real 100 HP and the
   opponent's knack just before the first shot.
 
 Sections: per trigger; sustained DPS on a Gnawer (body / head); time to kill every Mould (body /
@@ -278,13 +284,11 @@ PvP duel (real 100 HP; the opponent's knack just before the first shot; s to the
 
 At half damage for 3 s Tallow Skin made every kill ×1.9 on average (Tumbler 3.02 s, Longwick
 3.30); now ×1.55. Two-hit weapons still need a third hit through it (Bellows, Tamper, the
-Cinderbox's salvos): that is what the knack is for. The Kindle Flask (40 HP over 4 s, the
-thrower only in PvP) matters against the steady, slower killers (the bow's second draw, the
-Kiln, the Arclash) and between fights. Surge (two charges of mobility), the Snare (15 + a slow)
-and the Soot Pot (cover that hides players; in PvE it blinds Moulds) act outside a standing
-duel. In PvE the knacks keep their numbers: Tallow Skin's half damage for 3 s is for a Gaoler's
-bash or a Smelter's heave, the flask heals the whole team in co-op. The Thorn without a Quill is
-8 damage a throw: it stays the default for the Quill's ricochets; other builds should pick.
+Cinderbox's salvos): that is what the knack is for. The Kindle Flask is drunk since the rework
+(its numbers: "The rework's abilities" below). Surge (two charges of mobility), the Snare (15 + a
+slow) and the Soot Pot (cover that hides players; in PvE it blinds Moulds) act outside a
+standing duel. In PvE the knacks keep their numbers: Tallow Skin's half damage for 3 s is for a
+Gaoler's bash or a Smelter's heave. The Thorn relays every weapon since the rework.
 
 ### Healing from embers (PvE)
 
@@ -476,6 +480,151 @@ The tight pattern costs the Thresher at 10 m in PvP (its outer ring misses a pla
 * The stagger has no animation of its own: it shows as the Mould losing its footing (no
   steering, the blast's push carrying it). A flinch pose would be the client's.
 * Point blank in PvE is the Bellows' only (×1.25 inside 3 m); the Thresher has the fields at ×1.
-* Phase 2 (after the other areas merge): the Scatter pool's new abilities (Bolas, Bulwark) and
-  every other new ability, the Lamplighter, the drinkable Kindle Flask, the README tables; the
-  Both Barrels / Slug rows above go with them.
+* The new abilities, the Lamplighter and the Kindle Flask: the next section.
+
+## The rework's abilities (phase 2: the new pools, the Lamplighter, the Kindle Flask)
+
+The rework (`docs/rework.md` §1–3) gave every class four jobs: a **move**, a **control or
+defend**, a **set-up** and a **damage** tool. Eleven abilities are new, the Wisp and the Hurl
+changed, the Lamplighter is a new Precision weapon and the Kindle Flask is drunk. Damage per
+second can't judge a guard or a zip, so this pass made the harness measure each job and judged
+each ability by its own.
+
+### The harness, for the new pools
+
+* **Fights** (`balance_support::fight`, `fight_gain`; the report's `fights` section): Moulds
+  hunt the shooter with their own AI (endless) while it strafes (5 m/s, turning every 1.2 s)
+  holding its primary on the nearest; it takes their hits on endless health (`Trace::taken`;
+  `Trace::blocked`: what a guard caught; its own blasts' splash aside). The **rush**: three
+  Gnawers from 12 m. The **volley**: two Censers at 18 m and a Heron at 30 m. An ability's
+  worth there: the DPS it adds, the share of the damage it spares, the share of the foes' time
+  it holds them more (pinned, staggered, stunned: `Trace::held`). 20 s, averaged over three
+  turns of the formation (one layout's numbers swing with where the first blow lands).
+* **Move** (`moved`): how far one use carries the shooter within 1.5 s, its own movement free
+  (a Smelter 12 m ahead: the Wickline yanks you to a heavy; the Gust and the Breach aimed at the
+  feet: a jump).
+* **Policies, a good player's**: a guard raised while a blow winds up or a shot flies at you
+  (`threatened`): the Riposte dropped (its counter) once it has passed, the Bulwark held through
+  the volley; the Tally swept over every target, nearest first, across its hold; the Wisp flung
+  once it has nothing to zap or its orbit is ending; the Kite held (steered) while it flies; the
+  Blink Arrow's step once its arrow has landed; the Gust, the Breach, the Whirl and the
+  Discharge only with something in reach, the Gravewell never at your feet (it would pull them
+  onto you); a Waxwork left behind (the shooter walks to the other side of the fight).
+* **Settles**: a use is followed for what it leaves behind (`settle_of`: the Waxwork's 5 s and
+  its burst, the Lantern's 8 s, the Wisp's orbit and flight, the Bolas' cord, the steered
+  Kite), not a flat 4 s.
+* **PvP**: the one-shot rule judges what an ability lands within 1 s (`per_use_burst`,
+  `Trace::burst`: a Lantern or an orbiting Wisp deals more over its life, that isn't a
+  one-shot); the Lamplighter at a full and a 90 % focus; `knack_run`: metres run from a
+  standstill in 4 s with a knack used at once.
+* **Jobs** (`balance_support::job`): Wickline, Blink Arrow, Lunge, Breach (the blast-jump):
+  move; Gust (its jump is small next to its push), Bolas, Gravewell, Pinning Arrow, Whirl,
+  Discharge: control; Waxwork, Bulwark, Riposte: defend; Tally, Wisp, Lantern, Limpet, Beacon
+  Arrow: set up; Brand, Flak, Stoke, Kite, Hurl: damage.
+
+### What it found (main at `eb96c76`, the contract's starting numbers)
+
+| finding | measured | why it matters |
+|---|---|---|
+| **The harness couldn't see half of them** | the Riposte, the Waxwork and the Bulwark read 0 (targets that never attack; the Waxwork's burst came after the 4 s settle and hit only what attacked its double); the Wisp was never flung, the Kite never steered, the Tally swept one target | nothing to balance them by |
+| **Tally**: dead weight next to the Brand | 30 a mark every 6 s: 5 DPS on one Gnawer, 13.5 sweeping a rush, against the Brand's 35 | the set-up pick was a non-pick |
+| **Kite**: the Explosive pool's damage tool did the least damage | 75 every 5 s: 18 DPS (the Limpet 39, the Gravewell 27, the Breach 56); steered, 7 / 7 in the fights | its job was taken by the others |
+| **Beacon Arrow**: a cost, not a set-up | 0.6 × the arrow and ×1.15: 5 DPS, the bow's Brand 40 | |
+| **Bolas**: a control tool out-damaging the damage tool | the cord at ×0.6 carried the Thresher's pellets onto a second body: 101 DPS on a pack, 66 / 54 in the fights against the Flak's 66 / 6 | it dominated the Scatter pool |
+| **Hurl's return**: twice the Lunge | ×1.0 back and 40 % of the cooldown refunded: 85 DPS on the Tamper (the Lunge 43), 60 on the Trimmer (21); in PvP the Trimmer's out-and-back (75.6) and a slash killed in 0.10 s | |
+| **Lamplighter (PvP ×0.54)**: a headshot past 61 % focus killed | 70 body / 140 head at a full focus; at 90 % 130 | the rule: only a full focus may |
+| **Kindle Flask (PvP)**: haste ×1.3 out-ran Surge by three times | 19 m more in 4 s than without it, Surge's two charges 6 — on top of 40 HP | a must-pick against Surge |
+| Looked at and kept | Stoke at ×1.75 rate, 1 s overheat, 9 s (tried): 96 DPS on the Arclash in a rush, 2.7 × the Lantern; back to 1.6 / 1.5 s / 10 s. The Riposte's PvP counter at most 98 (three blocks on the Tamper). The Bulwark spares 18–41 %, the Waxwork 19–30 %, the Riposte 14–15 % | |
+
+### Changes
+
+| what | before → after | why |
+|---|---|---|
+| `tally.damage`, `cooldown` | 30 → 40, 6 → 4 s | 5 → 10 DPS on one Gnawer, 13.5 → 38 / 24 in the fights (the Brand 35): a real set-up pick, best on a pack (40). PvP 40 / 80 a mark, three marks |
+| `kite.damage`, `cooldown` | 75 → 110, 5 → 3.5 s | 18 → 35 DPS (the Limpet 39), 23 / 17 in the fights steered; PvP `Kite: (damage: 0.65)`: 71.5 a direct hit, as before |
+| `beacon_arrow.damage_scale`, `damage_multiplier` | 0.6 → 1.0, 1.15 → 1.35 | a brand on everything within 16 m for 6 s of every 8: 5 → 28 DPS on one target, 31 / 26 in the fights (the Brand 40); PvP override ×1.15 (a free-for-all) |
+| `bolas.link_share` | 0.6 → 0.4 | pack 101 → 70, fights 66 / 54 → 48 / 36: under the Flak's 63–66 where it shoots; the bind (16 % of the foes' time held) stays its job |
+| `hurl.return_damage_scale`, `catch_refund` | 1.0 → 0.5, 0.4 → 0.25 | Tamper 85 → 74, Trimmer 60 → 42 (the Lunge 43 / 21); PvP the Trimmer's out-and-back 75.6 → 60.5, with a slash 0.10 → 0.32 s |
+| PvP `Lamplighter` | damage 0.54 → 0.4 (interval 0.75) | 52 body / 104 head at a full focus, 96 at 90 %: the rule's "only a full focus"; still two body shots in 1.6 s |
+| PvP `"knacks.kindle_flask.haste_scale"` | 1.3 → 1.15 | 19 → 9.5 m more in 4 s (Surge 6): the healing pick, Surge the mobile one |
+| `combat_balance::no_ability_dominates_its_class_and_none_is_dead_weight` | ignored → judged by job (below) | |
+
+### The numbers, before → after
+
+PvE on the home weapon (build gain on one Gnawer; the fights: dealt more rush / volley; the
+job's own measure). Unchanged rows as measured now.
+
+| ability (home) | job | one Gnawer | rush / volley | its job |
+|---|---|---|---|---|
+| Brand (Quill) | damage | 35 | 17 / 21 | |
+| Wickline (Quill) | move | 2.5 | 4 / 2.5 | 6.2 m |
+| Tally (Lancet) | set up | 5 → **10** (pack 10 → 40) | 13.5 / 13.5 → **38 / 24** | |
+| Waxwork (Lancet) | defend | — | 6 / — | spares 19 % / 30 % |
+| Gust (Bellows) | control | 4 | −16 / — | spares 70 % of a rush |
+| Bolas (Thresher) | control | 7.5 (pack 101 → **70**) | 66 / 54 → **48 / 36** | holds 16 % / 15 % |
+| Bulwark (Bellows) | defend | — | — | spares 25 % / 34 % (catches 5 DPS of a rush) |
+| Flak (Thresher) | damage | 63 | 66 / 6 | |
+| Wisp (Arclash) | set up | 26 (flung) | 28.5 / 7 | |
+| Discharge (Arclash) | control | 27 (pack 160) | 29 / — | spares 63 % of a rush |
+| Stoke (Riveter) | damage | 27.5 | 32 / 28 | |
+| Lantern (Riveter) | set up | 14.5 | 17.5 / 16 | |
+| Breach (Tumbler) | move | 56 (at 4 m) | 16 / — | 7.6 m; spares 84 % of a rush |
+| Gravewell (Tumbler) | control | 27 | 47 / 19 | holds 30 % of a rush |
+| Limpet (Cinderbox) | set up | 39 | 20 / 0 | |
+| Kite (Cinderbox) | damage | 18 → **35** | 7 / 7 → **23 / 17** | |
+| Brand (Longwick) | damage | 40 | 20 / 24 | |
+| Blink Arrow (Longwick) | move | −3.5 | −4 / −3 | 8.8 m |
+| Pinning Arrow (Longwick) | control | 0 | 5 / — | holds 18 % |
+| Beacon Arrow (Longwick) | set up | 5 → **28** | 7 / 5 → **31 / 26** | |
+| Lunge (Trimmer / Tamper) | move | 21 / 43 | 11 / 25 | 4.6 m |
+| Whirl (Tamper) | control | 11 | 25 / — | |
+| Hurl (Trimmer / Tamper) | damage | 60 / 85 → **42 / 74** | 97 / 79 → **89 / 63** | |
+| Riposte (Tamper) | defend | — | 23 / — | spares 15 % |
+
+With the primary alone the shooter takes 25 DPS in the rush and 8 in the volley (strafing).
+Endless foes favour the knockback tools (a Gust, a Discharge, a Breach push them away for
+good) and penalise gathering ones (the Gravewell on the Cinderbox spares −81 % of a rush: it
+pulls endless Gnawers onto you); real packs die to the implosion.
+
+**PvP** (100 HP; body / head):
+
+| | before | after |
+|---|---|---|
+| Lamplighter, full / 90 % focus | 70 / **140**, 65 / **130** | 52 / **104**, 48 / 96 |
+| Lamplighter body time to kill (15 m) | 1.60 | 1.60 |
+| Tally, a mark | 30 / 60 | 40 / 80 |
+| Kite, a use | 71.5 | 68 (71.5 at its centre) |
+| Beacon Arrow at a full / 90 % draw | 31.5 / 63, 29 / 58 | 52.5 / **105**, 49 / 97 (a full arrow: the bow's rule) |
+| Hurl (Trimmer, out and back) | 75.6; with a slash 0.10 s | 60.5; 0.32 s |
+| Riposte (Tamper, three blocks) | 98 (analytic) | 98 |
+| Kindle Flask: the duel's time to kill (average) | ×1.11 (Tallow Skin ×1.55) | ×1.11 |
+| Kindle Flask: run 4 s (Surge +6 m) | +19 m | +9.5 m |
+
+Every other PvP number of the tables above stands; the one-shots are exactly the allowed
+ones: a full-draw bow headshot (105, any arrow), a full-focus Lamplighter headshot (104), a
+Bellows blast to the head inside 5 m and a full one to the body at point blank (110).
+
+### Locked in by tests (phase 2)
+
+* `combat_balance.rs::no_ability_dominates_its_class_and_none_is_dead_weight` (un-ignored),
+  on every carrier: a damage or set-up tool adds at least 10 DPS somewhere (one Gnawer, six,
+  or a fight); a control tool adds 10 DPS, spares 10 % or holds the foes 10 % longer in a
+  fight; a defend tool spares 10 % of a fight's damage; a move tool carries you 4 m; among a
+  weapon's damage and set-up tools the best adds at most 1.5 × the second best (the better of
+  one Gnawer and the fights); no move, control or defend tool out-damages its weapon's damage
+  tool by more than 2 ×; nothing adds more than 300 DPS on a pack.
+* `combat_arsenal.rs`: the analytic PvP test (a full-focus beam to the head kills, a 90 % one
+  doesn't), the in-play one (abilities judged by their 1 s burst; the Lamplighter's 90 % focus
+  doesn't kill), `pvp_knacks_are_choices_not_a_must_pick` (the Kindle Flask slows the average
+  duel less than Tallow Skin, and runs at most twice Surge's two charges).
+
+### Left open
+
+* Fights are against endless foes in the open: cover, line of sight breaks and real packs
+  dying change what control is worth (above). The Breach (a move tool by its job) adds 56 DPS
+  point blank, 1.6 × the Kite: within the 2 × rule, and it hurts you.
+* The Riposte in PvP isn't measured in play (the opponent doesn't attack): the analytic bound
+  is 98. It doesn't stagger PvP melee attackers, and its deflect raises no Parried event
+  (arsenal-a's notes); Burn doesn't stick to a Waxwork double.
+* The Pinning Arrow adds no damage and holds 18 % of the foes' time; Moulds it pins still
+  attack (by design): its worth is where you are not.
