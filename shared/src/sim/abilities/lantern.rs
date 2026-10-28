@@ -288,7 +288,7 @@ impl SimWorld {
         match l.weapon {
             WeaponKind::Riveter => {
                 let r = &c.riveter;
-                let mut rng = SpreadRng::new(self.tick, l.owner, LANTERN_SALT ^ l.id.0 as u32);
+                let mut rng = SpreadRng::new(self.tick, l.owner, LANTERN_SALT ^ l.id.0);
                 let d = spread_dir(dir, r.spread_degrees, &mut rng);
                 let start = self.safe_launch_point(from, from + dir * 0.3);
                 self.spawn_player_projectile(
