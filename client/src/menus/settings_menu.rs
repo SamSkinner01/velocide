@@ -243,6 +243,26 @@ fn gameplay_tab(ui: &mut Ui, s: &mut Settings, r: &mut SettingsResponse) {
     r.changed |= ui.toggle("SPEEDOMETER", &mut s.show_speed);
     r.changed |= ui.toggle("FPS COUNTER", &mut s.show_fps);
     r.changed |= ui.toggle("PING DISPLAY", &mut s.show_ping);
+    ui.heading("ONLINE");
+    r.changed |= ui
+        .text_field(
+            "ONLINE SERVICE",
+            &mut s.online_service,
+            64,
+            TextFilter::Address,
+        )
+        .changed;
+    let built_in = rendezvous::BUILT_IN_SERVICE;
+    ui.label_wrapped(&if built_in.is_empty() {
+        "Hosting and joining by code go through this service (HOST:PORT). This build has \
+         none built in."
+            .to_string()
+    } else {
+        format!(
+            "Hosting and joining by code go through this service. Leave it empty for the \
+             built-in one ({built_in})."
+        )
+    });
     ui.heading("UPDATES");
     r.changed |= ui.toggle("CHECK FOR UPDATES", &mut s.check_for_updates);
     ui.enabled_scope(false, |ui| {
@@ -287,6 +307,7 @@ fn reset_tab(tab: usize, s: &mut Settings) {
             s.show_fps = d.show_fps;
             s.show_ping = d.show_ping;
             s.check_for_updates = d.check_for_updates;
+            s.online_service = d.online_service;
         }
         _ => s.accessibility = d.accessibility,
     }

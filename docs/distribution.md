@@ -28,6 +28,7 @@ Every release has exactly these assets. The names carry no version, so
 | `velocide-linux-x86_64`               | the game, standalone (glibc 2.31 or newer)   |
 | `velocide-server-windows-x86_64.exe`  | the dedicated server, standalone             |
 | `velocide-server-linux-x86_64`        | the dedicated server, standalone             |
+| `velocide-rendezvous-linux-x86_64`    | the online service (docs/rendezvous.md); the deploy script installs it |
 | `PLAY.txt`                            | how to play, host and join (version filled in) |
 
 A release's `tag_name` is its version (`build-42`, `v1.0.0`) and its `target_commitish` is the
@@ -43,6 +44,7 @@ change rebuilds) and exposed as `shared::build_info`:
 | `VELOCIDE_VERSION` | the release's version, e.g. `build-42` | `dev`                    |
 | `VELOCIDE_COMMIT`  | the full 40-hex commit                 | empty                    |
 | `VELOCIDE_REPO`    | `owner/name` the updater checks        | `SamSkinner01/velocide`  |
+| `VELOCIDE_RENDEZVOUS` | `host:port` of the online service built in (`rendezvous::BUILT_IN_SERVICE`; CI: the repository variable) | none: online play needs one in the settings |
 
 `shared::build_info::{VERSION, COMMIT, REPO}` are `&'static str`; `is_release()` is true when
 `COMMIT` is 40 hex digits and `VERSION` isn't `dev`. `label()` is what players compare (the

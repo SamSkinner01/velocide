@@ -257,7 +257,7 @@ impl VelocideApp {
     fn start_game(&mut self, ctx: &mut EngineContext, mode: &StartMode) {
         // Hosted and joined games gather in the lobby; single-player starts right away.
         let screen = match mode {
-            StartMode::Host { .. } | StartMode::Join { .. } => {
+            StartMode::Host { .. } | StartMode::Join { .. } | StartMode::JoinCode { .. } => {
                 LobbyScreen::start(mode, &mut self.common, &mut ctx.renderer)
                     .map(|l| Screen::Lobby(Box::new(l)))
             }

@@ -330,3 +330,11 @@ The same moment in the standard look and in the deuteranopia mode.
 - **Tests:** `cargo test --workspace`. Lint: `cargo clippy --workspace --all-targets`, which
   must stay at zero warnings. CI runs both, and `cargo fmt --check`, on every pull request and
   push to `main`.
+
+## Online play
+
+Hosting from your own PC needs no port forwarding: **Host Game** with *Online: Join code*
+shows a code like `ABCD-EFGH` in the lobby, and friends type it under **Join Game** (or find
+*Public* games under **Browse games**). A small online service introduces the two PCs so they
+connect directly, and relays the game when they can't; *Hide my IP* always uses the relay.
+How it works, its security model and how CI deploys it to a VPS: `docs/rendezvous.md`.

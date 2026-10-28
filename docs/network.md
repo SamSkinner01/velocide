@@ -27,14 +27,19 @@ over loopback UDP, so SP, co-op and PvP share one code path.
 | `server::input_queue` | per-player input queue (dedupe, de-jitter buffer, catch-up, anti speed-hack) |
 | `server::lagcomp` | `LagCompHistory` (per-tick hitbox ring, rewind) |
 | `server::netsim` | `NetSimConfig`, `NetSim` (latency/jitter/loss/duplication) |
-| `server::transport` | renet channel config, `UdpLink`, `ServerTransport` trait, `NetcodeServerTransport` |
+| `server::transport` | renet channel config, `UdpLink`, `ServerTransport` trait, `NetcodeServerTransport` (with `OnlineConfig`: docs/rendezvous.md) |
 | `client::net` | `NetClient`, `NetEvent`, `NetStats`, `ConnectionState`, `ClientConfig` |
 | `client::net::{prediction, interpolation, clock, transport, session}` | `Prediction`, `SnapshotBuffer`, `ClockSync`, `ClientTransport`, `Session` |
+| `client::net::online` | `OnlineClientTransport`: joining by code through the rendezvous service |
 
 ## Transport
 
 - **renet 2** for channels/reliability over **netcode** (`renetcode`) on UDP, `Unsecure`
   authentication (join by IP:port). `PROTOCOL_ID = 0x56454C4F43494445` ("VELOCIDE").
+- **Online play** (join codes, the server browser, no port forwarding) adds the rendezvous
+  service on the same sockets, without touching the game protocol: docs/rendezvous.md. Unsecure
+  netcode doesn't check the server address in the connect token, so a joiner can connect to the
+  host's NAT-mapped address or to a relay stand-in address as is.
 - The client's `ConnectRequest { protocol_version, name }` travels in netcode's 256-byte
   connect-token user data. The server checks `PROTOCOL_VERSION` on connect and answers a
   mismatch with `ServerMessage::Rejected { reason }`, disconnecting 0.5 s later (so the reason

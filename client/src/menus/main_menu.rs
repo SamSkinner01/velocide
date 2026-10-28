@@ -12,8 +12,10 @@ use engine::audio::Sfx;
 use engine::render::Renderer;
 use engine::ui::{Rect, TextFilter, TextStyle, Ui, UiDrawExt};
 use glam::{Vec4, vec2};
+use rendezvous::browse::{BrowseState, Browser};
 use shared::level::LevelDef;
 use shared::lobby::{Difficulty, GameMode, LevelInfo};
+use shared::protocol::PROTOCOL_VERSION;
 
 use super::backdrop::Backdrop;
 use super::customize::CustomizeMenu;
@@ -25,6 +27,7 @@ use crate::app::Common;
 use crate::cli::StartMode;
 use crate::frame::{FrameBuffers, FrameIo, SceneParams, ScreenOutput, Transition};
 use crate::models::DEFAULT_TEAM_COLOR;
+use crate::settings::HostOnline;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -32,6 +35,8 @@ pub enum Page {
     SinglePlayer,
     Host,
     Join,
+    /// The server browser (from the join page).
+    Browse,
     Customize,
     Loadout,
     Settings,
@@ -64,6 +69,10 @@ pub struct MainMenu {
     port: String,
     max_players: f32,
     address: String,
+    /// Join page: the join code being typed.
+    code: String,
+    /// The browse page's listing fetch.
+    browser: Option<Browser>,
     settings: SettingsMenu,
     customize: CustomizeMenu,
     /// The LOADOUT page (made when it opens: it reads the tuning file for its numbers).
@@ -106,6 +115,7 @@ impl MainMenu {
         menu.difficulty = s.difficulty;
         menu.host_level = s.last_level.clone();
         menu.address = s.last_join_address.clone();
+        menu.code = s.last_join_code.clone();
         menu
     }
 
@@ -126,6 +136,8 @@ impl MainMenu {
             port: shared::DEFAULT_PORT.to_string(),
             max_players: 4.0,
             address: String::new(),
+            code: String::new(),
+            browser: None,
             settings: SettingsMenu::new(),
             customize: CustomizeMenu::new(),
             loadout: None,
@@ -174,6 +186,12 @@ impl MainMenu {
     }
 
     fn back(&mut self) {
+        if self.page == Page::Browse {
+            self.browser = None;
+            self.return_focus = Some("BROWSE GAMES");
+            self.page = Page::Join;
+            return;
+        }
         self.return_focus = ROOT_ITEMS
             .iter()
             .find(|(_, p)| *p == self.page)
@@ -317,6 +335,7 @@ impl MainMenu {
                         Page::SinglePlayer => self.single_player_page(&mut ui, panel, settings),
                         Page::Host => self.host_page(&mut ui, panel, settings, &mut name_changed),
                         Page::Join => self.join_page(&mut ui, panel, settings, &mut name_changed),
+                        Page::Browse => self.browse_page(&mut ui, panel),
                     };
                     if name_changed {
                         settings_resp.name_changed = true;
@@ -332,6 +351,10 @@ impl MainMenu {
                             self.back();
                         }
                         Some(PageResult::Error(e)) => self.message = Some(e),
+                        Some(PageResult::Open(page)) => {
+                            sound = Some(Sfx::UiSelect);
+                            self.page = page;
+                        }
                         None => {}
                     }
                     if in_page && ui.back_pressed() {
@@ -568,11 +591,43 @@ impl MainMenu {
             ui.text_field("PORT", &mut self.port, 5, TextFilter::Digits);
             let max = self.host_mode.max_players() as f32;
             ui.slider("MAX PLAYERS", &mut self.max_players, 1.0, max, 1.0, "{}");
+            let has_service = settings.online_service(None).is_some();
+            let online = if has_service {
+                let titles = HostOnline::ALL.map(HostOnline::title);
+                let mut i = HostOnline::ALL
+                    .iter()
+                    .position(|o| *o == settings.host_online)
+                    .unwrap_or(0);
+                if ui.choice("ONLINE", &mut i, &titles) {
+                    settings.host_online = HostOnline::ALL[i];
+                }
+                if settings.host_online != HostOnline::Off {
+                    ui.toggle("HIDE MY IP (RELAY)", &mut settings.host_relay_only);
+                }
+                settings.host_online
+            } else {
+                HostOnline::Off
+            };
             ui.spacing(2.0);
             let dim = TextStyle::new(ui.theme().bone_dim);
             ui.text("THE LOBBY OPENS FIRST: CHANGE ANYTHING THERE.", &dim);
-            ui.text("FRIENDS JOIN WITH YOUR IP AND THIS PORT (UDP).", &dim);
-            ui.text("FORWARD THE PORT TO PLAY OVER THE INTERNET.", &dim);
+            match online {
+                HostOnline::Code => {
+                    ui.text("FRIENDS JOIN WITH THE CODE IT SHOWS.", &dim);
+                    ui.text("NO PORT FORWARDING NEEDED.", &dim);
+                }
+                HostOnline::Public => {
+                    ui.text("ANYONE CAN FIND IT IN THE SERVER BROWSER,", &dim);
+                    ui.text("OR JOIN WITH THE CODE IT SHOWS.", &dim);
+                }
+                HostOnline::Off => {
+                    ui.text("FRIENDS JOIN WITH YOUR IP AND THIS PORT (UDP).", &dim);
+                    ui.text("FORWARD THE PORT TO PLAY OVER THE INTERNET.", &dim);
+                    if !has_service {
+                        ui.text("(NO ONLINE SERVICE: SEE SETTINGS.)", &dim);
+                    }
+                }
+            }
             ui.spacing(4.0);
             ui.row(2, |ui| {
                 if ui.button("HOST") {
@@ -620,10 +675,28 @@ impl MainMenu {
             {
                 *name_changed = true;
             }
+            let dim = TextStyle::new(ui.theme().bone_dim);
+            let service = settings.online_service(None);
+            let mut join_code = false;
+            if let Some(service) = &service {
+                join_code = ui
+                    .text_field("JOIN CODE", &mut self.code, 9, TextFilter::Custom(is_code_char))
+                    .submitted;
+                ui.row(2, |ui| {
+                    join_code |= ui.button("JOIN BY CODE");
+                    if ui.button("BROWSE GAMES") {
+                        self.browser = Some(Browser::start(service, PROTOCOL_VERSION));
+                        result = Some(PageResult::Open(Page::Browse));
+                    }
+                });
+                ui.toggle("HIDE MY IP (RELAY)", &mut settings.join_relay_only);
+            } else {
+                ui.text("JOIN CODES NEED AN ONLINE SERVICE (SETTINGS).", &dim);
+            }
+            ui.spacing(4.0);
             let submitted = ui
                 .text_field("ADDRESS", &mut self.address, 64, TextFilter::Address)
                 .submitted;
-            let dim = TextStyle::new(ui.theme().bone_dim);
             ui.text(
                 &format!("IP:PORT  (DEFAULT PORT {})", shared::DEFAULT_PORT),
                 &dim,
@@ -636,6 +709,23 @@ impl MainMenu {
                     result = Some(PageResult::Back);
                 }
             });
+            if join_code {
+                let code = self.code.trim().to_uppercase();
+                result = Some(match rendezvous::Code::parse(&code) {
+                    Some(parsed) => {
+                        settings.last_join_code = parsed.to_string();
+                        PageResult::Start(Transition::Start(StartMode::JoinCode {
+                            code: parsed.to_string(),
+                        }))
+                    }
+                    None if code.is_empty() => {
+                        PageResult::Error("Enter the code the host's lobby shows, e.g. ABCD-EFGH".into())
+                    }
+                    None => PageResult::Error(format!(
+                        "'{code}' isn't a join code: those have 8 letters and digits, like ABCD-EFGH"
+                    )),
+                });
+            }
             if connect {
                 let address = self.address.trim().to_string();
                 result = Some(if address.is_empty() {
@@ -648,10 +738,80 @@ impl MainMenu {
         });
         result
     }
+
+    /// The server browser: public games of this version, newest list on REFRESH.
+    fn browse_page(&mut self, ui: &mut Ui, panel: Rect) -> Option<PageResult> {
+        let mut result = None;
+        let browser = &mut self.browser;
+        ui.panel(panel, "SERVER BROWSER", |ui| {
+            let dim = TextStyle::new(ui.theme().bone_dim);
+            let state = browser.as_mut().map(|b| b.poll().clone());
+            match state {
+                None => ui.text("NO ONLINE SERVICE (SEE SETTINGS).", &dim),
+                Some(BrowseState::Loading) => ui.text("LOOKING FOR GAMES...", &dim),
+                Some(BrowseState::Failed(e)) => ui.label_wrapped(&e.to_uppercase()),
+                Some(BrowseState::Done(entries)) if entries.is_empty() => {
+                    ui.text("NO PUBLIC GAMES RIGHT NOW.", &dim);
+                    ui.text("HOST ONE WITH ONLINE: PUBLIC.", &dim);
+                }
+                Some(BrowseState::Done(entries)) => {
+                    ui.scroll_area("browser", 150.0, |ui| {
+                        for e in &entries {
+                            if ui.selectable(&format!("{}##{}", browse_row(e), e.code), false) {
+                                result = Some(PageResult::Start(Transition::Start(
+                                    StartMode::JoinCode {
+                                        code: e.code.to_string(),
+                                    },
+                                )));
+                            }
+                        }
+                    });
+                    if entries.iter().any(|e| e.in_match) {
+                        ui.text("* MATCH UNDER WAY (YOU JOIN IN)", &dim);
+                    }
+                }
+            }
+            ui.spacing(4.0);
+            ui.row(2, |ui| {
+                ui.default_focus();
+                if ui.button("REFRESH")
+                    && let Some(b) = browser.as_mut()
+                {
+                    b.refresh();
+                }
+                if ui.button("BACK") {
+                    result = Some(PageResult::Back);
+                }
+            });
+        });
+        result
+    }
+}
+
+/// Join codes: letters, digits and the dash.
+fn is_code_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '-'
+}
+
+/// "SAM'S GAME     DEATHMATCH KNELL YARD   3/8*"
+fn browse_row(e: &rendezvous::proto::ListEntry) -> String {
+    let mode = GameMode::ALL
+        .get(e.mode as usize)
+        .map_or("?", |m| m.title());
+    let name: String = e.name.to_uppercase().chars().take(14).collect();
+    let level: String = level_display_name(&e.level).chars().take(12).collect();
+    format!(
+        "{name:<14} {mode:<10} {level:<12} {}/{}{}",
+        e.players,
+        e.max_players,
+        if e.in_match { "*" } else { "" }
+    )
 }
 
 enum PageResult {
     Start(Transition),
+    /// Another page (the server browser).
+    Open(Page),
     Back,
     Error(String),
 }

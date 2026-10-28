@@ -1,5 +1,11 @@
 # Hosting a dedicated server (e.g. a DigitalOcean droplet)
 
+You don't need one to play over the internet: **HOST GAME** with *ONLINE: JOIN CODE* hosts
+from your PC without port forwarding, through the online service (docs/rendezvous.md). A
+dedicated server is for a game that runs while nobody's PC hosts it. On the VPS that runs the
+online service, `scripts/deploy/setup-vps.sh --with-server` sets one up that CI keeps up to
+date ("Deploying" in docs/rendezvous.md); the steps below do it by hand.
+
 The dedicated server is one file: the levels, enemy definitions and tuning are built into it.
 It needs no GPU, no audio, no `assets/` folder and no Rust toolchain on the machine it runs on.
 
@@ -110,6 +116,9 @@ Add these to `ExecStart`. `velocide-server --help` lists them all.
 | `--autostart` | start the match as soon as everyone is ready (no host needed) |
 | `--name "Friday Night"` | server name |
 | `--dev-commands` | enables `/god`, `/spawn` and so on for the lobby host. Leave this off on a public server. |
+| `--online` | list it in the server browser through the online service built into the game (docs/rendezvous.md); `--rendezvous HOST:PORT` names another |
+| `--private` / `--relay-only` / `--allow-direct` | online: code only (not listed) / joiners go through the relay / also let anyone in by address (online, by default only joiners the service introduces get in from the internet) |
+| `--exit-when-replaced PATH` | exit once PATH points at another binary and nobody is connected (deploys; systemd starts the new one) |
 
 How a session runs:
 
@@ -121,7 +130,9 @@ How a session runs:
 ## Updating
 
 Everyone (the server and every player) must run the same version of the game. The game offers
-players each new release by itself; the server you update by hand. To the newest release:
+players each new release by itself. A server set up with `scripts/deploy/setup-vps.sh` is
+updated by CI with every release (docs/rendezvous.md "Deploying"); one set up by hand as above
+you update by hand. To the newest release:
 
 ```sh
 ssh root@SERVER_IP
