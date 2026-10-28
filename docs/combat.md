@@ -253,9 +253,21 @@ victims.
 
 Swept spheres, simulated on the server only. Per tick: exact ballistic step
 (`p += v·dt − ½g·dt²ŷ`, `v −= g·dt·ŷ`), sphere cast against the level (`MASK_SHOTS`) and a
-swept-sphere test against the **current** hitboxes of everything the owner `can_hit` (owners
+swept-sphere test against the current hitboxes of everything the owner `can_hit` (owners
 and co-op teammates are never hit; enemy projectiles never hit enemies); the earliest contact
-wins.
+wins. A player's projectile is swept in each target's moving frame (players have moved this
+tick, enemies move after the projectiles, by their velocity), so a target crossing its path
+between ticks is touched where it was then.
+
+**Lag compensation** (`docs/feel.md`, "Hit registration"): a player's projectile fired from
+an input flies from that input's view time `V` (clamped like a hitscan rewind and by
+`net.projectile_lag_comp_max_ms`, 350): on its first step it makes up the `now − 1 − V` ticks
+of flight its shooter already watched, each tick swept against the hit shapes rewound to that
+moment, then flies on in the present (its fuse and lifetime count from `V`). A contact made on
+the way is moved onto the target as it is now. It leaves from where the input's movement
+started (`LaunchView::eye_shift`). Not the Wisp, the Kite and the Hurl (orbiting, steered,
+returning: driven from the present every tick). `SimWorld::projectile_seen` is where the owner
+saw its projectile for a recast.
 
 | kind (net kind) | gravity | radius | life | on target | on level | parryable |
 |---|---|---|---|---|---|---|
@@ -538,11 +550,14 @@ Prediction duties:
   event and "RESPAWNING IN N.N".
 * **Projectiles/thorns**: other players' / enemies' projectiles and *all* thorns are drawn
   at `replicated_position(e, render_tick, …)` (consistent with lag compensation, parry and
-  ricochet validation). **Your own projectiles** are taken from the newest snapshot and drawn
-  at the present (`server_tick_estimate`, at most 6 ticks past the newest snapshot), starting
-  at the drawn muzzle and blending onto the true path over 0.15 s; before the server reports
-  one, a local stand-in flies it from the muzzle on the shot's frame and hands over to it
-  without a pop or a double (`stand_in.rs`, `docs/feel.md`); your own explosions
+  ricochet validation). **Your own projectiles** are drawn at the render tick too: the server
+  flies them from the view time their shot was aimed at (Projectiles, "Lag compensation"), so
+  that is where they are among the targets you see; before one shows there, a local stand-in
+  flies it from the muzzle on the shot's frame (on the same clock, stopping in the server's
+  padded hit shapes) and hands over to it without a pop or a double (`stand_in.rs`,
+  `docs/feel.md` "Hit registration"). Deflected ones and the orbiting Wisp, the steered Kite
+  and the returning Hurl are taken from the newest snapshot and drawn at the present
+  (`server_tick_estimate`, at most 6 ticks past the newest snapshot). Your own explosions
   (`Fx::Explosion::owner`) play on arrival to match (an own Breach's bang was already played
   by the prediction).
 
