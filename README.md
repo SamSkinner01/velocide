@@ -99,7 +99,11 @@ models.
 
 Everyone in a game, the server included, must run the same version (the release's name, such
 as `build-42`). The game checks for a newer release when it starts and offers to update itself
-from the main menu (`docs/distribution.md`), so friends download it by hand only once.
+from the main menu (`docs/distribution.md`), so friends download it by hand only once. The
+version is shown bottom right on the main menu and in Settings → Gameplay, where *Check for
+updates* turns the check off (as does `VELOCIDE_NO_UPDATE_CHECK=1`). If the game can't replace
+itself (in a read-only folder, say), the prompt says why and opens the release page instead.
+On Windows the replaced file stays as `<name>.exe.old` until the next launch deletes it.
 
 The releases are made by CI: every push to `main` becomes a release `build-<n>`, and every `v*`
 tag a release under its name, once fmt, clippy, the tests and both builds pass
