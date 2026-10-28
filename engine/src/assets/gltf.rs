@@ -1,6 +1,7 @@
 //! glTF 2.0 models: a loader (node transforms applied, embedded base64 or external `.bin`
-//! buffers, PNG/JPEG images) and a minimal exporter that writes a self-contained `.gltf`
-//! (JSON with base64 data URIs) so procedurally generated models can be saved and reloaded.
+//! buffers, PNG/JPEG images; from a file, from bytes, or from the assets folder with its
+//! embedded fallback) and a minimal exporter that writes a self-contained `.gltf` (JSON with
+//! base64 data URIs) so procedurally generated models can be saved and reloaded.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -26,10 +27,55 @@ pub struct ModelPart {
 pub fn load(path: &Path) -> anyhow::Result<Vec<ModelPart>> {
     let (doc, buffers, images) =
         ::gltf::import(path).with_context(|| format!("loading {}", path.display()))?;
+    parts_of(&doc, &buffers, &images)
+}
+
+/// Like [`load`] from the bytes of a `.gltf` / `.glb` whose buffers and images are embedded
+/// (data URIs or the GLB binary chunk); external files can't be resolved.
+pub fn load_slice(bytes: &[u8]) -> anyhow::Result<Vec<ModelPart>> {
+    let ::gltf::Gltf { document, blob } = ::gltf::Gltf::from_slice(bytes)?;
+    let buffers = ::gltf::import_buffers(&document, None, blob)?;
+    // `gltf::import_slice` refuses images with `data:` URIs (it only decodes them when it has
+    // a folder for relative URIs): give those a folder, which a data URI never reads from.
+    // Any other URI still fails.
+    let images = document
+        .images()
+        .map(|image| {
+            let source = image.source();
+            let base = match source {
+                ::gltf::image::Source::Uri { uri, .. } if uri.starts_with("data:") => {
+                    Some(Path::new("."))
+                }
+                _ => None,
+            };
+            ::gltf::image::Data::from_source(source, base, &buffers)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    parts_of(&document, &buffers, &images)
+}
+
+/// Loads a model of the assets folder (`models/shrike.gltf`) through
+/// [`crate::asset_files`]: the file on disk if there is one, else the copy compiled into the
+/// binary.
+pub fn load_asset(path: &str) -> anyhow::Result<Vec<ModelPart>> {
+    match crate::asset_files::find(path) {
+        Some(crate::asset_files::Source::Disk(file)) => load(&file),
+        Some(crate::asset_files::Source::Embedded(bytes)) => {
+            load_slice(bytes).with_context(|| format!("loading embedded {path}"))
+        }
+        None => anyhow::bail!("{path} not found (neither in the assets folder nor embedded)"),
+    }
+}
+
+fn parts_of(
+    doc: &::gltf::Document,
+    buffers: &[::gltf::buffer::Data],
+    images: &[::gltf::image::Data],
+) -> anyhow::Result<Vec<ModelPart>> {
     let mut parts = Vec::new();
     let mut ctx = LoadCtx {
-        buffers: &buffers,
-        images: &images,
+        buffers,
+        images,
         parts: &mut parts,
     };
     match doc.default_scene().or_else(|| doc.scenes().next()) {
@@ -569,7 +615,18 @@ mod tests {
         let path = temp_path("parts.gltf");
         write_parts(&path, &parts).unwrap();
         let loaded = load(&path).unwrap();
+        let from_bytes = load_slice(&std::fs::read(&path).unwrap()).unwrap();
         std::fs::remove_file(&path).ok();
+
+        assert_eq!(from_bytes.len(), loaded.len());
+        for (a, b) in from_bytes.iter().zip(&loaded) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.mesh.indices, b.mesh.indices);
+            assert_eq!(
+                a.texture.as_ref().map(|t| &t.rgba),
+                b.texture.as_ref().map(|t| &t.rgba)
+            );
+        }
 
         assert_eq!(loaded.len(), 2, "empty parts are skipped");
         assert_eq!(loaded[0].name, "body \"main\"");
@@ -602,5 +659,22 @@ mod tests {
         let (lo, hi) = meshgen::bounds(&parts[0].mesh.vertices);
         assert_eq!(lo, Vec3::new(-1.0, 4.0, 0.0));
         assert_eq!(hi, Vec3::new(1.0, 6.0, 0.0));
+    }
+
+    #[test]
+    fn embedded_models_load_from_their_bytes() {
+        let bytes = crate::asset_files::embedded("models/warden.gltf").expect("embedded");
+        assert!(!load_slice(bytes).unwrap().is_empty());
+        assert!(!load_asset("models/warden.gltf").unwrap().is_empty());
+        let error = load_asset("models/missing.gltf").unwrap_err().to_string();
+        assert!(error.contains("models/missing.gltf"), "{error}");
+        // Bytes have no folder: external buffers and images are refused, not read.
+        for external in [
+            r#"{"asset":{"version":"2.0"},"buffers":[{"byteLength":4,"uri":"x.bin"}]}"#,
+            r#"{"asset":{"version":"2.0"},"images":[{"uri":"x.png"}]}"#,
+            r#"{"asset":{"version":"2.0"},"images":[{"uri":"file:///etc/passwd"}]}"#,
+        ] {
+            assert!(load_slice(external.as_bytes()).is_err(), "{external}");
+        }
     }
 }
