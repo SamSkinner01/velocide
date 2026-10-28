@@ -1195,8 +1195,7 @@ impl SimWorld {
         let mut rng = SpreadRng::new(self.tick, id, input.seq);
         match weapon {
             WeaponKind::Quill => {
-                let shot =
-                    ShotSpec::new(eye, aim, c.hitscan_range, c.quill.damage, attack).ricochet(true);
+                let shot = ShotSpec::new(eye, aim, c.hitscan_range, c.quill.damage, attack);
                 self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
             }
             WeaponKind::Lancet => {
@@ -1312,8 +1311,6 @@ impl SimWorld {
         let owner = Owner::Player(id);
         let c = &t.combat;
         let attack = ability.attack();
-        // Only the Quill's shots ricochet off thorns (its identity), whichever ability.
-        let ricochet = weapon == WeaponKind::Quill;
         // Bow abilities change the arrow of the release (`charge` = the draw).
         if weapon.class() == WeaponClass::Draw {
             let (kind, scale) = match ability {
@@ -1326,8 +1323,7 @@ impl SimWorld {
         }
         match ability {
             Ability::Brand => {
-                let shot = ShotSpec::new(eye, aim, c.hitscan_range, c.quill.brand_damage, attack)
-                    .ricochet(ricochet);
+                let shot = ShotSpec::new(eye, aim, c.hitscan_range, c.quill.brand_damage, attack);
                 let (_, results) = self.fire_hitscan_group(t, history, id, input, attack, &[shot]);
                 // Whatever the (last leg of the) shot hit is branded, if it survived.
                 for impact in results.iter().filter_map(|r| r.impact) {

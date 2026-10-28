@@ -23,6 +23,9 @@
 //! * **Hurl**: a spinning blade / hammer-head projectile (`ProjectileKind::Hurl`) that comes
 //!   back (`abilities/hurl.rs`).
 //!
+//! A live thorn inside a swing's arc (or a Whirl's reach) is batted on at the hostile its relay
+//! picks, as a ray of the swing's damage (`thorn.rs`).
+//!
 //! Every swing, Whirl, Riposte counter and the start of a Lunge is a [`SimEvent::Swing`]
 //! (`Fx::Swing` for the other clients and the replay). All melee damage carries
 //! [`DamageFlags::MELEE`].
@@ -210,6 +213,8 @@ impl SimWorld {
             let info = melee_damage(id, (damage, attack), point, aim, kb);
             self.apply_damage(t, target, info);
         }
+        // A thorn in the arc is batted on at the swing's damage (thorn.rs).
+        self.relay_cone(t, id, input, arc, damage, attack);
         self.events.push(SimEvent::Swing {
             player: id,
             attack,
@@ -287,6 +292,9 @@ impl SimWorld {
                     let info = melee_damage(id, (primary * w.damage_scale, attack), at, dir, kb);
                     self.apply_damage(t, target, info);
                 }
+                // The thorns around are batted on (thorn.rs).
+                let damage = primary * w.damage_scale;
+                self.relay_nova(t, id, input, center, w.radius, damage, attack);
                 n
             }
             Ability::Hurl => {

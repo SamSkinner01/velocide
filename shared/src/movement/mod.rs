@@ -103,6 +103,13 @@ pub struct MoveState {
     /// ground / air / dash / slide speeds are scaled by `slow_scale`. Set by the server.
     pub slow_time: f32,
     pub slow_scale: f32,
+    /// Seconds left of a haste (the Kindle Flask, `docs/arsenal.md`): while it lasts, ground /
+    /// air / slide speeds and accelerations and the dash are scaled by `haste_scale` (with a
+    /// slow or a guard too, all apply, multiplied). Set by the server.
+    #[serde(default)]
+    pub haste_time: f32,
+    #[serde(default)]
+    pub haste_scale: f32,
     /// Seconds left of a raised guard's slow (Bulwark, Riposte: `docs/rework.md`): speeds
     /// scaled by `guard_scale` as well (with a slow: both, multiplied). Set by the server when
     /// the guard goes up (for its longest hold) and cleared when it drops.
@@ -241,13 +248,20 @@ fn volume_overlaps(v: &Volume, lo: Vec3, hi: Vec3) -> bool {
     lo.cmple(v.max).all() && hi.cmpge(v.min).all()
 }
 
-/// `t` with its speeds scaled by `k` (0..=1): a slowed player.
-fn slowed(t: &MovementTuning, k: f32) -> MovementTuning {
-    let k = if k.is_finite() {
-        k.clamp(0.0, 1.0)
+/// `t` with its speeds scaled by `slow` (0..=1, a slowed player) and `haste` (1..=3, a hasted
+/// one) and its accelerations by `haste`.
+fn scaled(t: &MovementTuning, slow: f32, haste: f32) -> MovementTuning {
+    let slow = if slow.is_finite() {
+        slow.clamp(0.0, 1.0)
     } else {
         1.0
     };
+    let haste = if haste.is_finite() {
+        haste.clamp(1.0, 3.0)
+    } else {
+        1.0
+    };
+    let k = slow * haste;
     MovementTuning {
         ground_speed: t.ground_speed * k,
         air_max_speed: t.air_max_speed * k,
@@ -255,6 +269,8 @@ fn slowed(t: &MovementTuning, k: f32) -> MovementTuning {
         dash_end_speed: t.dash_end_speed * k,
         slide_min_speed: t.slide_min_speed * k,
         slide_max_speed: t.slide_max_speed * k,
+        ground_accel: t.ground_accel * haste,
+        air_accel: t.air_accel * haste,
         ..t.clone()
     }
 }
@@ -276,20 +292,26 @@ pub fn step(
     if !state.velocity.is_finite() {
         state.velocity = Vec3::ZERO;
     }
-    // Slowed (Pinned, a raised guard): every speed scaled while it lasts.
-    let slowed_tuning;
-    let mut scale = None;
+    // Slowed (Pinned, a raised guard) and / or hasted (the Kindle Flask): every speed scaled
+    // while it lasts (the accelerations too by a haste).
+    let scaled_tuning;
+    let mut slow = None;
     if state.slow_time > 0.0 {
         state.slow_time = (state.slow_time - dt).max(0.0);
-        scale = Some(state.slow_scale);
+        slow = Some(state.slow_scale);
     }
     if state.guard_time > 0.0 {
         state.guard_time = (state.guard_time - dt).max(0.0);
-        scale = Some(scale.unwrap_or(1.0) * state.guard_scale);
+        slow = Some(slow.unwrap_or(1.0) * state.guard_scale);
     }
-    let t = if let Some(k) = scale {
-        slowed_tuning = slowed(t, k);
-        &slowed_tuning
+    let mut haste = None;
+    if state.haste_time > 0.0 {
+        state.haste_time = (state.haste_time - dt).max(0.0);
+        haste = Some(state.haste_scale);
+    }
+    let t = if slow.is_some() || haste.is_some() {
+        scaled_tuning = scaled(t, slow.unwrap_or(1.0), haste.unwrap_or(1.0));
+        &scaled_tuning
     } else {
         t
     };

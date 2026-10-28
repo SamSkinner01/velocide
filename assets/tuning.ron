@@ -151,10 +151,11 @@
             lifetime: 8.0,         // once planted / lying
             radius: 0.08,
             damage: 8.0,           // hitting a target (it then drops and lies as a live thorn)
-            ricochet_radius: 0.6,
+            ricochet_radius: 0.6,  // every player ray (and projectile) this close relays off it
             chain_range: 30.0,     // next thorn, else a branded hostile, else the nearest hostile
             target_range: 40.0,
-            damage_multiplier: 1.5, // per bounce
+            damage_multiplier: 1.5, // per bounce (every relay)
+            relay_damage: 30.0,    // the ray an explosion flings a thorn in its radius with
         ),
         // 1: precision spike-caster (hitscan). Defaults Brand, Wickline.
         quill: (
@@ -435,16 +436,8 @@
             kindle_flask: (
                 charges: 1,
                 recharge_time: 14.0,
-                speed: 16.0,
-                angle_degrees: 15.0,   // lobbed above the aim
-                gravity: 16.0,
-                projectile_radius: 0.15,
-                flight_time: 3.0,
-                radius: 3.5,           // the pool where it lands ...
-                duration: 4.0,
-                heal_rate: 10.0,       // ... heals HP/s (teammates and you; PvP: only you)
-                haste_time: 5.0,       // drunk (docs/rework.md): haste for this long ...
-                haste_scale: 1.3,      // ... speeds and accelerations x this ...
+                haste_time: 5.0,       // drunk at once (only you): haste for this long ...
+                haste_scale: 1.3,      // ... speeds and accelerations (the dash too) x this ...
                 haste_heal: 8.0,       // ... and this many HP ...
                 haste_heal_interval: 1.0, // ... every this many seconds
             ),

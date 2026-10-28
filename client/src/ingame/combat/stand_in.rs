@@ -292,6 +292,12 @@ pub fn launches(
                 ),
                 Ability::Bolas => one(kind::BOLAS, safe(eye + aim * 0.5), aim * c.bolas.speed),
                 Ability::Kite => one(kind::KITE, safe(eye + aim * 0.6), aim * c.kite.speed),
+                // The Lantern's toss (gear.rs draws it).
+                Ability::Lantern => one(
+                    kind::LANTERN_TOSS,
+                    safe(eye + aim * 0.5),
+                    aim * c.lantern.toss_speed,
+                ),
                 Ability::Gravewell => one(
                     kind::GRAVEWELL,
                     eye,
@@ -310,11 +316,6 @@ pub fn launches(
             let k = &c.knacks;
             let start = safe(eye + aim * 0.5);
             match knack {
-                Knack::KindleFlask => one(
-                    kind::KINDLE_FLASK,
-                    start,
-                    lob_dir(aim, k.kindle_flask.angle_degrees) * k.kindle_flask.speed,
-                ),
                 Knack::Snare => one(kind::SNARE, start, aim * k.snare.speed),
                 Knack::SootPot => one(kind::SOOT_POT, start, aim * k.soot_pot.speed),
                 _ => Vec::new(),

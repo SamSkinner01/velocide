@@ -15,6 +15,8 @@
 /// The Shrike's cosmetics kit: masks, crests, cloaks, emblems (`shared::cosmetics`).
 pub mod cosmetics;
 pub mod enemies;
+/// The rework's ability gear: the Bolas, the Bulwark's slab, the Lantern, the Kite.
+pub mod gear;
 /// Warm-up hub props: the ready board and the practice console (docs/lobby.md).
 pub mod hub;
 pub mod kit;
@@ -145,10 +147,19 @@ pub enum ModelId {
     BlinkArrow,
     /// Beacon Arrow: the arrow that lights a beacon where it sticks.
     BeaconArrow,
+    // The rework's ability gear (docs/rework.md, `gear`).
+    /// Two wax balls on a wick cord (Bolas).
+    Bolas,
+    /// The hardened wax slab raised in front of a Bulwark.
+    Bulwark,
+    /// The turret lantern set down by Lantern.
+    Lantern,
+    /// The steered ember kite (Kite).
+    Kite,
 }
 
 impl ModelId {
-    pub const ALL: [ModelId; 56] = [
+    pub const ALL: [ModelId; 60] = [
         ModelId::Shrike,
         ModelId::ShrikeKit,
         ModelId::Gnawer,
@@ -205,6 +216,10 @@ impl ModelId {
         ModelId::WaxPuddle,
         ModelId::BlinkArrow,
         ModelId::BeaconArrow,
+        ModelId::Bolas,
+        ModelId::Bulwark,
+        ModelId::Lantern,
+        ModelId::Kite,
     ];
 
     /// Index into [`ModelId::ALL`].
@@ -271,6 +286,10 @@ impl ModelId {
             ModelId::WaxPuddle => "fx_wax_puddle.gltf",
             ModelId::BlinkArrow => "proj_arrow_blink.gltf",
             ModelId::BeaconArrow => "proj_arrow_beacon.gltf",
+            ModelId::Bolas => "proj_bolas.gltf",
+            ModelId::Bulwark => "prop_bulwark.gltf",
+            ModelId::Lantern => "prop_lantern.gltf",
+            ModelId::Kite => "proj_kite.gltf",
         }
     }
 
@@ -306,6 +325,9 @@ impl ModelId {
             ModelId::Lamplighter => &weapons::lamplighter::JOINTS,
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::joints(self),
             ModelId::BlinkArrow | ModelId::BeaconArrow => tricks::joints(self),
+            ModelId::Bolas | ModelId::Bulwark | ModelId::Lantern | ModelId::Kite => {
+                gear::joints(self)
+            }
             ModelId::ArmRight => &weapons::arm::JOINTS,
             ModelId::Fist => &weapons::fist::JOINTS,
             id if id.is_player_projectile() => projectiles::joints(self),
@@ -346,6 +368,9 @@ impl ModelId {
             ModelId::Lamplighter => weapons::lamplighter::build(),
             ModelId::KindleFlask | ModelId::Snare | ModelId::SootPot => knacks::build(self),
             ModelId::BlinkArrow | ModelId::BeaconArrow => tricks::build(self),
+            ModelId::Bolas | ModelId::Bulwark | ModelId::Lantern | ModelId::Kite => {
+                gear::build(self)
+            }
             ModelId::ArmRight => weapons::arm::build(),
             ModelId::Fist => weapons::fist::build(),
             id if id.is_player_projectile() => projectiles::build(self),

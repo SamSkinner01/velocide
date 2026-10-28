@@ -38,7 +38,9 @@ serde): `position` (feet), `velocity`, `on_ground`, `prev_buttons`, `mode`, `gro
 `wall_normal` (for view tilt; zero if none), `wall_clinging`, `jump_pad` (pad currently
 inside), `footstep_accum`, `air_time`, `slow_time` + `slow_scale` (a slow set by the server:
 the Pinned status, `docs/arsenal.md`; while `slow_time` runs, ground / air / dash / slide speeds
-are scaled by `slow_scale`).
+are scaled by `slow_scale`), `haste_time` + `haste_scale` (a haste set by the server: the Kindle
+Flask, `docs/arsenal.md`; while `haste_time` runs, those speeds and the ground / air
+accelerations are scaled by `haste_scale`, 1–3; with a slow too, both apply, multiplied).
 
 `MoveEvents` (per tick, `Copy`): `jumped` (any ground/coyote jump, incl. slide-/dash-jumps and
 slam bounces), `slide_jumped`, `dash_jumped`, `slam_bounced`, `wall_jumped`, `dashed`,
@@ -78,7 +80,8 @@ crouch, or dashing out of a slide under a ceiling).
 
 ### Tick order (`step`)
 
-0. Slowed (`slow_time > 0`): count it down and use the tuning with its speeds scaled.
+0. Slowed (`slow_time > 0`) and / or hasted (`haste_time > 0`): count them down and use the
+   tuning with its speeds scaled (× slow × haste) and its accelerations (× haste).
 1. Depenetrate (spawned/pushed into geometry, or resting exactly on a surface).
 2. Grounded with `velocity.y > 0` (external impulse) → leave the ground.
 3. Timers: i-frames, coyote, slam-bounce window, jump buffer (a jump press sets it), stamina

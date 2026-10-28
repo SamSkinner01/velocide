@@ -462,8 +462,9 @@ impl Default for HitAssistTuning {
     }
 }
 
-/// Thorns: thrown relay spikes (`THROW`). They plant in the world; Quill shots ricochet off
-/// them.
+/// Thorns: thrown relay spikes (`THROW`). They plant in the world; every player attack
+/// relays off them (`thorn.rs`): rays ricochet, projectiles turn, swings / cones / novas /
+/// blasts fling them as a ray.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ThornTuning {
@@ -482,15 +483,19 @@ pub struct ThornTuning {
     pub radius: f32,
     /// Damage to an enemy / player it hits in flight (it then drops to the floor).
     pub damage: f32,
-    /// A Quill shot passing this close to a live thorn ricochets off it.
+    /// A player ray (or projectile, beyond its own radius) passing this close to a live thorn
+    /// ricochets off it.
     pub ricochet_radius: f32,
     /// Another live thorn within this range is preferred as the next bounce (chain) ...
     pub chain_range: f32,
     /// ... else a branded hostile, else the nearest hostile within this range (weak point
     /// preferred, line of sight).
     pub target_range: f32,
-    /// Damage multiplier per bounce.
+    /// Damage multiplier per bounce (every relay).
     pub damage_multiplier: f32,
+    /// Damage of the ray an explosion flings a thorn in its radius with (before
+    /// `damage_multiplier`); swings, cones and novas fling it with their own per-hit damage.
+    pub relay_damage: f32,
 }
 
 impl Default for ThornTuning {
@@ -509,6 +514,7 @@ impl Default for ThornTuning {
             chain_range: 30.0,
             target_range: 40.0,
             damage_multiplier: 1.5,
+            relay_damage: 30.0,
         }
     }
 }
@@ -1323,26 +1329,18 @@ pub struct KnackTuning {
     pub surge: SurgeTuning,
 }
 
-/// Kindle Flask: a lobbed flask; where it lands a pool heals the Shrikes standing in it
-/// (teammates and you; in PvP only you) through the normal healing rules.
+/// Kindle Flask: drunk at once (docs/rework.md §3). For `haste_time` the drinker is hasted
+/// (`MoveState::haste_*`: ground, air, slide and dash speeds and the ground / air accelerations
+/// × `haste_scale`) and heals `haste_heal` HP every `haste_heal_interval` (the first step one
+/// interval after drinking) through the normal healing rules. Only the drinker.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KindleFlaskTuning {
     pub charges: u32,
     pub recharge_time: f32,
-    pub speed: f32,
-    /// Launch angle above the aim.
-    pub angle_degrees: f32,
-    pub gravity: f32,
-    pub projectile_radius: f32,
-    pub flight_time: f32,
-    pub radius: f32,
-    pub duration: f32,
-    /// HP per second to everyone it heals.
-    pub heal_rate: f32,
-    /// Drunk (docs/rework.md): haste for this long ...
+    /// Drunk: haste for this long ...
     pub haste_time: f32,
-    /// ... ground, air, slide and dash speeds and accelerations × this ...
+    /// ... ground, air, slide and dash speeds and accelerations × this (1..=3) ...
     pub haste_scale: f32,
     /// ... and this many HP every `haste_heal_interval` (never above the effective max).
     pub haste_heal: f32,
@@ -1354,14 +1352,6 @@ impl Default for KindleFlaskTuning {
         Self {
             charges: 1,
             recharge_time: 14.0,
-            speed: 16.0,
-            angle_degrees: 15.0,
-            gravity: 16.0,
-            projectile_radius: 0.15,
-            flight_time: 3.0,
-            radius: 3.5,
-            duration: 4.0,
-            heal_rate: 10.0,
             haste_time: 5.0,
             haste_scale: 1.3,
             haste_heal: 8.0,
@@ -2479,7 +2469,7 @@ impl ThornTuning {
         clamp!(self, d, 0.0, 1.0; inherit_velocity);
         clamp!(self, d, 0.0, MAX_ACCEL; gravity);
         clamp!(self, d, 0.0, 10.0; radius);
-        clamp!(self, d, 0.0, MAX_DAMAGE; damage);
+        clamp!(self, d, 0.0, MAX_DAMAGE; damage, relay_damage);
         clamp!(self, d, 0.0, MAX_DIST; ricochet_radius, chain_range, target_range);
         clamp!(self, d, 0.0, MAX_MULT; damage_multiplier);
     }
@@ -2888,14 +2878,11 @@ impl KnackTuning {
 impl KindleFlaskTuning {
     pub fn sanitize(&mut self) {
         let d = Self::default();
-        clamp!(self, d, 0.0, MAX_TIME; recharge_time, flight_time, duration, haste_time,
-            haste_heal_interval);
-        clamp!(self, d, 0.0, MAX_SPEED; speed);
-        clamp!(self, d, 0.0, 90.0; angle_degrees);
-        clamp!(self, d, 0.0, MAX_ACCEL; gravity);
-        clamp!(self, d, 0.0, 10.0; projectile_radius, haste_scale);
-        clamp!(self, d, 0.0, MAX_DIST; radius);
-        clamp!(self, d, 0.0, MAX_DAMAGE; heal_rate, haste_heal);
+        clamp!(self, d, 0.0, MAX_TIME; recharge_time, haste_time);
+        // The movement step clamps the haste to the same range.
+        clamp!(self, d, 1.0, 3.0; haste_scale);
+        clamp!(self, d, 0.0, MAX_DAMAGE; haste_heal);
+        clamp!(self, d, 0.05, MAX_TIME; haste_heal_interval);
         clamp_count!(self; charges);
     }
 }

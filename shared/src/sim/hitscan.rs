@@ -12,12 +12,16 @@
 //! **Hit assist**: player-owned rays test the plain shapes first and, on a miss, the shapes
 //! inflated by [`SimWorld::hit_pads`] (`combat.hit_assist`); enemy attacks use plain shapes.
 //!
-//! **Ricochet**: a Quill shot (`ricochet` enabled) that passes within `thorn.ricochet_radius`
-//! of a live thorn before anything else stops it shatters the thorn and re-fires from it, ×1.5
-//! damage per bounce, at another live thorn within `thorn.chain_range` (chain), else at a
-//! branded hostile within `thorn.target_range`, else at the nearest hostile in range — always
-//! in line of sight, weak point / head if visible, else the body. Bounce legs are traced
-//! against current (not rewound) hitboxes since they auto-aim at current positions.
+//! **Ricochet**: every player ray (any hitscan primary or ability, each pellet, each zap;
+//! [`ShotSpec::ricochet`] opts one out) that passes within `thorn.ricochet_radius` of a live
+//! thorn before anything else stops it shatters the thorn and re-fires from it, ×1.5 damage
+//! per bounce, at another live thorn within `thorn.chain_range` (chain), else at a branded
+//! hostile within `thorn.target_range`, else at the nearest hostile in range — always in line
+//! of sight, weak point / head if visible, else the body. Bounce legs are traced against
+//! current (not rewound) hitboxes since they auto-aim at current positions. A pellet spread
+//! uses a thorn once: the first pellet to reach it shatters it, the rest fly past. Every
+//! bounce path is a [`SimEvent::Ricochet`]. The other attack families relay off thorns too
+//! (`thorn.rs`).
 //!
 //! **Pierce** (the Lamplighter's full focus): the ray passes through targets, nearest first,
 //! losing damage for each one.
@@ -47,7 +51,7 @@ pub struct ShotSpec {
     pub attack: Attack,
     /// Velocity change applied to the target along the ray.
     pub knockback: f32,
-    /// Can ricochet off thorns.
+    /// Can ricochet off thorns (every player ray does unless turned off).
     pub ricochet: bool,
     /// A target this ray passes through (it starts inside it).
     pub exclude: Option<HitTarget>,
@@ -87,7 +91,7 @@ impl ShotSpec {
             damage,
             attack,
             knockback: 0.0,
-            ricochet: false,
+            ricochet: true,
             exclude: None,
             point_blank: None,
         }
@@ -228,7 +232,8 @@ impl SimWorld {
 
     /// Fires a group of rays from one input (one shot, a pellet spread) against the
     /// lag-compensated view and emits one [`SimEvent::Shot`] (plus [`SimEvent::Ricochet`]
-    /// per bounce path). Returns the view (for follow-up traces) and every ray's result.
+    /// per bounce path, [`SimWorld::trace_shot`]). Returns the view (for follow-up traces)
+    /// and every ray's result.
     pub(crate) fn fire_hitscan_group(
         &mut self,
         t: &Tuning,
@@ -243,13 +248,6 @@ impl SimWorld {
         let mut results = Vec::with_capacity(shots.len());
         for shot in shots {
             let r = self.trace_shot(t, shooter, &view.hitboxes, Some(view.time), shot, 0);
-            if !r.ricochet.is_empty() {
-                self.events.push(SimEvent::Ricochet {
-                    shooter,
-                    attack,
-                    points: r.ricochet.clone(),
-                });
-            }
             results.push(r);
         }
         let origin = shots.first().map_or(Vec3::ZERO, |s| s.origin);
@@ -348,8 +346,33 @@ impl SimWorld {
     }
 
     /// Traces one shot (and its ricochet legs) against `hitboxes`; thorns are taken at
-    /// `thorn_time` (ticks; `None` = current positions). Applies the damage.
+    /// `thorn_time` (ticks; `None` = current positions). Applies the damage (× the thorn
+    /// multiplier for each of `ricochets`, bounces before this shot) and emits
+    /// [`SimEvent::Ricochet`] when it bounced.
     pub fn trace_shot(
+        &mut self,
+        t: &Tuning,
+        shooter: Owner,
+        hitboxes: &[Hitbox],
+        thorn_time: Option<f64>,
+        spec: &ShotSpec,
+        ricochets: u8,
+    ) -> TraceResult {
+        let r = self.trace_leg(t, shooter, hitboxes, thorn_time, spec, ricochets);
+        if !r.ricochet.is_empty() {
+            self.events.push(SimEvent::Ricochet {
+                shooter,
+                attack: spec.attack,
+                points: r.ricochet.clone(),
+                projectile: None,
+            });
+        }
+        r
+    }
+
+    /// [`SimWorld::trace_shot`] without the event: one leg, and the legs after it when it
+    /// reaches a thorn.
+    fn trace_leg(
         &mut self,
         t: &Tuning,
         shooter: Owner,
@@ -368,7 +391,21 @@ impl SimWorld {
         let hit =
             self.first_target_on_ray(t, shooter, hitboxes, origin, dir, world_t, spec.exclude);
         let block_t = hit.map_or(world_t, |h| h.0);
-        let thorn = if spec.ricochet {
+        // A hostile Bulwark's slab in front of that stops it (abilities/bulwark.rs).
+        if let Some((slab_t, holder)) = self.slab_on_ray(t, shooter, origin, dir, block_t) {
+            let point = origin + dir * slab_t;
+            let mult = t.combat.thorn.damage_multiplier.powi(ricochets as i32);
+            let info = DamageInfo::new(spec.damage * mult, shooter, spec.attack)
+                .at(point, dir)
+                .flags(Self::hitscan_flags(spec.attack));
+            self.slab_absorbs(t, holder, &info);
+            return TraceResult {
+                end: point,
+                ..Default::default()
+            };
+        }
+        // Thorns are the players' (PvE): only their rays relay.
+        let thorn = if spec.ricochet && matches!(shooter, Owner::Player(_)) {
             self.thorn_on_ray(t, origin, dir, block_t, thorn_time)
         } else {
             None
@@ -415,19 +452,39 @@ impl SimWorld {
         };
 
         // Ricochet: shatter the thorn and re-fire from it.
-        result.end = origin + dir * thorn_t;
-        self.shatter_thorn(thorn_id);
-        result.ricochet.push(thorn_pos);
-        let next = self.ricochet_target(t, thorn_pos, shooter);
+        let r = self.relay_leg(t, shooter, thorn_id, thorn_pos, dir, spec, ricochets);
+        TraceResult {
+            end: origin + dir * thorn_t,
+            ..r
+        }
+    }
+
+    /// An attack reached live thorn `thorn` at `at` travelling along `dir`: the thorn
+    /// shatters and `spec` re-fires from it at its [`SimWorld::ricochet_target`] (without one:
+    /// on along `dir`, `spec.range`) with one bounce more than `ricochets`. The result's
+    /// `ricochet` is the bounce path from this thorn (`end` is the leg's end); no event.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn relay_leg(
+        &mut self,
+        t: &Tuning,
+        shooter: Owner,
+        thorn: NetId,
+        at: Vec3,
+        dir: Vec3,
+        spec: &ShotSpec,
+        ricochets: u8,
+    ) -> TraceResult {
+        self.shatter_thorn(thorn);
+        let next = self.ricochet_target(t, at, shooter);
         let (next_dir, range) = match next {
             Some(aim) => {
-                let d = aim - thorn_pos;
+                let d = aim - at;
                 (d.normalize_or(dir), d.length() + 2.0)
             }
             None => (dir, spec.range),
         };
         let leg = ShotSpec {
-            origin: thorn_pos,
+            origin: at,
             dir: next_dir,
             range,
             exclude: None,
@@ -435,7 +492,7 @@ impl SimWorld {
             ..*spec
         };
         let current = self.current_hitboxes(t);
-        let r = self.trace_shot(
+        let r = self.trace_leg(
             t,
             shooter,
             &current,
@@ -443,19 +500,23 @@ impl SimWorld {
             &leg,
             ricochets.saturating_add(1),
         );
-        result.hits += r.hits;
-        result.impact = r.impact;
+        let mut ricochet = vec![at];
         if r.ricochet.is_empty() {
-            result.ricochet.push(r.end);
+            ricochet.push(r.end);
         } else {
-            result.ricochet.extend(r.ricochet);
+            ricochet.extend(r.ricochet);
         }
-        result
+        TraceResult {
+            end: r.end,
+            hits: r.hits,
+            ricochet,
+            impact: r.impact,
+        }
     }
 
     /// Nearest live thorn the ray passes within `ricochet_radius` of, before `max_t`:
     /// (id, distance along the ray, thorn position).
-    fn thorn_on_ray(
+    pub(crate) fn thorn_on_ray(
         &self,
         t: &Tuning,
         origin: Vec3,

@@ -15,6 +15,8 @@ pub mod arclash;
 pub mod arm;
 pub mod bellows;
 pub mod cinderbox;
+/// Drinking the Kindle Flask (docs/rework.md): the left hand's drink.
+pub mod drink;
 pub mod fist;
 pub mod kiln;
 /// The Lamplighter (docs/rework.md §2): the sniper's long pole, lens and focusing wick.
@@ -137,31 +139,31 @@ impl WeaponLook for WeaponKind {
 /// | class | abilities |
 /// |---|---|
 /// | Precision | Brand crimson, Wickline flame orange, Tally chalk ice, Waxwork tallow |
-/// | Scatter | Gust sky, Bolas orange, Bulwark brass, Flak rose |
-/// | Rapid | Wisp violet, Discharge blue, Stoke amber, Lantern signal red |
-/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite lilac |
+/// | Scatter | Gust sky, Bolas cord orange, Bulwark pale honey, Flak rose |
+/// | Rapid | Wisp violet, Discharge blue, Stoke forge red, Lantern lamplight gold |
+/// | Explosive | Breach orange-red, Gravewell green, Limpet yellow, Kite rose |
 /// | Draw | Brand crimson, Blink Arrow mint, Pinning Arrow steel blue, Beacon Arrow gold |
 /// | Melee | Lunge cyan, Whirl amber, Hurl violet, Riposte steel white |
 ///
-/// (Bolas, Bulwark, Stoke, Lantern and Kite took the colours of the ones they replaced.)
+/// (The Scatter, Rapid and Explosive abilities of the rework take theirs from `models::gear`.)
 pub fn ability_color(a: Ability) -> Vec4 {
     let c = match a {
         Ability::Brand => Vec3::new(1.0, 0.22, 0.38),
         Ability::Wickline => Vec3::new(1.0, 0.55, 0.18),
         Ability::Gust => Vec3::new(0.72, 0.9, 1.0),
-        Ability::Bolas => Vec3::new(1.0, 0.5, 0.15),
+        Ability::Bolas => super::gear::BOLAS_COLOR.truncate(),
         Ability::Wisp => Vec3::new(0.75, 0.5, 1.0),
         Ability::Discharge => Vec3::new(0.4, 0.8, 1.0),
         Ability::Breach => Vec3::new(1.0, 0.4, 0.1),
         Ability::Gravewell => Vec3::new(0.45, 1.0, 0.55),
         Ability::Tally => Vec3::new(0.8, 0.95, 1.0),
         Ability::Waxwork => Vec3::new(1.0, 0.85, 0.5),
-        Ability::Bulwark => Vec3::new(1.0, 0.82, 0.36),
+        Ability::Bulwark => super::gear::BULWARK_COLOR.truncate(),
         Ability::Flak => Vec3::new(1.0, 0.42, 0.68),
-        Ability::Stoke => Vec3::new(1.0, 0.76, 0.2),
-        Ability::Lantern => Vec3::new(1.0, 0.28, 0.2),
+        Ability::Stoke => super::gear::STOKE_COLOR.truncate(),
+        Ability::Lantern => super::gear::LANTERN_COLOR.truncate(),
         Ability::Limpet => Vec3::new(0.95, 1.0, 0.3),
-        Ability::Kite => Vec3::new(0.82, 0.6, 1.0),
+        Ability::Kite => super::gear::KITE_COLOR.truncate(),
         Ability::BlinkArrow => Vec3::new(0.5, 1.0, 0.82),
         Ability::PinningArrow => Vec3::new(0.55, 0.75, 1.0),
         Ability::BeaconArrow => Vec3::new(1.0, 0.84, 0.36),
@@ -282,6 +284,9 @@ pub struct ViewmodelAnim {
     /// Your Hurl's blade / head is out (it comes back, docs/rework.md): not in the hand until
     /// it is caught.
     pub hurled: bool,
+    /// Kindle Flask drink progress 0..1 (0 = not drinking, [`drink`]): the left hand brings
+    /// the flask to the mouth, tips it back and flicks it away; the gun dips meanwhile.
+    pub drink: f32,
 }
 
 impl ViewmodelAnim {
@@ -509,7 +514,9 @@ pub fn viewmodel_transform(anim: &ViewmodelAnim) -> Mat4 {
         .max(cinderbox::salvo_kick(anim.salvo));
     let (kick_back, kick_pitch) = kick_amount(w);
     let lowered = (1.0 - smoothstep(anim.switch)).powi(2);
-    let punch = punch_extension(anim.punch).max(throw_extension(anim.throw) * 0.6);
+    let punch = punch_extension(anim.punch)
+        .max(throw_extension(anim.throw) * 0.6)
+        .max(drink::lowering(anim.drink));
     let bob = anim.bob_amount.clamp(0.0, 1.0);
     let (s, c) = anim.bob_phase.sin_cos();
     let bob_offset = Vec3::new(s * 0.008, -(c * c) * 0.009 + 0.0045, 0.0) * bob;
@@ -594,6 +601,9 @@ fn fist_transform(anim: &ViewmodelAnim) -> Option<Mat4> {
             p,
         ));
     }
+    if let Some(hand) = drink::hand(anim.drink) {
+        return Some(hand);
+    }
     let throw = throw_extension(anim.throw);
     if throw > 0.0 {
         let p = anim.throw;
@@ -631,6 +641,14 @@ fn draw_fists(
             Vec3::new(-0.11, -0.135, -0.3) + bob,
         )
     });
+    if drink::drinking(anim.drink) {
+        let mouth = draw_left_hand(lib, anim, left, tint, out);
+        return ViewmodelDrawInfo {
+            muzzle: right.transform_point3(Vec3::new(0.0, 0.0, -0.05)),
+            muzzle_dir: Vec3::NEG_Z,
+            fist: Some(mouth),
+        };
+    }
     let mut pose = Pose::rest(fist::JOINTS.len());
     let flare = 0.6 + punch_extension(anim.punch) * 2.0;
     pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
@@ -660,6 +678,21 @@ fn draw_left_hand(
     pose.glow = Vec4::new(flare, flare * 0.85, flare * 0.7, 1.0);
     lib.get(ModelId::Fist).draw(&pose, fist, tint, out);
     let mut point = fist.transform_point3(Vec3::new(0.0, 0.0, -0.02));
+    if drink::drinking(anim.drink) {
+        // The Kindle Flask on the fist, its kindling flaring as it is drunk.
+        if let Some(held) = drink::flask(anim.drink, anim.time) {
+            let mut item_pose = lib.get(ModelId::KindleFlask).rest_pose();
+            let g = drink::flask_glow(anim.drink);
+            item_pose.glow = Vec4::new(g, g, g, 1.0);
+            if drink::unstoppered(anim.drink) {
+                item_pose.hide(super::knacks::FLASK_STOPPER);
+            }
+            lib.get(ModelId::KindleFlask)
+                .draw(&item_pose, held, tint, out);
+            point = held.transform_point3(Vec3::Y * 0.15);
+        }
+        return point;
+    }
     if anim.throw > 0.0 && anim.throw < 0.55 {
         let wobble = Quat::from_rotation_y(0.12 * wave(anim.time, 3.0))
             * Quat::from_rotation_x(-0.2 + 0.05 * wave(anim.time, 4.3));

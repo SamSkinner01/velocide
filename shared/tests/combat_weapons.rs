@@ -476,31 +476,37 @@ fn arc_chains_prefer_branded_and_need_line_of_sight() {
 }
 
 #[test]
-fn wisp_drifts_zaps_and_pops() {
+fn wisp_orbits_zapping_then_flung_pops_on_the_wall() {
     let mut a = Arena::new(flat_level(
         LevelKind::Campaign,
         vec![brush([-10.0, 0.0, -21.0], [10.0, 6.0, -20.0])],
     ));
     let p = a.player(0, Vec3::ZERO, 0.0);
     a.world.players.get_mut(&p).unwrap().notarget = true;
-    let in_path = dummy(&mut a, Vec3::new(0.0, 0.0, -6.0), PI, 1000.0);
-    let beside = dummy(&mut a, Vec3::new(3.0, 0.0, -12.0), PI, 1000.0);
+    let near = dummy(&mut a, Vec3::new(-4.0, 0.0, -2.0), PI, 1000.0);
     a.ticks(10);
     a.select(p, ARCLASH, 0);
     a.held.get_mut(&p).unwrap().pitch = 0.0;
-    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
+    let ev = a.tap(p, Buttons::ALT_FIRE, 60);
     assert!(
         ev.iter()
             .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Wisp))
     );
     let wisp = *a.world.projectiles.keys().next().unwrap();
     assert_eq!(a.world.projectiles[&wisp].kind, ProjectileKind::Wisp);
-    // (The rework's orbiting Wisp is arsenal-b's: until then the use flies it straight at
-    // `wisp_speed`, as the flung one will.)
+    // Orbiting (arsenal-b's twist, `combat_rework_b.rs`): zapping what is within 7 m.
+    let zap = a.tuning.combat.arclash.wisp_zap_damage;
+    let zapped = hits_on(&ev, HitTarget::Entity(near))
+        .iter()
+        .map(|d| d.dealt)
+        .sum::<f32>();
+    assert!(zapped >= 3.0 * zap && zapped % zap == 0.0, "{zapped}");
+    // Flung straight ahead (past the dummy) at `wisp_speed`: it pops on the wall.
+    a.aim(p, Vec3::new(0.0, 1.5, -20.0));
+    a.tap(p, Buttons::ALT_FIRE, 0);
     let speed = a.tuning.combat.arclash.wisp_speed;
     assert!((a.world.projectiles[&wisp].velocity.length() - speed).abs() < 1e-3);
     let ev = a.ticks(150);
-    // It passed through the dummy in its path (no pop there) ...
     let pops: Vec<Vec3> = ev
         .iter()
         .filter_map(|e| match e {
@@ -514,22 +520,6 @@ fn wisp_drifts_zaps_and_pops() {
         .collect();
     assert_eq!(pops.len(), 1);
     assert!(pops[0].z < -19.0, "popped on the wall: {}", pops[0]);
-    // ... zapping whatever was within 7 m every 0.25 s (9 each).
-    let zaps = ev
-        .iter()
-        .filter(|e| matches!(e, SimEvent::WispZap { .. }))
-        .count();
-    assert!(zaps >= 3, "{zaps} zaps");
-    let zapped = |id: NetId| {
-        hits_on(&ev, HitTarget::Entity(id))
-            .iter()
-            .filter(|d| !d.info.flags.contains(DamageFlags::EXPLOSIVE))
-            .map(|d| d.dealt)
-            .sum::<f32>()
-    };
-    let zap = a.tuning.combat.arclash.wisp_zap_damage;
-    assert!(zapped(in_path) >= 2.0 * zap && zapped(in_path) % zap == 0.0);
-    assert!(zapped(beside) >= zap && zapped(beside) % zap == 0.0);
     assert!(!a.world.projectiles.contains_key(&wisp));
 }
 

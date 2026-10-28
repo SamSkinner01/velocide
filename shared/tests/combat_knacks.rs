@@ -1,5 +1,6 @@
 //! Knacks in the world (docs/arsenal.md, "Knacks"): the PvP rule (the Thorn applies as
-//! Surge), Surge, Tallow Skin, the Kindle Flask's pool and the healing rules, the Snare (arm,
+//! Surge), Surge, Tallow Skin, the Kindle Flask (drunk: the haste predicted to the bit, the
+//! heal over time and the healing rules, PvP), the Snare (arm,
 //! spring, pin, damage, two out), the Soot Pot's cloud hiding players from Moulds (a Heron's
 //! lock breaks), replication, and the owner's prediction staying exact for every knack.
 
@@ -142,72 +143,197 @@ fn tallow_skin_halves_damage_and_stops_knockback() {
     assert_eq!((dealt, pushed), (20.0, 10.0));
 }
 
-/// Throws the flask at the floor at `p`'s feet and ticks until its pool is there.
-fn pool_at_feet(a: &mut Arena, p: PlayerId) -> NetId {
-    look_at_floor(a, p, 0.3);
-    let ev = a.tap(p, Buttons::THROW, 0);
-    assert_eq!(knack_uses(&ev), vec![Knack::KindleFlask]);
-    for _ in 0..120 {
-        if let Some(id) = a.world.knacks.pools.keys().next() {
-            return *id;
-        }
-        a.tick();
-    }
-    panic!("no pool");
-}
-
-fn healed_by_pools(events: &[SimEvent], who: PlayerId) -> f32 {
+fn healed_by_flasks(events: &[SimEvent], who: PlayerId) -> Vec<f32> {
     events
         .iter()
         .filter_map(|e| match e {
             SimEvent::Healed {
                 player,
                 amount,
-                source: HealSource::KindleFlask(_),
+                source: HealSource::KindleFlask,
                 ..
             } if *player == who => Some(*amount),
             _ => None,
         })
-        .sum()
+        .collect()
+}
+
+/// Drinks the flask (one tap of the knack).
+fn drink(a: &mut Arena, p: PlayerId) {
+    let projectiles = a.world.projectiles.len();
+    let ev = a.tap(p, Buttons::THROW, 0);
+    assert_eq!(knack_uses(&ev), vec![Knack::KindleFlask]);
+    assert_eq!(a.world.projectiles.len(), projectiles, "nothing thrown");
 }
 
 #[test]
-fn kindle_pools_heal_the_team_through_the_healing_rules() {
+fn the_kindle_flask_is_drunk_hastes_and_heals_over_time() {
     let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
     let mate = a.player(1, Vec3::new(1.5, 0.0, 0.0), 0.0);
     a.tuning.combat.hard_damage_recover_rate = 0.0;
-    for (id, damage, hard) in [(p, 60.0, 30.0), (mate, 50.0, 0.0)] {
-        let c = &mut a.world.players.get_mut(&id).unwrap().combat;
-        c.damage = damage;
-        c.hard = hard;
+    for (id, damage) in [(p, 60.0), (mate, 50.0)] {
+        a.world.players.get_mut(&id).unwrap().combat.damage = damage;
     }
-    let pool = pool_at_feet(&mut a, p);
-    let e = entity(&a, pool).expect("replicated");
-    assert_eq!(e.kind, kind::KINDLE_POOL);
-    assert_eq!(e.state, 35, "radius in dm");
-    assert_eq!(e.owner, p.0 as u16);
-    a.ticks(300);
-    assert!(a.world.knacks.pools.is_empty(), "dried up after 4 s");
-    // 10 HP/s for 4 s = 40 HP, in 0.25 s steps — never above the effective max (100 − 30
-    // hard damage for the thrower).
-    assert!((a.health(p) - 70.0).abs() < 1e-3, "{}", a.health(p));
-    assert!((healed_by_pools(&a.events, p) - 30.0).abs() < 1e-3);
-    assert!(
-        (healed_by_pools(&a.events, mate) - 40.0).abs() < 1e-3,
-        "the teammate"
-    );
-    assert!((a.health(mate) - 90.0).abs() < 1e-3);
+    let f = a.tuning.combat.knacks.kindle_flask.clone();
+    drink(&mut a, p);
+    let m = a.world.players[&p].movement;
+    assert_eq!((m.haste_time, m.haste_scale), (f.haste_time, f.haste_scale));
+    let e = entity(&a, NetId::player(p)).unwrap();
+    assert!(e.flags & player_flags::HASTE != 0, "replicated");
+    // A step of 8 HP every second, the first a second after drinking.
+    a.ticks(59);
+    assert!(healed_by_flasks(&a.events, p).is_empty());
+    a.ticks(1);
+    assert_eq!(healed_by_flasks(&a.events, p), vec![8.0]);
+    a.ticks(240);
+    // 8 HP/s for 5 s = 40 HP; only the drinker.
+    assert_eq!(healed_by_flasks(&a.events, p), vec![8.0; 5]);
+    assert!((a.health(p) - 80.0).abs() < 1e-3, "{}", a.health(p));
+    assert!(healed_by_flasks(&a.events, mate).is_empty(), "yours only");
+    assert_eq!(a.world.players[&mate].movement.haste_time, 0.0);
+    // The haste is over too.
+    a.ticks(2);
+    assert!(a.world.knacks.kindle.is_empty(), "done");
+    assert_eq!(a.world.players[&p].movement.haste_time, 0.0);
+    let e = entity(&a, NetId::player(p)).unwrap();
+    assert_eq!(e.flags & player_flags::HASTE, 0);
+    a.ticks(120);
+    assert_eq!(healed_by_flasks(&a.events, p).len(), 5);
+}
 
-    // PvP: the pool is only the thrower's.
+#[test]
+fn kindle_heals_follow_the_healing_rules() {
+    // Never above the effective max: 30 hard damage caps the 40 HP at 20 from 50 down.
+    let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
+    a.tuning.combat.hard_damage_recover_rate = 0.0;
+    {
+        let c = &mut a.world.players.get_mut(&p).unwrap().combat;
+        c.damage = 50.0;
+        c.hard = 30.0;
+    }
+    drink(&mut a, p);
+    a.ticks(400);
+    assert!((a.health(p) - 70.0).abs() < 1e-3, "{}", a.health(p));
+    let total: f32 = healed_by_flasks(&a.events, p).iter().sum();
+    assert!((total - 20.0).abs() < 1e-3, "{total}");
+    // At full health nothing is healed (no events).
+    let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
+    drink(&mut a, p);
+    a.ticks(400);
+    assert!(healed_by_flasks(&a.events, p).is_empty());
+    // Death ends it: no heal after a respawn.
+    let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
+    a.world.players.get_mut(&p).unwrap().combat.damage = 50.0;
+    drink(&mut a, p);
+    a.ticks(70);
+    let t = a.tuning.clone();
+    a.world.kill_player(&t, p, Attack::Dev);
+    a.world.respawn_player(&t, p);
+    a.world.players.get_mut(&p).unwrap().combat.damage = 50.0;
+    a.ticks(300);
+    assert_eq!(healed_by_flasks(&a.events, p), vec![8.0]);
+}
+
+/// Horizontal speed after running forward (and, with `dash`, dashing) for `ticks`.
+fn run(a: &mut Arena, p: PlayerId, ticks: u32, dash: bool) -> f32 {
+    let input = a.held.get_mut(&p).unwrap();
+    input.forward = 127;
+    input.buttons = if dash { Buttons::DASH } else { Buttons::NONE };
+    a.ticks(ticks);
+    let input = a.held.get_mut(&p).unwrap();
+    input.forward = 0;
+    input.buttons = Buttons::NONE;
+    let v = a.world.players[&p].movement.velocity;
+    Vec3::new(v.x, 0.0, v.z).length()
+}
+
+#[test]
+fn kindle_haste_speeds_up_running_and_the_dash() {
+    let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
+    let mv = a.tuning.movement.clone();
+    let haste = a.tuning.combat.knacks.kindle_flask.haste_scale;
+    let plain = run(&mut a, p, 40, false);
+    assert!((plain - mv.ground_speed).abs() < 0.5, "{plain}");
+    a.ticks(30);
+    drink(&mut a, p);
+    let hasted = run(&mut a, p, 40, false);
+    assert!(
+        (hasted - mv.ground_speed * haste).abs() < 0.5,
+        "{hasted} vs {}",
+        mv.ground_speed * haste
+    );
+    // The dash too (a press while running).
+    let dash = run(&mut a, p, 2, true);
+    assert!(
+        (dash - mv.dash_speed * haste).abs() < 0.5,
+        "{dash} vs {}",
+        mv.dash_speed * haste
+    );
+    // With a slow as well, both apply.
+    a.ticks(30);
+    {
+        let m = &mut a.world.players.get_mut(&p).unwrap().movement;
+        m.slow_time = 1.0;
+        m.slow_scale = 0.5;
+    }
+    let both = run(&mut a, p, 40, false);
+    assert!(
+        (both - mv.ground_speed * haste * 0.5).abs() < 0.5,
+        "{both} vs {}",
+        mv.ground_speed * haste * 0.5
+    );
+}
+
+#[test]
+fn kindle_haste_is_predicted_bit_exactly() {
+    // The owner's client takes the server's movement state after the drink (reconciliation)
+    // and predicts every further input with the shared step: it must match the server's to
+    // the bit, through running, jumping, sliding and dashing, until the haste wears off.
+    let (mut a, p) = with_knack(Arena::coop(), Knack::KindleFlask);
+    drink(&mut a, p);
+    let mut predicted = a.world.players[&p].movement;
+    assert!(predicted.haste_time > 0.0);
+    let t = a.tuning.clone();
+    let dt = shared::sim::tick_dt(60);
+    for i in 0..400u32 {
+        let input = a.held.get_mut(&p).unwrap();
+        input.forward = if i % 90 < 70 { 127 } else { -40 };
+        input.right = if (i / 50) % 2 == 0 { 60 } else { -60 };
+        input.yaw = i as f32 * 0.013;
+        let mut b = Buttons::NONE;
+        b.set(Buttons::JUMP, i % 37 < 2);
+        b.set(Buttons::CROUCH, i % 61 > 50);
+        b.set(Buttons::DASH, i % 83 == 10);
+        input.buttons = b;
+        let sent: PlayerInput = *input;
+        a.tick();
+        let env = a.world.move_env();
+        shared::sim::player_move_step(&mut predicted, &sent, &env, &t.movement, dt);
+        assert_eq!(a.world.players[&p].movement, predicted, "input {i}");
+    }
+    assert_eq!(predicted.haste_time, 0.0, "worn off");
+}
+
+#[test]
+fn the_kindle_flask_is_allowed_in_pvp_and_heals_the_drinker_only() {
     let (mut a, p) = with_knack(Arena::pvp(), Knack::KindleFlask);
+    assert_eq!(
+        a.world.players[&p].combat.weapons.knack(),
+        Knack::KindleFlask
+    );
     let other = a.player(1, Vec3::new(1.0, 0.0, 0.0), 0.0);
     for id in [p, other] {
         a.world.players.get_mut(&id).unwrap().combat.damage = 50.0;
     }
-    pool_at_feet(&mut a, p);
-    a.ticks(300);
-    assert!(healed_by_pools(&a.events, p) > 30.0);
-    assert_eq!(healed_by_pools(&a.events, other), 0.0);
+    drink(&mut a, p);
+    assert!(a.world.players[&p].movement.haste_time > 0.0);
+    a.ticks(310);
+    let total: f32 = healed_by_flasks(&a.events, p).iter().sum();
+    let f = &a.tuning.combat.knacks.kindle_flask;
+    let steps = (f.haste_time / f.haste_heal_interval).round();
+    assert!((total - f.haste_heal * steps).abs() < 1e-3, "{total}");
+    assert!(healed_by_flasks(&a.events, other).is_empty());
+    assert_eq!(a.world.players[&other].movement.haste_time, 0.0);
 }
 
 /// Throws a snare onto the floor ~2 m ahead and ticks until it lies there; its id.
@@ -415,11 +541,6 @@ fn needles(a: &Arena) -> usize {
 #[test]
 fn thrown_knacks_fly_and_land_as_replicated_projectiles() {
     for (knack, pk, k) in [
-        (
-            Knack::KindleFlask,
-            ProjectileKind::KindleFlask,
-            kind::KINDLE_FLASK,
-        ),
         (Knack::Snare, ProjectileKind::Snare, kind::SNARE),
         (Knack::SootPot, ProjectileKind::SootPot, kind::SOOT_POT),
     ] {
@@ -436,7 +557,6 @@ fn thrown_knacks_fly_and_land_as_replicated_projectiles() {
         assert_eq!(entity(&a, id).unwrap().kind, k, "{knack:?}");
         a.ticks(120);
         match knack {
-            Knack::KindleFlask => assert_eq!(a.world.knacks.pools.len(), 1),
             Knack::SootPot => assert_eq!(a.world.knacks.clouds.len(), 1),
             _ => assert!(a.world.projectiles[&id].stuck.is_some()),
         }

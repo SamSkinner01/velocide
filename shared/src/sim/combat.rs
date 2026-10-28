@@ -880,6 +880,8 @@ impl SimWorld {
     /// A player just died: dead / downed and the respawn delay by mode
     /// ([`SimWorld::mode_player_died`]).
     pub fn on_player_died(&mut self, t: &Tuning, id: PlayerId, kill: &KillInfo) {
+        // A Kindle Flask being drunk ends with the drinker (knacks.rs).
+        self.knacks.kindle.remove(&id);
         self.mode_player_died(t, id, kill);
     }
 

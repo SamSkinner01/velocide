@@ -2,7 +2,8 @@
 //! hostile projectiles around), the Arclash **Discharge** (radial nova around the shooter),
 //! the Tumbler **Breach** (point-blank explosion) and the **Kiln**'s ember spray (a short
 //! cone). All resolve instantly on the server from the input that fired them, against the
-//! hitboxes the shooter saw (lag compensation), with hit assist.
+//! hitboxes the shooter saw (lag compensation), with hit assist. A live thorn in a cone or a
+//! nova is flung on at its per-hit damage, one in a blast at `thorn.relay_damage` (`thorn.rs`).
 
 use engine::physics::MASK_SHOTS;
 use glam::Vec3;
@@ -13,6 +14,16 @@ use super::{HitPart, HitTarget, Hitbox, HitboxHistory, PlayerId, SimEvent, SimWo
 use crate::input::PlayerInput;
 use crate::protocol::NetId;
 use crate::tuning::Tuning;
+
+/// A Kiln cone's shape and hit ([`SimWorld::kiln_cone`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct KilnCone {
+    pub eye: Vec3,
+    pub aim: Vec3,
+    pub range: f32,
+    pub damage: f32,
+    pub attack: Attack,
+}
 
 /// A target inside a cone: `h` along the aim within `range` (ray), or its nearest (padded)
 /// surface within `range` with its centre inside `half_cone` radians of the aim. Returns the
@@ -106,6 +117,9 @@ impl SimWorld {
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        // The thorns in the cone are blown on (thorn.rs).
+        let cone = (b.gust_range, b.gust_cone_degrees);
+        self.relay_cone(t, id, input, cone, b.gust_damage, Attack::Gust);
         for pid in deflect {
             let kind = self.projectiles.get(&pid).map(|p| p.kind);
             let Some(position) = self.redirect_projectile(
@@ -198,12 +212,15 @@ impl SimWorld {
         for (target, info) in hits {
             self.apply_damage(t, target, info);
         }
+        // The thorns in the nova are flung on (thorn.rs).
+        self.relay_nova(t, id, input, center, radius, damage, Attack::Discharge);
     }
 
     /// Kiln spray: `kiln.damage` and `kiln.burn_stacks` Burn stacks to every hostile whose
-    /// (padded) shape is within `kiln.range` inside the `kiln.cone_degrees` cone along the aim
-    /// (line of sight from the eye). Embers don't ricochet and have no weak-point bonus. Emits
-    /// a `Shot` (no ray ends) for the remote spray.
+    /// (padded) shape is within `kiln.range` (stoked: × `stoke.kiln_reach`) inside the
+    /// `kiln.cone_degrees` cone along the aim (line of sight from the eye), as the shooter saw
+    /// them ([`SimWorld::kiln_cone`]). Embers have no weak-point bonus (a thorn in the spray is
+    /// flung on as a ray, `thorn.rs`). Emits a `Shot` (no ray ends) for the remote spray.
     pub(crate) fn kiln_spray(
         &mut self,
         t: &Tuning,
@@ -217,33 +234,68 @@ impl SimWorld {
         let k = &t.combat.kiln;
         let eye = p.movement.eye_position(&t.movement);
         let aim = input.look_dir();
-        let half_cone = (k.cone_degrees * 0.5).to_radians();
+        let range = self.kiln_reach(t, id);
         let me = Owner::Player(id);
         let view = self.shot_view(t, history, id, input);
+        let cone = KilnCone {
+            eye,
+            aim,
+            range,
+            damage: k.damage,
+            attack: Attack::Kiln,
+        };
+        self.kiln_cone(t, me, &view.hitboxes, cone);
+        // The thorns in the spray are flung on (thorn.rs).
+        self.relay_cone(
+            t,
+            id,
+            input,
+            (range, k.cone_degrees),
+            k.damage,
+            Attack::Kiln,
+        );
+        self.push_fired(id, Attack::Kiln, eye);
+    }
+
+    /// A Kiln cone of `shooter`'s (the spray, a Lantern's copy of it) against `hitboxes`:
+    /// `cone.damage` and `kiln.burn_stacks` Burn stacks as `cone.attack` to every hostile whose
+    /// (padded) shape is within `cone.range` inside `kiln.cone_degrees` along `cone.aim` from
+    /// `cone.eye`, in line of sight. Returns how many it reached.
+    pub(crate) fn kiln_cone(
+        &mut self,
+        t: &Tuning,
+        shooter: Owner,
+        hitboxes: &[Hitbox],
+        cone: KilnCone,
+    ) -> usize {
+        let k = &t.combat.kiln;
+        let half_cone = (k.cone_degrees * 0.5).to_radians();
         let world = &self.collision.world;
         let mut hits = Vec::new();
-        for h in &view.hitboxes {
-            if !self.can_hit(me, h.target) {
+        for h in hitboxes {
+            if !self.can_hit(shooter, h.target) {
                 continue;
             }
-            let pads = self.hit_pads(t, me, h.target);
-            let Some((_, _, point)) = in_cone(h, pads, eye, aim, k.range, half_cone) else {
+            let pads = self.hit_pads(t, shooter, h.target);
+            let Some((_, _, point)) = in_cone(h, pads, cone.eye, cone.aim, cone.range, half_cone)
+            else {
                 continue;
             };
-            if world.line_blocked(eye, point, MASK_SHOTS) {
+            if world.line_blocked(cone.eye, point, MASK_SHOTS) {
                 continue;
             }
-            let info = DamageInfo::new(k.damage, me, Attack::Kiln)
-                .at(point, aim)
+            let info = DamageInfo::new(cone.damage, shooter, cone.attack)
+                .at(point, cone.aim)
                 .part(HitPart::Body)
                 .flags(DamageFlags::HITSCAN);
             hits.push((h.target, info));
         }
+        let n = hits.len();
         for (target, info) in hits {
             self.apply_damage(t, target, info);
-            self.apply_burn(t, me, Attack::Kiln, target, k.burn_stacks);
+            self.apply_burn(t, shooter, cone.attack, target, k.burn_stacks);
         }
-        self.push_fired(id, Attack::Kiln, eye);
+        n
     }
 
     /// Tumbler Breach: explodes at the first surface or hostile within `breach_reach` along

@@ -128,12 +128,20 @@ impl SimWorld {
             } else {
                 1.0
             };
-            let mut info = DamageInfo::new(p.damage * scale, p.owner, p.attack)
+            let mut flags = DamageFlags::PROJECTILE;
+            // Turned at a thorn on its way out (thorn.rs): × the multiplier, a ricochet hit.
+            let mut damage = p.damage * scale;
+            if p.ricochets > 0 {
+                flags.insert(DamageFlags::RICOCHET);
+                damage *= t.combat.thorn.damage_multiplier.powi(p.ricochets as i32);
+            }
+            let mut info = DamageInfo::new(damage, p.owner, p.attack)
                 .at(at, dir)
                 .part(HitPart::Body)
                 .knockback(dir * h.knockback)
-                .flags(DamageFlags::PROJECTILE);
+                .flags(flags);
             info.projectile = Some(p.id);
+            info.ricochets = p.ricochets;
             self.apply_damage(t, target, info);
             if let Some(l) = self.abilities.hurl.thrown.get_mut(&p.id) {
                 l.struck.push(target);

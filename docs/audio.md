@@ -278,10 +278,7 @@ its index, so generation is deterministic.
     whooshing round twice over a spinning saw drone; `HurlThrow` a fling and the piece
     whirring away (a band-passed noise fluttering at 14 Hz); `HurlHit` (2 variants) a chop and
     a ringing, stuttering judder; `Upswing` a rising whoosh into a heavy upward heave.
-  - **Knacks.** `KnackThrow` a short lob and a clink (flask, snare, pot); `FlaskShatter` glass
-    bursting, the kindling catching (a whoomph) and a bright rising triangle chime with an
-    echo; `KindlePool` (1.5 s, soft at both ends: re-trigger while a pool burns) a breathing
-    ember crackle; `SnareSet` a wax thud and the jaws ratcheting open; `SnareArmed` two small
+  - **Knacks.** `KnackThrow` a short lob and a clink (snare, pot); `SnareSet` a wax thud and the jaws ratcheting open; `SnareArmed` two small
     bright ticks as its lamp catches; `SnareSpring` the jaws biting shut (a hard ~1 kHz steel
     bite) and a chain jerking taut; `SootBurst` (1.4 s) a dull clay pop, shards and soot
     billowing out, low-passed; `TallowSkin` a soft sizzling slide and a waxy settle under an
@@ -316,6 +313,38 @@ its index, so generation is deterministic.
     scraping on steel, a set and a held ring; `RiposteBlock` (2 variants) a hard bright clang
     (780–860 Hz inharmonic partials) and a burst of sparks, driven; `RiposteCounter` a heavy
     whoosh let go all at once and a ringing edge.
+- **The rework** (`docs/rework.md`; a block marked `client-b` at the end of `Sfx`). Glass and
+  kindling for the draught and the relays, cord and wax for Scatter, fire and steam for Rapid,
+  paper for the kite.
+  - **The Kindle Flask.** `KindleDrink` (about a second) the stopper popped (a falling sine
+    tick), two quick wet gulps, then the kindling catching in the wick (a low whoomph opening
+    up, a crackle) into a bright two-note triangle chime (D6, A6) with a short echo: the haste
+    is on;
+    `KindleTick` the heal tick every second, a soft fifth (G6, D7) on a breath of flame, quiet
+    (−21) so it repeats without nagging; `HasteFade` the wick settling back (a falling gutter
+    and a sigh) as the haste runs out.
+  - **Thorn relays.** Rays keep the `Ricochet` chime; `ThornBat` (2 variants) a glass crack,
+    a woody knock, shards and a whip away with a ~1.8 kHz ring (a blow or blast batting the
+    thorn); `ThornTurn` (2 variants) the spike shattering in a glassy ring and the shot's rush
+    bending away (a band-passed whoosh sweeping up then down) with an echo.
+  - **Bolas.** `BolasThrow` a fling and the weights whirring away (band-passed noise
+    fluttering at 11 Hz); `BolasBind` the cord whipping round twice and the wax weights
+    thudding together, driven; `BolasLink` the cord snapping taut, a low plucked G2 twang
+    (Karplus–Strong) over a hum; `BolasShare` a short low thrum when damage runs along it.
+  - **Bulwark.** `BulwarkRaise` a deep scrape-thud as the slab is heaved up, a hiss as it
+    hardens and cooling ticks; `BulwarkAbsorb` (2 variants) a dull packed wax thunk and a
+    crackle, driven and crushed; `BulwarkCrack` a sharp dry split running away over a groan;
+    `BulwarkShatter` (−11) a heavy crack and boom with hard wax chunks raining down and a short
+    room; `BulwarkDrop` a soft slump.
+  - **Wisp, Stoke, Lantern.** `WispFling` an FM whine rising 0.5 → 1.8 kHz over a crackle and
+    a fwoosh; `StokeIgnite` a bellows' breath roaring into the fire (a low-passed rush opening
+    up, a crackle, a saw rumble); `StokeVent` (about 1.3 s) a hard burst of steam settling into
+    a long hiss, then the metal ticking four times as it cools; `LanternSet` a brass clank, the
+    glass rattling, the taper catching; `LanternOut` the flame guttering away and a glass tick.
+    A lantern's shots are its carrier's primary sound at 55 %.
+  - **Kite.** `KiteLaunch` oiled paper snapping taut twice and the ember heart catching (a
+    fwoom); `KiteFlutter` (0.7 s, soft at both ends: re-trigger every 0.55 s while it flies)
+    paper fluttering at ~22 Hz over a soft ember crackle. It bursts with the explosion.
 - **Parry.** The loudest and brightest sound in the game (spectral centroid 6.2 kHz): a
   transient crack, a long inharmonic clang (C6 with partials at ×1.5, 2.76, 5.4, 8.9 and 13.3),
   a beating 3.52 kHz shimmer, a fast whoosh, then saturation and a reverb tail. Nothing else
@@ -477,10 +506,16 @@ soft-knee limiter, and every peak stays below 0 dBFS (the loudest is −0.2 dBFS
 | Arsenal: limpet blink | −22 |
 | Melee: Tamper hit | −11 |
 | Melee: Snare spring, Whirl, Upswing | −12 … −13 |
-| Melee: Trimmer hit, Tamper swing, Lunge, hurl hit, flask shatter, soot burst | −14 |
+| Melee: Trimmer hit, Tamper swing, Lunge, hurl hit, soot burst | −14 |
 | Melee: hurl throw, Tallow Skin, Surge, Trimmer slash (3/s) | −15 … −16 |
 | Melee: snare set, knack throw | −17 … −18 |
-| Melee: snare armed, kindle pool | −20 |
+| Melee: snare armed | −20 |
+| Rework: Bulwark shatter | −11 |
+| Rework: Bolas bind, Bulwark crack, Stoke ignite | −14 |
+| Rework: Kindle drink, thorn bat / turn, Bolas link, Bulwark raise / absorb, Wisp fling, Kite launch | −15 |
+| Rework: Bolas throw, Lantern set, Stoke vent | −16 |
+| Rework: Lantern out, Bulwark drop | −18 … −19 |
+| Rework: haste fade, Bolas share, Kindle tick, Kite flutter | −20 … −21 |
 | Rework: Lamplighter shot | −11 |
 | Rework: Waxwork burst, Riposte block / counter | −13 |
 | Rework: Tally shot, Blink, Lamplighter full focus, Wickline, Beacon light | −14 … −15 |

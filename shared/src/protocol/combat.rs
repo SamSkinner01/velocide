@@ -97,12 +97,16 @@ pub enum Fx {
         origin: QPos,
         ends: Vec<QPos>,
     },
-    /// A Quill shot bounced off thorns: shatter each thorn, draw the bright ricochet tracer
-    /// through `points` (thorns, then the final end). Sent to everyone (shooter included).
+    /// An attack relayed off thorns: shatter each thorn, draw the bright ricochet tracer
+    /// through `points` (thorns, then the final end): a ray, or the ray a swing / cone / nova /
+    /// blast flung the first thorn as. With `projectile` that projectile turned at the first
+    /// thorn instead (no tracer: it flies the leg itself, heading for the last point). Sent to
+    /// everyone (shooter included).
     Ricochet {
         shooter: u16,
         attack: Attack,
         points: Vec<QPos>,
+        projectile: Option<NetId>,
     },
     /// Fireball, light, shake by distance, `Sfx::Explosion`. Sent to everyone. `owner` is the
     /// owner code (player id / `OWNER_ENEMY` / `OWNER_NONE`): the owner's client draws its own

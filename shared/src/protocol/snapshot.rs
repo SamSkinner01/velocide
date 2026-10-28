@@ -149,9 +149,7 @@ pub mod kind {
     /// it is [`super::projectile_flags::GUIDED`] (homing on the thrower's chest, no gravity)
     /// and [`super::projectile_flags::RETURNING`].
     pub const HURL: u16 = 77;
-    /// Kindle Flask (knack): lobbed (`knacks.kindle_flask.gravity`); a `KINDLE_POOL` where it
-    /// lands.
-    pub const KINDLE_FLASK: u16 = 78;
+    // 78: free (the Kindle Flask's lobbed flask, retired: it is drunk now, docs/rework.md §3).
     /// Snare (knack): thrown (`knacks.snare.gravity`); `STUCK` once it lies on the floor
     /// (`position` current), [`super::projectile_flags::ARMED`] once armed. Sprung or expired:
     /// removed.
@@ -193,9 +191,7 @@ pub mod kind {
     /// [`super::waxwork_flags`], `health` = health, `aux` = the tick it slumps. (136 was the
     /// Flare's burning patch, retired with v11.)
     pub const WAXWORK: u16 = 136;
-    /// A Kindle Flask's healing pool: `position` = centre on the ground, `owner` = thrower,
-    /// `state` = radius (dm), `aux` = tick it dries up.
-    pub const KINDLE_POOL: u16 = 137;
+    // 137: free (the Kindle Flask's pool, retired with v11).
     /// A Soot Pot's cloud: `position` = centre, `owner` = thrower, `state` = radius (dm), `aux`
     /// = tick it clears. Moulds can't see into, out of or through it; draw it dense.
     pub const SOOT_CLOUD: u16 = 138;
@@ -287,8 +283,8 @@ pub mod player_flags {
     /// Tallow Skin (knack) active: half damage, no knockback (a waxy sheen).
     pub const TALLOW: u32 = 1 << 16;
     // Bits 17–23: the rework (docs/rework.md).
-    /// Haste (the drunk Kindle Flask): faster, healing (embers streaming off the wick, a speed
-    /// trail).
+    /// Hasted by a drunk Kindle Flask (knack): faster, healing over time (embers streaming off
+    /// the wick, a speed trail). The drinker's own `MoveState::haste_time` says how long.
     pub const HASTE: u32 = 1 << 17;
     /// Revealed by a Beacon Arrow: the shooter's side draws a silhouette through walls; takes
     /// more damage from players.
@@ -399,7 +395,7 @@ pub mod projectile_flags {
     pub const ENEMY: u32 = 1 << 3;
     /// A Snare lying on the floor has armed: the next hostile close by springs it.
     pub const ARMED: u32 = 1 << 4;
-    // Bits 5–7: the rework (docs/rework.md).
+    // Bits 5–8: the rework (docs/rework.md).
     /// Steered or homing (the Kite under its owner's crosshair, the Hurl on its way back):
     /// no gravity; the server re-launches the trajectory every tick it turns.
     pub const GUIDED: u32 = 1 << 5;
@@ -409,6 +405,9 @@ pub mod projectile_flags {
     /// draw it on its orbit round the owner's chest instead), `aux` = the tick the orbit
     /// started.
     pub const ORBITING: u32 = 1 << 7;
+    /// Turned at a thorn (a relay, `sim::thorn`): flies straight (no gravity) at what the
+    /// thorn picked.
+    pub const RELAYED: u32 = 1 << 8;
 }
 
 /// Flag bits of `kind::WAXWORK` (above the player flags of the pose it copies).

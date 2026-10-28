@@ -17,7 +17,10 @@
 //! - `weapons.png`, `weapons_34.png`: the four original guns at real scale (side, three-quarter
 //!   front); `weapons_x.png`, `weapons_x34.png`: the six expansion weapons;
 //! - `projectiles.png`, `projectiles_x.png` (the expansion's), `thorns.png` (planted in a wall,
-//!   lying, in flight), `props.png`.
+//!   lying, in flight), `props.png`;
+//! - `gear_*.png` (docs/rework.md): the Bolas, the Bulwark's slab cracking stage by stage
+//!   (front and from behind), the Lantern turning, firing and guttering out, the Kite; and
+//!   `vm_drink_*.png`, the Kindle Flask drunk in first person.
 //!
 //! ```text
 //! cargo run -p client --example models_view -- [--out DIR] [--only PREFIX]
@@ -1425,6 +1428,223 @@ fn melee_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     shots
 }
 
+/// The rework's gear (`models::gear`) and the Kindle Flask's drink (`weapons::drink`).
+fn gear_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
+    use client::models::gear;
+    let mut shots = Vec::new();
+
+    // Everything at real scale: the bolas spinning, the slab, the lantern, the kite.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.6, 1.6, 4.4),
+        Vec3::new(0.0, 0.8, 0.0),
+        60.0,
+    ));
+    let three_quarter = Quat::from_rotation_y(-0.6) * Quat::from_rotation_x(0.35);
+    lib.draw_model(
+        ModelId::Bolas,
+        Mat4::from_rotation_translation(three_quarter, Vec3::new(-2.0, 1.1, 0.5)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    lib.get(ModelId::Bulwark).draw(
+        &gear::bulwark_pose(0.0, 0.0, 1.0, t),
+        Mat4::from_rotation_translation(
+            Quat::from_rotation_y(0.35 + std::f32::consts::PI),
+            Vec3::new(-0.2, 1.0, -1.2),
+        ),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    lib.get(ModelId::Lantern).draw(
+        &gear::lantern_pose(0.5, 0.0, 0.0, Vec3::new(0.55, 0.8, 1.0), 1.0, t),
+        Mat4::from_translation(Vec3::new(1.3, 0.0, 0.8)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    lib.draw_model(
+        ModelId::Kite,
+        Mat4::from_rotation_translation(three_quarter, Vec3::new(2.2, 1.3, 0.2)),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    for (p, label) in [
+        (Vec3::new(-2.0, 0.75, 0.5), "BOLAS"),
+        (Vec3::new(-0.2, -0.05, -1.0), "BULWARK"),
+        (Vec3::new(1.3, -0.05, 0.8), "LANTERN"),
+        (Vec3::new(2.2, 0.9, 0.2), "KITE"),
+    ] {
+        shot.labels.push((p, label.into()));
+    }
+    shots.push(("gear_models".into(), "GEAR (REAL SCALE)".into(), shot));
+
+    // The slab's cracks, stage by stage (as its owner's enemies see it), then from behind (as
+    // its owner does).
+    for (name, title, behind) in [
+        (
+            "gear_bulwark",
+            "BULWARK: ABSORBED 0, .3, .6, 1 (FRONT)",
+            false,
+        ),
+        ("gear_bulwark_back", "BULWARK FROM BEHIND", true),
+    ] {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.3, 7.6),
+            Vec3::new(0.0, 1.1, 0.0),
+            60.0,
+        ));
+        for (k, absorbed) in [0.0f32, 0.3, 0.6, 1.0].into_iter().enumerate() {
+            let x = -3.6 + 2.4 * k as f32;
+            // Its face is -Z: turned round to face the camera, or left facing away.
+            let yaw = if behind { 0.0 } else { std::f32::consts::PI } + 0.15;
+            lib.get(ModelId::Bulwark).draw(
+                &gear::bulwark_pose(absorbed, 0.0, 1.0, t),
+                Mat4::from_rotation_translation(Quat::from_rotation_y(yaw), Vec3::new(x, 1.0, 0.0)),
+                &Tint::default(),
+                &mut shot.draws,
+            );
+        }
+        shots.push((name.into(), title.into(), shot));
+    }
+
+    // Close up, half cracked, a blow just landing.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.9, 1.5, 3.2),
+        Vec3::new(0.0, 1.0, 0.0),
+        60.0,
+    ));
+    lib.get(ModelId::Bulwark).draw(
+        &gear::bulwark_pose(0.6, 0.5, 1.0, t),
+        Mat4::from_rotation_translation(
+            Quat::from_rotation_y(std::f32::consts::PI + 0.25),
+            Vec3::new(0.0, 1.0, 0.0),
+        ),
+        &Tint::default(),
+        &mut shot.draws,
+    );
+    shots.push(("gear_bulwark_close".into(), "BULWARK CLOSE UP".into(), shot));
+
+    // The lantern: turned, tilted, firing (an Arclash's, a Riveter's, a Kiln's colours),
+    // guttering out.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 0.9, 2.6),
+        Vec3::new(0.0, 0.35, 0.0),
+        60.0,
+    ));
+    let arclash = Vec3::new(0.55, 0.8, 1.0);
+    for (k, (yaw, pitch, kick, color, left, label)) in [
+        (0.0, 0.0, 0.0, arclash, 1.0, "REST"),
+        (0.9, 0.3, 0.0, arclash, 1.0, "AIMING"),
+        (-0.6, 0.0, 1.0, Vec3::new(1.0, 0.45, 0.2), 1.0, "FIRING"),
+        (0.4, -0.2, 0.6, Vec3::new(1.0, 0.6, 0.25), 1.0, "KILN"),
+        (0.0, 0.0, 0.0, arclash, 0.06, "GUTTERING"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let x = -1.6 + 0.8 * k as f32;
+        lib.get(ModelId::Lantern).draw(
+            &gear::lantern_pose(yaw + FACE_CAMERA, pitch, kick, color, left, t),
+            Mat4::from_translation(Vec3::new(x, 0.0, 0.0)),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+        shot.labels.push((Vec3::new(x, -0.08, 0.2), label.into()));
+    }
+    shots.push(("gear_lantern".into(), "LANTERN".into(), shot));
+
+    // The bolas and the kite close up, from above and the side.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.0, 2.0, 2.4),
+        Vec3::new(0.0, 1.0, 0.0),
+        60.0,
+    ));
+    for (k, rot) in [
+        Quat::from_rotation_y(0.4),
+        Quat::from_rotation_y(-0.5) * Quat::from_rotation_x(0.6),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let x = -0.9 + 1.8 * k as f32;
+        lib.draw_model(
+            ModelId::Bolas,
+            Mat4::from_rotation_translation(rot, Vec3::new(x, 1.5, 0.0)),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+        lib.draw_model(
+            ModelId::Kite,
+            Mat4::from_rotation_translation(rot, Vec3::new(x, 0.7, 0.0)),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    shots.push(("gear_closeup".into(), "BOLAS, KITE".into(), shot));
+
+    // The Kindle Flask drunk in third person (three-quarter front).
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.6, 1.7, 4.6),
+        Vec3::new(0.0, 1.15, 0.0),
+        60.0,
+    ));
+    for (p, x) in [0.0f32, 0.15, 0.4, 0.62, 0.85]
+        .into_iter()
+        .zip([-3.0f32, -1.5, 0.0, 1.5, 3.0])
+    {
+        lib.draw_player(
+            &PlayerAnim {
+                yaw: FACE_CAMERA + 0.5,
+                weapon: WeaponKind::Arclash.id(),
+                drinking: p,
+                ..player(t)
+            },
+            Vec3::new(x, 0.0, 0.0),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    shots.push((
+        "gear_drink_3p".into(),
+        "KINDLE FLASK DRINK (3RD PERSON): REST, .15, .4, .62, .85".into(),
+        shot,
+    ));
+
+    // The Kindle Flask drunk in first person.
+    for (k, (p, weapon)) in [
+        (0.12, WeaponKind::Quill),
+        (0.3, WeaponKind::Quill),
+        (0.45, WeaponKind::Quill),
+        (0.62, WeaponKind::Quill),
+        (0.82, WeaponKind::Quill),
+        (0.45, WeaponKind::Tumbler),
+        (0.45, WeaponKind::Trimmer),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut shot = Shot::new(look_at(
+            Vec3::new(0.0, 1.7, 7.0),
+            Vec3::new(0.0, 1.5, 0.0),
+            75.0,
+        ));
+        let anim = ViewmodelAnim {
+            weapon,
+            ability: weapon.default_build().abilities[0],
+            switch: 1.0,
+            time: 1.7,
+            drink: p,
+            ..Default::default()
+        };
+        lib.draw_viewmodel(&anim, &Tint::default(), &mut shot.viewmodel);
+        shots.push((
+            format!("vm_drink_{k}"),
+            format!("KINDLE FLASK DRINK {p} ({weapon:?})").to_uppercase(),
+            shot,
+        ));
+    }
+    shots
+}
+
 fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
     let projectiles = [
         (ModelId::Bomb, "BOMB"),
@@ -2031,6 +2251,7 @@ fn main() -> anyhow::Result<()> {
     shots.extend(prop_shots(&lib, 2.0));
     shots.extend(melee_shots(&lib, 2.0));
     shots.extend(rework_shots(&lib, 2.0));
+    shots.extend(gear_shots(&lib, 2.0));
 
     for (name, title, shot) in &shots {
         if only.as_ref().is_some_and(|o| !name.starts_with(o.as_str())) {

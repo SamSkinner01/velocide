@@ -43,8 +43,8 @@ pub enum HealSource {
     /// Drew in an ember burst (kindling).
     Embers(NetId),
     Parry,
-    /// Stood in a Kindle Flask's pool (`knacks.rs`).
-    KindleFlask(NetId),
+    /// Drank a Kindle Flask (`knacks.rs`): a heal step over time.
+    KindleFlask,
 }
 
 impl EmberBurst {

@@ -385,11 +385,14 @@ pub enum SimEvent {
     },
     /// A player fired (hitscan: `ends` = end of each ray; projectile weapons: empty).
     Shot(ShotEvent),
-    /// A Quill shot bounced off thorns: thorn positions, then the final end point.
+    /// An attack relayed off thorns (`thorn.rs`): thorn positions, then the final end point. A
+    /// ray (or the ray a swing / cone / nova / blast flung a thorn as) flew that path;
+    /// `projectile`: that projectile turned at the first thorn and flies at the last point.
     Ricochet {
         shooter: Owner,
         attack: Attack,
         points: Vec<Vec3>,
+        projectile: Option<NetId>,
     },
     /// A projectile burst into secondary rays at `origin` (the Flak ring): the end of each.
     Burst {
@@ -660,7 +663,7 @@ pub struct SimWorld {
     pub enemy_hazards: BTreeMap<NetId, enemy::SlagLine>,
     /// Burn / Pinned status effects, keyed by the target (`status.rs`).
     pub statuses: BTreeMap<HitTarget, status::Status>,
-    /// Kindle pools, soot clouds, Tallow Skin (`knacks.rs`).
+    /// Soot clouds, Tallow Skin, Kindle Flasks being drunk (`knacks.rs`).
     pub knacks: knacks::KnackWorld,
     /// The rework's abilities between ticks: guards, Waxworks, Lanterns, beacons, tallies...
     /// (`abilities/`).
@@ -1184,6 +1187,10 @@ impl SimWorld {
             if self.has_tallow(p.id) {
                 e.flags |= player_flags::TALLOW;
             }
+            // The Kindle Flask's haste (knacks.rs) lives in the movement state.
+            if p.movement.haste_time > 0.0 && !p.combat.dead {
+                e.flags |= player_flags::HASTE;
+            }
             // The rework's abilities: GUARDING, REVEALED, BOUND (abilities/).
             self.decorate_player_abilities(tuning, &mut e);
             frame.insert(&e);
@@ -1234,9 +1241,6 @@ impl SimWorld {
         }
         for h in self.enemy_hazards.values() {
             frame.insert(&h.entity_state(self.tick));
-        }
-        for p in self.knacks.pools.values() {
-            frame.insert(&p.entity_state());
         }
         for c in self.knacks.clouds.values() {
             frame.insert(&c.entity_state());
