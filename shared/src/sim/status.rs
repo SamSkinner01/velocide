@@ -1,6 +1,6 @@
 //! Status effects of the arsenal (`docs/arsenal.md`, "Status effects"): **Burn** (embers from
-//! the Kiln, Flare patches and Ember Arrows) and **Pinned** (Pinning Arrow), on enemies and,
-//! in PvP, on players; and the Flare's **burning patches**.
+//! the Kiln, a stoked weapon, the Waxwork's burst) and **Pinned** (Pinning Arrow, Snare,
+//! Bolas), on enemies and, in PvP, on players.
 //!
 //! * Burn: damage over time, `burn.dps` per stack, up to `burn.max_stacks`, for
 //!   `burn.duration` (every new stack refreshes it), dealt every `burn.tick_interval` through
@@ -9,19 +9,16 @@
 //! * Pinned: an enemy is rooted where it stood (`pinning_arrow.enemy_time`, heavies
 //!   `heavy_time`; it can still attack); a player is slowed to `pinning_arrow.player_slow` of
 //!   their speeds for `player_time` (`MoveState::slow_time`, predicted by the owner).
-//! * Burning patch: a disc on the ground where a Flare lands; every hostile inside gets
-//!   `flare.burn_rate` Burn stacks per second.
 //!
-//! Like brands, statuses live in side tables ([`SimWorld::statuses`],
-//! [`SimWorld::fire_patches`]) and [`SimWorld::replicate`] ORs `BURNING` / `PINNED` into the
-//! target's entity flags. Patches replicate as `kind::BURNING_PATCH`.
+//! Like brands, statuses live in a side table ([`SimWorld::statuses`]) and
+//! [`SimWorld::replicate`] ORs `BURNING` / `PINNED` into the target's entity flags. (The
+//! Flare's burning patches retired with the rework, `docs/rework.md`.)
 
 use engine::physics::MASK_MOVEMENT;
 use glam::Vec3;
 
 use super::combat::{Attack, DamageFlags, DamageInfo, Owner, secs_to_ticks};
 use super::{HitPart, HitTarget, SimWorld};
-use crate::protocol::{EntityState, NetId, kind, owner_code};
 use crate::tuning::Tuning;
 
 /// A target's burn.
@@ -51,37 +48,6 @@ pub struct Status {
     pub burn: Option<Burn>,
     /// Enemies only (players are slowed through their movement state).
     pub pin: Option<Pin>,
-}
-
-/// A burning patch on the ground (Flare).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FirePatch {
-    pub id: NetId,
-    pub owner: Owner,
-    pub attack: Attack,
-    /// Centre, on the ground.
-    pub position: Vec3,
-    pub radius: f32,
-    /// Burn stacks per second to everything hostile inside.
-    pub rate: f32,
-    pub expire_tick: u32,
-    /// Stacks owed but not applied yet (fractional rates).
-    pub owed: f32,
-}
-
-impl FirePatch {
-    /// Replicated state: `state` = radius (dm), `aux` = burn-out tick, `owner` = owner code.
-    pub fn entity_state(&self) -> EntityState {
-        EntityState {
-            id: self.id,
-            kind: kind::BURNING_PATCH,
-            owner: owner_code(self.owner),
-            position: self.position,
-            state: (self.radius * 10.0).round().clamp(0.0, u16::MAX as f32) as u16,
-            aux: self.expire_tick,
-            ..Default::default()
-        }
-    }
 }
 
 impl SimWorld {
@@ -180,34 +146,8 @@ impl SimWorld {
         }
     }
 
-    /// A Flare's burning patch at `position` (on the ground). `None` at the entity limit.
-    pub fn spawn_fire_patch(
-        &mut self,
-        t: &Tuning,
-        owner: Owner,
-        attack: Attack,
-        position: Vec3,
-    ) -> Option<NetId> {
-        let id = self.alloc_net_id()?;
-        let f = &t.combat.flare;
-        let expire_tick = self.tick + secs_to_ticks(f.patch_time, self.tick_rate, 1) as u32;
-        self.fire_patches.insert(
-            id,
-            FirePatch {
-                id,
-                owner,
-                attack,
-                position,
-                radius: f.patch_radius,
-                rate: f.burn_rate,
-                expire_tick,
-                owed: 0.0,
-            },
-        );
-        Some(id)
-    }
-
-    /// The floor under `point` within `depth` metres (a patch lands there), if any.
+    /// The floor under `point` within `depth` metres (a pool or a lantern lands there), if
+    /// any.
     pub(crate) fn floor_below(&self, point: Vec3, depth: f32) -> Option<Vec3> {
         self.collision
             .world
@@ -220,29 +160,10 @@ impl SimWorld {
             .map(|h| h.point + Vec3::Y * 0.02)
     }
 
-    /// Per tick: burning patches feed Burn, burns deal their damage, pinned enemies are held,
-    /// and everything expired, dead or gone is dropped.
+    /// Per tick: burns deal their damage, pinned enemies are held, and everything expired,
+    /// dead or gone is dropped.
     pub(crate) fn step_statuses(&mut self, t: &Tuning) {
         let now = self.tick;
-        let dt = self.dt();
-
-        // Patches: Burn to every hostile standing inside.
-        self.fire_patches.retain(|_, p| now < p.expire_tick);
-        let mut feed = Vec::new();
-        for p in self.fire_patches.values_mut() {
-            p.owed += p.rate * dt;
-            let stacks = p.owed.floor();
-            if stacks < 1.0 {
-                continue;
-            }
-            p.owed -= stacks;
-            feed.push((p.owner, p.attack, p.position, p.radius, stacks as u32));
-        }
-        for (owner, attack, center, radius, stacks) in feed {
-            for target in self.targets_in_patch(center, radius) {
-                self.apply_burn(t, owner, attack, target, stacks);
-            }
-        }
 
         // Drop what is over or whose target is gone.
         let players = &self.players;
@@ -300,8 +221,8 @@ impl SimWorld {
         }
     }
 
-    /// Living players and enemies whose feet are inside a patch (and at most 2 m above it).
-    /// (Kindle pools and snares use the same rule, `knacks.rs`.)
+    /// Living players and enemies whose feet are inside a disc on the ground (and at most 2 m
+    /// above it): Kindle pools and snares (`knacks.rs`).
     pub(crate) fn targets_in_patch(&self, center: Vec3, radius: f32) -> Vec<HitTarget> {
         let inside = |feet: Vec3| {
             let d = feet - center;

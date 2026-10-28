@@ -344,8 +344,10 @@ fn own_state_and_events_survive_bincode() {
         "own combat state: {combat_bytes} B; snapshot with a 10-pellet shot: {} B",
         bytes.len()
     );
-    // The carried loadout (16 B: the owner predicts with it) rides along every snapshot.
-    assert!(combat_bytes < 64);
+    // The carried loadout (16 B: the owner predicts with it) rides along every snapshot, and
+    // the rework's per-slot timers (live, stoke, overheat: a byte each while idle) and the
+    // Tally's marks (a byte each while empty) since v11.
+    assert!(combat_bytes < 88, "{combat_bytes} B");
 
     // A kill event round-trips through the reliable channel encoding.
     let mut a = Arena::coop();

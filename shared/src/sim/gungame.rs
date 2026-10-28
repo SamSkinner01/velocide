@@ -196,7 +196,7 @@ mod tests {
         assert!(g.ladder.iter().all(WeaponBuild::is_valid));
         assert_eq!(g.finale, WeaponKind::Trimmer.default_build());
         let finale = finale_tier(&g);
-        assert_eq!(finale, 10);
+        assert_eq!(finale, 11);
         assert_eq!(tier_of(&g, 0), Tier::Weapon(g.ladder[0]));
         assert_eq!(tier_of(&g, finale), Tier::Finale(g.finale));
         assert_eq!(tier_of(&g, finale + 1), Tier::Won);

@@ -41,7 +41,7 @@ pub enum SwingKind {
     Whirl,
     /// A throw: the arm winds back and flings.
     Hurl,
-    /// From the floor up past the head.
+    /// From the floor up past the head (the retired Upswing's; the Riposte's counter for now).
     Upswing,
     /// The Riposte's guard: the weapon raised crosswise in front (the Trimmer's two blades
     /// crossed), held while the button is (its progress runs over the longest guard; ended

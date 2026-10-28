@@ -43,15 +43,17 @@ pub fn primary_color(weapon: MeleeWeapon) -> Vec4 {
 
 /// The colour of a melee move (its trails, rings, streaks): a slash in the weapon's primary
 /// colour, an ability in its ability colour (`models::ability_color`: Lunge cyan, Whirl amber,
-/// Hurl violet, Upswing lime).
+/// Hurl violet, Riposte lime). (The retired Upswing's rising strike stands in for the
+/// Riposte's counter-swing until client-a gives it its own move.)
 pub fn ability_color(kind: SwingKind) -> Vec4 {
     match kind {
         SwingKind::Slash => primary_color(MeleeWeapon::Trimmer),
         SwingKind::Lunge => weapon_ability_color(Ability::Lunge),
         SwingKind::Whirl => weapon_ability_color(Ability::Whirl),
         SwingKind::Hurl => weapon_ability_color(Ability::Hurl),
-        SwingKind::Upswing => weapon_ability_color(Ability::Upswing),
-        SwingKind::Guard | SwingKind::Riposte => super::tricks::riposte::STEEL,
+        SwingKind::Upswing | SwingKind::Guard | SwingKind::Riposte => {
+            weapon_ability_color(Ability::Riposte)
+        }
     }
 }
 
@@ -70,7 +72,7 @@ pub fn swing_kind(attack: Attack) -> Option<SwingKind> {
         Attack::Lunge => SwingKind::Lunge,
         Attack::Whirl => SwingKind::Whirl,
         Attack::Hurl => SwingKind::Hurl,
-        Attack::Upswing => SwingKind::Upswing,
+        Attack::Riposte => SwingKind::Upswing,
         _ => return None,
     })
 }
@@ -710,7 +712,7 @@ pub fn weapon_of_attack(attack: Attack, held: Option<WeaponKind>) -> Option<Mele
         Attack::Tamper => MeleeWeapon::Tamper,
         _ => match held.and_then(model::of) {
             Some(m) => m,
-            None if matches!(attack, Attack::Whirl | Attack::Upswing) => MeleeWeapon::Tamper,
+            None if matches!(attack, Attack::Whirl | Attack::Riposte) => MeleeWeapon::Tamper,
             None => MeleeWeapon::Trimmer,
         },
     })
@@ -791,7 +793,7 @@ pub fn hit_weapon(attack: Attack, held: Option<WeaponKind>) -> Option<MeleeWeapo
     match attack {
         Attack::Trimmer => Some(MeleeWeapon::Trimmer),
         Attack::Tamper => Some(MeleeWeapon::Tamper),
-        Attack::Lunge | Attack::Whirl | Attack::Upswing => {
+        Attack::Lunge | Attack::Whirl | Attack::Riposte => {
             Some(held.and_then(model::of).unwrap_or(MeleeWeapon::Trimmer))
         }
         _ => None,

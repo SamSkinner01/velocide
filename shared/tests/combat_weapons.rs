@@ -1,5 +1,5 @@
-//! Every weapon and fire mode against target dummies: Quill / Brand / Splinter, Bellows Blast /
-//! Gust / Both Barrels, Arclash Arc / Wisp / Discharge, Tumbler bomb / Breach / Gravewell, the
+//! Every weapon and fire mode against target dummies: Quill / Brand, Bellows Blast / Gust,
+//! Arclash Arc / Wisp / Discharge, Tumbler bomb / Breach / Gravewell, the
 //! fist, hit assist, cover, explosions and self damage, friendly fire, dash i-frames, hard
 //! damage and ember bursts, and weapon-state prediction — on the SimWorld directly
 //! (deterministic, no networking). Network-level tests live in `server/tests/combat_net.rs`.
@@ -246,87 +246,10 @@ fn brand_on_players_in_pvp() {
     assert!(a.world.brands.is_empty());
 }
 
-#[test]
-fn splinters_continue_through_the_target() {
-    let run = || {
-        let (mut a, p, d) = range(
-            &[Vec3::new(0.0, 0.0, -10.0), Vec3::new(0.0, 0.0, -13.5)],
-            1000.0,
-        );
-        a.select(p, QUILL, 1);
-        let body = dummy_body(&a, d[0]);
-        a.aim(p, body);
-        let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-        let splinters = ev
-            .iter()
-            .find_map(|e| match e {
-                SimEvent::Splinters { origin, ends, .. } => Some((*origin, ends.clone())),
-                _ => None,
-            })
-            .expect("splinter burst");
-        (dmg(&ev, d[0]), dmg(&ev, d[1]), splinters)
-    };
-    let (front, back, (origin, ends)) = run();
-    assert_eq!(
-        front, 20.0,
-        "the target hit directly takes only the main shot"
-    );
-    assert_eq!(ends.len(), 6);
-    assert!(
-        origin.z > -10.0 && origin.z < -9.4,
-        "burst on the target: {origin}"
-    );
-    assert!(
-        back >= 9.0 && back % 9.0 == 0.0,
-        "splinters hit the one behind: {back}"
-    );
-    // Every splinter leaves forward, inside the 40 degree cone.
-    for end in &ends {
-        let dir = (*end - origin).normalize();
-        assert!(dir.angle_between(Vec3::NEG_Z).to_degrees() < 21.0, "{end}");
-    }
-    // Deterministic.
-    assert_eq!(run(), (front, back, (origin, ends)));
-}
-
-#[test]
-fn splinters_reflect_off_walls() {
-    let mut a = Arena::new(flat_level(
-        LevelKind::Campaign,
-        vec![brush([-20.0, 0.0, -10.5], [20.0, 6.0, -10.0])],
-    ));
-    let p = a.player(0, Vec3::ZERO, 0.0);
-    a.world.players.get_mut(&p).unwrap().notarget = true;
-    // Around the corner of the reflected shot (the main shot passes 1.6 m away).
-    let d = dummy(&mut a, Vec3::new(5.9, 0.0, -8.2), PI, 1000.0);
-    a.ticks(10);
-    let eye = a.eye(p);
-    a.aim(p, Vec3::new(5.0, eye.y, -10.0));
-    a.select(p, QUILL, 1);
-    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    let (origin, ends) = ev
-        .iter()
-        .find_map(|e| match e {
-            SimEvent::Splinters { origin, ends, .. } => Some((*origin, ends.clone())),
-            _ => None,
-        })
-        .expect("burst on the wall");
-    assert!((origin.z + 10.0).abs() < 0.1, "{origin}");
-    for end in &ends {
-        assert!(
-            end.z > -10.05,
-            "splinters bounce back out of the wall: {end}"
-        );
-        assert!(end.x > origin.x, "reflected: {end}");
-    }
-    let hit = dmg(&ev, d);
-    assert!(hit >= 9.0 && hit % 9.0 == 0.0, "corner shot: {hit}");
-}
-
 // ---- Bellows ----------------------------------------------------------------------------
 
 #[test]
-fn bellows_blast_and_both_barrels() {
+fn bellows_blast() {
     let (mut a, p, d) = range(&[Vec3::new(0.0, 0.0, -5.0)], 1000.0);
     a.select(p, BELLOWS, 1);
     let body = dummy_body(&a, d[0]);
@@ -337,26 +260,14 @@ fn bellows_blast_and_both_barrels() {
     assert_eq!(dmg(&ev, d[0]), 96.0);
     assert!(hits.iter().all(|h| h.info.knockback.length() > 1.9));
     assert_eq!(hits[0].info.attack.name(), "Bellows");
-    // Both barrels: 24 pellets and a blast-jump recoil; holds the primary too.
-    a.ticks(60);
-    reset_dummy(&mut a, d[0], Vec3::new(0.0, 0.0, -5.0));
-    a.ticks(2);
-    let body = dummy_body(&a, d[0]);
-    a.aim(p, body);
-    let v0 = a.world.players[&p].movement.velocity;
-    let ev = a.tap(p, Buttons::ALT_FIRE, 0);
-    assert_eq!(hits_on(&ev, HitTarget::Entity(d[0])).len(), 24);
-    assert_eq!(dmg(&ev, d[0]), 192.0);
-    let aim = a.held[&p].look_dir();
-    let dv = a.world.players[&p].movement.velocity - v0;
-    assert!(dv.dot(-aim) > 7.0, "recoil {dv}");
+    // The next blast after its interval (0.8 s).
     a.set_buttons(p, Buttons::FIRE);
-    let ev = a.ticks(47);
+    let ev = a.ticks(46);
     assert!(
         !ev.iter().any(|e| matches!(e, SimEvent::Shot(_))),
-        "primary waits"
+        "the blast waits its interval"
     );
-    let ev = a.ticks(1);
+    let ev = a.ticks(2);
     assert!(
         ev.iter()
             .any(|e| matches!(e, SimEvent::Shot(s) if s.attack == Attack::Blast))
@@ -557,7 +468,10 @@ fn wisp_drifts_zaps_and_pops() {
     );
     let wisp = *a.world.projectiles.keys().next().unwrap();
     assert_eq!(a.world.projectiles[&wisp].kind, ProjectileKind::Wisp);
-    assert!((a.world.projectiles[&wisp].velocity.length() - 12.0).abs() < 1e-3);
+    // (The rework's orbiting Wisp is arsenal-b's: until then the use flies it straight at
+    // `wisp_speed`, as the flung one will.)
+    let speed = a.tuning.combat.arclash.wisp_speed;
+    assert!((a.world.projectiles[&wisp].velocity.length() - speed).abs() < 1e-3);
     let ev = a.ticks(150);
     // It passed through the dummy in its path (no pop there) ...
     let pops: Vec<Vec3> = ev
@@ -573,12 +487,12 @@ fn wisp_drifts_zaps_and_pops() {
         .collect();
     assert_eq!(pops.len(), 1);
     assert!(pops[0].z < -19.0, "popped on the wall: {}", pops[0]);
-    // ... zapping whatever was within 6 m every 0.2 s (11 each).
+    // ... zapping whatever was within 7 m every 0.25 s (9 each).
     let zaps = ev
         .iter()
         .filter(|e| matches!(e, SimEvent::WispZap { .. }))
         .count();
-    assert!(zaps >= 6, "{zaps} zaps");
+    assert!(zaps >= 3, "{zaps} zaps");
     let zapped = |id: NetId| {
         hits_on(&ev, HitTarget::Entity(id))
             .iter()
