@@ -926,24 +926,10 @@ pub fn play(ctx: &mut FxCtx, ev: &FxEvent) {
                 world_impact(ctx.effects, ctx.world, muzzle, end, 4);
             }
         }
-        Fx::Ricochet { points, .. } => {
+        // A relay off thorns, of any weapon (relay.rs).
+        Fx::Ricochet { attack, points, .. } => {
             let pts: Vec<Vec3> = points.iter().map(|p| q(*p)).collect();
-            for (i, w) in pts.windows(2).enumerate() {
-                let color = Vec4::new(1.6, 1.5, 0.9, 0.95);
-                ctx.beams
-                    .beam(w[0], w[1], 0.07 + 0.02 * i as f32, color, 0.35);
-            }
-            // Every point but the last is a shattering thorn.
-            for (i, p) in pts.iter().enumerate().take(pts.len().saturating_sub(1)) {
-                thorn_shatter(ctx, *p);
-                ctx.audio.play(
-                    Sfx::Ricochet,
-                    PlayParams::at(*p).with_pitch(1.0 + 0.18 * i as f32),
-                );
-            }
-            if let Some(last) = pts.last() {
-                ctx.effects.sparks(*last, Vec3::Y, 10);
-            }
+            super::relay::play(ctx, *attack, &pts);
         }
         // Ember bombs burst into embers rather than a fireball (enemy_fx.rs).
         Fx::Explosion {

@@ -31,6 +31,21 @@ use super::rig::{JointDef, Pose, ROOT, Shade, joint, static_part};
 use super::{ModelId, PartSet};
 
 // ---------------------------------------------------------------------------------------------
+// The abilities' colours (`weapons::ability_color`: the weapon glows in them, their effects
+// take them; distinct within each class's pool)
+
+/// Bolas: the burning cord's orange.
+pub const BOLAS_COLOR: Vec4 = Vec4::new(1.0, 0.52, 0.18, 1.0);
+/// Bulwark: pale honey wax.
+pub const BULWARK_COLOR: Vec4 = Vec4::new(1.0, 0.88, 0.58, 1.0);
+/// Stoke: forge red.
+pub const STOKE_COLOR: Vec4 = Vec4::new(1.0, 0.3, 0.12, 1.0);
+/// Lantern: lamplight gold.
+pub const LANTERN_COLOR: Vec4 = Vec4::new(1.0, 0.84, 0.32, 1.0);
+/// Kite: the dyed paper's rose red.
+pub const KITE_COLOR: Vec4 = Vec4::new(1.0, 0.38, 0.6, 1.0);
+
+// ---------------------------------------------------------------------------------------------
 // Part tables
 
 const BOLAS: [JointDef; 2] = [

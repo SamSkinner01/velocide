@@ -110,7 +110,7 @@ pub fn haste_trail(
             gravity: -0.8,
             drag: 1.5,
             max_life: rng.range(0.4, 0.7),
-            size: Vec2::splat(rng.range(0.08, 0.14)),
+            size: Vec2::splat(rng.range(0.11, 0.18)),
             end_scale: 0.35,
             color: hot(c, 1.6, 1.0),
             texture: FxTex::Spark,

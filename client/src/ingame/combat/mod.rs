@@ -19,16 +19,25 @@
 //! `combat_update` (Fx playback, entity bookkeeping, music), `combat_draw`, `combat_hud`.
 
 pub mod arsenal;
+/// The rework's Scatter / Rapid / Explosive abilities and the Thorn relays (docs/rework.md).
+pub mod bolas;
+pub mod bulwark;
 pub mod enemy_fx;
 pub mod entities;
 pub mod fx;
+pub mod gear;
 pub mod hud;
 /// The Kindle Flask drunk: the drink, the haste, its heal ticks (docs/rework.md).
 pub mod kindle;
+pub mod kite;
 pub mod knacks;
+pub mod lantern;
 pub mod melee;
+pub mod relay;
 pub mod stand_in;
+pub mod stoke;
 pub mod weapon_feel;
+pub mod wisp;
 
 use engine::audio::{PlayParams, Sfx};
 use engine::gfx::UiDrawList;
@@ -310,6 +319,8 @@ pub struct CombatClient {
     /// Melee trails, streaks and hurled pieces; the knacks' things (`melee.rs`, `knacks.rs`).
     pub melee: melee::MeleeView,
     pub knacks: knacks::KnackView,
+    /// The rework's abilities and the Thorn relays (`gear.rs`).
+    pub gear: gear::GearView,
     rng: Rng,
     /// Predicted shots of this frame's ticks (played after the tick loop).
     shots: Vec<PredictedShot>,
@@ -347,6 +358,7 @@ impl CombatClient {
             stand_ins: stand_in::StandIns::new(),
             melee: melee::MeleeView::new(),
             knacks: knacks::KnackView::new(),
+            gear: gear::GearView::new(),
             rng: Rng::default(),
             shots: Vec::new(),
             early: Vec::new(),
@@ -372,6 +384,7 @@ impl CombatClient {
         self.early.clear();
         self.melee.clear();
         self.knacks.clear();
+        self.gear.clear();
         self.predictor.reset();
         self.killed_by = None;
         self.parry_predicted_at = None;
@@ -1408,8 +1421,10 @@ impl InGame {
         let rate_k = if target > combat.music { 1.5 } else { 0.25 };
         combat.music += (target - combat.music) * (1.0 - (-rate_k * vdt.max(0.0)).exp());
         common.audio.set_music_intensity(combat.music);
-        // The Kindle Flask's haste, its previews and heal ticks (kindle.rs).
+        // The Kindle Flask's haste, its previews and heal ticks (kindle.rs); the rework's
+        // abilities (gear.rs).
         self.combat_kindle(common, vdt);
+        self.combat_gear(common, vdt);
     }
 
     /// Combat entities and tracers.
@@ -1462,6 +1477,14 @@ impl InGame {
         self.combat
             .knacks
             .draw(lib, &mut out.draws, &mut out.lights);
+        self.combat.gear.draw(
+            lib,
+            self.last_camera.position,
+            self.controls.yaw,
+            self.controls.pitch,
+            &mut out.draws,
+            &mut out.lights,
+        );
     }
 
     /// Combat HUD layer (after `Hud::draw`).
@@ -1542,6 +1565,7 @@ impl InGame {
         if !dead {
             let rush = self.combat.melee.rush();
             self.combat.knacks.hud(list, c, tallow, rush, now);
+            self.combat.gear.hud(list, &common.theme, c, now);
         }
     }
 }

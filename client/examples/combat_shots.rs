@@ -111,6 +111,21 @@ fn eye(game: &InGame) -> Option<Vec3> {
     Some(net.local_state()?.eye_position(t))
 }
 
+/// Feet of the living enemies, nearest first.
+fn enemy_feet(game: &InGame) -> Vec<Vec3> {
+    let (Some(net), Some(me)) = (game.net(), eye(game)) else {
+        return Vec::new();
+    };
+    let mut v: Vec<Vec3> = net
+        .remote_entities()
+        .iter()
+        .filter(|e| kind::is_enemy(e.kind) && e.flags & shared::protocol::enemy_flags::DYING == 0)
+        .map(|e| e.position)
+        .collect();
+    v.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
+    v
+}
+
 /// Nearest living enemy's chest (or head).
 fn nearest_enemy(game: &InGame, head: bool) -> Option<Vec3> {
     let net = game.net()?;
@@ -916,6 +931,169 @@ fn kindle_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 90, still);
 }
 
+/// The rework's Scatter / Rapid / Explosive abilities and the Thorn relays (docs/rework.md),
+/// staged client-side with `InGame::preview_gear` (`gear_*.png`, `relay_*.png`).
+fn gear_previews(h: &mut Harness, game: &mut InGame) {
+    use client::ingame::combat::gear::GearPreview as G;
+    use shared::loadout::WeaponKind;
+    use shared::sim::Attack;
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    game.send_chat("/killall");
+    spawn(game, 3);
+    h.frames(game, 90, still);
+    if let Some(t) = nearest_enemy(game, false) {
+        aim_at(game, t - Vec3::Y * 0.3);
+    }
+    let Some(eye) = eye(game) else {
+        return;
+    };
+    let fwd = shared::input::look_dir(game.controls.yaw, 0.0);
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    let floor = Vec3::new(eye.x, eye.y - 1.6, eye.z);
+    let ahead = |d: f32, side: f32| floor + fwd * d + right * side;
+
+    // Bolas: thrown at the nearest Mould, the cord snapping on to the next one.
+    let moulds = enemy_feet(game);
+    let first = moulds.first().copied().unwrap_or(ahead(9.0, -1.2));
+    let second = moulds.get(1).copied().unwrap_or(ahead(10.0, 2.4));
+    game.preview_gear(G::Bolas {
+        from: eye + fwd * 0.6 + right * 0.2 - Vec3::Y * 0.2,
+        to: first,
+        height: 2.0,
+        link: Some(second),
+        seconds: 3.0,
+    });
+    h.frames(game, 9, still);
+    h.shot("gear_bolas_flight");
+    h.frames(game, 16, still);
+    h.shot("gear_bolas_bound");
+    h.frames(game, 40, still);
+    h.shot("gear_bolas_link");
+    h.frames(game, 160, still);
+
+    // Bulwark: yours, taking blows and cracking, then shattering.
+    game.preview_gear(G::Bulwark {
+        holder: None,
+        seconds: 3.0,
+        hits: 6,
+        shatter: true,
+    });
+    h.frames(game, 12, still);
+    h.shot("gear_bulwark_raised");
+    h.frames(game, 100, still);
+    h.shot("gear_bulwark_cracked");
+    h.frames(game, 46, still);
+    h.shot("gear_bulwark_shatter");
+    h.frames(game, 60, still);
+    // Another Shrike's, as its opponents see it.
+    game.preview_gear(G::Bulwark {
+        holder: Some((ahead(5.0, 0.5), game.controls.yaw + std::f32::consts::PI)),
+        seconds: 2.5,
+        hits: 3,
+        shatter: false,
+    });
+    h.frames(game, 100, still);
+    h.shot("gear_bulwark_other");
+    h.frames(game, 80, still);
+
+    // The wisp orbiting you, then flung; round another spot ahead.
+    game.preview_gear(G::Wisp {
+        around: None,
+        seconds: 2.0,
+        fling: Some(shared::input::look_dir(
+            game.controls.yaw,
+            game.controls.pitch,
+        )),
+    });
+    game.preview_gear(G::Wisp {
+        around: Some(ahead(6.0, -3.0)),
+        seconds: 3.0,
+        fling: None,
+    });
+    for (frames, name) in [
+        (30, "gear_wisp_orbit"),
+        (24, "gear_wisp_orbit_2"),
+        (70, "gear_wisp_flung"),
+    ] {
+        h.frames(game, frames, still);
+        h.shot(name);
+    }
+    h.frames(game, 100, still);
+
+    // Stoke: your weapon (the Arclash) stoked (early, late), then venting.
+    select(game, 2, 0);
+    game.preview_gear(G::Stoke {
+        stoke: 4.0,
+        vent: 1.5,
+    });
+    h.frames(game, 20, still);
+    h.shot("gear_stoke_early");
+    h.frames(game, 200, still);
+    h.shot("gear_stoke_late");
+    h.frames(game, 30, still);
+    h.shot("gear_stoke_vent");
+    h.frames(game, 80, still);
+
+    // Lanterns: an Arclash's, a Riveter's and a Kiln's, firing at a body ahead.
+    let target = nearest_enemy(game, false).unwrap_or(ahead(12.0, 0.0) + Vec3::Y);
+    for (k, carrier) in [WeaponKind::Arclash, WeaponKind::Riveter, WeaponKind::Kiln]
+        .into_iter()
+        .enumerate()
+    {
+        game.preview_gear(G::Lantern {
+            from: eye + fwd * 0.6 - Vec3::Y * 0.3,
+            to: ahead(3.5 + k as f32, -2.5 + 2.5 * k as f32),
+            carrier,
+            target,
+            seconds: 3.0,
+        });
+    }
+    h.frames(game, 40, still);
+    h.shot("gear_lantern_set");
+    h.frames(game, 50, still);
+    h.shot("gear_lantern_firing");
+    h.frames(game, 125, still);
+    h.shot("gear_lantern_out");
+    h.frames(game, 40, still);
+
+    // A kite steered round to the left, then bursting.
+    game.preview_gear(G::Kite {
+        from: eye + fwd * 0.8 - Vec3::Y * 0.2,
+        velocity: (fwd + Vec3::Y * 0.15) * 16.0,
+        steer: ahead(9.0, -4.0) + Vec3::Y * 1.5,
+        steer_for: 1.6,
+        seconds: 2.2,
+    });
+    h.frames(game, 40, still);
+    h.shot("gear_kite_steer");
+    h.frames(game, 50, still);
+    h.shot("gear_kite_free");
+    h.frames(game, 60, still);
+
+    // Thorn relays: a Bellows pellet ray, a rivet turning, a Trimmer slash batting it, a Kiln
+    // cone; each thorn ahead, relayed at a body to the side.
+    for (k, (attack, name)) in [
+        (Attack::Blast, "relay_ray"),
+        (Attack::Riveter, "relay_turn"),
+        (Attack::Trimmer, "relay_bat"),
+        (Attack::Kiln, "relay_blast"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let thorn = ahead(4.5, -3.2 + k as f32 * 0.3) + Vec3::Y * 1.2;
+        game.preview_gear(G::Relay {
+            attack,
+            from: eye - Vec3::Y * 0.2 + right * 0.2,
+            thorn,
+            to: target,
+        });
+        h.frames(game, 5, still);
+        h.shot(name);
+        h.frames(game, 40, still);
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -959,6 +1137,7 @@ fn main() -> anyhow::Result<()> {
 
     // The rework (docs/rework.md); `COMBAT_SHOTS=rework` stops after them (quick look).
     kindle_previews(&mut h, &mut game);
+    gear_previews(&mut h, &mut game);
     if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
         println!("{} screenshots in {}", h.shots.len(), h.out.display());
         game.shutdown(&mut h.renderer, &mut h.common);
