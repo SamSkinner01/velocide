@@ -1558,6 +1558,8 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
                     WeaponKind::Kiln => Vec3::new(-0.72, 0.48, 0.0),
                     WeaponKind::Thresher => Vec3::new(0.7, 1.45, 0.0),
                     WeaponKind::Cinderbox => Vec3::new(0.7, 0.72, 0.0),
+                    // The long sniper lies along the bottom, under the bow.
+                    WeaponKind::Lamplighter => Vec3::new(0.1, 0.2, 0.0),
                     _ => Vec3::new(0.0, 1.08, 0.0),
                 }
             } else {
@@ -1648,23 +1650,16 @@ fn prop_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
 
 /// The rework (docs/rework.md, area client-a): the Lamplighter at real scale through its focus.
 fn rework_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
-    use client::models::weapons::lamplighter;
     let mut shots = Vec::new();
     let pose = |focus: f32, kick: f32| {
-        let held = HeldWeapon {
-            ability: Ability::Brand,
+        weapon_pose(&HeldWeapon {
+            weapon: WeaponKind::Lamplighter,
+            ability: Ability::Wickline,
             draw: focus,
             kick,
             time: t,
             ..HeldWeapon::default()
-        };
-        let (mut glow, mut color) = (0.9, client::models::ability_color(held.ability).truncate());
-        let mut pose = lamplighter::pose(&held, &mut glow, &mut color);
-        pose.glow = (color * glow).extend(1.0);
-        if std::env::var("HIDE_GLASS").is_ok() {
-            pose.hide(lamplighter::GLASS);
-        }
-        pose
+        })
     };
     for (name, title, cam, yaw) in [
         (
@@ -1742,22 +1737,17 @@ fn rework_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             Vec3::new(0.0, 1.5, 0.0),
             75.0,
         ));
-        let eased = focus * focus * (3.0 - 2.0 * focus);
-        let turn = lamplighter::view_rotation(focus);
-        let rot = Quat::from_euler(engine::glam::EulerRot::YXZ, 0.045, 0.42 * kick, 0.0) * turn;
-        let offset = lamplighter::VIEW_OFFSET
-            + lamplighter::FOCUS_SHIFT * eased
-            + Vec3::new(0.0, -0.008, 0.09 * 0.52) * kick;
-        let gun = Mat4::from_scale_rotation_translation(Vec3::splat(0.52), rot, offset);
-        lib.get(ModelId::Lamplighter).draw(
-            &pose(focus, kick),
-            gun,
-            &Tint::default(),
-            &mut shot.viewmodel,
-        );
-        let arm = gun * Mat4::from_quat(turn.inverse());
-        lib.get(ModelId::ArmRight)
-            .draw_static(arm, &Tint::default(), &mut shot.viewmodel);
+        // Through the game's own viewmodel path.
+        let anim = ViewmodelAnim {
+            weapon: WeaponKind::Lamplighter,
+            ability: Ability::Wickline,
+            draw: focus,
+            fire_kick: kick,
+            switch: 1.0,
+            time: t,
+            ..Default::default()
+        };
+        lib.draw_viewmodel(&anim, &Tint::default(), &mut shot.viewmodel);
         shots.push((format!("lamp_vm_{i}"), format!("LAMPLIGHTER {name}"), shot));
     }
 
@@ -1781,6 +1771,38 @@ fn rework_shots(lib: &ModelLibrary, t: f64) -> Vec<(String, String, Shot)> {
             .push((pos + Vec3::new(0.0, 0.72, 0.0), name.to_string()));
     }
     shots.push(("rework_arrows".into(), "THE REWORK'S ARROWS".into(), shot));
+
+    // Third person: Shrikes holding the Lamplighter at rest, focusing and at full focus, and
+    // one just after the shot.
+    let mut shot = Shot::new(look_at(
+        Vec3::new(0.6, 1.7, 4.4),
+        Vec3::new(0.0, 1.15, 0.0),
+        60.0,
+    ));
+    for ((draw, firing), x) in [(0.0f32, 0.0f32), (0.5, 0.0), (1.0, 0.0), (0.0, 1.0)]
+        .into_iter()
+        .zip([-2.25f32, -0.75, 0.75, 2.25])
+    {
+        lib.draw_player(
+            &PlayerAnim {
+                yaw: 2.6,
+                weapon: WeaponKind::Lamplighter.id(),
+                draw,
+                firing,
+                on_ground: true,
+                time: t,
+                ..PlayerAnim::default()
+            },
+            Vec3::new(x, 0.0, 0.0),
+            &Tint::default(),
+            &mut shot.draws,
+        );
+    }
+    shots.push((
+        "lamp_3p".into(),
+        "LAMPLIGHTER (3RD PERSON): REST, FOCUS .5, FULL, SHOT".into(),
+        shot,
+    ));
     shots
 }
 

@@ -1082,6 +1082,76 @@ fn rework_previews(h: &mut Harness, game: &mut InGame) {
     h.frames(game, 30, still);
 }
 
+/// The rework for real (`rework_play_*.png`): `/loadout` hands out the Lamplighter, the Longwick
+/// with the Blink and Beacon arrows and the Trimmer with the Riposte; the script focuses and
+/// fires at the Moulds (scope at half and full focus, the beam), raises the guard, looses a
+/// beacon arrow.
+fn rework_play_shots(h: &mut Harness, game: &mut InGame) {
+    let still = |g: &mut InGame, _| hold(g, Buttons::NONE);
+    let aimed = |g: &mut InGame, buttons: Buttons| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t);
+        }
+        hold(g, buttons);
+    };
+    game.send_chat("/killall");
+    game.controls.yaw = 0.0;
+    game.controls.pitch = 0.0;
+    h.frames(game, 10, still);
+    spawn(game, 3);
+    h.frames(game, 60, still);
+    game.send_chat(
+        "/loadout lamplighter:wickline,waxwork longwick:blink,beacon trimmer:riposte,hurl quill",
+    );
+    h.frames(game, 20, still);
+
+    // The Lamplighter: at rest, focusing (half, full), the beam.
+    select(game, 0, 0);
+    h.frames(game, 20, |g, _| aimed(g, Buttons::NONE));
+    h.shot("rework_play_lamplighter");
+    h.frames(game, 26, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("rework_play_focus_half");
+    h.frames(game, 50, |g, _| aimed(g, Buttons::FIRE));
+    h.shot("rework_play_focus_full");
+    h.frames(game, 2, |g, _| aimed(g, Buttons::NONE));
+    h.shot("rework_play_beam");
+    h.frames(game, 30, still);
+
+    // The Longwick's Beacon Arrow: armed, drawn, loosed into the floor by the pack.
+    select(game, 1, 1);
+    h.frames(game, 20, still);
+    let floor = |g: &mut InGame, buttons: Buttons| {
+        if let Some(t) = nearest_enemy(g, false) {
+            aim_at(g, t - Vec3::Y * 0.9 + Vec3::X * 1.5);
+        }
+        hold(g, buttons);
+    };
+    h.frames(game, 2, |g, i| {
+        floor(
+            g,
+            if i == 0 {
+                Buttons::ALT_FIRE
+            } else {
+                Buttons::NONE
+            },
+        )
+    });
+    h.frames(game, 45, |g, _| floor(g, Buttons::FIRE));
+    h.frames(game, 3, |g, _| floor(g, Buttons::NONE));
+    h.frames(game, 40, still);
+    h.shot("rework_play_beacon");
+
+    // The Trimmer's Riposte: the guard held.
+    select(game, 2, 0);
+    h.frames(game, 20, still);
+    h.frames(game, 20, |g, _| aimed(g, Buttons::ALT_FIRE));
+    h.shot("rework_play_riposte_guard");
+    h.frames(game, 40, still);
+    game.send_chat("/loadout quill bellows arclash tumbler");
+    game.send_chat("/killall");
+    h.frames(game, 30, still);
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let out = std::env::args()
@@ -1125,6 +1195,7 @@ fn main() -> anyhow::Result<()> {
 
     // The rework's tricks; `COMBAT_SHOTS=rework` stops after them (quick look).
     rework_previews(&mut h, &mut game);
+    rework_play_shots(&mut h, &mut game);
     if std::env::var("COMBAT_SHOTS").is_ok_and(|v| v == "rework") {
         println!("{} screenshots in {}", h.shots.len(), h.out.display());
         game.shutdown(&mut h.renderer, &mut h.common);

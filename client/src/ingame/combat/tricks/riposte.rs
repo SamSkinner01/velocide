@@ -1,9 +1,9 @@
 //! Riposte (docs/rework.md §1): hold to guard with the melee weapon, release to answer.
 //!
 //! The guard is a pose (the blade / haft raised crosswise in front, `models::weapons::melee`);
-//! here is what it does to the screen and the world: while it is up, a steel arc across the
-//! bottom of the view shows the guarded front and how long the guard can still be held, with a
-//! pip per blow taken (each makes the counter harder); every block throws a fan of white-hot
+//! here is what it does to the screen and the world: while it is up, a steel arc over the
+//! crosshair shows the guarded front and how long the guard can still be held, with a pip per
+//! blow taken (each makes the counter harder); every block throws a fan of white-hot
 //! sparks off the guard with a flash, a ring and a tiny hitstop; the counter-swing leaves a
 //! wide bright crescent, wider for every block it answers.
 
@@ -72,20 +72,21 @@ pub fn counter_crescent(beams: &mut Beams, eye: Vec3, fwd: Vec3, right: Vec3, bl
     }
 }
 
-/// The guard on the HUD: a steel arc low in the view spanning the guarded front, closing as
+/// The guard on the HUD: a steel arc over the crosshair spanning the guarded front, closing as
 /// the hold runs out (`left` 1 → 0), and a pip per blow taken (`blocks`, of `max` that count).
 pub fn draw_guard(list: &mut UiDrawList, c: Rect, left: f32, blocks: u32, max: u32, time: f64) {
     let center = c.center().floor() + vec2(0.5, 0.5);
     let left = left.clamp(0.0, 1.0);
-    let radius = 46.0;
-    // The front 120°, centred on straight ahead (drawn as an arc under the crosshair).
+    let radius = 22.0;
+    // The front 120°, centred on straight ahead: an arc over the crosshair (the guard's own
+    // pose crosses the view under it).
     let half = 60f32.to_radians() * (0.35 + 0.65 * left);
     let n = 40;
     let ink = Vec4::new(0.0, 0.0, 0.0, 0.7);
     let shimmer = 0.8 + 0.2 * ((time * 6.0).sin() as f32);
     for i in 0..=n {
         let a = -half + 2.0 * half * i as f32 / n as f32;
-        let p = center + vec2(a.sin(), a.cos()) * radius;
+        let p = center + vec2(a.sin(), -a.cos()) * radius;
         list.rect(
             (p - Vec2::splat(1.5)).floor(),
             (p + Vec2::splat(1.5)).floor(),
@@ -94,13 +95,13 @@ pub fn draw_guard(list: &mut UiDrawList, c: Rect, left: f32, blocks: u32, max: u
         list.rect(
             (p - Vec2::splat(1.0)).floor(),
             (p + Vec2::splat(1.0)).floor(),
-            fade(STEEL, 0.75 * shimmer),
+            fade(STEEL, shimmer),
         );
     }
-    // A pip per blow taken under the arc.
+    // A pip per blow taken over the arc.
     for i in 0..max {
         let x = center.x - (max as f32 - 1.0) * 4.0 + i as f32 * 8.0;
-        let y = center.y + radius + 6.0;
+        let y = center.y - radius - 7.0;
         let lit = i < blocks;
         list.rect(vec2(x - 3.0, y - 3.0), vec2(x + 3.0, y + 3.0), ink);
         list.rect(
