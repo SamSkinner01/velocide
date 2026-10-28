@@ -49,7 +49,7 @@ OPTIONS:
     --tick-rate <HZ>         simulation rate (default 60)
     --snapshot-rate <HZ>     snapshot rate (default: tuning.ron net.snapshot_rate, 30)
     --netsim <L,J,LOSS[,D]>  simulate latency ms, jitter ms, loss %, duplicate %
-    --tuning <PATH>          tuning file (default assets/tuning.ron), hot-reloaded
+    --tuning <PATH>          tuning file (default assets/tuning.ron, else the built-in one), hot-reloaded
     --no-watch               don't watch the tuning file
     --no-delta               disable snapshot delta compression (bandwidth testing)
     --name <NAME>            server name
